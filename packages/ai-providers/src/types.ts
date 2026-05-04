@@ -1,4 +1,4 @@
-import type { AIProviderName, AspectRatio, ConceptInput } from '@mbb/shared';
+import type { AIProviderName, AspectRatio, ConceptInput, VerifyKeyResult } from '@mbb/shared';
 
 export interface GenerateInput {
   apiKey: string; // user's BYOK key, decrypted by caller
@@ -26,8 +26,13 @@ export interface GeneratedCreative {
 export interface AIProvider {
   readonly name: AIProviderName;
 
-  /** Lightweight call to confirm the user's API key is valid. */
-  verifyKey(apiKey: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * Lightweight check that the user's credential is valid. Returns the
+   * verification method actually used — `'api'` if we hit the provider,
+   * `'format_only'` if we couldn't reach a verify endpoint and only checked
+   * the credential's shape. The audit log persists this.
+   */
+  verifyKey(apiKey: string): Promise<VerifyKeyResult>;
 
   /** Kick off a generation job. May be sync or async per provider. */
   generateVariants(input: GenerateInput): Promise<GeneratedCreative[]>;

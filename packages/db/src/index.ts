@@ -15,3 +15,11 @@ export {
   type RedeemResult,
   type RedeemFailureReason,
 } from './telegram-link';
+export {
+  getUserSettings,
+  saveUserSettings,
+  diffSettings,
+  type SettingsRow,
+  type SettingsChange,
+} from './settings';
+export { cascadePauseUser, getLatestPauseReason } from './pause';
