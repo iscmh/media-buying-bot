@@ -161,3 +161,45 @@ export async function listAdAccounts(userId: string, token: string): Promise<AdA
   if (!res.ok) throw new Error(res.message);
   return res.data?.data ?? [];
 }
+
+// ----- DELETE /me/permissions (revoke) -----
+
+/**
+ * Best-effort token revoke. Phase 2b disconnect flow calls this BEFORE
+ * soft-deleting the local row. On failure (network, Meta down, token
+ * already invalid) we proceed with the local disconnect — the token will
+ * expire in ≤60 days anyway, so leaving it active for that window is an
+ * acceptable worst case. Always logs to meta_api_call_logs.
+ */
+export async function revokeMetaToken(
+  userId: string,
+  token: string,
+): Promise<{ ok: boolean; status: number }> {
+  const url = `${META_BASE}/me/permissions`;
+  const t0 = Date.now();
+  let status = 0;
+  let body: unknown = null;
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+      cache: 'no-store',
+    });
+    status = res.status;
+    body = await res.json().catch(() => null);
+  } catch (err) {
+    body = { _fetch_error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    await logMetaApiCall({
+      userId,
+      endpoint: '/me/permissions',
+      method: 'DELETE',
+      requestBody: {},
+      responseStatus: status,
+      responseBody: body,
+      latencyMs: Date.now() - t0,
+      dryRun: false,
+    });
+  }
+  return { ok: status >= 200 && status < 300, status };
+}
