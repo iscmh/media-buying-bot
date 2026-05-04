@@ -1,3 +1,4 @@
+import { formatDateTime } from '@/lib/format/date';
 import { AlertCircle } from 'lucide-react';
 import { UnpauseButton } from './unpause-button';
 
@@ -31,7 +32,7 @@ export function PauseBanner({ reason, pausedAt, pausedBy, openPauseCount }: Prop
         <p className="font-semibold">Bot is paused</p>
         <p className="text-muted-foreground mt-1 text-sm">{message}</p>
         <p className="text-muted-foreground mt-1 text-xs">
-          Paused {pausedAt.toLocaleString()} by {pausedBy === 'auto' ? 'the platform' : pausedBy}.
+          Paused {formatDateTime(pausedAt)} by {pausedBy === 'auto' ? 'the platform' : pausedBy}.
         </p>
       </div>
       <UnpauseButton openPauseCount={openPauseCount} />

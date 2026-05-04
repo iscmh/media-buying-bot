@@ -1,5 +1,7 @@
 'use client';
 
+import { formatDateTime } from '@/lib/format/date';
+
 import * as React from 'react';
 import { useFormStatus } from 'react-dom';
 import type { AIProviderName } from '@mbb/shared';
@@ -36,7 +38,7 @@ export function ProviderConnectedSummary({
   verificationMethod,
   apiKeyVerifiedAt,
 }: Props) {
-  const verified = apiKeyVerifiedAt ? apiKeyVerifiedAt.toLocaleString() : 'unknown';
+  const verified = apiKeyVerifiedAt ? formatDateTime(apiKeyVerifiedAt) : 'unknown';
 
   return (
     <div className="space-y-6">

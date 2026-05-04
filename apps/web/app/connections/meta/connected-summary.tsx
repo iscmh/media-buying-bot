@@ -1,5 +1,7 @@
 'use client';
 
+import { formatDate, formatDateTime } from '@/lib/format/date';
+
 import * as React from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -36,8 +38,8 @@ export function MetaConnectedSummary({
   tokenExpiresAt,
   lastVerifiedAt,
 }: Props) {
-  const expiry = tokenExpiresAt ? tokenExpiresAt.toLocaleDateString() : 'never';
-  const verified = lastVerifiedAt ? lastVerifiedAt.toLocaleString() : 'unknown';
+  const expiry = tokenExpiresAt ? formatDate(tokenExpiresAt) : 'never';
+  const verified = lastVerifiedAt ? formatDateTime(lastVerifiedAt) : 'unknown';
 
   return (
     <div className="space-y-6">

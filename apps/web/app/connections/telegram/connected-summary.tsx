@@ -1,5 +1,7 @@
 'use client';
 
+import { formatDateTime } from '@/lib/format/date';
+
 import * as React from 'react';
 import { useFormStatus } from 'react-dom';
 import { Button } from '@/components/ui/button';
@@ -30,7 +32,7 @@ function DisconnectButton() {
 }
 
 export function TelegramConnectedSummary({ tgChatId, tgUsername, linkedAt }: Props) {
-  const linked = linkedAt ? linkedAt.toLocaleString() : 'unknown';
+  const linked = linkedAt ? formatDateTime(linkedAt) : 'unknown';
 
   return (
     <div className="space-y-6">

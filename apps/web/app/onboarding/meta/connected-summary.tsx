@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/format/date';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
@@ -13,9 +14,7 @@ interface Props {
  * surface a tooltip-style note.
  */
 export function MetaConnectedSummary({ businessManagerId, adAccountIds, tokenExpiresAt }: Props) {
-  const expiry = tokenExpiresAt
-    ? tokenExpiresAt.toLocaleDateString(undefined, { dateStyle: 'medium' })
-    : 'never';
+  const expiry = tokenExpiresAt ? formatDate(tokenExpiresAt) : 'never';
 
   return (
     <article className="mx-auto max-w-2xl">
