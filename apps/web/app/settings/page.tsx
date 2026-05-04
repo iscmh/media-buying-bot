@@ -1,29 +1,29 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { getUserSettings } from '@mbb/db';
+import { PLATFORM_HARD_CEILING_USD } from '@mbb/shared';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { SettingsForm } from './settings-form';
 
 export const metadata = { title: 'Settings — Media Buying Bot' };
 
 export default async function SettingsPage() {
-  await requireOnboardingComplete();
+  const { userId } = await requireOnboardingComplete();
+  const current = await getUserSettings(userId);
+  if (!current) {
+    // Should never happen — the auth.users → user_settings trigger seeds
+    // a row on signup. Surface loudly if it does.
+    throw new Error('user_settings row missing for authenticated user');
+  }
 
   return (
-    <main className="container mx-auto px-4 py-12">
-      <h1 className="mb-6 text-3xl font-bold">Settings</h1>
+    <main className="container mx-auto max-w-3xl px-4 py-12">
+      <header className="mb-6">
+        <h1 className="text-3xl font-bold">Settings</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Bot configuration. Changes apply on the next launch / poll cycle.
+        </p>
+      </header>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Bot configuration</CardTitle>
-          <CardDescription>
-            Test caps, kill thresholds, scale tiers, manual approval cutoffs, timezone.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-sm">
-            Settings UI ships in Phase 2. Defaults are seeded automatically via the
-            <code className="bg-muted mx-1 rounded px-1 py-0.5">user_settings</code> trigger.
-          </p>
-        </CardContent>
-      </Card>
+      <SettingsForm initialValues={current} hardCeiling={PLATFORM_HARD_CEILING_USD} />
     </main>
   );
 }
