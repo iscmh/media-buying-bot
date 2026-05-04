@@ -3,8 +3,6 @@ import { registerStart } from './commands/start.js';
 import { registerLink } from './commands/link.js';
 import { registerStatus } from './commands/status.js';
 
-export type Ctx = Parameters<Parameters<Bot['command']>[1]>[0];
-
 export function createBot(token: string): Bot {
   const bot = new Bot(token);
 
