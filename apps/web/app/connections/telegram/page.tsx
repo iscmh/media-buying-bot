@@ -1,0 +1,30 @@
+import { redirect } from 'next/navigation';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
+
+export const metadata = { title: 'Telegram bot — Media Buying Bot' };
+
+export default async function ConnectTelegramPage() {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/login');
+
+  return (
+    <main className="container mx-auto max-w-3xl px-4 py-12">
+      <h1 className="mb-6 text-3xl font-bold">Connect Telegram</h1>
+      <Card>
+        <CardHeader>
+          <CardTitle>Link your Telegram account</CardTitle>
+          <CardDescription>
+            We&rsquo;ll generate a one-time code. Open the bot and send <code>/start &lt;code&gt;</code>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">Phase 2 — coming soon.</p>
+        </CardContent>
+      </Card>
+    </main>
+  );
+}

@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+# Pre-commit: format/lint staged files, then typecheck the whole workspace.
+# Slow (~10s) but catches breakage before it hits GitHub.
+
+pnpm exec lint-staged || exit 1
+pnpm -r typecheck || exit 1
