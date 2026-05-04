@@ -1,30 +1,36 @@
+import { TOS_VERSION } from '@mbb/shared';
+import { TOS_DISCLOSURE_BANNER, TOS_SECTIONS } from '@/lib/content/tos';
+
 export const metadata = { title: 'Terms of Service — Media Buying Bot' };
 
+/**
+ * Publicly-readable canonical ToS. Same content source as /onboarding/tos
+ * (no checkbox here — that's the gated acceptance flow). Bumping
+ * TOS_VERSION updates both pages and triggers re-acceptance for existing
+ * users on next login.
+ */
 export default function ToSPage() {
   return (
-    <main className="prose prose-neutral container mx-auto max-w-3xl px-4 py-12">
-      <h1>Terms of Service (placeholder)</h1>
-      <p className="text-muted-foreground text-sm">
-        <strong>NOT LEGAL ADVICE. DO NOT USE IN PRODUCTION.</strong> This page is a stub. Final ToS
-        will be written by counsel before any user signs up.
-      </p>
+    <main className="container mx-auto max-w-3xl px-4 py-12">
+      <header className="mb-6">
+        <h1 className="text-4xl font-bold">Terms of Service</h1>
+        <p className="text-muted-foreground mt-2 text-sm">
+          Version {TOS_VERSION}. {TOS_DISCLOSURE_BANNER}
+        </p>
+      </header>
 
-      <h2>Liability protection (intent)</h2>
-      <ul>
-        <li>Customer is solely responsible for ad content and Meta policy compliance.</li>
-        <li>
-          Indemnification: customer holds the platform harmless for Meta enforcement actions against
-          the customer&rsquo;s Meta accounts.
-        </li>
-        <li>
-          Limitation of liability: max liability = 1 month subscription fee paid (which is $0 during
-          MVP).
-        </li>
-        <li>
-          Disclosure: Platform receives referral compensation from agency BM partners (FTC
-          compliance).
-        </li>
-      </ul>
+      <article className="space-y-6 text-sm leading-relaxed">
+        {TOS_SECTIONS.map((section) => (
+          <section key={section.heading}>
+            <h2 className="mb-2 text-lg font-semibold">{section.heading}</h2>
+            {section.body.map((paragraph, i) => (
+              <p key={i} className="text-foreground/90 mb-2 last:mb-0">
+                {paragraph}
+              </p>
+            ))}
+          </section>
+        ))}
+      </article>
     </main>
   );
 }
