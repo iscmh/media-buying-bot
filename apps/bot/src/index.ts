@@ -1,3 +1,4 @@
+import './load-env'; // MUST be first — populates process.env in dev
 import * as Sentry from '@sentry/node';
 import { parseEnv, TelegramEnvSchema } from '@mbb/shared/env';
 import { createBot } from './bot';
