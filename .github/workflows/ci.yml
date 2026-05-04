@@ -27,9 +27,7 @@ jobs:
           cache: pnpm
 
       - name: Install
-        # First run won't have a committed lockfile. Once you run `pnpm install`
-        # locally and commit pnpm-lock.yaml, switch this to --frozen-lockfile.
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Format check
         run: pnpm format:check
@@ -57,7 +55,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
       - run: pnpm -r --filter '!@mbb/db' test
 
   isolation-tests:
@@ -81,7 +79,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: pnpm }
-      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm install --frozen-lockfile
 
       # NOTE: The full multi-tenant isolation test requires Supabase Auth
       # schema (auth.users, auth.uid(), Vault). A bare Postgres can't run
