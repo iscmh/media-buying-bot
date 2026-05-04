@@ -1,26 +1,41 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { eq } from 'drizzle-orm';
+import { getDb, schema } from '@mbb/db';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { TelegramConnectedSummary } from './connected-summary';
 
 export const metadata = { title: 'Telegram bot — Media Buying Bot' };
 
 export default async function ConnectTelegramPage() {
-  await requireOnboardingComplete();
+  const { userId } = await requireOnboardingComplete();
+  const db = getDb();
+  const conn = await db.query.telegramConnections.findFirst({
+    where: eq(schema.telegramConnections.userId, userId),
+    columns: { tgChatId: true, linkedAt: true, status: true, metadata: true },
+  });
+
+  if (!conn || conn.status !== 'active' || !conn.tgChatId) {
+    // Defensive — the gate should have redirected us already.
+    return (
+      <main className="container mx-auto max-w-2xl px-4 py-12">
+        <p className="text-muted-foreground text-sm">No active Telegram link on file.</p>
+      </main>
+    );
+  }
 
   return (
-    <main className="container mx-auto max-w-3xl px-4 py-12">
-      <h1 className="mb-6 text-3xl font-bold">Connect Telegram</h1>
-      <Card>
-        <CardHeader>
-          <CardTitle>Link your Telegram account</CardTitle>
-          <CardDescription>
-            We&rsquo;ll generate a one-time code. Open the bot and send{' '}
-            <code>/start &lt;code&gt;</code>.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-muted-foreground text-sm">Phase 2 — coming soon.</p>
-        </CardContent>
-      </Card>
+    <main className="container mx-auto max-w-2xl px-4 py-12">
+      <header className="mb-6">
+        <h1 className="text-3xl font-bold">Telegram</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Where the bot pings you for kill/scale decisions and daily summaries.
+        </p>
+      </header>
+
+      <TelegramConnectedSummary
+        tgChatId={conn.tgChatId}
+        tgUsername={conn.metadata?.tgUsername ?? null}
+        linkedAt={conn.linkedAt}
+      />
     </main>
   );
 }
