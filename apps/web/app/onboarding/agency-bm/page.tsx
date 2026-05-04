@@ -6,9 +6,12 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 export const metadata = { title: 'Agency BM — Media Buying Bot' };
 
 /**
- * Agency BM partner referral step. Tracking is wired from day 1; the actual
- * partner deal is signed in Phase 7 (Beta polish) — until then this page
- * shows the placeholder list and records intent in `partner_referrals`.
+ * Agency BM partner referral information page. Phase 7 will turn this into
+ * the real referral integration. In Phase 2a it's an informational stop
+ * users can land on while connecting Meta, so we gate it on auth only —
+ * not on completed onboarding.
+ *
+ * Skips the wizard progress bar via the layout's path-based check.
  */
 export default async function AgencyBMPage() {
   const supabase = await getSupabaseServerClient();
@@ -18,32 +21,33 @@ export default async function AgencyBMPage() {
   if (!user) redirect('/login');
 
   return (
-    <main className="container mx-auto max-w-3xl px-4 py-12">
-      <h1 className="mb-2 text-3xl font-bold">Agency Business Manager (recommended)</h1>
-      <p className="text-muted-foreground mb-6 text-sm">
-        Disclosure: We receive referral compensation from agency BM partners. This is because
-        aggressive verticals require account separation that protects you and us.
-      </p>
+    <article className="mx-auto max-w-2xl">
+      <header className="mb-6">
+        <h1 className="text-3xl font-bold">Agency Business Manager (recommended)</h1>
+        <p className="text-muted-foreground mt-1 text-sm">
+          Disclosure: We may receive referral compensation from agency BM partners in a future
+          phase. None today — partner integrations land in Phase 7.
+        </p>
+      </header>
 
       <Card>
         <CardHeader>
           <CardTitle>Why an agency BM?</CardTitle>
           <CardDescription>
-            Isolates Meta enforcement risk from your personal Facebook account. Recommended for MMO,
-            bizopp, and finance verticals.
+            Isolates Meta enforcement risk from your personal Facebook account. Strongly recommended
+            for MMO, biz-opp, and finance verticals.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground text-sm">
-            Partners list will populate here once we&rsquo;ve signed our first deal (Phase 7). For
-            now, you can{' '}
-            <Link href="/connections/meta" className="underline">
+            Partners list will populate here once the partner integration ships. For now, you can{' '}
+            <Link href="/onboarding/meta" className="underline">
               connect your existing BM
             </Link>{' '}
-            and acknowledge the risks.
+            and acknowledge the risks during onboarding.
           </p>
         </CardContent>
       </Card>
-    </main>
+    </article>
   );
 }

@@ -1,16 +1,11 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 
 export const metadata = { title: 'Meta connection — Media Buying Bot' };
 
 export default async function ConnectMetaPage() {
-  const supabase = await getSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) redirect('/login');
+  await requireOnboardingComplete();
 
   return (
     <main className="container mx-auto max-w-3xl px-4 py-12">
