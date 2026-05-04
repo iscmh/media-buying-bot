@@ -7,3 +7,11 @@ export { checkKillSwitches } from './safety/kill-switches';
 export { isFeatureEnabled } from './safety/feature-flags';
 export { reserveRateLimitSlot, recordRateLimitHit } from './safety/rate-limiter';
 export { encryptSecret, decryptSecret } from './safety/encryption';
+export { getOnboardingState, type OnboardingState } from './onboarding';
+export {
+  redeemTelegramLinkCode,
+  getActiveLinkByChatId,
+  LINK_CODE_TTL_MINUTES,
+  type RedeemResult,
+  type RedeemFailureReason,
+} from './telegram-link';
