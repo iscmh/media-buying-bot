@@ -1,6 +1,6 @@
 import { date, integer, numeric, pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { ads } from './ads.js';
-import { users } from './users.js';
+import { ads } from './ads';
+import { users } from './users';
 
 export const performanceLogs = pgTable('performance_logs', {
   id: uuid('id').primaryKey().defaultRandom(),

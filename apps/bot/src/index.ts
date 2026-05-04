@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/node';
 import { parseEnv, TelegramEnvSchema } from '@mbb/shared/env';
-import { createBot } from './bot.js';
+import { createBot } from './bot';
 
 if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
   Sentry.init({

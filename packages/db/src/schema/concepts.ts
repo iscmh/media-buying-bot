@@ -1,6 +1,6 @@
 import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { conceptContentTypeEnum, conceptStatusEnum } from './enums.js';
-import { users } from './users.js';
+import { conceptContentTypeEnum, conceptStatusEnum } from './enums';
+import { users } from './users';
 
 /**
  * Source creative concepts uploaded by the user. The bot analyzes and

@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { aiProviderEnum, connectionMethodEnum, connectionStatusEnum } from './enums.js';
-import { users } from './users.js';
+import { aiProviderEnum, connectionMethodEnum, connectionStatusEnum } from './enums';
+import { users } from './users';
 
 /**
  * Meta Business Manager connection. One per user (we may relax this later).
@@ -19,7 +19,10 @@ export const metaConnections = pgTable('meta_connections', {
   fbUserId: text('fb_user_id'),
   businessManagerId: text('business_manager_id'),
   // Array of ad account ids the user authorized for bot management.
-  adAccountIds: text('ad_account_ids').array().notNull().default(sql`'{}'::text[]`),
+  adAccountIds: text('ad_account_ids')
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
 
   // Encrypted via pgcrypto + Supabase Vault key.
   accessTokenEncrypted: text('access_token_encrypted'),

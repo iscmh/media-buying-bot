@@ -23,9 +23,9 @@ export default async function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             Settings UI ships in Phase 2. Defaults are seeded automatically via the
-            <code className="mx-1 rounded bg-muted px-1 py-0.5">user_settings</code> trigger.
+            <code className="bg-muted mx-1 rounded px-1 py-0.5">user_settings</code> trigger.
           </p>
         </CardContent>
       </Card>

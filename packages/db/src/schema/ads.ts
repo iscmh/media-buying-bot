@@ -1,7 +1,7 @@
 import { integer, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { adStatusEnum, campaignObjectiveEnum } from './enums.js';
-import { generatedCreatives } from './generation.js';
-import { users } from './users.js';
+import { adStatusEnum, campaignObjectiveEnum } from './enums';
+import { generatedCreatives } from './generation';
+import { users } from './users';
 
 export const campaigns = pgTable('campaigns', {
   id: uuid('id').primaryKey().defaultRandom(),

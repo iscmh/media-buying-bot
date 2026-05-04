@@ -5,14 +5,14 @@
  * RLS policies and Vault setup are NOT defined here — those live in
  * supabase/migrations/*.sql since they're Postgres-native features.
  */
-export * from './enums.js';
-export * from './users.js';
-export * from './connections.js';
-export * from './settings.js';
-export * from './concepts.js';
-export * from './generation.js';
-export * from './ads.js';
-export * from './performance.js';
-export * from './logs.js';
-export * from './ops.js';
-export * from './partners.js';
+export * from './enums';
+export * from './users';
+export * from './connections';
+export * from './settings';
+export * from './concepts';
+export * from './generation';
+export * from './ads';
+export * from './performance';
+export * from './logs';
+export * from './ops';
+export * from './partners';

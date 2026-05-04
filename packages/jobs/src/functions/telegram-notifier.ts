@@ -1,4 +1,4 @@
-import { inngest } from '../client.js';
+import { inngest } from '../client';
 
 /**
  * Pushes a message to the user's Telegram chat. Decoupled from senders so

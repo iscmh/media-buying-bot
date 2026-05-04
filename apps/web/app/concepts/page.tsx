@@ -18,12 +18,12 @@ export default async function ConceptsPage() {
         <CardHeader>
           <CardTitle>Upload winners</CardTitle>
           <CardDescription>
-            Upload 5–6 winning creative concepts (videos or text descriptions). The bot splits
-            hook / body / CTA, then mixes 30–40 fresh variants.
+            Upload 5–6 winning creative concepts (videos or text descriptions). The bot splits hook
+            / body / CTA, then mixes 30–40 fresh variants.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">Phase 3 — coming soon.</p>
+          <p className="text-muted-foreground text-sm">Phase 3 — coming soon.</p>
         </CardContent>
       </Card>
     </main>

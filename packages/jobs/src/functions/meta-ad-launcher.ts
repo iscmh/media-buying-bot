@@ -1,4 +1,4 @@
-import { inngest } from '../client.js';
+import { inngest } from '../client';
 
 /**
  * Take generated creatives, push to user's Meta account via the Marketing API.

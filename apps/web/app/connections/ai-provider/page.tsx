@@ -14,7 +14,7 @@ export default async function ConnectAIProviderPage() {
   return (
     <main className="container mx-auto max-w-3xl px-4 py-12">
       <h1 className="mb-6 text-3xl font-bold">AI UGC provider</h1>
-      <p className="mb-4 text-sm text-muted-foreground">
+      <p className="text-muted-foreground mb-4 text-sm">
         Pick one: Arcads (recommended), HeyGen, or Creatify. Bring your own API key.
       </p>
       <Card>
@@ -25,7 +25,7 @@ export default async function ConnectAIProviderPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">Phase 2 — coming soon.</p>
+          <p className="text-muted-foreground text-sm">Phase 2 — coming soon.</p>
         </CardContent>
       </Card>
     </main>

@@ -1,6 +1,6 @@
 import { jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { partnerReferralStatusEnum, partnerStatusEnum } from './enums.js';
-import { users } from './users.js';
+import { partnerReferralStatusEnum, partnerStatusEnum } from './enums';
+import { users } from './users';
 
 /**
  * Agency BM partners. Scaffolding from day 1 — actual partner deal wired

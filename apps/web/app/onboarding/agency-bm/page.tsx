@@ -20,23 +20,23 @@ export default async function AgencyBMPage() {
   return (
     <main className="container mx-auto max-w-3xl px-4 py-12">
       <h1 className="mb-2 text-3xl font-bold">Agency Business Manager (recommended)</h1>
-      <p className="mb-6 text-sm text-muted-foreground">
-        Disclosure: We receive referral compensation from agency BM partners. This is
-        because aggressive verticals require account separation that protects you and us.
+      <p className="text-muted-foreground mb-6 text-sm">
+        Disclosure: We receive referral compensation from agency BM partners. This is because
+        aggressive verticals require account separation that protects you and us.
       </p>
 
       <Card>
         <CardHeader>
           <CardTitle>Why an agency BM?</CardTitle>
           <CardDescription>
-            Isolates Meta enforcement risk from your personal Facebook account. Recommended
-            for MMO, bizopp, and finance verticals.
+            Isolates Meta enforcement risk from your personal Facebook account. Recommended for MMO,
+            bizopp, and finance verticals.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Partners list will populate here once we&rsquo;ve signed our first deal (Phase 7).
-            For now, you can{' '}
+          <p className="text-muted-foreground text-sm">
+            Partners list will populate here once we&rsquo;ve signed our first deal (Phase 7). For
+            now, you can{' '}
             <Link href="/connections/meta" className="underline">
               connect your existing BM
             </Link>{' '}

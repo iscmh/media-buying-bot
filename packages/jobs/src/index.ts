@@ -1,2 +1,2 @@
-export { inngest } from './client.js';
-export { functions } from './functions/index.js';
+export { inngest } from './client';
+export { functions } from './functions/index';

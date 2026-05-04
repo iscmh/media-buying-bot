@@ -18,11 +18,12 @@ export default async function ConnectTelegramPage() {
         <CardHeader>
           <CardTitle>Link your Telegram account</CardTitle>
           <CardDescription>
-            We&rsquo;ll generate a one-time code. Open the bot and send <code>/start &lt;code&gt;</code>.
+            We&rsquo;ll generate a one-time code. Open the bot and send{' '}
+            <code>/start &lt;code&gt;</code>.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">Phase 2 — coming soon.</p>
+          <p className="text-muted-foreground text-sm">Phase 2 — coming soon.</p>
         </CardContent>
       </Card>
     </main>

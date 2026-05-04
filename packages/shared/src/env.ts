@@ -22,7 +22,10 @@ export const SafetyEnvSchema = z.object({
   BOT_DRY_RUN: boolish.default(true),
   PLATFORM_DAILY_SPEND_CEILING_USD: z.coerce.number().positive().default(500),
   META_RATE_LIMIT_INTERNAL_CAP_PCT: z.coerce.number().min(1).max(100).default(60),
-  META_API_VERSION: z.string().regex(/^v\d+\.\d+$/).default('v21.0'),
+  META_API_VERSION: z
+    .string()
+    .regex(/^v\d+\.\d+$/)
+    .default('v21.0'),
 });
 
 export const TelegramEnvSchema = z.object({
@@ -52,7 +55,9 @@ export const ResendEnvSchema = z.object({
 export function parseEnv<T extends z.ZodTypeAny>(schema: T, source: NodeJS.ProcessEnv): z.infer<T> {
   const result = schema.safeParse(source);
   if (!result.success) {
-    const issues = result.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`).join('\n');
+    const issues = result.error.issues
+      .map((i) => `  - ${i.path.join('.')}: ${i.message}`)
+      .join('\n');
     throw new Error(`Invalid environment variables:\n${issues}`);
   }
   return result.data;

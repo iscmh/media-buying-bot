@@ -1,4 +1,4 @@
-import { inngest } from '../client.js';
+import { inngest } from '../client';
 
 /**
  * Computes the previous day's P&L per user (in user's local timezone) and

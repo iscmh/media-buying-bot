@@ -17,7 +17,7 @@ export default async function DashboardPage() {
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Welcome, {user.email}</p>
+          <p className="text-muted-foreground text-sm">Welcome, {user.email}</p>
         </div>
       </div>
 
@@ -29,7 +29,7 @@ export default async function DashboardPage() {
               <CardDescription>Connect your Business Manager.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">Phase 2 — coming soon</p>
+              <p className="text-muted-foreground text-sm">Phase 2 — coming soon</p>
             </CardContent>
           </Card>
         </Link>
@@ -41,7 +41,7 @@ export default async function DashboardPage() {
               <CardDescription>Receive kill/scale alerts.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">Phase 2 — coming soon</p>
+              <p className="text-muted-foreground text-sm">Phase 2 — coming soon</p>
             </CardContent>
           </Card>
         </Link>
@@ -53,7 +53,7 @@ export default async function DashboardPage() {
               <CardDescription>Bring your own key.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">Phase 2 — coming soon</p>
+              <p className="text-muted-foreground text-sm">Phase 2 — coming soon</p>
             </CardContent>
           </Card>
         </Link>
@@ -65,7 +65,7 @@ export default async function DashboardPage() {
               <CardDescription>Upload winning creatives.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">Phase 3 — coming soon</p>
+              <p className="text-muted-foreground text-sm">Phase 3 — coming soon</p>
             </CardContent>
           </Card>
         </Link>
@@ -77,7 +77,7 @@ export default async function DashboardPage() {
               <CardDescription>P&amp;L, kill/survive logs.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">Phase 6 — coming soon</p>
+              <p className="text-muted-foreground text-sm">Phase 6 — coming soon</p>
             </CardContent>
           </Card>
         </Link>
@@ -89,7 +89,7 @@ export default async function DashboardPage() {
               <CardDescription>Bot config + safety rules.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground">Phase 2 — coming soon</p>
+              <p className="text-muted-foreground text-sm">Phase 2 — coming soon</p>
             </CardContent>
           </Card>
         </Link>

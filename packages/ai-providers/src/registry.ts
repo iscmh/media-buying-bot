@@ -1,8 +1,8 @@
 import type { AIProviderName } from '@mbb/shared';
-import { ArcadsProvider } from './arcads.js';
-import { CreatifyProvider } from './creatify.js';
-import { HeyGenProvider } from './heygen.js';
-import type { AIProvider } from './types.js';
+import { ArcadsProvider } from './arcads';
+import { CreatifyProvider } from './creatify';
+import { HeyGenProvider } from './heygen';
+import type { AIProvider } from './types';
 
 const registry = new Map<AIProviderName, AIProvider>([
   ['arcads', new ArcadsProvider()],

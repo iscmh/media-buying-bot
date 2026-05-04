@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { getDb } from '../client.js';
+import { getDb } from '../client';
 
 /**
  * Column-level encryption helpers backed by pgcrypto + Supabase Vault.

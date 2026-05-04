@@ -1,11 +1,11 @@
-import { dailySummaryGenerator } from './daily-summary-generator.js';
-import { generationJobProcessor } from './generation-job-processor.js';
-import { killScaleEvaluator } from './kill-scale-evaluator.js';
-import { metaAdLauncher } from './meta-ad-launcher.js';
-import { performancePoller } from './performance-poller.js';
-import { suspiciousActivityMonitor } from './suspicious-activity-monitor.js';
-import { telegramNotifier } from './telegram-notifier.js';
-import { tokenExpiryChecker } from './token-expiry-checker.js';
+import { dailySummaryGenerator } from './daily-summary-generator';
+import { generationJobProcessor } from './generation-job-processor';
+import { killScaleEvaluator } from './kill-scale-evaluator';
+import { metaAdLauncher } from './meta-ad-launcher';
+import { performancePoller } from './performance-poller';
+import { suspiciousActivityMonitor } from './suspicious-activity-monitor';
+import { telegramNotifier } from './telegram-notifier';
+import { tokenExpiryChecker } from './token-expiry-checker';
 
 export const functions = [
   metaAdLauncher,

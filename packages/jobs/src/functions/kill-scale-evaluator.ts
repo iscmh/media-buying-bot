@@ -1,4 +1,4 @@
-import { inngest } from '../client.js';
+import { inngest } from '../client';
 
 /**
  * Evaluates user's kill rules + scale tiers against the latest performance

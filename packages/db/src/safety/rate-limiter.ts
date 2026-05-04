@@ -1,6 +1,6 @@
 import { and, desc, eq, gte } from 'drizzle-orm';
-import { getDb } from '../client.js';
-import { rateLimitEvents } from '../schema/ops.js';
+import { getDb } from '../client';
+import { rateLimitEvents } from '../schema/ops';
 
 /**
  * Rate limit scheduler infrastructure (anti-ban guardrail #1).
@@ -39,10 +39,7 @@ export async function recordRateLimitHit(input: {
 
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
   const recent = await db.query.rateLimitEvents.findMany({
-    where: and(
-      eq(rateLimitEvents.userId, input.userId),
-      gte(rateLimitEvents.hitAt, oneHourAgo),
-    ),
+    where: and(eq(rateLimitEvents.userId, input.userId), gte(rateLimitEvents.hitAt, oneHourAgo)),
     orderBy: desc(rateLimitEvents.hitAt),
   });
 

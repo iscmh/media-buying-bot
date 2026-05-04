@@ -1,6 +1,6 @@
 import { and, eq, isNull, or } from 'drizzle-orm';
-import { getDb } from '../client.js';
-import { featureFlags } from '../schema/ops.js';
+import { getDb } from '../client';
+import { featureFlags } from '../schema/ops';
 
 /**
  * Resolve a feature flag for a (flag, user) pair.
@@ -32,7 +32,10 @@ export async function isFeatureEnabled(flagName: string, userId?: string): Promi
       eq(featureFlags.flagName, flagName),
       eq(featureFlags.scope, 'global'),
       // Defensive: a legitimate global row has userId NULL.
-      or(isNull(featureFlags.userId), eq(featureFlags.userId, '00000000-0000-0000-0000-000000000000')),
+      or(
+        isNull(featureFlags.userId),
+        eq(featureFlags.userId, '00000000-0000-0000-0000-000000000000'),
+      ),
     ),
   });
   return globalFlag?.enabled ?? false;

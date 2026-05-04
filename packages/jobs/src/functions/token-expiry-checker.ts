@@ -1,4 +1,4 @@
-import { inngest } from '../client.js';
+import { inngest } from '../client';
 
 /**
  * Hourly cron. For each meta_connection:

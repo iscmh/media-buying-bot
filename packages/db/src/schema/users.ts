@@ -1,5 +1,5 @@
 import { boolean, pgSchema, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { userRoleEnum } from './enums.js';
+import { userRoleEnum } from './enums';
 
 /**
  * Reference to Supabase's auth.users table. We don't manage this — Supabase

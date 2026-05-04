@@ -1,4 +1,4 @@
-import type { AIProvider, GenerateInput, GeneratedCreative } from './types.js';
+import type { AIProvider, GenerateInput, GeneratedCreative } from './types';
 
 /**
  * HeyGen (most established UGC AI provider).

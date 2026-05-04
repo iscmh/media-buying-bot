@@ -1,6 +1,6 @@
 import { boolean, integer, pgTable, smallint, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { featureFlagScopeEnum, pauseActorEnum } from './enums.js';
-import { users } from './users.js';
+import { featureFlagScopeEnum, pauseActorEnum } from './enums';
+import { users } from './users';
 
 /**
  * Feature flags. DB-backed so I can flip without redeploy.

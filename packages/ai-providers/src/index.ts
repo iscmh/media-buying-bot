@@ -1,5 +1,5 @@
-export type { AIProvider, GeneratedCreative, GenerateInput } from './types.js';
-export { getProvider, registerProvider } from './registry.js';
-export { ArcadsProvider } from './arcads.js';
-export { HeyGenProvider } from './heygen.js';
-export { CreatifyProvider } from './creatify.js';
+export type { AIProvider, GeneratedCreative, GenerateInput } from './types';
+export { getProvider, registerProvider } from './registry';
+export { ArcadsProvider } from './arcads';
+export { HeyGenProvider } from './heygen';
+export { CreatifyProvider } from './creatify';

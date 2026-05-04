@@ -1,5 +1,5 @@
-import { getDb } from './client.js';
-import { auditLogs } from './schema/logs.js';
+import { getDb } from './client';
+import { auditLogs } from './schema/logs';
 
 /**
  * Record an application audit event. Callable from anywhere — web, bot, jobs.

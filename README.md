@@ -72,18 +72,18 @@ media-buying-bot/
 
 ## Anti-ban guardrails (non-negotiable)
 
-| # | Layer | Where it lives |
-| - | ----- | -------------- |
-| 1 | Rate limiter (60% of 200/hr per user) | `packages/db/src/safety/rate-limiter.ts` |
-| 2 | Pattern-of-use staggering | `packages/meta-api` (Phase 4) |
-| 3 | Suspicious-activity auto-pause | `packages/jobs/src/functions/suspicious-activity-monitor.ts` |
-| 4 | Platform spend ceiling above user cap | `packages/db/src/safety/spend-safety.ts` |
-| 5 | Pre-launch compliance checks | `packages/meta-api` (Phase 4) |
-| 6 | Audit log on every Meta call | `packages/db/src/meta-api-log.ts` |
-| 7 | Per-user + global kill switches | `packages/db/src/safety/kill-switches.ts` |
-| 8 | Dry-run mode | `BOT_DRY_RUN` env, enforced in `callMeta` |
-| 9 | Liability ToS | `apps/web/app/legal/tos/page.tsx` (placeholder) |
-| 10 | Onboarding risk education | Phase 2 onboarding wizard |
+| #   | Layer                                 | Where it lives                                               |
+| --- | ------------------------------------- | ------------------------------------------------------------ |
+| 1   | Rate limiter (60% of 200/hr per user) | `packages/db/src/safety/rate-limiter.ts`                     |
+| 2   | Pattern-of-use staggering             | `packages/meta-api` (Phase 4)                                |
+| 3   | Suspicious-activity auto-pause        | `packages/jobs/src/functions/suspicious-activity-monitor.ts` |
+| 4   | Platform spend ceiling above user cap | `packages/db/src/safety/spend-safety.ts`                     |
+| 5   | Pre-launch compliance checks          | `packages/meta-api` (Phase 4)                                |
+| 6   | Audit log on every Meta call          | `packages/db/src/meta-api-log.ts`                            |
+| 7   | Per-user + global kill switches       | `packages/db/src/safety/kill-switches.ts`                    |
+| 8   | Dry-run mode                          | `BOT_DRY_RUN` env, enforced in `callMeta`                    |
+| 9   | Liability ToS                         | `apps/web/app/legal/tos/page.tsx` (placeholder)              |
+| 10  | Onboarding risk education             | Phase 2 onboarding wizard                                    |
 
 `callMeta()` is the only allowed entry point for Meta Graph calls. Any direct `fetch('https://graph.facebook.com/...')` is a code review block.
 
@@ -174,16 +174,16 @@ curl https://YOUR-VERCEL-DOMAIN/api/health
 
 ## Roadmap (full)
 
-| Phase | Scope | Status |
-| ----- | ----- | ------ |
-| 1 | Monorepo scaffold, schema, safety layer, empty pages, kill switches | ✓ |
-| 2 | BYO Meta token onboarding, TG link flow, AI provider connect, settings UI, ToS signing | next |
-| 3 | Concept upload, generation pipeline (Arcads + HeyGen + Creatify), captions, B-roll | |
-| 4 | Auto-launch to Meta, retry logic, pre-launch compliance, pattern-of-use staggering | |
-| 5 | Performance polling, kill/scale logic, TG approval flows, suspicious-activity monitor | |
-| 6 | Dashboard, daily P&L summaries (per-user TZ), TG daily digest | |
-| 7 | Beta polish, support tooling, agency BM partner deal | |
-| 8 | Stripe billing, founding member migration, paid tiers | |
+| Phase | Scope                                                                                  | Status |
+| ----- | -------------------------------------------------------------------------------------- | ------ |
+| 1     | Monorepo scaffold, schema, safety layer, empty pages, kill switches                    | ✓      |
+| 2     | BYO Meta token onboarding, TG link flow, AI provider connect, settings UI, ToS signing | next   |
+| 3     | Concept upload, generation pipeline (Arcads + HeyGen + Creatify), captions, B-roll     |        |
+| 4     | Auto-launch to Meta, retry logic, pre-launch compliance, pattern-of-use staggering     |        |
+| 5     | Performance polling, kill/scale logic, TG approval flows, suspicious-activity monitor  |        |
+| 6     | Dashboard, daily P&L summaries (per-user TZ), TG daily digest                          |        |
+| 7     | Beta polish, support tooling, agency BM partner deal                                   |        |
+| 8     | Stripe billing, founding member migration, paid tiers                                  |        |
 
 ---
 

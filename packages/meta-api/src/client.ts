@@ -4,7 +4,7 @@ import {
   recordRateLimitHit,
   reserveRateLimitSlot,
 } from '@mbb/db';
-import { isRateLimitError } from './errors.js';
+import { isRateLimitError } from './errors';
 
 /**
  * The single chokepoint for ALL Meta Graph API calls. EVERY call must go

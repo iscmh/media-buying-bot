@@ -1,5 +1,5 @@
-import { getDb } from './client.js';
-import { metaApiCallLogs } from './schema/logs.js';
+import { getDb } from './client';
+import { metaApiCallLogs } from './schema/logs';
 
 const RESPONSE_BODY_EXCERPT_BYTES = 2048;
 

@@ -3,7 +3,9 @@ import { defineConfig } from 'drizzle-kit';
 
 const dbUrl = process.env.DATABASE_URL;
 if (!dbUrl) {
-  throw new Error('DATABASE_URL is required to run drizzle-kit. Copy .env.example → .env at repo root.');
+  throw new Error(
+    'DATABASE_URL is required to run drizzle-kit. Copy .env.example → .env at repo root.',
+  );
 }
 
 export default defineConfig({

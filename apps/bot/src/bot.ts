@@ -1,7 +1,7 @@
 import { Bot } from 'grammy';
-import { registerStart } from './commands/start.js';
-import { registerLink } from './commands/link.js';
-import { registerStatus } from './commands/status.js';
+import { registerStart } from './commands/start';
+import { registerLink } from './commands/link';
+import { registerStatus } from './commands/status';
 
 export function createBot(token: string): Bot {
   const bot = new Bot(token);

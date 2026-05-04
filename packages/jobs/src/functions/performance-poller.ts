@@ -1,4 +1,4 @@
-import { inngest } from '../client.js';
+import { inngest } from '../client';
 
 /**
  * Polls Meta for first-hour, hour 4, hour 6, hour 24 performance data per

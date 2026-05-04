@@ -10,9 +10,7 @@ export function registerStart(bot: Bot): void {
   bot.command('start', async (ctx) => {
     const code = ctx.match?.toString().trim();
     if (code) {
-      await ctx.reply(
-        `Got link code "${code}". Account linking flow ships in Phase 2.`,
-      );
+      await ctx.reply(`Got link code "${code}". Account linking flow ships in Phase 2.`);
       return;
     }
     await ctx.reply(

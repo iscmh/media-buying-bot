@@ -22,7 +22,7 @@ export default async function PerformancePage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground">Phase 6 — coming soon.</p>
+          <p className="text-muted-foreground text-sm">Phase 6 — coming soon.</p>
         </CardContent>
       </Card>
     </main>

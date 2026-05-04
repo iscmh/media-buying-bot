@@ -1,5 +1,5 @@
 import { integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { users } from './users.js';
+import { users } from './users';
 
 /**
  * General application audit log. NOT for Meta API calls — those go to

@@ -1,4 +1,4 @@
-import type { AIProvider, GenerateInput, GeneratedCreative } from './types.js';
+import type { AIProvider, GenerateInput, GeneratedCreative } from './types';
 
 /**
  * Creatify (cheaper option).

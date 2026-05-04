@@ -21,12 +21,7 @@ export type AdStatus =
   | 'rejected'
   | 'paused';
 
-export type GenerationJobStatus =
-  | 'queued'
-  | 'processing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+export type GenerationJobStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
 
 export type AspectRatio = '9:16' | '1:1' | '4:5';
 

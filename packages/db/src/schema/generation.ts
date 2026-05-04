@@ -5,8 +5,8 @@ import {
   aspectRatioEnum,
   creativeStatusEnum,
   generationJobStatusEnum,
-} from './enums.js';
-import { users } from './users.js';
+} from './enums';
+import { users } from './users';
 
 export const generationJobs = pgTable('generation_jobs', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -14,7 +14,10 @@ export const generationJobs = pgTable('generation_jobs', {
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
 
-  conceptIds: uuid('concept_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  conceptIds: uuid('concept_ids')
+    .array()
+    .notNull()
+    .default(sql`'{}'::uuid[]`),
   aiProviderUsed: aiProviderEnum('ai_provider_used').notNull(),
 
   status: generationJobStatusEnum('status').notNull().default('queued'),

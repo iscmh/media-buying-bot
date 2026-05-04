@@ -1,13 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = new Set([
-  '/',
-  '/signup',
-  '/login',
-  '/legal/tos',
-  '/legal/privacy',
-]);
+const PUBLIC_PATHS = new Set(['/', '/signup', '/login', '/legal/tos', '/legal/privacy']);
 
 const PUBLIC_PREFIXES = ['/api/auth', '/api/inngest', '/api/health', '/_next', '/favicon'];
 
@@ -39,8 +33,7 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isPublic =
-    PUBLIC_PATHS.has(path) || PUBLIC_PREFIXES.some((p) => path.startsWith(p));
+  const isPublic = PUBLIC_PATHS.has(path) || PUBLIC_PREFIXES.some((p) => path.startsWith(p));
 
   if (!user && !isPublic) {
     const loginUrl = request.nextUrl.clone();

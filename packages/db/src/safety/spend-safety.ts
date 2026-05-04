@@ -1,10 +1,10 @@
 import type { SpendSafetyResult } from '@mbb/shared';
 import { and, eq, gte, sum } from 'drizzle-orm';
-import { getDb } from '../client.js';
-import { dailySummaries } from '../schema/performance.js';
-import { userSettings } from '../schema/settings.js';
-import { users } from '../schema/users.js';
-import { checkKillSwitches } from './kill-switches.js';
+import { getDb } from '../client';
+import { dailySummaries } from '../schema/performance';
+import { userSettings } from '../schema/settings';
+import { users } from '../schema/users';
+import { checkKillSwitches } from './kill-switches';
 
 /**
  * The mandatory gate before EVERY Meta mutation that would spend money.
@@ -65,8 +65,7 @@ export async function checkSpendSafety(input: {
     return {
       allow: false,
       reason: `would exceed daily ceiling: spent=${spentToday}, planned=${plannedSpend}, ceiling=${effectiveCeiling}`,
-      code:
-        envCeiling < userCeiling ? 'platform_ceiling_exceeded' : 'user_ceiling_exceeded',
+      code: envCeiling < userCeiling ? 'platform_ceiling_exceeded' : 'user_ceiling_exceeded',
     };
   }
 

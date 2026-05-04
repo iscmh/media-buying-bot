@@ -1,6 +1,6 @@
 import { boolean, integer, numeric, pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { campaignObjectiveEnum } from './enums.js';
-import { users } from './users.js';
+import { campaignObjectiveEnum } from './enums';
+import { users } from './users';
 
 /**
  * One row per user. Created automatically on first login.

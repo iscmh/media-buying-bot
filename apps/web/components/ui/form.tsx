@@ -41,7 +41,9 @@ const useFormField = () => {
 };
 
 const FormItem = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => <div ref={ref} className={cn('space-y-2', className)} {...props} />,
+  ({ className, ...props }, ref) => (
+    <div ref={ref} className={cn('space-y-2', className)} {...props} />
+  ),
 );
 FormItem.displayName = 'FormItem';
 
@@ -54,18 +56,19 @@ const FormLabel = React.forwardRef<
 });
 FormLabel.displayName = 'FormLabel';
 
-const FormMessage = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
-  ({ className, children, ...props }, ref) => {
-    const { error } = useFormField();
-    const body = error ? String(error.message ?? '') : children;
-    if (!body) return null;
-    return (
-      <p ref={ref} className={cn('text-sm font-medium text-destructive', className)} {...props}>
-        {body}
-      </p>
-    );
-  },
-);
+const FormMessage = React.forwardRef<
+  HTMLParagraphElement,
+  React.HTMLAttributes<HTMLParagraphElement>
+>(({ className, children, ...props }, ref) => {
+  const { error } = useFormField();
+  const body = error ? String(error.message ?? '') : children;
+  if (!body) return null;
+  return (
+    <p ref={ref} className={cn('text-destructive text-sm font-medium', className)} {...props}>
+      {body}
+    </p>
+  );
+});
 FormMessage.displayName = 'FormMessage';
 
 export { Form, FormField, FormItem, FormLabel, FormMessage, useFormField };

@@ -1,3 +1,3 @@
-export * from './user-settings.js';
-export * from './kill-rules.js';
-export * from './concept.js';
+export * from './user-settings';
+export * from './kill-rules';
+export * from './concept';

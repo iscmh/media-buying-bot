@@ -1,8 +1,8 @@
 import type { SpendSafetyResult } from '@mbb/shared';
 import { eq } from 'drizzle-orm';
-import { getDb } from '../client.js';
-import { globalEmergencyStop } from '../schema/ops.js';
-import { users } from '../schema/users.js';
+import { getDb } from '../client';
+import { globalEmergencyStop } from '../schema/ops';
+import { users } from '../schema/users';
 
 /**
  * Check global + per-user kill switches before any bot action.
