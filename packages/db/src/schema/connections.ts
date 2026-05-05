@@ -1,6 +1,11 @@
 import { sql } from 'drizzle-orm';
 import { boolean, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
-import { aiProviderEnum, connectionMethodEnum, connectionStatusEnum } from './enums';
+import {
+  aiProviderEnum,
+  connectionMethodEnum,
+  connectionStatusEnum,
+  toolProviderEnum,
+} from './enums';
 import { users } from './users';
 
 /**
@@ -84,6 +89,37 @@ export const aiProviderConnections = pgTable('ai_provider_connections', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 
   isPrimary: boolean('is_primary').notNull().default(false),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Phase 3a (migration 0008). BYOK credentials for non-UGC tools — Gemini
+ * Vision (concept analysis), Claude (copy + prompt refinement), Kie.ai
+ * (Sora 2 video gen). Distinct from `ai_provider_connections` which holds
+ * Arcads/HeyGen/Creatify UGC video credentials. Per spec, Kie.ai lives
+ * here even though it's a video provider.
+ *
+ * Same encryption + audit pattern as the other connection tables. Soft-
+ * delete via `deleted_at`; one active row per (user, provider) enforced
+ * by a partial unique index in the migration.
+ */
+export const toolConnections = pgTable('tool_connections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  provider: toolProviderEnum('provider').notNull(),
+
+  apiKeyEncrypted: text('api_key_encrypted').notNull(),
+  apiKeyVerifiedAt: timestamp('api_key_verified_at', { withTimezone: true }),
+
+  status: text('status').notNull().default('pending'),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

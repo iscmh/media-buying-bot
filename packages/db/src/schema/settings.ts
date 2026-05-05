@@ -49,6 +49,12 @@ export const userSettings = pgTable('user_settings', {
     .notNull()
     .default('500.00'),
 
+  // Phase 3a: per-day USD cap on AI generation costs (Gemini/Claude/Kie.ai/
+  // HeyGen/Arcads). Server clamps to PLATFORM_HARD_AI_CEILING_USD (200).
+  aiGenerationDailyCapUsd: numeric('ai_generation_daily_cap_usd', { precision: 10, scale: 2 })
+    .notNull()
+    .default('50.00'),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

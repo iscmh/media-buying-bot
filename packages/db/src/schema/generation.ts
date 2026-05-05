@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import {
   aiProviderEnum,
   aspectRatioEnum,
@@ -18,7 +18,13 @@ export const generationJobs = pgTable('generation_jobs', {
     .array()
     .notNull()
     .default(sql`'{}'::uuid[]`),
-  aiProviderUsed: aiProviderEnum('ai_provider_used').notNull(),
+
+  // Phase 1 used this for UGC-provider scoping; Phase 3a static jobs use
+  // Gemini + Claude (which live in tool_connections), so this is now
+  // nullable. UGC jobs populate it; static jobs leave it null. The actual
+  // user-picked provider lives in providerChoice (free-form text, accepts
+  // values from either ai_provider enum or tool_provider enum).
+  aiProviderUsed: aiProviderEnum('ai_provider_used'),
 
   status: generationJobStatusEnum('status').notNull().default('queued'),
 
@@ -27,6 +33,17 @@ export const generationJobs = pgTable('generation_jobs', {
 
   generatedCreativeCount: integer('generated_creative_count').notNull().default(0),
   errorMessage: text('error_message'),
+
+  // Phase 3a additions.
+  intensity: text('intensity'),
+  variantCount: integer('variant_count'),
+  providerChoice: text('provider_choice'),
+  estimatedCostUsd: numeric('estimated_cost_usd', { precision: 10, scale: 4 }),
+  actualCostUsd: numeric('actual_cost_usd', { precision: 10, scale: 4 }),
+  mode: text('mode').default('mock'),
+  // Where analyze-concept stuffs its mock structured analysis. Phase 3b
+  // replaces with real Gemini Vision output.
+  metadata: jsonb('metadata'),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
