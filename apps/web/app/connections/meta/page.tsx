@@ -1,4 +1,5 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import Link from 'next/link';
+import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { MetaConnectedSummary } from './connected-summary';
@@ -19,11 +20,31 @@ export default async function ConnectMetaPage() {
   });
 
   // requireOnboardingComplete already redirected if Meta isn't connected,
-  // so conn should always be present here. Belt-and-suspenders fallback:
+  // so conn should always be present here. Defensive fallback for race
+  // conditions (disconnect just happened, page rendered before redirect):
+  // surface "Last connected ... Reconnect →" instead of an empty state.
   if (!conn || !conn.businessManagerId) {
+    const lastRevoked = await db.query.metaConnections.findFirst({
+      where: and(
+        eq(schema.metaConnections.userId, userId),
+        ne(schema.metaConnections.status, 'active'),
+      ),
+      orderBy: desc(schema.metaConnections.deletedAt),
+      columns: { deletedAt: true },
+    });
     return (
       <main className="container mx-auto max-w-2xl px-4 py-12">
-        <p className="text-muted-foreground text-sm">No active Meta connection on file.</p>
+        <h1 className="mb-2 text-3xl font-bold">Meta connection</h1>
+        <p className="text-destructive text-sm">
+          Disconnected
+          {lastRevoked?.deletedAt && (
+            <> · last connected {lastRevoked.deletedAt.toLocaleDateString()}</>
+          )}
+          .{' '}
+          <Link href="/onboarding/meta" className="underline">
+            Reconnect →
+          </Link>
+        </p>
       </main>
     );
   }

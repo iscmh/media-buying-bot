@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { eq } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
@@ -10,14 +11,23 @@ export default async function ConnectTelegramPage() {
   const db = getDb();
   const conn = await db.query.telegramConnections.findFirst({
     where: eq(schema.telegramConnections.userId, userId),
-    columns: { tgChatId: true, linkedAt: true, status: true, metadata: true },
+    columns: { tgChatId: true, linkedAt: true, status: true, metadata: true, updatedAt: true },
   });
 
+  // Defensive — the gate should have redirected us before reaching this
+  // branch. If we land here anyway (race during disconnect), surface a
+  // "Disconnected · Reconnect →" line rather than an empty state.
   if (!conn || conn.status !== 'active' || !conn.tgChatId) {
-    // Defensive — the gate should have redirected us already.
     return (
       <main className="container mx-auto max-w-2xl px-4 py-12">
-        <p className="text-muted-foreground text-sm">No active Telegram link on file.</p>
+        <h1 className="mb-2 text-3xl font-bold">Telegram</h1>
+        <p className="text-destructive text-sm">
+          Disconnected
+          {conn?.updatedAt && <> · last linked {conn.updatedAt.toLocaleDateString()}</>}.{' '}
+          <Link href="/onboarding/telegram" className="underline">
+            Reconnect →
+          </Link>
+        </p>
       </main>
     );
   }
