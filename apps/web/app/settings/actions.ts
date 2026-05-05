@@ -2,7 +2,12 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { PLATFORM_HARD_CEILING_USD, SettingsFormSchema, type SettingsFormInput } from '@mbb/shared';
+import {
+  PLATFORM_HARD_AI_CEILING_USD,
+  PLATFORM_HARD_CEILING_USD,
+  SettingsFormSchema,
+  type SettingsFormInput,
+} from '@mbb/shared';
 import { saveUserSettings } from '@mbb/db';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -49,6 +54,10 @@ export async function saveSettingsAction(
     platformDailySpendCeiling: Math.min(
       parsed.data.platformDailySpendCeiling,
       PLATFORM_HARD_CEILING_USD,
+    ),
+    aiGenerationDailyCapUsd: Math.min(
+      parsed.data.aiGenerationDailyCapUsd,
+      PLATFORM_HARD_AI_CEILING_USD,
     ),
   };
 

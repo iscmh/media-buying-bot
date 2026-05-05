@@ -87,13 +87,11 @@ export function isValidIanaZone(tz: string): boolean {
   // 'Region/Subregion/City'). Rejects POSIX/legacy abbreviations like
   // 'PST', 'EST', 'utc' (case-insensitive variants) that DateTimeFormat
   // would otherwise accept.
-  const isIanaShape =
-    tz === 'UTC' || /^[A-Z][A-Za-z_]+(\/[A-Z][A-Za-z_-]+){1,2}$/.test(tz);
+  const isIanaShape = tz === 'UTC' || /^[A-Z][A-Za-z_]+(\/[A-Z][A-Za-z_-]+){1,2}$/.test(tz);
   if (!isIanaShape) return false;
 
   try {
-    // Throws RangeError on unknown zones.
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+    // Throws RangeError on unknown zones. Construct, ignore the result.
     new Intl.DateTimeFormat('en-US', { timeZone: tz });
     return true;
   } catch {

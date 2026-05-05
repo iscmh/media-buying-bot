@@ -21,6 +21,7 @@ const baseline: SettingsRow = {
   scaleTier2Cap: 400,
   manualApprovalThreshold: 400,
   platformDailySpendCeiling: 500,
+  aiGenerationDailyCapUsd: 50,
   timezone: 'America/New_York',
 };
 

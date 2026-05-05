@@ -12,6 +12,7 @@ import { saveSettingsAction } from './actions';
 interface Props {
   initialValues: SettingsFormInput;
   hardCeiling: number;
+  aiHardCeiling: number;
 }
 
 interface ToastState {
@@ -102,6 +103,12 @@ const FIELDS: Array<{
     help: 'Hard cap on per-day spend across all your ad accounts. USD.',
     type: 'currency',
   },
+  {
+    name: 'aiGenerationDailyCapUsd',
+    label: 'AI generation daily cap',
+    help: 'Hard cap on per-day AI generation costs (Gemini, Claude, Kie.ai, HeyGen, Arcads). USD.',
+    type: 'currency',
+  },
   // --- Daily summaries ---
   {
     name: 'timezone',
@@ -111,7 +118,7 @@ const FIELDS: Array<{
   },
 ];
 
-export function SettingsForm({ initialValues, hardCeiling }: Props) {
+export function SettingsForm({ initialValues, hardCeiling, aiHardCeiling }: Props) {
   const form = useForm<SettingsFormInput>({
     resolver: zodResolver(SettingsFormSchema),
     defaultValues: initialValues,
@@ -219,6 +226,12 @@ export function SettingsForm({ initialValues, hardCeiling }: Props) {
               <p className="text-muted-foreground text-xs">
                 Platform hard ceiling: <strong>${hardCeiling}</strong>. Even if you enter a higher
                 number, the platform clamps to this.
+              </p>
+            )}
+            {field.name === 'aiGenerationDailyCapUsd' && (
+              <p className="text-muted-foreground text-xs">
+                Platform hard ceiling: <strong>${aiHardCeiling}</strong>. Generation jobs that would
+                exceed this are blocked server-side.
               </p>
             )}
 

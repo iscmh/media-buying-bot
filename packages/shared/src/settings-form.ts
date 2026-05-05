@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { PLATFORM_HARD_CEILING_USD } from './safety';
+import { PLATFORM_HARD_AI_CEILING_USD, PLATFORM_HARD_CEILING_USD } from './safety';
 import { isValidIanaZone } from './timezone';
 
 /**
@@ -65,6 +65,17 @@ export const SettingsFormSchema = z.object({
       `Daily ceiling cannot exceed the platform hard ceiling of $${PLATFORM_HARD_CEILING_USD}.`,
     ),
 
+  // Phase 3a: per-day AI generation cost cap. Server clamps to
+  // PLATFORM_HARD_AI_CEILING_USD ($200) — same belt-and-suspenders pattern
+  // as platformDailySpendCeiling.
+  aiGenerationDailyCapUsd: z.coerce
+    .number()
+    .min(5, 'AI generation cap must be at least $5.')
+    .max(
+      PLATFORM_HARD_AI_CEILING_USD,
+      `AI generation cap cannot exceed the platform hard ceiling of $${PLATFORM_HARD_AI_CEILING_USD}.`,
+    ),
+
   // Daily-summary timezone. Lives on users.timezone in the schema (Phase 1
   // decision), but rolled into the same form so save can write atomically.
   // Validation accepts the full IANA db, not just the picker's curated list.
@@ -89,5 +100,6 @@ export const SETTINGS_FIELD_KEYS = [
   'scaleTier2Cap',
   'manualApprovalThreshold',
   'platformDailySpendCeiling',
+  'aiGenerationDailyCapUsd',
   'timezone',
 ] as const satisfies ReadonlyArray<keyof SettingsFormInput>;

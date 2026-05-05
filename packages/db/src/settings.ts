@@ -29,6 +29,7 @@ export interface SettingsRow {
   scaleTier2Cap: number;
   manualApprovalThreshold: number;
   platformDailySpendCeiling: number;
+  aiGenerationDailyCapUsd: number;
   timezone: string;
 }
 
@@ -55,6 +56,7 @@ export async function getUserSettings(userId: string): Promise<SettingsRow | nul
     scaleTier2Cap: Number(settingsRow.scaleTier2Cap),
     manualApprovalThreshold: Number(settingsRow.manualApprovalThreshold),
     platformDailySpendCeiling: Number(settingsRow.platformDailySpendCeiling),
+    aiGenerationDailyCapUsd: Number(settingsRow.aiGenerationDailyCapUsd),
     timezone: userRow.timezone,
   };
 }
@@ -124,6 +126,7 @@ export async function saveUserSettings(
         scaleTier2Cap: next.scaleTier2Cap.toFixed(2),
         manualApprovalThreshold: next.manualApprovalThreshold.toFixed(2),
         platformDailySpendCeiling: next.platformDailySpendCeiling.toFixed(2),
+        aiGenerationDailyCapUsd: next.aiGenerationDailyCapUsd.toFixed(2),
       })
       .where(eq(userSettings.userId, userId));
 
