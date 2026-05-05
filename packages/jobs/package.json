@@ -20,6 +20,7 @@
     "@mbb/db": "workspace:*",
     "@mbb/meta-api": "workspace:*",
     "@mbb/shared": "workspace:*",
+    "drizzle-orm": "^0.36.4",
     "inngest": "^3.27.5",
     "zod": "^3.24.1"
   },

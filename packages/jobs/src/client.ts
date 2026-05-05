@@ -23,6 +23,18 @@ export type Events = {
   'generation/job.requested': {
     data: { userId: string; generationJobId: string };
   };
+  // Phase 3a: split job pipeline. Static jobs go straight to
+  // generation/static.requested; UGC jobs first hit analyze (Gemini Vision
+  // deconstruction in 3b; mock JSON in 3a) then fan out to ugc.requested.
+  'generation/analyze.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
+  'generation/static.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
+  'generation/ugc.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   'summary/daily.requested': {
     data: { userId: string; date: string };
   };
