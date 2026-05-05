@@ -104,6 +104,23 @@ export default async function DashboardPage() {
           </Card>
         </Link>
 
+        <Link href="/connections/tools">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">AI tools</CardTitle>
+              <CardDescription>Gemini · Claude · Kie.ai (BYOK).</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm">
+                <span className="font-medium">
+                  {summaries.tools.connectedCount} of {summaries.tools.totalCount}
+                </span>{' '}
+                <span className="text-muted-foreground">connected</span>
+              </p>
+            </CardContent>
+          </Card>
+        </Link>
+
         <Link href="/concepts">
           <Card>
             <CardHeader>

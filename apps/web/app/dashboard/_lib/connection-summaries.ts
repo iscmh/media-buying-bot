@@ -18,12 +18,13 @@ export interface ConnectionSummaries {
   meta: { connected: true; bmIdShort: string; adAccountCount: number } | { connected: false };
   telegram: { connected: true; username: string | null } | { connected: false };
   aiProvider: { connected: true; provider: AIProviderName; label: string } | { connected: false };
+  tools: { connectedCount: number; totalCount: 3 };
 }
 
 export async function getConnectionSummaries(userId: string): Promise<ConnectionSummaries> {
   const db = getDb();
 
-  const [meta, tg, ai] = await Promise.all([
+  const [meta, tg, ai, tools] = await Promise.all([
     db.query.metaConnections.findFirst({
       where: and(
         eq(schema.metaConnections.userId, userId),
@@ -47,6 +48,14 @@ export async function getConnectionSummaries(userId: string): Promise<Connection
       ),
       columns: { provider: true },
     }),
+    db.query.toolConnections.findMany({
+      where: and(
+        eq(schema.toolConnections.userId, userId),
+        eq(schema.toolConnections.status, 'active'),
+        isNull(schema.toolConnections.deletedAt),
+      ),
+      columns: { provider: true },
+    }),
   ]);
 
   return {
@@ -67,5 +76,9 @@ export async function getConnectionSummaries(userId: string): Promise<Connection
           label: AI_PROVIDER_META[ai.provider as AIProviderName].label,
         }
       : { connected: false },
+    tools: {
+      connectedCount: tools.length,
+      totalCount: 3,
+    },
   };
 }
