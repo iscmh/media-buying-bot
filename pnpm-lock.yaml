@@ -196,6 +196,9 @@ importers:
 
   packages/ai-providers:
     dependencies:
+      '@mbb/db':
+        specifier: workspace:*
+        version: link:../db
       '@mbb/shared':
         specifier: workspace:*
         version: link:../shared
@@ -258,6 +261,9 @@ importers:
       '@mbb/shared':
         specifier: workspace:*
         version: link:../shared
+      '@supabase/supabase-js':
+        specifier: ^2.46.2
+        version: 2.105.1
       drizzle-orm:
         specifier: ^0.36.4
         version: 0.36.4(@opentelemetry/api@1.9.1)(@types/pg@8.15.6)(@types/react@18.3.28)(postgres@3.4.9)(react@18.3.1)
