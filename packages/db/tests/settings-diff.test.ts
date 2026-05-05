@@ -21,6 +21,7 @@ const baseline: SettingsRow = {
   scaleTier2Cap: 400,
   manualApprovalThreshold: 400,
   platformDailySpendCeiling: 500,
+  timezone: 'America/New_York',
 };
 
 describe('diffSettings', () => {
@@ -66,5 +67,16 @@ describe('diffSettings', () => {
     const changes = diffSettings(stringy, baseline);
     expect(changes).toHaveLength(1);
     expect(changes[0]?.field).toBe('defaultTestCap');
+  });
+
+  it('includes timezone changes in the diff', () => {
+    const next = { ...baseline, timezone: 'Europe/London' };
+    const changes = diffSettings(baseline, next);
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toEqual({
+      field: 'timezone',
+      oldValue: 'America/New_York',
+      newValue: 'Europe/London',
+    });
   });
 });

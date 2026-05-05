@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PLATFORM_HARD_CEILING_USD } from './safety';
+import { isValidIanaZone } from './timezone';
 
 /**
  * Zod schema for the settings form. Drives both client-side react-hook-form
@@ -63,6 +64,14 @@ export const SettingsFormSchema = z.object({
       PLATFORM_HARD_CEILING_USD,
       `Daily ceiling cannot exceed the platform hard ceiling of $${PLATFORM_HARD_CEILING_USD}.`,
     ),
+
+  // Daily-summary timezone. Lives on users.timezone in the schema (Phase 1
+  // decision), but rolled into the same form so save can write atomically.
+  // Validation accepts the full IANA db, not just the picker's curated list.
+  timezone: z
+    .string()
+    .min(1, 'Pick a timezone.')
+    .refine(isValidIanaZone, 'Pick a valid IANA timezone (e.g. America/New_York).'),
 });
 export type SettingsFormInput = z.infer<typeof SettingsFormSchema>;
 
@@ -80,4 +89,5 @@ export const SETTINGS_FIELD_KEYS = [
   'scaleTier2Cap',
   'manualApprovalThreshold',
   'platformDailySpendCeiling',
+  'timezone',
 ] as const satisfies ReadonlyArray<keyof SettingsFormInput>;

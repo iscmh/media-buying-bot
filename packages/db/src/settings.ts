@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import { logAuditEvent } from './audit';
 import { getDb } from './client';
 import { userSettings } from './schema/settings';
+import { users } from './schema/users';
 
 /**
  * Settings read + write helpers.
@@ -10,6 +11,9 @@ import { userSettings } from './schema/settings';
  * preserves precision). We parse to Number on read and toFixed() on write
  * so callers always work with regular JS numbers and the diff helper can
  * compare them with === without surprises.
+ *
+ * `timezone` lives on the users table (Phase 1 schema decision) but rolls
+ * into this helper so the form save can be atomic across both rows.
  */
 
 export interface SettingsRow {
@@ -25,27 +29,33 @@ export interface SettingsRow {
   scaleTier2Cap: number;
   manualApprovalThreshold: number;
   platformDailySpendCeiling: number;
+  timezone: string;
 }
 
 export async function getUserSettings(userId: string): Promise<SettingsRow | null> {
   const db = getDb();
-  const row = await db.query.userSettings.findFirst({
-    where: eq(userSettings.userId, userId),
-  });
-  if (!row) return null;
+  const [settingsRow, userRow] = await Promise.all([
+    db.query.userSettings.findFirst({ where: eq(userSettings.userId, userId) }),
+    db.query.users.findFirst({
+      where: eq(users.id, userId),
+      columns: { timezone: true },
+    }),
+  ]);
+  if (!settingsRow || !userRow) return null;
   return {
-    defaultTestCap: Number(row.defaultTestCap),
-    adSetsPerLaunch: row.adSetsPerLaunch,
-    dailyGenerationVolume: row.dailyGenerationVolume,
-    campaignObjective: row.campaignObjective,
-    killThresholdCpc: Number(row.killThresholdCpc),
-    killThresholdCtr: Number(row.killThresholdCtr),
-    gracePeriodMinutes: row.gracePeriodMinutes,
-    hour6CutoffEnabled: row.hour6CutoffEnabled,
-    scaleTier1Cap: Number(row.scaleTier1Cap),
-    scaleTier2Cap: Number(row.scaleTier2Cap),
-    manualApprovalThreshold: Number(row.manualApprovalThreshold),
-    platformDailySpendCeiling: Number(row.platformDailySpendCeiling),
+    defaultTestCap: Number(settingsRow.defaultTestCap),
+    adSetsPerLaunch: settingsRow.adSetsPerLaunch,
+    dailyGenerationVolume: settingsRow.dailyGenerationVolume,
+    campaignObjective: settingsRow.campaignObjective,
+    killThresholdCpc: Number(settingsRow.killThresholdCpc),
+    killThresholdCtr: Number(settingsRow.killThresholdCtr),
+    gracePeriodMinutes: settingsRow.gracePeriodMinutes,
+    hour6CutoffEnabled: settingsRow.hour6CutoffEnabled,
+    scaleTier1Cap: Number(settingsRow.scaleTier1Cap),
+    scaleTier2Cap: Number(settingsRow.scaleTier2Cap),
+    manualApprovalThreshold: Number(settingsRow.manualApprovalThreshold),
+    platformDailySpendCeiling: Number(settingsRow.platformDailySpendCeiling),
+    timezone: userRow.timezone,
   };
 }
 
@@ -77,6 +87,11 @@ export function diffSettings(current: SettingsRow, next: SettingsRow): SettingsC
  * platformDailySpendCeiling against PLATFORM_HARD_CEILING_USD. Numeric
  * columns are written as strings (Drizzle's contract for `numeric`).
  *
+ * Wraps both the user_settings UPDATE and the users.timezone UPDATE in a
+ * single transaction so the diff log captures them atomically — partial
+ * saves on transient failure could leave audit-log gaps that lie about
+ * what actually happened.
+ *
  * Returns the changes that were actually written. If `next` matches the
  * current row exactly, returns [] and writes nothing — including no audit
  * log row (no-op submit shouldn't pollute the log).
@@ -93,23 +108,29 @@ export async function saveUserSettings(
   if (changes.length === 0) return [];
 
   const db = getDb();
-  await db
-    .update(userSettings)
-    .set({
-      defaultTestCap: next.defaultTestCap.toFixed(2),
-      adSetsPerLaunch: next.adSetsPerLaunch,
-      dailyGenerationVolume: next.dailyGenerationVolume,
-      campaignObjective: next.campaignObjective,
-      killThresholdCpc: next.killThresholdCpc.toFixed(4),
-      killThresholdCtr: next.killThresholdCtr.toFixed(2),
-      gracePeriodMinutes: next.gracePeriodMinutes,
-      hour6CutoffEnabled: next.hour6CutoffEnabled,
-      scaleTier1Cap: next.scaleTier1Cap.toFixed(2),
-      scaleTier2Cap: next.scaleTier2Cap.toFixed(2),
-      manualApprovalThreshold: next.manualApprovalThreshold.toFixed(2),
-      platformDailySpendCeiling: next.platformDailySpendCeiling.toFixed(2),
-    })
-    .where(eq(userSettings.userId, userId));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(userSettings)
+      .set({
+        defaultTestCap: next.defaultTestCap.toFixed(2),
+        adSetsPerLaunch: next.adSetsPerLaunch,
+        dailyGenerationVolume: next.dailyGenerationVolume,
+        campaignObjective: next.campaignObjective,
+        killThresholdCpc: next.killThresholdCpc.toFixed(4),
+        killThresholdCtr: next.killThresholdCtr.toFixed(2),
+        gracePeriodMinutes: next.gracePeriodMinutes,
+        hour6CutoffEnabled: next.hour6CutoffEnabled,
+        scaleTier1Cap: next.scaleTier1Cap.toFixed(2),
+        scaleTier2Cap: next.scaleTier2Cap.toFixed(2),
+        manualApprovalThreshold: next.manualApprovalThreshold.toFixed(2),
+        platformDailySpendCeiling: next.platformDailySpendCeiling.toFixed(2),
+      })
+      .where(eq(userSettings.userId, userId));
+
+    if (changes.some((c) => c.field === 'timezone')) {
+      await tx.update(users).set({ timezone: next.timezone }).where(eq(users.id, userId));
+    }
+  });
 
   await logAuditEvent({
     userId,

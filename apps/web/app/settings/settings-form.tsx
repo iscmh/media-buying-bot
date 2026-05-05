@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { SettingsFormSchema, type SettingsFormInput } from '@mbb/shared';
+import { SettingsFormSchema, TIMEZONE_PICKER_GROUPS, type SettingsFormInput } from '@mbb/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -24,7 +24,7 @@ const FIELDS: Array<{
   name: keyof SettingsFormInput;
   label: string;
   help: string;
-  type: 'number' | 'integer' | 'currency' | 'percent' | 'enum-cbo-abo' | 'boolean';
+  type: 'number' | 'integer' | 'currency' | 'percent' | 'enum-cbo-abo' | 'boolean' | 'timezone';
 }> = [
   // --- Test budget ---
   {
@@ -101,6 +101,13 @@ const FIELDS: Array<{
     label: 'Daily spend ceiling',
     help: 'Hard cap on per-day spend across all your ad accounts. USD.',
     type: 'currency',
+  },
+  // --- Daily summaries ---
+  {
+    name: 'timezone',
+    label: 'Timezone',
+    help: 'Daily P&L summaries arrive at midnight in this timezone.',
+    type: 'timezone',
   },
 ];
 
@@ -198,6 +205,16 @@ export function SettingsForm({ initialValues, hardCeiling }: Props) {
               </div>
             )}
 
+            {field.type === 'timezone' && (
+              <TimezoneField
+                name={field.name}
+                value={form.watch(field.name) as string}
+                onChange={(tz) =>
+                  form.setValue(field.name, tz, { shouldDirty: true, shouldValidate: true })
+                }
+              />
+            )}
+
             {field.name === 'platformDailySpendCeiling' && (
               <p className="text-muted-foreground text-xs">
                 Platform hard ceiling: <strong>${hardCeiling}</strong>. Even if you enter a higher
@@ -230,5 +247,75 @@ export function SettingsForm({ initialValues, hardCeiling }: Props) {
         </Button>
       </div>
     </form>
+  );
+}
+
+interface TimezoneFieldProps {
+  name: string;
+  value: string;
+  onChange: (tz: string) => void;
+}
+
+/**
+ * Region-grouped <select> for IANA timezones + a "Use detected"
+ * suggestion when the browser-detected timezone differs from the saved
+ * one. Detected via Intl.DateTimeFormat — runs only on the client (SSR
+ * pass leaves the value at the saved one).
+ */
+function TimezoneField({ name, value, onChange }: TimezoneFieldProps) {
+  const [browserTz, setBrowserTz] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (detected) setBrowserTz(detected);
+    } catch {
+      // Some embedded browsers don't surface this; leave null.
+    }
+  }, []);
+
+  const showSuggestion = browserTz && browserTz !== value;
+
+  return (
+    <div className="space-y-2">
+      <select
+        id={name}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+      >
+        {TIMEZONE_PICKER_GROUPS.map((group) => (
+          <optgroup key={group.region} label={group.region}>
+            {group.zones.map((tz) => (
+              <option key={tz} value={tz}>
+                {tz}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+        {/* If the saved value isn't in the picker (e.g. set via API to an
+            obscure but valid IANA zone), keep it visible so it's not
+            silently overwritten on next save. */}
+        {!TIMEZONE_PICKER_GROUPS.some((g) => g.zones.includes(value)) && (
+          <optgroup label="Other (saved)">
+            <option value={value}>{value}</option>
+          </optgroup>
+        )}
+      </select>
+      {showSuggestion && (
+        <p className="text-muted-foreground flex items-center gap-2 text-xs">
+          <span>
+            Detected: <code className="font-mono">{browserTz}</code>
+          </span>
+          <button
+            type="button"
+            onClick={() => onChange(browserTz)}
+            className="text-primary underline"
+          >
+            Use detected
+          </button>
+        </p>
+      )}
+    </div>
   );
 }
