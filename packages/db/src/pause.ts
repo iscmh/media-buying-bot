@@ -41,19 +41,72 @@ export async function cascadePauseUser(input: {
 
 /**
  * For the dashboard banner: surface the active (unresolved) pause reason
- * if any. "Active" = the most recent pause log row whose unpaused_at is
- * NULL. Returns null if the user is not paused or has no pause history.
+ * + count of open pause-log rows. "Active" = pause log rows whose
+ * unpaused_at is NULL. Returns null if the user has no open pauses.
  */
 export async function getLatestPauseReason(userId: string): Promise<{
   reason: string;
   pausedAt: Date;
   pausedBy: 'user' | 'admin' | 'auto';
+  openPauseCount: number;
 } | null> {
   const db = getDb();
-  const row = await db.query.userPauseLog.findFirst({
+  const openRows = await db.query.userPauseLog.findMany({
     where: and(eq(userPauseLog.userId, userId), isNull(userPauseLog.unpausedAt)),
     orderBy: desc(userPauseLog.pausedAt),
     columns: { reason: true, pausedAt: true, pausedBy: true },
   });
-  return row ?? null;
+  if (openRows.length === 0) return null;
+  const latest = openRows[0]!;
+  return { ...latest, openPauseCount: openRows.length };
+}
+
+/**
+ * Inverse of cascadePauseUser. Closes ALL open user_pause_log rows for the
+ * user (sets unpaused_at = now()) and flips users.is_paused = false. Audit-
+ * logs the unpause with the count and array of reasons that were closed,
+ * which is useful debugging signal later (was this user paused for one
+ * reason or three?).
+ *
+ * Returns the closed reasons. If the user is not actually paused (no open
+ * log rows), returns null and writes nothing — the banner won't be visible
+ * in that case anyway, but a stale POST shouldn't write spurious logs.
+ *
+ * Reconnecting a previously-disconnected service does NOT call this; the
+ * user must explicitly unpause from the dashboard banner.
+ */
+export async function unpauseUser(
+  userId: string,
+): Promise<{ previousPauseCount: number; previousReasons: string[] } | null> {
+  const db = getDb();
+
+  const openRows = await db.query.userPauseLog.findMany({
+    where: and(eq(userPauseLog.userId, userId), isNull(userPauseLog.unpausedAt)),
+    columns: { reason: true },
+  });
+  if (openRows.length === 0) {
+    // Defensive: user is already unpaused. Don't write phantom audit rows.
+    await db.update(users).set({ isPaused: false }).where(eq(users.id, userId));
+    return null;
+  }
+
+  const now = new Date();
+  await db
+    .update(userPauseLog)
+    .set({ unpausedAt: now })
+    .where(and(eq(userPauseLog.userId, userId), isNull(userPauseLog.unpausedAt)));
+
+  await db.update(users).set({ isPaused: false }).where(eq(users.id, userId));
+
+  const previousReasons = openRows.map((r) => r.reason);
+  await logAuditEvent({
+    userId,
+    eventType: 'user_unpaused',
+    eventData: {
+      previous_pause_count: openRows.length,
+      previous_reasons: previousReasons,
+    },
+  });
+
+  return { previousPauseCount: openRows.length, previousReasons };
 }

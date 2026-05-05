@@ -4,6 +4,7 @@ import { getDb, getLatestPauseReason, schema } from '@mbb/db';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { PauseBanner } from './_components/pause-banner';
+import { getConnectionSummaries } from './_lib/connection-summaries';
 
 export const metadata = { title: 'Dashboard — Media Buying Bot' };
 
@@ -15,7 +16,10 @@ export default async function DashboardPage() {
     where: eq(schema.users.id, user.userId),
     columns: { isPaused: true },
   });
-  const pauseReason = userRow?.isPaused ? await getLatestPauseReason(user.userId) : null;
+  const [pauseReason, summaries] = await Promise.all([
+    userRow?.isPaused ? getLatestPauseReason(user.userId) : Promise.resolve(null),
+    getConnectionSummaries(user.userId),
+  ]);
 
   return (
     <main className="container mx-auto px-4 py-12">
@@ -23,6 +27,7 @@ export default async function DashboardPage() {
         <PauseBanner
           reason={pauseReason.reason}
           pausedAt={pauseReason.pausedAt}
+          openPauseCount={pauseReason.openPauseCount}
           pausedBy={pauseReason.pausedBy}
         />
       )}
@@ -42,7 +47,17 @@ export default async function DashboardPage() {
               <CardDescription>Manage your Business Manager + ad accounts.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground text-sm">View · Disconnect</p>
+              {summaries.meta.connected ? (
+                <p className="text-sm">
+                  <span className="font-medium">Connected</span>{' '}
+                  <span className="text-muted-foreground">
+                    · BM …{summaries.meta.bmIdShort} · {summaries.meta.adAccountCount} ad account
+                    {summaries.meta.adAccountCount === 1 ? '' : 's'}
+                  </span>
+                </p>
+              ) : (
+                <p className="text-destructive text-sm">Disconnected — reconnect →</p>
+              )}
             </CardContent>
           </Card>
         </Link>
@@ -54,7 +69,18 @@ export default async function DashboardPage() {
               <CardDescription>Where you receive kill/scale alerts.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground text-sm">View · Disconnect</p>
+              {summaries.telegram.connected ? (
+                <p className="text-sm">
+                  <span className="font-medium">Linked</span>{' '}
+                  {summaries.telegram.username && (
+                    <span className="text-muted-foreground font-mono">
+                      as @{summaries.telegram.username}
+                    </span>
+                  )}
+                </p>
+              ) : (
+                <p className="text-destructive text-sm">Disconnected — reconnect →</p>
+              )}
             </CardContent>
           </Card>
         </Link>
@@ -66,7 +92,14 @@ export default async function DashboardPage() {
               <CardDescription>Arcads · HeyGen · Creatify (BYOK).</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground text-sm">View · Switch · Disconnect</p>
+              {summaries.aiProvider.connected ? (
+                <p className="text-sm">
+                  <span className="font-medium">{summaries.aiProvider.label}</span>{' '}
+                  <span className="text-muted-foreground">connected</span>
+                </p>
+              ) : (
+                <p className="text-destructive text-sm">Not connected — connect provider →</p>
+              )}
             </CardContent>
           </Card>
         </Link>
@@ -99,10 +132,10 @@ export default async function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Settings</CardTitle>
-              <CardDescription>Bot config: caps, kill/scale, safety.</CardDescription>
+              <CardDescription>Configure bot rules.</CardDescription>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground text-sm">Edit</p>
+              <p className="text-muted-foreground text-sm">Caps · kill/scale · timezone</p>
             </CardContent>
           </Card>
         </Link>

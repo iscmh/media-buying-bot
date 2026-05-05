@@ -1,10 +1,11 @@
 import { AlertCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { UnpauseButton } from './unpause-button';
 
 interface Props {
   reason: string;
   pausedAt: Date;
   pausedBy: 'user' | 'admin' | 'auto';
+  openPauseCount: number;
 }
 
 const REASON_LABELS: Record<string, string> = {
@@ -17,17 +18,10 @@ const REASON_LABELS: Record<string, string> = {
 
 /**
  * Red strip rendered at the top of the dashboard whenever users.is_paused.
- * Shows the most-recent pause-log reason in plain English where we have a
- * mapping; falls back to the raw reason string for unknown causes (admin
- * actions, future suspicious-activity auto-pause, etc.).
- *
- * The Unpause button is intentionally disabled in Phase 2b — the wire-up
- * (write users.is_paused=false, set unpaused_at on the active log row,
- * audit log) lands in Phase 2c. Showing the button now is operator-honest
- * about the path forward; hiding it would feel like the platform is
- * stuck.
+ * Static parts are server-rendered; the Unpause button is a small client
+ * component (UnpauseButton) that owns the confirm dialog + action call.
  */
-export function PauseBanner({ reason, pausedAt, pausedBy }: Props) {
+export function PauseBanner({ reason, pausedAt, pausedBy, openPauseCount }: Props) {
   const message = REASON_LABELS[reason] ?? `Bot is paused: ${reason}.`;
 
   return (
@@ -40,11 +34,7 @@ export function PauseBanner({ reason, pausedAt, pausedBy }: Props) {
           Paused {pausedAt.toLocaleString()} by {pausedBy === 'auto' ? 'the platform' : pausedBy}.
         </p>
       </div>
-      <div title="Available in Phase 2c">
-        <Button type="button" variant="outline" size="sm" disabled>
-          Unpause
-        </Button>
-      </div>
+      <UnpauseButton openPauseCount={openPauseCount} />
     </div>
   );
 }

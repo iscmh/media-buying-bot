@@ -22,4 +22,4 @@ export {
   type SettingsRow,
   type SettingsChange,
 } from './settings';
-export { cascadePauseUser, getLatestPauseReason } from './pause';
+export { cascadePauseUser, getLatestPauseReason, unpauseUser } from './pause';
