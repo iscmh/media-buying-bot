@@ -12,6 +12,15 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { acknowledgeLiveGenerationAction } from './ack-action';
 import { createGenerationJobAction } from './actions';
 
 interface Props {
@@ -19,6 +28,7 @@ interface Props {
   conceptType: ConceptType;
   spentTodayUsd: number;
   capUsd: number;
+  liveAcknowledged: boolean;
 }
 
 const INTENSITIES: Array<{
@@ -49,11 +59,20 @@ const UGC_PROVIDERS: Array<{ value: UgcVideoProvider; recommended?: boolean }> =
   { value: 'arcads' },
 ];
 
-export function GenerationRequestForm({ conceptId, conceptType, spentTodayUsd, capUsd }: Props) {
+export function GenerationRequestForm({
+  conceptId,
+  conceptType,
+  spentTodayUsd,
+  capUsd,
+  liveAcknowledged: initialLiveAck,
+}: Props) {
   const router = useRouter();
   const [intensity, setIntensity] = React.useState<'small' | 'medium' | 'big'>('medium');
   const [variantCount, setVariantCount] = React.useState<number>(10);
   const [provider, setProvider] = React.useState<UgcVideoProvider>('kie_ai');
+  const [mode, setMode] = React.useState<'mock' | 'live'>('mock');
+  const [liveAck, setLiveAck] = React.useState(initialLiveAck);
+  const [showLiveDialog, setShowLiveDialog] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
 
@@ -72,13 +91,33 @@ export function GenerationRequestForm({ conceptId, conceptType, spentTodayUsd, c
   const overVariantCap = variantCount > MAX_VARIANTS_PER_JOB;
   const usedPct = capUsd > 0 ? Math.round((spentTodayUsd / capUsd) * 100) : 0;
 
-  function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function pickMode(next: 'mock' | 'live') {
+    if (next === 'live' && !liveAck) {
+      setShowLiveDialog(true);
+      return;
+    }
+    setMode(next);
+  }
+
+  async function confirmLiveDialog() {
+    setError(null);
+    const result = await acknowledgeLiveGenerationAction();
+    if (!result.ok) {
+      setError(result.errorMessage ?? 'Could not record acknowledgment.');
+      return;
+    }
+    setLiveAck(true);
+    setMode('live');
+    setShowLiveDialog(false);
+  }
+
+  function submit() {
     if (overCap || overVariantCap) return;
     const formData = new FormData();
     formData.set('conceptId', conceptId);
     formData.set('intensity', intensity);
     formData.set('variantCount', String(variantCount));
+    formData.set('mode', mode);
     if (conceptType === 'ugc') formData.set('provider', provider);
 
     startTransition(async () => {
@@ -92,8 +131,47 @@ export function GenerationRequestForm({ conceptId, conceptType, spentTodayUsd, c
     });
   }
 
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submit();
+  }
+
   return (
     <form onSubmit={onSubmit} className="space-y-6">
+      {/* Mode toggle (Phase 3b) */}
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium">Mode</legend>
+        <div className="bg-card flex gap-2 rounded-lg border p-2">
+          <button
+            type="button"
+            onClick={() => pickMode('mock')}
+            className={
+              'flex-1 rounded-md px-3 py-2 text-sm transition-colors ' +
+              (mode === 'mock' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/30')
+            }
+          >
+            <span className="block font-semibold">Mock</span>
+            <span className="text-xs opacity-80">Free placeholder data</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => pickMode('live')}
+            className={
+              'flex-1 rounded-md px-3 py-2 text-sm transition-colors ' +
+              (mode === 'live' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/30')
+            }
+          >
+            <span className="block font-semibold">Live</span>
+            <span className="text-xs opacity-80">Real spend on your API keys</span>
+          </button>
+        </div>
+        {mode === 'live' && (
+          <p className="text-xs text-amber-700">
+            Live mode will spend real money on your connected provider keys.
+          </p>
+        )}
+      </fieldset>
+
       {/* Intensity */}
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">Intensity</legend>
@@ -213,8 +291,47 @@ export function GenerationRequestForm({ conceptId, conceptType, spentTodayUsd, c
       <Button type="submit" size="lg" disabled={pending || overCap || overVariantCap}>
         {pending
           ? 'Creating job…'
-          : `Generate ${variantCount} variants ($${estimate.estimateUsd.toFixed(2)})`}
+          : mode === 'live'
+            ? `Generate live · ${variantCount} variants · $${estimate.estimateUsd.toFixed(2)}`
+            : `Generate ${variantCount} variants ($${estimate.estimateUsd.toFixed(2)})`}
       </Button>
+
+      {/* First-time live-mode confirmation dialog (Phase 3b) */}
+      <Dialog open={showLiveDialog} onOpenChange={setShowLiveDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Live mode — real spend</DialogTitle>
+            <DialogDescription>
+              This generation will use your connected API keys (Gemini, Claude, and your chosen
+              video provider) and spend real money. You can monitor your daily AI spend in settings.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-card space-y-1 rounded-md border p-3 text-sm">
+            <p>
+              Estimated cost for this job: <strong>${estimate.estimateUsd.toFixed(2)}</strong>
+            </p>
+            <p>
+              Daily cap: <strong>${capUsd.toFixed(2)}</strong> · used{' '}
+              <strong>${spentTodayUsd.toFixed(2)}</strong> · remaining{' '}
+              <strong>${remaining.toFixed(2)}</strong>
+            </p>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Future live submissions skip this dialog. You can revoke API keys anytime from
+            Connections.
+          </p>
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="button" onClick={confirmLiveDialog}>
+              I understand, proceed
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

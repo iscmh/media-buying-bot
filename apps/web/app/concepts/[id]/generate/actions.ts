@@ -96,14 +96,48 @@ export async function createGenerationJobAction(
     provider: pickedProvider,
   });
 
-  // Cost cap.
+  // Cost cap. Counts both mock + live jobs against the per-user daily cap
+  // (Phase 3a invariant — server clamp is the same for both modes).
   const cap = await assertDailyCostCap(user.id, estimate.estimateUsd);
   if (!cap.allowed) {
     return { ok: false, errorMessage: cap.reason };
   }
 
-  const dryRun = (process.env.BOT_DRY_RUN ?? 'true').toLowerCase() === 'true';
-  const mode = dryRun ? 'mock' : 'live';
+  // Phase 3b: per-job mode opt-in. Form posts 'mock' (default) or 'live';
+  // server only allows 'live' if the user has acknowledged the spend
+  // dialog at least once. Fresh users default to mock until they explicitly
+  // confirm. BOT_DRY_RUN no longer gates AI mode — it stays a Phase 4
+  // Meta-launching kill switch.
+  const requestedMode = String(formData.get('mode') ?? 'mock');
+  let mode: 'mock' | 'live';
+  if (requestedMode === 'live') {
+    const userRow = await db.query.users.findFirst({
+      where: eq(schema.users.id, user.id),
+      columns: { id: true },
+    });
+    if (!userRow) {
+      return { ok: false, errorMessage: 'User row not found.' };
+    }
+    const settings = await db.query.userSettings.findFirst({
+      where: eq(schema.userSettings.userId, user.id),
+      columns: { liveGenerationAcknowledgedAt: true },
+    });
+    if (!settings?.liveGenerationAcknowledgedAt) {
+      return {
+        ok: false,
+        errorMessage:
+          'Live mode requires acknowledgment. Switch back to Live and confirm the dialog.',
+      };
+    }
+    // UGC live requires Claude (refinement) + Kie.ai/HeyGen (video gen).
+    // Static live requires Claude (copy) + Gemini (image gen). For Phase 3b,
+    // we don't pre-flight check tool_connections here — the Inngest job
+    // will surface a clean error if a key is missing. Future Phase 3.5
+    // could pre-check.
+    mode = 'live';
+  } else {
+    mode = 'mock';
+  }
 
   // Insert job row.
   const [row] = await db

@@ -40,6 +40,14 @@ export default async function GenerateRequestPage({ params }: Props) {
   const spentTodayUsd = capCheck.spentTodayUsd;
   const capUsd = capCheck.capUsd;
 
+  // Phase 3b: read live-mode acknowledgment to decide whether to show the
+  // first-time confirmation dialog. Once set, the dialog is skipped.
+  const settings = await db.query.userSettings.findFirst({
+    where: eq(schema.userSettings.userId, userId),
+    columns: { liveGenerationAcknowledgedAt: true },
+  });
+  const liveAcknowledged = !!settings?.liveGenerationAcknowledgedAt;
+
   return (
     <main className="container mx-auto max-w-2xl px-4 py-12">
       <header className="mb-6">
@@ -57,6 +65,7 @@ export default async function GenerateRequestPage({ params }: Props) {
         conceptType={concept.contentType as ConceptType}
         spentTodayUsd={spentTodayUsd}
         capUsd={capUsd}
+        liveAcknowledged={liveAcknowledged}
       />
     </main>
   );
