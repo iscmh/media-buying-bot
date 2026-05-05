@@ -2,6 +2,7 @@ export * as schema from './schema/index';
 export { getDb, closeDb } from './client';
 export { logAuditEvent } from './audit';
 export { logMetaApiCall } from './meta-api-log';
+export { logAiProviderApiCall } from './ai-provider-log';
 export { checkSpendSafety } from './safety/spend-safety';
 export { checkKillSwitches } from './safety/kill-switches';
 export { isFeatureEnabled } from './safety/feature-flags';

@@ -1,4 +1,5 @@
-import { integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { generatedCreatives, generationJobs } from './generation';
 import { users } from './users';
 
 /**
@@ -48,6 +49,49 @@ export const metaApiCallLogs = pgTable('meta_api_call_logs', {
 
   // Whether this was a no-op due to BOT_DRY_RUN.
   dryRun: integer('dry_run').notNull().default(0),
+
+  calledAt: timestamp('called_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Phase 3b: every Gemini / Claude / Kie.ai / HeyGen / Arcads / Creatify
+ * API call from inside an Inngest generation job. Same shape as
+ * meta_api_call_logs plus a `provider` discriminator and `cost_usd`.
+ *
+ * Not folded into meta_api_call_logs because that table has Meta-specific
+ * semantics (tokens, ad-account scoping). Two parallel tables is cleaner
+ * than one cross-purposed one.
+ *
+ * Service-role writes only; users read their own via RLS.
+ */
+export const aiProviderApiCallLogs = pgTable('ai_provider_api_call_logs', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+
+  // Free-form text rather than enum so adding a provider doesn't require
+  // a migration. Expected values: 'gemini', 'claude', 'kie_ai', 'heygen',
+  // 'arcads', 'creatify'.
+  provider: text('provider').notNull(),
+
+  endpoint: text('endpoint').notNull(),
+  method: text('method').notNull(),
+
+  // Sanitized: API keys stripped, large media payloads excerpted.
+  requestBodySanitized: jsonb('request_body_sanitized').notNull().default({}),
+  responseStatus: integer('response_status'),
+  responseBodyExcerpt: jsonb('response_body_excerpt'),
+
+  latencyMs: integer('latency_ms'),
+  costUsd: numeric('cost_usd', { precision: 10, scale: 4 }),
+
+  generationJobId: uuid('generation_job_id').references(() => generationJobs.id, {
+    onDelete: 'set null',
+  }),
+  generatedCreativeId: uuid('generated_creative_id').references(() => generatedCreatives.id, {
+    onDelete: 'set null',
+  }),
 
   calledAt: timestamp('called_at', { withTimezone: true }).notNull().defaultNow(),
 });

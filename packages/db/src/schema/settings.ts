@@ -55,6 +55,13 @@ export const userSettings = pgTable('user_settings', {
     .notNull()
     .default('50.00'),
 
+  // Phase 3b: timestamp of the user's first acknowledgment of the
+  // "live generation will spend real money" dialog. NULL = first-time
+  // confirmation still required. Set the moment they click Proceed.
+  liveGenerationAcknowledgedAt: timestamp('live_generation_acknowledged_at', {
+    withTimezone: true,
+  }),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
