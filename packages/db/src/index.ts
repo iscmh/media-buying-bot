@@ -23,3 +23,4 @@ export {
   type SettingsChange,
 } from './settings';
 export { cascadePauseUser, getLatestPauseReason, unpauseUser } from './pause';
+export { assertDailyCostCap, type DailyCostCapResult } from './cost-cap';

@@ -10,3 +10,17 @@
  * spend-safety reads the stricter of (env var, user setting, this constant).
  */
 export const PLATFORM_HARD_CEILING_USD = 1000;
+
+/**
+ * Phase 3a: hard ceiling on per-day AI generation costs (Gemini/Claude/
+ * Kie.ai/HeyGen/Arcads). Same clamping pattern as PLATFORM_HARD_CEILING_USD.
+ *
+ * Sized at $200/day so a runaway generation job (variant_count typo, retry
+ * loop in Phase 3b) can't burn a meaningful amount of the operator's
+ * money before the cap stops it. The 100-variant cap per job (enforced
+ * separately) reinforces this from the per-job side.
+ */
+export const PLATFORM_HARD_AI_CEILING_USD = 200;
+
+/** Per-job hard cap on the variant_count field. */
+export const MAX_VARIANTS_PER_JOB = 100;
