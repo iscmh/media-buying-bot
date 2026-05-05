@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
+import { formatDate } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { MetaConnectedSummary } from './connected-summary';
 
@@ -38,9 +39,8 @@ export default async function ConnectMetaPage() {
         <p className="text-destructive text-sm">
           Disconnected
           {lastRevoked?.deletedAt && (
-            <> · last connected {lastRevoked.deletedAt.toLocaleDateString()}</>
-          )}
-          .{' '}
+            <> · last connected {formatDate(lastRevoked.deletedAt)}</>
+          )}.{' '}
           <Link href="/onboarding/meta" className="underline">
             Reconnect →
           </Link>

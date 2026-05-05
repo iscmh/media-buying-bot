@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { eq } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
+import { formatDate } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { TelegramConnectedSummary } from './connected-summary';
 
@@ -23,7 +24,7 @@ export default async function ConnectTelegramPage() {
         <h1 className="mb-2 text-3xl font-bold">Telegram</h1>
         <p className="text-destructive text-sm">
           Disconnected
-          {conn?.updatedAt && <> · last linked {conn.updatedAt.toLocaleDateString()}</>}.{' '}
+          {conn?.updatedAt && <> · last linked {formatDate(conn.updatedAt)}</>}.{' '}
           <Link href="/onboarding/telegram" className="underline">
             Reconnect →
           </Link>
