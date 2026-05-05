@@ -13,13 +13,14 @@
     "build": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@mbb/ai-providers": "workspace:*",
     "@mbb/db": "workspace:*",
     "@mbb/meta-api": "workspace:*",
     "@mbb/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.46.2",
     "drizzle-orm": "^0.36.4",
     "inngest": "^3.27.5",
     "zod": "^3.24.1"
