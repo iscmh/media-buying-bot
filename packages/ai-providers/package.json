@@ -15,6 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@mbb/db": "workspace:*",
     "@mbb/shared": "workspace:*",
     "zod": "^3.24.1"
   },
