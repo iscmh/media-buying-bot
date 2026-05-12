@@ -156,6 +156,13 @@ export interface GeminiImageInput {
   userId: string;
   apiKey: string;
   prompt: string;
+  /**
+   * Phase 3d: separate system instruction lets us frame the call as an
+   * EDIT operation ("preserve reference style, replace text only") rather
+   * than a free-form generation. Without this, nano-banana ignored the
+   * reference image and invented unrelated scenes.
+   */
+  systemInstruction?: string;
   /** Reference image as base64 + mime; nano-banana uses it as a style reference. */
   referenceImageBase64?: string;
   referenceImageMimeType?: string;
@@ -177,11 +184,13 @@ export interface GeminiImageResult {
  * Call Gemini Image (nano-banana) with a JSON prompt + optional reference
  * image. Returns base64 image data; caller uploads to Supabase Storage.
  */
+export const GEMINI_IMAGE_TEMPERATURE = 0.4;
+
 export async function callGeminiImage(input: GeminiImageInput): Promise<GeminiImageResult> {
   const url = `${GEMINI_BASE}/models/${IMAGE_MODEL}:generateContent`;
-  const parts: Array<{ text: string } | { inline_data: { mime_type: string; data: string } }> = [
-    { text: input.prompt },
-  ];
+  // Order matters: put the reference image FIRST so the model anchors on
+  // it as the thing to edit, then the text instructions referring to it.
+  const parts: Array<{ text: string } | { inline_data: { mime_type: string; data: string } }> = [];
   if (input.referenceImageBase64 && input.referenceImageMimeType) {
     parts.push({
       inline_data: {
@@ -190,10 +199,22 @@ export async function callGeminiImage(input: GeminiImageInput): Promise<GeminiIm
       },
     });
   }
+  parts.push({ text: input.prompt });
 
-  const body = {
+  const body: Record<string, unknown> = {
     contents: [{ role: 'user' as const, parts }],
+    generationConfig: {
+      // Phase 3d: down from default. We're cloning style, not inventing —
+      // lower temperature keeps the model anchored to the reference image.
+      temperature: GEMINI_IMAGE_TEMPERATURE,
+      // nano-banana defaults to image output; this is belt-and-suspenders
+      // and matches the v1beta REST docs.
+      responseModalities: ['Image'],
+    },
   };
+  if (input.systemInstruction) {
+    body.systemInstruction = { parts: [{ text: input.systemInstruction }] };
+  }
 
   const result = await callProvider<GeminiResponse>({
     userId: input.userId,
@@ -209,7 +230,9 @@ export async function callGeminiImage(input: GeminiImageInput): Promise<GeminiIm
     requestBodyForLog: {
       model: IMAGE_MODEL,
       prompt_chars: input.prompt.length,
+      has_system_instruction: !!input.systemInstruction,
       has_reference_image: !!input.referenceImageBase64,
+      temperature: GEMINI_IMAGE_TEMPERATURE,
     },
     generationJobId: input.generationJobId,
     generatedCreativeId: input.generatedCreativeId,
