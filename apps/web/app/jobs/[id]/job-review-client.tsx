@@ -12,6 +12,9 @@ interface Variant {
   aspectRatio: string;
   status: string;
   createdAtIso: string;
+  headline: string | null;
+  primaryText: string | null;
+  description: string | null;
 }
 
 interface Props {
@@ -101,13 +104,7 @@ export function JobReviewClient({ jobId, conceptType, variants: initial }: Props
         </div>
       )}
 
-      <div
-        className={
-          conceptType === 'static'
-            ? 'grid gap-4 sm:grid-cols-2 md:grid-cols-3'
-            : 'grid gap-4 sm:grid-cols-2'
-        }
-      >
+      <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
         {variants.map((v) => (
           <VariantCard
             key={v.id}
@@ -134,6 +131,11 @@ interface VariantCardProps {
 function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: VariantCardProps) {
   const isApproved = variant.status === 'approved';
   const isRejected = variant.status === 'rejected';
+  const [copyExpanded, setCopyExpanded] = React.useState(false);
+
+  const hasCopy = Boolean(variant.headline || variant.primaryText || variant.description);
+  const primaryTextNeedsClamp =
+    variant.primaryText != null && variant.primaryText.length > 160 && !copyExpanded;
 
   return (
     <article
@@ -144,12 +146,12 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
     >
       <div className="bg-muted aspect-square w-full">
         {conceptType === 'static' ? (
-          // Plain img — Phase 3a uses placehold.co (external) and Phase 3b
-          // will use Supabase signed URLs that rotate. next/image's optimizer
-          // doesn't help either case.
+          // Plain img — Phase 3a uses placehold.co (external) and Phase 3c
+          // stores Supabase public URLs. next/image's optimizer doesn't
+          // help either case.
           <img
             src={variant.fileUrl}
-            alt="Generated variant"
+            alt={variant.headline ?? 'Generated variant'}
             className="h-full w-full object-cover"
           />
         ) : (
@@ -161,7 +163,33 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
           />
         )}
       </div>
-      <div className="flex flex-col gap-2 p-3">
+      <div className="flex flex-col gap-3 p-4">
+        {hasCopy && (
+          <div className="flex flex-col gap-1.5">
+            {variant.headline && (
+              <h3 className="text-base font-semibold leading-snug">{variant.headline}</h3>
+            )}
+            {variant.primaryText && (
+              <p
+                className={'text-sm leading-snug ' + (primaryTextNeedsClamp ? 'line-clamp-3' : '')}
+              >
+                {variant.primaryText}
+              </p>
+            )}
+            {variant.primaryText && variant.primaryText.length > 160 && (
+              <button
+                type="button"
+                onClick={() => setCopyExpanded((v) => !v)}
+                className="text-muted-foreground hover:text-foreground self-start text-xs underline"
+              >
+                {copyExpanded ? 'See less' : 'See more'}
+              </button>
+            )}
+            {variant.description && (
+              <p className="text-muted-foreground text-xs leading-snug">{variant.description}</p>
+            )}
+          </div>
+        )}
         <p className="text-muted-foreground text-xs">
           {variant.aspectRatio} · {formatDateTime(new Date(variant.createdAtIso))}
         </p>

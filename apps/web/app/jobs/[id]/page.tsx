@@ -84,6 +84,9 @@ export default async function JobReviewPage({ params }: Props) {
             aspectRatio: v.aspectRatio,
             status: v.status,
             createdAtIso: v.createdAt.toISOString(),
+            headline: v.headline,
+            primaryText: v.primaryText,
+            description: v.description,
           }))}
         />
       )}
