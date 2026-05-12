@@ -58,15 +58,31 @@ export const generatedCreatives = pgTable('generated_creatives', {
     .notNull()
     .references(() => generationJobs.id, { onDelete: 'cascade' }),
 
+  // Full public URL (Phase 3c+). Storage object key lives in
+  // image_storage_path for backend deletion / archival.
   fileUrl: text('file_url').notNull(),
+  imageStoragePath: text('image_storage_path'),
 
-  // Combinatorial mixing indices: which hook × which body × which CTA.
+  // Phase 3c: Claude-generated copy actually persisted (was dropped on
+  // the floor pre-3c — only the index columns below existed).
+  headline: text('headline'),
+  primaryText: text('primary_text'),
+  description: text('description'),
+
+  // Legacy 2D-matrix indices. Kept nullable for backward compat; Phase 3c
+  // populates all three with the same value as variant_index for
+  // consistency until the 2D matrix architecture is built (if ever).
   hookVariantIndex: integer('hook_variant_index'),
   bodyVariantIndex: integer('body_variant_index'),
   ctaVariantIndex: integer('cta_variant_index'),
 
   aspectRatio: aspectRatioEnum('aspect_ratio').notNull(),
   status: creativeStatusEnum('status').notNull().default('pending'),
+
+  // Flex bag for provider response details (prompt used, latency_ms,
+  // claude_rationale, errors). Phase 3c stores per-variant generation
+  // context here.
+  generationMetadata: jsonb('generation_metadata').default({}),
 
   // Soft delete.
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
