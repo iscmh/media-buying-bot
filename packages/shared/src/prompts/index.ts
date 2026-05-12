@@ -299,9 +299,22 @@ No preamble, no explanation outside the JSON. Just the JSON object.
 
 If the original ad is missing a \`description\` field, generate one anyway — Meta accepts it on most placements and it adds A/B-test surface.`;
 
-export const NANO_BANANA_CLONING_PROMPT_TEMPLATE = `\`\`\`json
+export const NANO_BANANA_CLONING_PROMPT_TEMPLATE = `PRIMARY DIRECTIVE: Edit, do not generate. Preserve reference image style.
+
+This is a STYLE-TRANSFER + TEXT-REPLACEMENT task, not a free-form generation task. You receive a reference image showing a winning ad creative. Your output must:
+
+1. Keep the reference image's visual style, mockup structure, background, color palette, lighting, and composition EXACTLY THE SAME.
+2. Replace ONLY the text content with the new headline + body provided.
+3. Ensure all text fits within the visible canvas with at least 8% safe margin from every edge. Scale text DOWN if needed. NEVER crop or clip text. NEVER let text extend beyond the visible area.
+4. Use the same typography style as the reference (font family, weight, casing, alignment). Match the reference's visual brand.
+
+If the reference shows an iPhone notification mockup, output an iPhone notification mockup with the new text. If the reference shows a screenshot of an interface, output a similar interface screenshot with the new text. The MOCKUP TYPE must match the reference exactly.
+
+The JSON template below is OVERLAY GUIDANCE describing which fields may be mutated per intensity — it does NOT override the PRIMARY DIRECTIVE. When in doubt, preserve the reference image.
+
+\`\`\`json
 {
-  "task": "Generate a photo-realistic image that recreates the visual style, composition, and aesthetic of the reference image with the specific modifications described below.",
+  "task": "Edit the reference image: replace ONLY the overlay text with the provided headline + body. Preserve composition, background, lighting, typography style, and mockup framing exactly.",
 
   "subject": {
     "type": "[person | object | scene | text-overlay-graphic]",
