@@ -1,11 +1,23 @@
 'use client';
 
 import * as React from 'react';
-import { Check, Download, X } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Check, Download, Rocket, X } from 'lucide-react';
 import { formatDateTime } from '@/lib/format/date';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { bulkDecideJobAction, decideVariantAction } from './actions';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  acknowledgeLaunchAction,
+  bulkDecideJobAction,
+  decideVariantAction,
+  launchApprovedAction,
+} from './actions';
 
 interface Variant {
   id: string;
@@ -18,24 +30,46 @@ interface Variant {
   description: string | null;
 }
 
+export interface LaunchSnapshot {
+  acknowledged: boolean;
+  perAdBudgetUsd: number;
+  optimizationGoal: string;
+  placementType: string;
+  committedTodayUsd: number;
+  capUsd: number;
+  remainingUsd: number;
+}
+
 interface Props {
   jobId: string;
   conceptType: 'static' | 'ugc';
   variants: Variant[];
+  launchSnapshot: LaunchSnapshot;
 }
 
-export function JobReviewClient({ jobId, conceptType, variants: initial }: Props) {
+export function JobReviewClient({ jobId, conceptType, variants: initial, launchSnapshot }: Props) {
+  const router = useRouter();
   // Optimistic local state. Server action triggers revalidatePath, but
   // optimistic updates make individual approvals feel instant.
   const [variants, setVariants] = React.useState<Variant[]>(initial);
   const [pendingId, setPendingId] = React.useState<string | null>(null);
   const [bulkPending, setBulkPending] = React.useState<'approved' | 'rejected' | null>(null);
+  const [acknowledged, setAcknowledged] = React.useState(launchSnapshot.acknowledged);
+  const [showLaunchDialog, setShowLaunchDialog] = React.useState(false);
+  const [launchPending, setLaunchPending] = React.useState(false);
+  const [launchError, setLaunchError] = React.useState<string | null>(null);
 
   const total = variants.length;
   const approvedCount = variants.filter((v) => v.status === 'approved').length;
   const rejectedCount = variants.filter((v) => v.status === 'rejected').length;
-  const undecidedCount = total - approvedCount - rejectedCount;
+  const launchedCount = variants.filter(
+    (v) => v.status === 'launched' || v.status === 'launch_failed',
+  ).length;
+  const undecidedCount = total - approvedCount - rejectedCount - launchedCount;
   const allDecided = undecidedCount === 0;
+  const launchableCount = variants.filter((v) => v.status === 'approved').length;
+  const totalBudgetIfLaunched = launchableCount * launchSnapshot.perAdBudgetUsd;
+  const exceedsCap = totalBudgetIfLaunched > launchSnapshot.remainingUsd;
 
   async function decide(id: string, decision: 'approved' | 'rejected') {
     setPendingId(id);
@@ -60,6 +94,35 @@ export function JobReviewClient({ jobId, conceptType, variants: initial }: Props
     }
   }
 
+  function onLaunchClick() {
+    setLaunchError(null);
+    setShowLaunchDialog(true);
+  }
+
+  async function confirmLaunch() {
+    setLaunchError(null);
+    setLaunchPending(true);
+    try {
+      if (!acknowledged) {
+        const ack = await acknowledgeLaunchAction();
+        if (!ack.ok) {
+          setLaunchError(ack.errorMessage ?? 'Could not record acknowledgment.');
+          return;
+        }
+        setAcknowledged(true);
+      }
+      const result = await launchApprovedAction(jobId);
+      if (!result.ok) {
+        setLaunchError(result.errorMessage ?? 'Launch failed.');
+        return;
+      }
+      setShowLaunchDialog(false);
+      router.push('/launched');
+    } finally {
+      setLaunchPending(false);
+    }
+  }
+
   return (
     <>
       <div className="bg-card mb-6 flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -72,7 +135,7 @@ export function JobReviewClient({ jobId, conceptType, variants: initial }: Props
           {' / '}
           {total} total
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             size="sm"
@@ -91,6 +154,20 @@ export function JobReviewClient({ jobId, conceptType, variants: initial }: Props
             className="text-destructive"
           >
             {bulkPending === 'rejected' ? 'Rejecting…' : 'Reject all pending'}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={onLaunchClick}
+            disabled={launchableCount === 0 || launchPending}
+            title={
+              launchableCount === 0
+                ? 'Approve at least one variant first.'
+                : `Launch ${launchableCount} approved variant${launchableCount === 1 ? '' : 's'}.`
+            }
+          >
+            <Rocket className="mr-1 h-4 w-4" />
+            Launch approved ({launchableCount})
           </Button>
         </div>
       </div>
@@ -122,6 +199,67 @@ export function JobReviewClient({ jobId, conceptType, variants: initial }: Props
           Click any image to view full size and download.
         </p>
       )}
+
+      <Dialog open={showLaunchDialog} onOpenChange={setShowLaunchDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Launch ads to Meta</DialogTitle>
+            <DialogDescription>
+              {acknowledged
+                ? `${launchableCount} approved variant${launchableCount === 1 ? '' : 's'} will be launched as paused Meta ads.`
+                : 'Launching ads will spend real money on your Meta ad account when DRY_RUN is disabled. Phase 4a is in safe mode — no real money will be spent — but the workflow is real, so confirm you understand.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-card space-y-1 rounded-md border p-3 text-sm">
+            <p>
+              Variants to launch: <strong>{launchableCount}</strong>
+            </p>
+            <p>
+              Per-ad daily budget: <strong>${launchSnapshot.perAdBudgetUsd.toFixed(2)}</strong>
+            </p>
+            <p>
+              Total daily budget: <strong>${totalBudgetIfLaunched.toFixed(2)}</strong>
+            </p>
+            <p>
+              Optimization goal: <strong>{launchSnapshot.optimizationGoal}</strong> · placement{' '}
+              <strong>{launchSnapshot.placementType}</strong>
+            </p>
+            <p className="text-muted-foreground text-xs">
+              Mode: <strong>DRY_RUN</strong> — placeholder Meta IDs, no real spend.
+            </p>
+            <hr className="my-2" />
+            <p className="text-xs">
+              Daily launch cap: <strong>${launchSnapshot.capUsd.toFixed(2)}</strong> · committed
+              today <strong>${launchSnapshot.committedTodayUsd.toFixed(2)}</strong> · remaining{' '}
+              <strong>${launchSnapshot.remainingUsd.toFixed(2)}</strong>
+            </p>
+            {exceedsCap && (
+              <p className="text-destructive text-xs">
+                This launch would exceed your remaining daily cap. Reduce approved variants, raise
+                the cap in Settings, or wait until tomorrow.
+              </p>
+            )}
+          </div>
+          {launchError && (
+            <p className="text-destructive text-sm" role="alert">
+              {launchError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowLaunchDialog(false)}
+              disabled={launchPending}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={confirmLaunch} disabled={launchPending || exceedsCap}>
+              {launchPending ? 'Launching…' : 'Confirm launch'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

@@ -28,3 +28,21 @@ export async function sendGenerationJobEvent(input: {
     },
   });
 }
+
+/**
+ * Phase 4a: dispatch the Meta auto-launch job for an approved generation.
+ * Caller (jobs/[id]) must have already enforced the daily launch cap
+ * server-side; the Inngest worker re-checks defense-in-depth.
+ */
+export async function sendMetaLaunchEvent(input: {
+  userId: string;
+  generationJobId: string;
+}): Promise<void> {
+  await inngest.send({
+    name: 'meta/launch.requested',
+    data: {
+      userId: input.userId,
+      generationJobId: input.generationJobId,
+    },
+  });
+}
