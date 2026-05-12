@@ -1,5 +1,10 @@
 import { getUserSettings } from '@mbb/db';
-import { PLATFORM_HARD_AI_CEILING_USD, PLATFORM_HARD_CEILING_USD } from '@mbb/shared';
+import {
+  PLATFORM_HARD_AD_DAILY_BUDGET_USD,
+  PLATFORM_HARD_AI_CEILING_USD,
+  PLATFORM_HARD_CEILING_USD,
+  PLATFORM_HARD_LAUNCH_CEILING_USD,
+} from '@mbb/shared';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { SettingsForm } from './settings-form';
 
@@ -27,6 +32,8 @@ export default async function SettingsPage() {
         initialValues={current}
         hardCeiling={PLATFORM_HARD_CEILING_USD}
         aiHardCeiling={PLATFORM_HARD_AI_CEILING_USD}
+        launchHardCeiling={PLATFORM_HARD_LAUNCH_CEILING_USD}
+        adDailyHardCeiling={PLATFORM_HARD_AD_DAILY_BUDGET_USD}
       />
     </main>
   );

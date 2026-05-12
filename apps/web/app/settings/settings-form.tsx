@@ -3,7 +3,13 @@
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { SettingsFormSchema, TIMEZONE_PICKER_GROUPS, type SettingsFormInput } from '@mbb/shared';
+import {
+  META_OPTIMIZATION_GOALS,
+  META_PLACEMENT_TYPES,
+  SettingsFormSchema,
+  TIMEZONE_PICKER_GROUPS,
+  type SettingsFormInput,
+} from '@mbb/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,6 +19,8 @@ interface Props {
   initialValues: SettingsFormInput;
   hardCeiling: number;
   aiHardCeiling: number;
+  launchHardCeiling: number;
+  adDailyHardCeiling: number;
 }
 
 interface ToastState {
@@ -25,7 +33,16 @@ const FIELDS: Array<{
   name: keyof SettingsFormInput;
   label: string;
   help: string;
-  type: 'number' | 'integer' | 'currency' | 'percent' | 'enum-cbo-abo' | 'boolean' | 'timezone';
+  type:
+    | 'number'
+    | 'integer'
+    | 'currency'
+    | 'percent'
+    | 'enum-cbo-abo'
+    | 'enum-optimization-goal'
+    | 'enum-placement-type'
+    | 'boolean'
+    | 'timezone';
 }> = [
   // --- Test budget ---
   {
@@ -109,6 +126,31 @@ const FIELDS: Array<{
     help: 'Hard cap on per-day AI generation costs (Gemini, Claude, Kie.ai, HeyGen, Arcads). USD.',
     type: 'currency',
   },
+  // --- Launch defaults (Phase 4a) ---
+  {
+    name: 'dailyLaunchBudgetCapUsd',
+    label: 'Daily launch budget cap',
+    help: 'Hard cap on per-day total daily budget committed when launching approved variants to Meta. USD.',
+    type: 'currency',
+  },
+  {
+    name: 'defaultAdDailyBudgetUsd',
+    label: 'Default per-ad daily budget',
+    help: 'Default daily budget per launched ad. Used unless overridden at launch time. USD.',
+    type: 'currency',
+  },
+  {
+    name: 'defaultOptimizationGoal',
+    label: 'Default optimization goal',
+    help: 'Meta optimization goal applied to new ad sets at launch.',
+    type: 'enum-optimization-goal',
+  },
+  {
+    name: 'defaultPlacementType',
+    label: 'Default placement type',
+    help: 'Advantage+ lets Meta auto-place; manual restricts placements per ad set.',
+    type: 'enum-placement-type',
+  },
   // --- Daily summaries ---
   {
     name: 'timezone',
@@ -118,7 +160,13 @@ const FIELDS: Array<{
   },
 ];
 
-export function SettingsForm({ initialValues, hardCeiling, aiHardCeiling }: Props) {
+export function SettingsForm({
+  initialValues,
+  hardCeiling,
+  aiHardCeiling,
+  launchHardCeiling,
+  adDailyHardCeiling,
+}: Props) {
   const form = useForm<SettingsFormInput>({
     resolver: zodResolver(SettingsFormSchema),
     defaultValues: initialValues,
@@ -171,6 +219,34 @@ export function SettingsForm({ initialValues, hardCeiling, aiHardCeiling }: Prop
               >
                 <option value="CBO">CBO — campaign-budget optimization</option>
                 <option value="ABO">ABO — ad-set budget optimization</option>
+              </select>
+            )}
+
+            {field.type === 'enum-optimization-goal' && (
+              <select
+                id={field.name}
+                {...form.register(field.name)}
+                className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+              >
+                {META_OPTIMIZATION_GOALS.map((goal) => (
+                  <option key={goal} value={goal}>
+                    {goal}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {field.type === 'enum-placement-type' && (
+              <select
+                id={field.name}
+                {...form.register(field.name)}
+                className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+              >
+                {META_PLACEMENT_TYPES.map((p) => (
+                  <option key={p} value={p}>
+                    {p === 'advantage_plus' ? 'Advantage+ (auto placements)' : 'Manual placements'}
+                  </option>
+                ))}
               </select>
             )}
 
@@ -232,6 +308,18 @@ export function SettingsForm({ initialValues, hardCeiling, aiHardCeiling }: Prop
               <p className="text-muted-foreground text-xs">
                 Platform hard ceiling: <strong>${aiHardCeiling}</strong>. Generation jobs that would
                 exceed this are blocked server-side.
+              </p>
+            )}
+            {field.name === 'dailyLaunchBudgetCapUsd' && (
+              <p className="text-muted-foreground text-xs">
+                Platform hard ceiling: <strong>${launchHardCeiling}</strong>. Launches that would
+                exceed today&apos;s committed total are blocked server-side.
+              </p>
+            )}
+            {field.name === 'defaultAdDailyBudgetUsd' && (
+              <p className="text-muted-foreground text-xs">
+                Per-ad hard ceiling: <strong>${adDailyHardCeiling}</strong>. Server clamps higher
+                values silently.
               </p>
             )}
 

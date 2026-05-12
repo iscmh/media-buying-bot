@@ -3,8 +3,10 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import {
+  PLATFORM_HARD_AD_DAILY_BUDGET_USD,
   PLATFORM_HARD_AI_CEILING_USD,
   PLATFORM_HARD_CEILING_USD,
+  PLATFORM_HARD_LAUNCH_CEILING_USD,
   SettingsFormSchema,
   type SettingsFormInput,
 } from '@mbb/shared';
@@ -58,6 +60,14 @@ export async function saveSettingsAction(
     aiGenerationDailyCapUsd: Math.min(
       parsed.data.aiGenerationDailyCapUsd,
       PLATFORM_HARD_AI_CEILING_USD,
+    ),
+    dailyLaunchBudgetCapUsd: Math.min(
+      parsed.data.dailyLaunchBudgetCapUsd,
+      PLATFORM_HARD_LAUNCH_CEILING_USD,
+    ),
+    defaultAdDailyBudgetUsd: Math.min(
+      parsed.data.defaultAdDailyBudgetUsd,
+      PLATFORM_HARD_AD_DAILY_BUDGET_USD,
     ),
   };
 
