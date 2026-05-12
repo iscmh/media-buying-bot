@@ -24,3 +24,33 @@ export const PLATFORM_HARD_AI_CEILING_USD = 200;
 
 /** Per-job hard cap on the variant_count field. */
 export const MAX_VARIANTS_PER_JOB = 100;
+
+/**
+ * Phase 4a: hard ceiling on total per-day Meta launch budget (sum of
+ * daily_budget_usd across all ads launched today). Server clamps
+ * user_settings.daily_launch_budget_cap_usd to this. Same role as
+ * PLATFORM_HARD_CEILING_USD but specifically for the launch-pipeline
+ * cap; sized identically since they're enforcing the same underlying
+ * "max real-money outlay per day" bound from different angles.
+ */
+export const PLATFORM_HARD_LAUNCH_CEILING_USD = 1000;
+
+/** Phase 4a: per-ad daily budget hard ceiling. Phase-4b can raise. */
+export const PLATFORM_HARD_AD_DAILY_BUDGET_USD = 200;
+
+/**
+ * Phase 4a: Meta optimization goals we support at launch time. Values
+ * match Meta's Marketing API enum literals exactly so we can pass
+ * straight through once BOT_DRY_RUN flips off.
+ */
+export const META_OPTIMIZATION_GOALS = [
+  'CONVERSIONS',
+  'LINK_CLICKS',
+  'LANDING_PAGE_VIEWS',
+  'OUTCOME_TRAFFIC',
+  'OUTCOME_SALES',
+] as const;
+export type MetaOptimizationGoal = (typeof META_OPTIMIZATION_GOALS)[number];
+
+export const META_PLACEMENT_TYPES = ['advantage_plus', 'manual'] as const;
+export type MetaPlacementType = (typeof META_PLACEMENT_TYPES)[number];

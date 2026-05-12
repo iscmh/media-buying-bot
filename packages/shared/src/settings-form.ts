@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { PLATFORM_HARD_AI_CEILING_USD, PLATFORM_HARD_CEILING_USD } from './safety';
+import {
+  META_OPTIMIZATION_GOALS,
+  META_PLACEMENT_TYPES,
+  PLATFORM_HARD_AD_DAILY_BUDGET_USD,
+  PLATFORM_HARD_AI_CEILING_USD,
+  PLATFORM_HARD_CEILING_USD,
+  PLATFORM_HARD_LAUNCH_CEILING_USD,
+} from './safety';
 import { isValidIanaZone } from './timezone';
 
 /**
@@ -76,6 +83,26 @@ export const SettingsFormSchema = z.object({
       `AI generation cap cannot exceed the platform hard ceiling of $${PLATFORM_HARD_AI_CEILING_USD}.`,
     ),
 
+  // Phase 4a: Meta auto-launch defaults. Server clamps the budget cap to
+  // PLATFORM_HARD_LAUNCH_CEILING_USD and the per-ad budget to
+  // PLATFORM_HARD_AD_DAILY_BUDGET_USD.
+  dailyLaunchBudgetCapUsd: z.coerce
+    .number()
+    .min(10, 'Daily launch budget cap must be at least $10.')
+    .max(
+      PLATFORM_HARD_LAUNCH_CEILING_USD,
+      `Daily launch budget cap cannot exceed $${PLATFORM_HARD_LAUNCH_CEILING_USD}.`,
+    ),
+  defaultAdDailyBudgetUsd: z.coerce
+    .number()
+    .min(2, 'Per-ad daily budget must be at least $2.')
+    .max(
+      PLATFORM_HARD_AD_DAILY_BUDGET_USD,
+      `Per-ad daily budget cannot exceed $${PLATFORM_HARD_AD_DAILY_BUDGET_USD}.`,
+    ),
+  defaultOptimizationGoal: z.enum(META_OPTIMIZATION_GOALS),
+  defaultPlacementType: z.enum(META_PLACEMENT_TYPES),
+
   // Daily-summary timezone. Lives on users.timezone in the schema (Phase 1
   // decision), but rolled into the same form so save can write atomically.
   // Validation accepts the full IANA db, not just the picker's curated list.
@@ -101,5 +128,9 @@ export const SETTINGS_FIELD_KEYS = [
   'manualApprovalThreshold',
   'platformDailySpendCeiling',
   'aiGenerationDailyCapUsd',
+  'dailyLaunchBudgetCapUsd',
+  'defaultAdDailyBudgetUsd',
+  'defaultOptimizationGoal',
+  'defaultPlacementType',
   'timezone',
 ] as const satisfies ReadonlyArray<keyof SettingsFormInput>;

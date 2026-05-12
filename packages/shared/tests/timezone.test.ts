@@ -53,6 +53,10 @@ describe('SettingsFormSchema timezone field', () => {
       manualApprovalThreshold: 400,
       platformDailySpendCeiling: 500,
       aiGenerationDailyCapUsd: 50,
+      dailyLaunchBudgetCapUsd: 50,
+      defaultAdDailyBudgetUsd: 10,
+      defaultOptimizationGoal: 'CONVERSIONS',
+      defaultPlacementType: 'advantage_plus',
       timezone: 'America/New_York',
       ...overrides,
     };
