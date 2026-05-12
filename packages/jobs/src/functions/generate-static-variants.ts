@@ -322,14 +322,18 @@ async function renderOneStaticVariant(input: {
     };
   }
 
-  // Render the nano-banana template's overlay text from Claude's copy.
-  // The template is a JSON-shaped string; Gemini Image accepts it as
-  // free-form prompt text and uses the structured fields as guidance.
+  // Phase 3d: split into a system instruction (style-preservation rules)
+  // + user message (the actual copy + aspect ratio for this variant). The
+  // system instruction frames the call as an EDIT operation so Gemini
+  // anchors on the reference image instead of inventing a new scene.
+  const aspectRatio = aspectRatioForIndex(input.variantIndex);
+  const systemInstruction = renderGeminiImageSystemInstruction(aspectRatio);
   const prompt = renderNanoBananaPrompt(input.copy, input.variantIndex);
 
   const image = await callGeminiImage({
     userId: input.userId,
     apiKey,
+    systemInstruction,
     prompt,
     referenceImageBase64: referenceImage.base64,
     referenceImageMimeType: referenceImage.mimeType,
@@ -402,6 +406,7 @@ async function renderOneStaticVariant(input: {
     generationMetadata: {
       variant_index: input.variantIndex,
       claude_rationale: input.copy.rationale ?? null,
+      gemini_system_instruction: systemInstruction,
       gemini_prompt_used: prompt,
       intensity_level: input.copy.intensity_level,
     },
@@ -415,20 +420,51 @@ function aspectRatioForIndex(i: number): '1:1' | '4:5' | '9:16' {
   return order[i % order.length]!;
 }
 
+type StaticAspectRatio = '1:1' | '4:5' | '9:16';
+
+const ASPECT_POSITION_GUIDANCE: Record<StaticAspectRatio, string> = {
+  '1:1': 'Square format — position the PRIMARY OVERLAY text in the upper third of the canvas.',
+  '4:5': 'Portrait format — position the PRIMARY OVERLAY text in the upper-middle area.',
+  '9:16':
+    'Vertical / Stories format — position the PRIMARY OVERLAY text in the upper third, leaving the bottom 40% for the visual subject.',
+};
+
+/**
+ * Phase 3d Part A — system instruction sent to Gemini Image. Frames the
+ * call as an EDIT operation so the model preserves the reference image's
+ * mockup style instead of inventing a new scene, and enforces the 8%
+ * canvas safe margin so text never gets cropped.
+ */
+export function renderGeminiImageSystemInstruction(aspectRatio: StaticAspectRatio): string {
+  return `You are an image editor, not an image generator. You will be given a reference image and a new headline + body copy. Your task is ONLY to replace the text overlaid on the reference image with the new copy.
+
+Preserve everything else exactly:
+- Same visual composition and framing
+- Same background and lighting
+- Same mockup style (e.g. iPhone popup, screenshot, notification card)
+- Same color palette
+- Same typography style (font family, weight, casing)
+- Same text positioning within the canvas
+
+The new text MUST fit entirely within the visible canvas with at least 8% safe margin from all edges. If the new text is longer than the original, scale the font size DOWN to fit. NEVER crop or clip text. NEVER let text extend beyond the visible area.
+
+Aspect ratio for this output: ${aspectRatio}
+${ASPECT_POSITION_GUIDANCE[aspectRatio]}`;
+}
+
+/**
+ * Phase 3d Part B — user-message prompt with the variant's actual copy +
+ * the (style-only) JSON template guidance. The PRIMARY DIRECTIVE block
+ * in the template + the system instruction above do the heavy lifting;
+ * this message just supplies the specific text values for this variant.
+ */
 export function renderNanoBananaPrompt(copy: ClaudeCopyVariant, variantIndex: number): string {
-  // Bug-3 fix: previously the variant copy was appended after the template
-  // and Gemini Image kept rendering the reference image's original copy.
-  // Now we lead with an explicit "render this exact text" directive so the
-  // variant copy actually lands on the image, and keep the template as
-  // supplemental style guidance.
   const aspect = aspectRatioForIndex(variantIndex);
   const secondary = copy.primary_text.slice(0, 120);
-  return `CRITICAL OVERLAY TEXT — render this EXACT text onto the image (do NOT use any text from the reference image):
+  return `Edit the reference image. Replace its overlay text with the EXACT text below — do not invent or paraphrase. All text MUST fit inside the canvas with 8% safe margin.
 
-PRIMARY OVERLAY: ${JSON.stringify(copy.headline)}
-SECONDARY OVERLAY: ${JSON.stringify(secondary)}
-
-The reference image is provided ONLY for visual style guidance (composition, lighting, subject pose, color grade, authenticity). Replace any text rendered in the reference image with the overlay text above.
+PRIMARY OVERLAY (headline): ${JSON.stringify(copy.headline)}
+SECONDARY OVERLAY (body): ${JSON.stringify(secondary)}
 
 Aspect ratio: ${aspect}
 Variant intensity: ${copy.intensity_level} (${
@@ -438,9 +474,9 @@ Variant intensity: ${copy.intensity_level} (${
         ? 'noticeable aesthetic shift, same persona/setting'
         : 'fresh persona or angle, same offer'
   })
-${copy.rationale ? `Rationale: ${copy.rationale}` : ''}
+${copy.rationale ? `Rationale for this variant: ${copy.rationale}` : ''}
 
-Use the JSON template below for structured style guidance — but the overlay text MUST be the PRIMARY and SECONDARY values declared above.
+The JSON template below is overlay guidance — the PRIMARY DIRECTIVE (preserve reference style, replace text only) and the system instruction take precedence over any conflicting field in the JSON.
 
 ${NANO_BANANA_CLONING_PROMPT_TEMPLATE}`;
 }
