@@ -1,4 +1,5 @@
 import { eq } from 'drizzle-orm';
+import type { MetaOptimizationGoal, MetaPlacementType } from '@mbb/shared';
 import { logAuditEvent } from './audit';
 import { getDb } from './client';
 import { userSettings } from './schema/settings';
@@ -30,6 +31,11 @@ export interface SettingsRow {
   manualApprovalThreshold: number;
   platformDailySpendCeiling: number;
   aiGenerationDailyCapUsd: number;
+  // Phase 4a — launch defaults.
+  dailyLaunchBudgetCapUsd: number;
+  defaultAdDailyBudgetUsd: number;
+  defaultOptimizationGoal: MetaOptimizationGoal;
+  defaultPlacementType: MetaPlacementType;
   timezone: string;
 }
 
@@ -57,6 +63,10 @@ export async function getUserSettings(userId: string): Promise<SettingsRow | nul
     manualApprovalThreshold: Number(settingsRow.manualApprovalThreshold),
     platformDailySpendCeiling: Number(settingsRow.platformDailySpendCeiling),
     aiGenerationDailyCapUsd: Number(settingsRow.aiGenerationDailyCapUsd),
+    dailyLaunchBudgetCapUsd: Number(settingsRow.dailyLaunchBudgetCapUsd),
+    defaultAdDailyBudgetUsd: Number(settingsRow.defaultAdDailyBudgetUsd),
+    defaultOptimizationGoal: settingsRow.defaultOptimizationGoal as MetaOptimizationGoal,
+    defaultPlacementType: settingsRow.defaultPlacementType as MetaPlacementType,
     timezone: userRow.timezone,
   };
 }
@@ -127,6 +137,10 @@ export async function saveUserSettings(
         manualApprovalThreshold: next.manualApprovalThreshold.toFixed(2),
         platformDailySpendCeiling: next.platformDailySpendCeiling.toFixed(2),
         aiGenerationDailyCapUsd: next.aiGenerationDailyCapUsd.toFixed(2),
+        dailyLaunchBudgetCapUsd: next.dailyLaunchBudgetCapUsd.toFixed(2),
+        defaultAdDailyBudgetUsd: next.defaultAdDailyBudgetUsd.toFixed(2),
+        defaultOptimizationGoal: next.defaultOptimizationGoal,
+        defaultPlacementType: next.defaultPlacementType,
       })
       .where(eq(userSettings.userId, userId));
 
