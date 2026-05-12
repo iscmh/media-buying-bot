@@ -83,12 +83,21 @@ export const generateStaticVariants = inngest.createFunction(
         const rows = Array.from({ length: variantCount }, (_, i) => {
           const size = MOCK_SIZES[i % MOCK_SIZES.length]!;
           const aspectRatio = size === '1080x1080' ? '1:1' : size === '1080x1350' ? '4:5' : '9:16';
+          const fakeUrl = `https://placehold.co/${size}/png?text=Variant+${i + 1}`;
           return {
             userId,
             generationJobId: jobId,
-            fileUrl: `https://placehold.co/${size}/png?text=Variant+${i + 1}`,
+            fileUrl: fakeUrl,
+            imageStoragePath: null,
+            headline: `Mock headline ${i}`,
+            primaryText: `Mock primary text for variant ${i} — this would be Claude-generated copy in live mode.`,
+            description: `Mock description ${i}`,
+            hookVariantIndex: i,
+            bodyVariantIndex: i,
+            ctaVariantIndex: i,
             aspectRatio: aspectRatio as '1:1' | '4:5' | '9:16',
             status: 'ready_for_review' as const,
+            generationMetadata: { mock: true, variant_index: i },
           };
         });
         await db.insert(schema.generatedCreatives).values(rows);
@@ -224,7 +233,7 @@ export const generateStaticVariants = inngest.createFunction(
   },
 );
 
-interface ClaudeCopyVariant {
+export interface ClaudeCopyVariant {
   variant_index: number;
   intensity_level: 'small' | 'medium' | 'big';
   rationale?: string;
@@ -233,7 +242,7 @@ interface ClaudeCopyVariant {
   description?: string;
 }
 
-function parseVariantsArray(
+export function parseVariantsArray(
   json: unknown,
   expectedCount: number,
 ): { ok: true; variants: ClaudeCopyVariant[] } | { ok: false; error: string } {
@@ -333,8 +342,20 @@ async function renderOneStaticVariant(input: {
       userId: input.userId,
       generationJobId: input.jobId,
       fileUrl: '',
+      imageStoragePath: null,
+      headline: input.copy.headline,
+      primaryText: input.copy.primary_text,
+      description: input.copy.description ?? null,
+      hookVariantIndex: input.variantIndex,
+      bodyVariantIndex: input.variantIndex,
+      ctaVariantIndex: input.variantIndex,
       aspectRatio: aspectRatioForIndex(input.variantIndex),
       status: 'rejected',
+      generationMetadata: {
+        variant_index: input.variantIndex,
+        error: image.errorMessage ?? 'Gemini Image returned no data',
+        claude_rationale: input.copy.rationale ?? null,
+      },
     });
     return {
       index: input.variantIndex,
@@ -345,6 +366,7 @@ async function renderOneStaticVariant(input: {
   }
 
   let storagePath: string;
+  let publicUrl: string;
   try {
     const upload = await uploadGeneratedImage({
       userId: input.userId,
@@ -354,6 +376,7 @@ async function renderOneStaticVariant(input: {
       mimeType: image.imageMimeType ?? 'image/png',
     });
     storagePath = upload.path;
+    publicUrl = upload.publicUrl;
   } catch (err) {
     return {
       index: input.variantIndex,
@@ -366,9 +389,22 @@ async function renderOneStaticVariant(input: {
   await db.insert(schema.generatedCreatives).values({
     userId: input.userId,
     generationJobId: input.jobId,
-    fileUrl: storagePath,
+    fileUrl: publicUrl,
+    imageStoragePath: storagePath,
+    headline: input.copy.headline,
+    primaryText: input.copy.primary_text,
+    description: input.copy.description ?? null,
+    hookVariantIndex: input.variantIndex,
+    bodyVariantIndex: input.variantIndex,
+    ctaVariantIndex: input.variantIndex,
     aspectRatio: aspectRatioForIndex(input.variantIndex),
     status: 'ready_for_review',
+    generationMetadata: {
+      variant_index: input.variantIndex,
+      claude_rationale: input.copy.rationale ?? null,
+      gemini_prompt_used: prompt,
+      intensity_level: input.copy.intensity_level,
+    },
   });
 
   return { index: input.variantIndex, ok: true, costUsd: image.costUsd };
@@ -379,19 +415,34 @@ function aspectRatioForIndex(i: number): '1:1' | '4:5' | '9:16' {
   return order[i % order.length]!;
 }
 
-function renderNanoBananaPrompt(copy: ClaudeCopyVariant, variantIndex: number): string {
-  // Wrap the operator template with variant-specific overrides. We keep
-  // the template verbatim and append a "render with these values" block
-  // — Gemini Image is good at picking up the latter.
+export function renderNanoBananaPrompt(copy: ClaudeCopyVariant, variantIndex: number): string {
+  // Bug-3 fix: previously the variant copy was appended after the template
+  // and Gemini Image kept rendering the reference image's original copy.
+  // Now we lead with an explicit "render this exact text" directive so the
+  // variant copy actually lands on the image, and keep the template as
+  // supplemental style guidance.
   const aspect = aspectRatioForIndex(variantIndex);
-  return `${NANO_BANANA_CLONING_PROMPT_TEMPLATE}
+  const secondary = copy.primary_text.slice(0, 120);
+  return `CRITICAL OVERLAY TEXT — render this EXACT text onto the image (do NOT use any text from the reference image):
 
---- RENDER WITH THESE OVERRIDES ---
-overlay_text: ${JSON.stringify(copy.headline)}
-secondary_overlay: ${JSON.stringify(copy.primary_text.slice(0, 120))}
-output_format.aspect_ratio: ${aspect}
-intensity_level: ${copy.intensity_level}
-${copy.rationale ? `rationale_for_variant: ${JSON.stringify(copy.rationale)}` : ''}`;
+PRIMARY OVERLAY: ${JSON.stringify(copy.headline)}
+SECONDARY OVERLAY: ${JSON.stringify(secondary)}
+
+The reference image is provided ONLY for visual style guidance (composition, lighting, subject pose, color grade, authenticity). Replace any text rendered in the reference image with the overlay text above.
+
+Aspect ratio: ${aspect}
+Variant intensity: ${copy.intensity_level} (${
+    copy.intensity_level === 'small'
+      ? 'minimal aesthetic change'
+      : copy.intensity_level === 'medium'
+        ? 'noticeable aesthetic shift, same persona/setting'
+        : 'fresh persona or angle, same offer'
+  })
+${copy.rationale ? `Rationale: ${copy.rationale}` : ''}
+
+Use the JSON template below for structured style guidance — but the overlay text MUST be the PRIMARY and SECONDARY values declared above.
+
+${NANO_BANANA_CLONING_PROMPT_TEMPLATE}`;
 }
 
 async function markJobFailed(

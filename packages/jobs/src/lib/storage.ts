@@ -54,8 +54,10 @@ export async function downloadAsBase64(input: {
 
 /**
  * Upload base64 image data to Supabase Storage at the user-scoped path
- * `<userId>/generated/<jobId>/<variantIndex>.png`. Returns the storage
- * path (caller signs URLs at display time).
+ * `<userId>/generated/<jobId>/<variantIndex>.png`. Returns both the
+ * object path (for backend ops like deletion) and the public URL (for
+ * the UI). The `generated-creatives` bucket is public; if it ever needs
+ * to go private, swap getPublicUrl() for createSignedUrl().
  */
 export async function uploadGeneratedImage(input: {
   userId: string;
@@ -63,7 +65,7 @@ export async function uploadGeneratedImage(input: {
   variantIndex: number;
   imageBase64: string;
   mimeType: string;
-}): Promise<{ path: string }> {
+}): Promise<{ path: string; publicUrl: string }> {
   const supabase = getServiceRoleSupabase();
   const ext = input.mimeType === 'image/jpeg' ? '.jpg' : '.png';
   const path = `${input.userId}/generated/${input.jobId}/${input.variantIndex}${ext}`;
@@ -74,5 +76,6 @@ export async function uploadGeneratedImage(input: {
   if (error) {
     throw new Error(`Storage upload failed for ${path}: ${error.message}`);
   }
-  return { path };
+  const { data } = supabase.storage.from('generated-creatives').getPublicUrl(path);
+  return { path, publicUrl: data.publicUrl };
 }
