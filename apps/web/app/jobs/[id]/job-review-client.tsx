@@ -1,9 +1,10 @@
 'use client';
 
 import * as React from 'react';
-import { Check, X } from 'lucide-react';
+import { Check, Download, X } from 'lucide-react';
 import { formatDateTime } from '@/lib/format/date';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { bulkDecideJobAction, decideVariantAction } from './actions';
 
 interface Variant {
@@ -116,8 +117,33 @@ export function JobReviewClient({ jobId, conceptType, variants: initial }: Props
           />
         ))}
       </div>
+      {conceptType === 'static' && variants.length > 0 && (
+        <p className="text-muted-foreground mt-4 text-center text-xs">
+          Click any image to view full size and download.
+        </p>
+      )}
     </>
   );
+}
+
+async function downloadVariantImage(fileUrl: string, filename: string) {
+  // Cross-origin <a download> is ignored by browsers without
+  // Content-Disposition. Fetch as a blob, then trigger a same-origin
+  // download via an object URL.
+  const res = await fetch(fileUrl);
+  if (!res.ok) {
+    window.open(fileUrl, '_blank', 'noopener');
+    return;
+  }
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 interface VariantCardProps {
@@ -132,10 +158,22 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
   const isApproved = variant.status === 'approved';
   const isRejected = variant.status === 'rejected';
   const [copyExpanded, setCopyExpanded] = React.useState(false);
+  const [expandOpen, setExpandOpen] = React.useState(false);
+  const [downloading, setDownloading] = React.useState(false);
 
   const hasCopy = Boolean(variant.headline || variant.primaryText || variant.description);
   const primaryTextNeedsClamp =
     variant.primaryText != null && variant.primaryText.length > 160 && !copyExpanded;
+
+  const downloadFilename = `variant-${variant.id}.png`;
+  async function onDownload() {
+    setDownloading(true);
+    try {
+      await downloadVariantImage(variant.fileUrl, downloadFilename);
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   return (
     <article
@@ -149,11 +187,18 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
           // Plain img — Phase 3a uses placehold.co (external) and Phase 3c
           // stores Supabase public URLs. next/image's optimizer doesn't
           // help either case.
-          <img
-            src={variant.fileUrl}
-            alt={variant.headline ?? 'Generated variant'}
-            className="h-full w-full object-cover"
-          />
+          <button
+            type="button"
+            onClick={() => setExpandOpen(true)}
+            className="block h-full w-full cursor-pointer"
+            aria-label="View full size"
+          >
+            <img
+              src={variant.fileUrl}
+              alt={variant.headline ?? 'Generated variant'}
+              className="h-full w-full object-cover"
+            />
+          </button>
         ) : (
           <video
             src={variant.fileUrl}
@@ -163,6 +208,83 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
           />
         )}
       </div>
+
+      {conceptType === 'static' && (
+        <Dialog open={expandOpen} onOpenChange={setExpandOpen}>
+          <DialogContent className="max-h-[95vh] max-w-4xl overflow-y-auto p-0 sm:p-0">
+            <DialogTitle className="sr-only">
+              {variant.headline ?? 'Generated variant'} — full size view
+            </DialogTitle>
+            <div className="flex flex-col">
+              <div className="bg-muted flex items-center justify-center">
+                <img
+                  src={variant.fileUrl}
+                  alt={variant.headline ?? 'Generated variant'}
+                  className="max-h-[80vh] w-auto max-w-full object-contain"
+                />
+              </div>
+              <div className="flex flex-col gap-4 p-6">
+                {hasCopy && (
+                  <div className="flex flex-col gap-2">
+                    {variant.headline && (
+                      <h2 className="text-xl font-semibold leading-snug">{variant.headline}</h2>
+                    )}
+                    {variant.primaryText && (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                        {variant.primaryText}
+                      </p>
+                    )}
+                    {variant.description && (
+                      <p className="text-muted-foreground text-xs leading-snug">
+                        {variant.description}
+                      </p>
+                    )}
+                  </div>
+                )}
+                <p className="text-muted-foreground text-xs">
+                  {variant.aspectRatio} · {formatDateTime(new Date(variant.createdAtIso))}
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={onDownload}
+                    disabled={downloading}
+                    className="flex-1"
+                  >
+                    <Download className="mr-1 h-4 w-4" />
+                    {downloading ? 'Downloading…' : 'Download image'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isApproved ? 'default' : 'outline'}
+                    onClick={onApprove}
+                    disabled={isPending}
+                    className="flex-1"
+                  >
+                    <Check className="mr-1 h-4 w-4" />
+                    {isApproved ? 'Approved' : 'Approve'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isRejected ? 'destructive' : 'outline'}
+                    onClick={onReject}
+                    disabled={isPending}
+                    className="flex-1"
+                  >
+                    <X className="mr-1 h-4 w-4" />
+                    {isRejected ? 'Rejected' : 'Reject'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
       <div className="flex flex-col gap-3 p-4">
         {hasCopy && (
           <div className="flex flex-col gap-1.5">
