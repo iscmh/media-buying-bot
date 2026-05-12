@@ -49,6 +49,8 @@ export const creativeStatusEnum = pgEnum('creative_status', [
   // Phase 3a: operator approved, waiting for Phase 4 launch.
   'approved',
   'launched',
+  // Phase 4a: launch attempt errored (caller has details on launched_ads.error_message).
+  'launch_failed',
   'rejected',
   'archived',
 ]);
@@ -84,3 +86,14 @@ export const partnerReferralStatusEnum = pgEnum('partner_referral_status', [
 ]);
 
 export const featureFlagScopeEnum = pgEnum('feature_flag_scope', ['global', 'user']);
+
+// Phase 4a: per-row status of a launched_ads entry. 'dry_run' is the
+// Phase-4a placeholder before BOT_DRY_RUN flips to false in Phase 4b.
+export const launchedAdStatusEnum = pgEnum('launched_ad_status', [
+  'dry_run',
+  'active',
+  'paused',
+  'killed',
+  'rejected_by_meta',
+  'launch_failed',
+]);

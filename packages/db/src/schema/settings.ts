@@ -1,4 +1,4 @@
-import { boolean, integer, numeric, pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, integer, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { campaignObjectiveEnum } from './enums';
 import { users } from './users';
 
@@ -61,6 +61,18 @@ export const userSettings = pgTable('user_settings', {
   liveGenerationAcknowledgedAt: timestamp('live_generation_acknowledged_at', {
     withTimezone: true,
   }),
+
+  // Phase 4a: Meta auto-launch defaults + per-day launch budget cap.
+  // Server clamps to PLATFORM_HARD_LAUNCH_CEILING_USD (1000).
+  launchAcknowledgedAt: timestamp('launch_acknowledged_at', { withTimezone: true }),
+  dailyLaunchBudgetCapUsd: numeric('daily_launch_budget_cap_usd', { precision: 10, scale: 2 })
+    .notNull()
+    .default('50.00'),
+  defaultAdDailyBudgetUsd: numeric('default_ad_daily_budget_usd', { precision: 10, scale: 2 })
+    .notNull()
+    .default('10.00'),
+  defaultOptimizationGoal: text('default_optimization_goal').notNull().default('CONVERSIONS'),
+  defaultPlacementType: text('default_placement_type').notNull().default('advantage_plus'),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

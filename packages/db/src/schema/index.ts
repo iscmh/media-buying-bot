@@ -12,6 +12,7 @@ export * from './settings';
 export * from './concepts';
 export * from './generation';
 export * from './ads';
+export * from './launched-ads';
 export * from './performance';
 export * from './logs';
 export * from './ops';
