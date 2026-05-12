@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseVariantsArray,
+  renderGeminiImageSystemInstruction,
   renderNanoBananaPrompt,
   type ClaudeCopyVariant,
 } from '../src/functions/generate-static-variants';
@@ -17,12 +18,12 @@ describe('renderNanoBananaPrompt — Bug 3: variant copy must reach Gemini', () 
 
   it('places the variant headline as PRIMARY OVERLAY', () => {
     const prompt = renderNanoBananaPrompt(copy, 2);
-    expect(prompt).toMatch(/PRIMARY OVERLAY: "I tried this for 30 days"/);
+    expect(prompt).toMatch(/PRIMARY OVERLAY \(headline\): "I tried this for 30 days"/);
   });
 
   it('places the primary_text as SECONDARY OVERLAY', () => {
     const prompt = renderNanoBananaPrompt(copy, 2);
-    expect(prompt).toMatch(/SECONDARY OVERLAY: "Mind blown\. Here is what happened\."/);
+    expect(prompt).toMatch(/SECONDARY OVERLAY \(body\): "Mind blown\. Here is what happened\."/);
   });
 
   it('puts the overlay directive BEFORE the template so Gemini prioritizes it', () => {
@@ -41,9 +42,47 @@ describe('renderNanoBananaPrompt — Bug 3: variant copy must reach Gemini', () 
     expect(renderNanoBananaPrompt(copy, 3)).toMatch(/Aspect ratio: 1:1/);
   });
 
-  it('instructs Gemini to ignore reference image text', () => {
+  it('frames the call as an edit, not a free-form generation', () => {
     const prompt = renderNanoBananaPrompt(copy, 0);
-    expect(prompt).toMatch(/do NOT use any text from the reference image/);
+    expect(prompt).toMatch(/Edit the reference image/);
+  });
+
+  it('includes the PRIMARY DIRECTIVE block (template was upgraded for Phase 3d)', () => {
+    const prompt = renderNanoBananaPrompt(copy, 0);
+    expect(prompt).toMatch(/PRIMARY DIRECTIVE: Edit, do not generate/);
+  });
+
+  it('includes the 8% safe-margin instruction so text never gets cropped', () => {
+    const prompt = renderNanoBananaPrompt(copy, 0);
+    expect(prompt).toMatch(/8% safe margin/);
+  });
+});
+
+describe('renderGeminiImageSystemInstruction — Phase 3d Part A', () => {
+  it('frames the model as an image editor, not a generator', () => {
+    const sys = renderGeminiImageSystemInstruction('1:1');
+    expect(sys).toMatch(/image editor, not an image generator/);
+  });
+
+  it('enforces the 8% canvas safe margin', () => {
+    const sys = renderGeminiImageSystemInstruction('4:5');
+    expect(sys).toMatch(/8% safe margin/);
+    expect(sys).toMatch(/NEVER crop or clip text/);
+  });
+
+  it('gives aspect-ratio-specific text positioning', () => {
+    expect(renderGeminiImageSystemInstruction('1:1')).toMatch(/upper third/);
+    expect(renderGeminiImageSystemInstruction('4:5')).toMatch(/upper-middle/);
+    expect(renderGeminiImageSystemInstruction('9:16')).toMatch(/upper third/);
+    expect(renderGeminiImageSystemInstruction('9:16')).toMatch(/bottom 40%/);
+  });
+
+  it('echoes the target aspect ratio', () => {
+    expect(renderGeminiImageSystemInstruction('1:1')).toMatch(/Aspect ratio for this output: 1:1/);
+    expect(renderGeminiImageSystemInstruction('4:5')).toMatch(/Aspect ratio for this output: 4:5/);
+    expect(renderGeminiImageSystemInstruction('9:16')).toMatch(
+      /Aspect ratio for this output: 9:16/,
+    );
   });
 });
 
