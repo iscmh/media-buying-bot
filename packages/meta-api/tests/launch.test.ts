@@ -62,6 +62,42 @@ describe('Phase 4a mock Meta CRUD — DRY_RUN gating', () => {
     expect(call.dryRun).toBe(true);
   });
 
+  it('Phase 4b hotfix: createCampaign payload sets is_adset_budget_sharing_enabled=false', async () => {
+    await createCampaign({
+      userId: 'u',
+      accessToken: '',
+      adAccountId: 'act_123',
+      name: 'sharing flag test',
+      objective: 'OUTCOME_TRAFFIC',
+      mode: 'mock',
+    });
+    const call = vi.mocked(logMetaApiCall).mock.calls[0]![0]!;
+    expect(
+      (call.requestBody as { is_adset_budget_sharing_enabled?: boolean })
+        .is_adset_budget_sharing_enabled,
+    ).toBe(false);
+  });
+
+  it('Phase 4b hotfix: createAdSet HARDCODES optimization_goal=LINK_CLICKS', async () => {
+    await createAdSet({
+      userId: 'u',
+      accessToken: '',
+      adAccountId: 'act_123',
+      campaignId: 'dry_run_campaign_abc',
+      name: 'opt-goal hardcode test',
+      dailyBudgetUsd: 5,
+      // User picked CONVERSIONS in settings — incompatible with our
+      // OUTCOME_TRAFFIC campaign. Hardcode must override it.
+      optimizationGoal: 'CONVERSIONS',
+      placementType: 'advantage_plus',
+      mode: 'mock',
+    });
+    const call = vi.mocked(logMetaApiCall).mock.calls[0]![0]!;
+    expect((call.requestBody as { optimization_goal?: string }).optimization_goal).toBe(
+      'LINK_CLICKS',
+    );
+  });
+
   it('createAdCreative serializes headline / primary_text into link_data', async () => {
     await createAdCreative({
       userId: 'u',

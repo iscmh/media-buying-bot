@@ -81,6 +81,12 @@ export async function createCampaign(
     objective: input.objective,
     status: FORCED_STATUS_PAUSED,
     special_ad_categories: [] as string[],
+    // Phase 4b hotfix: Meta requires this flag whenever a campaign's
+    // ad sets carry their own daily_budget (which is exactly our model
+    // — one daily_budget per ad set). False = each ad set spends its
+    // own budget independently. Without it Meta rejects the campaign
+    // create with error code 100, subcode 4834011.
+    is_adset_budget_sharing_enabled: false,
   };
 
   if (effective === 'mock') {
@@ -157,12 +163,17 @@ export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateRe
           instagram_positions: ['stream'],
         };
 
+  // Phase 4b: hardcoded LINK_CLICKS — compatible with OUTCOME_TRAFFIC.
+  // Settings field reserved for future per-launch picker once we support
+  // more campaign objectives. Passing CONVERSIONS / etc. here against an
+  // OUTCOME_TRAFFIC campaign returns HTTP 400 from Meta.
+  void input.optimizationGoal;
   const body = {
     name: input.name,
     campaign_id: input.campaignId,
     daily_budget: Math.round(input.dailyBudgetUsd * 100), // Meta wants cents
     billing_event: 'IMPRESSIONS',
-    optimization_goal: input.optimizationGoal,
+    optimization_goal: 'LINK_CLICKS',
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
     targeting,
     status: FORCED_STATUS_PAUSED,
