@@ -45,6 +45,7 @@ const FIELDS: Array<{
     | 'enum-placement-type'
     | 'enum-page'
     | 'multi-country'
+    | 'enum-hour'
     | 'boolean'
     | 'timezone';
 }> = [
@@ -229,7 +230,20 @@ const FIELDS: Array<{
     help: 'Hard ceiling on per-ad daily budget after scaling. 10–1000.',
     type: 'currency',
   },
-  // --- Daily summaries ---
+  // --- Daily summaries (Phase 6) ---
+  {
+    name: 'dailySummaryEnabled',
+    label: 'Daily summary',
+    help: 'Receive a daily P&L recap on Telegram. Sent at your local hour below.',
+    type: 'boolean',
+  },
+  {
+    name: 'dailySummaryHourLocal',
+    label: 'Daily summary hour',
+    help: 'Local hour (0–23) to receive the recap. Uses your timezone below.',
+    type: 'enum-hour',
+  },
+  // --- Daily summaries (timezone) ---
   {
     name: 'timezone',
     label: 'Timezone',
@@ -349,6 +363,20 @@ export function SettingsForm({
                   ))}
                 </select>
               ))}
+
+            {field.type === 'enum-hour' && (
+              <select
+                id={field.name}
+                {...form.register(field.name)}
+                className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+              >
+                {Array.from({ length: 24 }, (_, h) => (
+                  <option key={h} value={h}>
+                    {String(h).padStart(2, '0')}:00
+                  </option>
+                ))}
+              </select>
+            )}
 
             {field.type === 'multi-country' && (
               <CountryMultiSelect
