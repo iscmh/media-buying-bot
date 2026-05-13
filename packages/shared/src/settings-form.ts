@@ -103,6 +103,17 @@ export const SettingsFormSchema = z.object({
   defaultOptimizationGoal: z.enum(META_OPTIMIZATION_GOALS),
   defaultPlacementType: z.enum(META_PLACEMENT_TYPES),
 
+  // Phase 4b: Meta launch targeting defaults. defaultPageId is nullable
+  // since first-time users haven't fetched their pages yet. age_min/max
+  // narrow to Meta's allowed [13, 65] window (we default to 18-65, no
+  // operational reason to go below 18 for our verticals).
+  defaultPageId: z.union([z.string().min(1), z.null()]),
+  defaultTargetingCountries: z
+    .array(z.string().regex(/^[A-Z]{2}$/, 'Use ISO 3166-1 alpha-2 codes (e.g. US, CA, GB).'))
+    .min(1, 'At least one country must be selected.'),
+  defaultAgeMin: z.coerce.number().int().min(13).max(65),
+  defaultAgeMax: z.coerce.number().int().min(13).max(65),
+
   // Daily-summary timezone. Lives on users.timezone in the schema (Phase 1
   // decision), but rolled into the same form so save can write atomically.
   // Validation accepts the full IANA db, not just the picker's curated list.
@@ -112,6 +123,12 @@ export const SettingsFormSchema = z.object({
     .refine(isValidIanaZone, 'Pick a valid IANA timezone (e.g. America/New_York).'),
 });
 export type SettingsFormInput = z.infer<typeof SettingsFormSchema>;
+
+// Cross-field validation: age_min must be <= age_max.
+export const SettingsFormSchemaRefined = SettingsFormSchema.refine(
+  (v) => v.defaultAgeMin <= v.defaultAgeMax,
+  { message: 'Min age must be ≤ max age.', path: ['defaultAgeMin'] },
+);
 
 /** All field keys, in display order. Used for diffing and audit logging. */
 export const SETTINGS_FIELD_KEYS = [
@@ -132,5 +149,23 @@ export const SETTINGS_FIELD_KEYS = [
   'defaultAdDailyBudgetUsd',
   'defaultOptimizationGoal',
   'defaultPlacementType',
+  'defaultPageId',
+  'defaultTargetingCountries',
+  'defaultAgeMin',
+  'defaultAgeMax',
   'timezone',
 ] as const satisfies ReadonlyArray<keyof SettingsFormInput>;
+
+/** Phase 4b — countries the launch defaults dropdown offers. Operator
+ *  picks the ones they're licensed in; full list is too long for a
+ *  picker. Add more here as we expand. */
+export const SUPPORTED_TARGETING_COUNTRIES = [
+  { code: 'US', name: 'United States' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'AU', name: 'Australia' },
+  { code: 'NZ', name: 'New Zealand' },
+  { code: 'IE', name: 'Ireland' },
+  { code: 'DE', name: 'Germany' },
+  { code: 'FR', name: 'France' },
+] as const;

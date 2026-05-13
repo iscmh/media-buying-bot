@@ -39,6 +39,15 @@ export const PLATFORM_HARD_LAUNCH_CEILING_USD = 1000;
 export const PLATFORM_HARD_AD_DAILY_BUDGET_USD = 200;
 
 /**
+ * Phase 4b: HARDCODED first-live-launch total-daily-exposure cap.
+ * Applies to the user's FIRST live launch session only — once
+ * user_settings.live_launch_count > 0, the regular daily launch cap
+ * takes over. Sized small enough that a misconfigured ad costs less
+ * than dinner if the user forgets to keep status='PAUSED'.
+ */
+export const FIRST_LIVE_LAUNCH_HARD_CAP_USD = 10;
+
+/**
  * Phase 4a: Meta optimization goals we support at launch time. Values
  * match Meta's Marketing API enum literals exactly so we can pass
  * straight through once BOT_DRY_RUN flips off.

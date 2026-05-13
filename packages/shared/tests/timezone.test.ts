@@ -57,6 +57,10 @@ describe('SettingsFormSchema timezone field', () => {
       defaultAdDailyBudgetUsd: 10,
       defaultOptimizationGoal: 'CONVERSIONS',
       defaultPlacementType: 'advantage_plus',
+      defaultPageId: null,
+      defaultTargetingCountries: ['US'],
+      defaultAgeMin: 18,
+      defaultAgeMax: 65,
       timezone: 'America/New_York',
       ...overrides,
     };

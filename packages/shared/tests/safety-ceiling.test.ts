@@ -62,6 +62,10 @@ function validBaseline(overrides: Partial<Record<string, number | string | boole
     defaultAdDailyBudgetUsd: 10,
     defaultOptimizationGoal: 'CONVERSIONS',
     defaultPlacementType: 'advantage_plus',
+    defaultPageId: null,
+    defaultTargetingCountries: ['US'],
+    defaultAgeMin: 18,
+    defaultAgeMax: 65,
     timezone: 'America/New_York',
     ...overrides,
   };
