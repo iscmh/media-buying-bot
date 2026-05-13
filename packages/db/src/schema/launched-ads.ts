@@ -55,6 +55,22 @@ export const launchedAds = pgTable('launched_ads', {
   metaClicks: integer('meta_clicks'),
   metaConversions: integer('meta_conversions'),
 
+  // Phase 5 — kill/scale tracking. The decision engine marks
+  // *_recommended_* columns; the approval handler stamps *_confirmed_at
+  // once the user taps Confirm in Telegram and the Meta call succeeds.
+  killRecommendedAt: timestamp('kill_recommended_at', { withTimezone: true }),
+  killRecommendedReason: text('kill_recommended_reason'),
+  killConfirmedAt: timestamp('kill_confirmed_at', { withTimezone: true }),
+  scaleRecommendedAt: timestamp('scale_recommended_at', { withTimezone: true }),
+  scaleRecommendedToUsd: numeric('scale_recommended_to_usd', { precision: 10, scale: 2 }),
+  scaleRecommendedReason: text('scale_recommended_reason'),
+  scaleConfirmedAt: timestamp('scale_confirmed_at', { withTimezone: true }),
+  // Per-ad scale counter. Drives "growing pains" UI ("scaled 3 times")
+  // and is independent of user_settings.scale_success_count (per-user,
+  // gates the first-5-scales +25% cap).
+  scaleCount: integer('scale_count').notNull().default(0),
+  lastScaledAt: timestamp('last_scaled_at', { withTimezone: true }),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

@@ -41,6 +41,15 @@ export interface SettingsRow {
   defaultTargetingCountries: string[];
   defaultAgeMin: number;
   defaultAgeMax: number;
+  // Phase 5 — kill/scale thresholds.
+  pollingIntervalMinutes: number;
+  killMaxCpcUsd: number;
+  killNoConvSpendUsd: number;
+  killMinCtrPct: number;
+  scaleMinRoas: number;
+  scaleMinSpendUsd: number;
+  scaleIncrementPct: number;
+  scaleMaxDailyBudgetUsd: number;
   timezone: string;
 }
 
@@ -76,6 +85,14 @@ export async function getUserSettings(userId: string): Promise<SettingsRow | nul
     defaultTargetingCountries: settingsRow.defaultTargetingCountries,
     defaultAgeMin: settingsRow.defaultAgeMin,
     defaultAgeMax: settingsRow.defaultAgeMax,
+    pollingIntervalMinutes: settingsRow.pollingIntervalMinutes,
+    killMaxCpcUsd: Number(settingsRow.killMaxCpcUsd),
+    killNoConvSpendUsd: Number(settingsRow.killNoConvSpendUsd),
+    killMinCtrPct: Number(settingsRow.killMinCtrPct),
+    scaleMinRoas: Number(settingsRow.scaleMinRoas),
+    scaleMinSpendUsd: Number(settingsRow.scaleMinSpendUsd),
+    scaleIncrementPct: Number(settingsRow.scaleIncrementPct),
+    scaleMaxDailyBudgetUsd: Number(settingsRow.scaleMaxDailyBudgetUsd),
     timezone: userRow.timezone,
   };
 }
@@ -154,6 +171,14 @@ export async function saveUserSettings(
         defaultTargetingCountries: next.defaultTargetingCountries,
         defaultAgeMin: next.defaultAgeMin,
         defaultAgeMax: next.defaultAgeMax,
+        pollingIntervalMinutes: next.pollingIntervalMinutes,
+        killMaxCpcUsd: next.killMaxCpcUsd.toFixed(2),
+        killNoConvSpendUsd: next.killNoConvSpendUsd.toFixed(2),
+        killMinCtrPct: next.killMinCtrPct.toFixed(2),
+        scaleMinRoas: next.scaleMinRoas.toFixed(2),
+        scaleMinSpendUsd: next.scaleMinSpendUsd.toFixed(2),
+        scaleIncrementPct: next.scaleIncrementPct.toFixed(2),
+        scaleMaxDailyBudgetUsd: next.scaleMaxDailyBudgetUsd.toFixed(2),
       })
       .where(eq(userSettings.userId, userId));
 

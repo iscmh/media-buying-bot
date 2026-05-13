@@ -88,6 +88,28 @@ export const userSettings = pgTable('user_settings', {
   defaultAgeMin: integer('default_age_min').notNull().default(18),
   defaultAgeMax: integer('default_age_max').notNull().default(65),
 
+  // Phase 5 — kill/scale thresholds + first-time ack flags + counters.
+  killAcknowledgedAt: timestamp('kill_acknowledged_at', { withTimezone: true }),
+  scaleAcknowledgedAt: timestamp('scale_acknowledged_at', { withTimezone: true }),
+  killMaxCpcUsd: numeric('kill_max_cpc_usd', { precision: 10, scale: 2 }).notNull().default('5.00'),
+  killNoConvSpendUsd: numeric('kill_no_conv_spend_usd', { precision: 10, scale: 2 })
+    .notNull()
+    .default('10.00'),
+  killMinCtrPct: numeric('kill_min_ctr_pct', { precision: 5, scale: 2 }).notNull().default('0.50'),
+  scaleMinRoas: numeric('scale_min_roas', { precision: 5, scale: 2 }).notNull().default('2.00'),
+  scaleMinSpendUsd: numeric('scale_min_spend_usd', { precision: 10, scale: 2 })
+    .notNull()
+    .default('20.00'),
+  scaleIncrementPct: numeric('scale_increment_pct', { precision: 5, scale: 2 })
+    .notNull()
+    .default('50.00'),
+  scaleMaxDailyBudgetUsd: numeric('scale_max_daily_budget_usd', { precision: 10, scale: 2 })
+    .notNull()
+    .default('100.00'),
+  pollingIntervalMinutes: integer('polling_interval_minutes').notNull().default(30),
+  // Per-user counter feeding the first-5-scales +25% hardcoded cap.
+  scaleSuccessCount: integer('scale_success_count').notNull().default(0),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
