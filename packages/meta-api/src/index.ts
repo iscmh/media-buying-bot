@@ -5,9 +5,12 @@ export {
   createAdSet,
   createAdCreative,
   createAd,
+  effectiveLaunchMode,
   type CreateCampaignInput,
   type CreateAdSetInput,
   type CreateAdCreativeInput,
   type CreateAdInput,
+  type LaunchMode,
   type MetaCreateResult,
 } from './launch';
+export { fetchUserPages, type MetaPageSummary } from './pages';

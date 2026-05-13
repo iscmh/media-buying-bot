@@ -17,6 +17,7 @@
   "dependencies": {
     "@mbb/db": "workspace:*",
     "@mbb/shared": "workspace:*",
+    "drizzle-orm": "^0.36.4",
     "zod": "^3.24.1"
   },
   "devDependencies": {
