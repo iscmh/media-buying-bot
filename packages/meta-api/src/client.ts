@@ -93,24 +93,114 @@ export async function callMeta(input: MetaCallInput): Promise<MetaCallResult> {
     return { status: 0, body: null, dryRun: true, latencyMs: Date.now() - t0 };
   }
 
-  // 4. Actual call.
-  // Phase 4 will implement: build URL with META_API_VERSION, fetch with
-  // Authorization: Bearer <accessToken>, parse JSON, handle errors.
-  // For Phase 1 we throw to make accidental live calls obvious.
-  void input.accessToken;
-  await logMetaApiCall({
-    userId: input.userId,
-    endpoint: input.endpoint,
-    method: input.method,
-    requestBody: input.body ?? {},
-    responseStatus: 0,
-    responseBody: { _phase_1_stub: true },
-    latencyMs: Date.now() - t0,
-    dryRun: false,
-  });
-  throw new Error(
-    'callMeta: live Meta API calls not implemented in Phase 1. Set BOT_DRY_RUN=true.',
-  );
+  // 4. Actual call — Phase 4b implementation.
+  //
+  // Auth: Bearer <user access token>. The token never leaves this
+  // function as plaintext — caller decrypted it from
+  // meta_connections.access_token_encrypted, we forward it to the
+  // Graph endpoint, and only the sanitized request body lands in
+  // meta_api_call_logs.
+  //
+  // Per-call 30s timeout (matches spec). On 4xx Meta returns a
+  // structured error body; on 5xx it varies. We log everything and
+  // surface the parsed body so the caller can decide whether to retry
+  // (5xx → yes via Inngest retry) or write a launched_ads
+  // rejected_by_meta row (4xx).
+  const url = `https://graph.facebook.com/${META_API_VERSION}${input.endpoint}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), META_TIMEOUT_MS);
+
+  let status = 0;
+  let body: unknown = null;
+  try {
+    const res = await fetch(url, {
+      method: input.method,
+      headers: {
+        Authorization: `Bearer ${input.accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: input.body == null ? undefined : JSON.stringify(input.body),
+      signal: controller.signal,
+    });
+    status = res.status;
+    const text = await res.text();
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { _non_json_body: text.slice(0, 4096) };
+      }
+    }
+
+    // 5xx returns get a record of the hit but no rate-limit penalty —
+    // we let Inngest retry policy handle them. 4xx with rate-limit
+    // codes mark the user for cooldown; other 4xx are Meta business
+    // errors and surface as-is.
+    const metaErrorCode = extractMetaErrorCode(body);
+    if (status >= 400 && status < 500 && isRateLimitError(metaErrorCode)) {
+      await recordRateLimitHit({ userId: input.userId, errorCode: metaErrorCode! });
+    }
+
+    await logMetaApiCall({
+      userId: input.userId,
+      endpoint: input.endpoint,
+      method: input.method,
+      requestBody: sanitizeRequestBody(input.body),
+      responseStatus: status,
+      responseBody: body,
+      latencyMs: Date.now() - t0,
+      dryRun: false,
+    });
+
+    return { status, body, dryRun: false, latencyMs: Date.now() - t0 };
+  } catch (err) {
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    const errorMessage = isAbort
+      ? `Meta call timed out after ${META_TIMEOUT_MS}ms`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+    await logMetaApiCall({
+      userId: input.userId,
+      endpoint: input.endpoint,
+      method: input.method,
+      requestBody: sanitizeRequestBody(input.body),
+      responseStatus: 0,
+      responseBody: { _network_error: errorMessage, _timeout: isAbort },
+      latencyMs: Date.now() - t0,
+      dryRun: false,
+    });
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+const META_API_VERSION = 'v21.0';
+const META_TIMEOUT_MS = 30_000;
+
+function extractMetaErrorCode(body: unknown): number | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const error = (body as { error?: { code?: number } }).error;
+  return typeof error?.code === 'number' ? error.code : undefined;
+}
+
+/**
+ * Audit-log payload sanitizer. The request body itself never contains
+ * the access token (that's a header), but we drop anything that looks
+ * like a token/key as a belt-and-suspenders measure.
+ */
+function sanitizeRequestBody(body: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!body) return {};
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(body)) {
+    if (/token|secret|password|api_key|access_token/i.test(k)) {
+      out[k] = '[REDACTED]';
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }
 
 export class MetaSafetyDeniedError extends Error {
