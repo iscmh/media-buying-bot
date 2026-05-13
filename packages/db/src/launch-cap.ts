@@ -1,5 +1,5 @@
-import { and, eq, gte } from 'drizzle-orm';
-import { PLATFORM_HARD_LAUNCH_CEILING_USD } from '@mbb/shared';
+import { and, eq, gte, sql } from 'drizzle-orm';
+import { FIRST_LIVE_LAUNCH_HARD_CAP_USD, PLATFORM_HARD_LAUNCH_CEILING_USD } from '@mbb/shared';
 import { getDb } from './client';
 import { launchedAds } from './schema/launched-ads';
 import { userSettings } from './schema/settings';
@@ -88,6 +88,65 @@ export async function assertDailyLaunchBudgetCap(
     capUsd,
     remainingUsd: capUsd - committedTodayUsd,
   };
+}
+
+/**
+ * Phase 4b: HARDCODED first-live-launch hard cap. The user's first
+ * EVER live launch session must commit ≤ FIRST_LIVE_LAUNCH_HARD_CAP_USD
+ * total daily budget across all variants. After the counter
+ * (live_launch_count) is bumped on success, the regular daily launch
+ * cap (assertDailyLaunchBudgetCap) takes over.
+ *
+ * This is a session-level guard, not a per-day guard — it only fires
+ * the very first time a user goes live. Defense against an excited
+ * operator typo'ing 100 variants at $50/day on day one and waking up
+ * to an empty bank account.
+ */
+export type FirstLaunchCapResult =
+  | { allowed: true; isFirstLaunch: boolean; capUsd: number }
+  | { allowed: false; reason: string; capUsd: number; liveLaunchCount: number };
+
+export async function assertFirstLiveLaunchCap(
+  userId: string,
+  plannedTotalBudgetUsd: number,
+): Promise<FirstLaunchCapResult> {
+  const db = getDb();
+  const settings = await db.query.userSettings.findFirst({
+    where: eq(userSettings.userId, userId),
+    columns: { liveLaunchCount: true },
+  });
+  const liveLaunchCount = settings?.liveLaunchCount ?? 0;
+  if (liveLaunchCount > 0) {
+    return { allowed: true, isFirstLaunch: false, capUsd: FIRST_LIVE_LAUNCH_HARD_CAP_USD };
+  }
+
+  if (plannedTotalBudgetUsd > FIRST_LIVE_LAUNCH_HARD_CAP_USD) {
+    return {
+      allowed: false,
+      reason: `First live launch is hard-capped at $${FIRST_LIVE_LAUNCH_HARD_CAP_USD.toFixed(
+        2,
+      )} total daily exposure (across all ads in this batch). This batch would commit $${plannedTotalBudgetUsd.toFixed(
+        2,
+      )}. Reduce the variant count or per-ad budget. Subsequent launches use your normal daily cap.`,
+      capUsd: FIRST_LIVE_LAUNCH_HARD_CAP_USD,
+      liveLaunchCount,
+    };
+  }
+
+  return { allowed: true, isFirstLaunch: true, capUsd: FIRST_LIVE_LAUNCH_HARD_CAP_USD };
+}
+
+/**
+ * Phase 4b: increment user_settings.live_launch_count by 1 (per session,
+ * not per ad). Called by the launch job after at least one live ad
+ * lands successfully on Meta.
+ */
+export async function incrementLiveLaunchCount(userId: string): Promise<void> {
+  const db = getDb();
+  await db
+    .update(userSettings)
+    .set({ liveLaunchCount: sql`${userSettings.liveLaunchCount} + 1` })
+    .where(eq(userSettings.userId, userId));
 }
 
 // --- TZ helpers — duplicated from cost-cap.ts so each cap module can

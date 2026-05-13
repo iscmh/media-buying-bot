@@ -36,6 +36,11 @@ export interface SettingsRow {
   defaultAdDailyBudgetUsd: number;
   defaultOptimizationGoal: MetaOptimizationGoal;
   defaultPlacementType: MetaPlacementType;
+  // Phase 4b — Meta targeting defaults.
+  defaultPageId: string | null;
+  defaultTargetingCountries: string[];
+  defaultAgeMin: number;
+  defaultAgeMax: number;
   timezone: string;
 }
 
@@ -67,6 +72,10 @@ export async function getUserSettings(userId: string): Promise<SettingsRow | nul
     defaultAdDailyBudgetUsd: Number(settingsRow.defaultAdDailyBudgetUsd),
     defaultOptimizationGoal: settingsRow.defaultOptimizationGoal as MetaOptimizationGoal,
     defaultPlacementType: settingsRow.defaultPlacementType as MetaPlacementType,
+    defaultPageId: settingsRow.defaultPageId,
+    defaultTargetingCountries: settingsRow.defaultTargetingCountries,
+    defaultAgeMin: settingsRow.defaultAgeMin,
+    defaultAgeMax: settingsRow.defaultAgeMax,
     timezone: userRow.timezone,
   };
 }
@@ -141,6 +150,10 @@ export async function saveUserSettings(
         defaultAdDailyBudgetUsd: next.defaultAdDailyBudgetUsd.toFixed(2),
         defaultOptimizationGoal: next.defaultOptimizationGoal,
         defaultPlacementType: next.defaultPlacementType,
+        defaultPageId: next.defaultPageId,
+        defaultTargetingCountries: next.defaultTargetingCountries,
+        defaultAgeMin: next.defaultAgeMin,
+        defaultAgeMax: next.defaultAgeMax,
       })
       .where(eq(userSettings.userId, userId));
 

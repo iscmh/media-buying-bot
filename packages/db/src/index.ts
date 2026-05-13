@@ -25,4 +25,10 @@ export {
 } from './settings';
 export { cascadePauseUser, getLatestPauseReason, unpauseUser } from './pause';
 export { assertDailyCostCap, type DailyCostCapResult } from './cost-cap';
-export { assertDailyLaunchBudgetCap, type DailyLaunchCapResult } from './launch-cap';
+export {
+  assertDailyLaunchBudgetCap,
+  assertFirstLiveLaunchCap,
+  incrementLiveLaunchCount,
+  type DailyLaunchCapResult,
+  type FirstLaunchCapResult,
+} from './launch-cap';
