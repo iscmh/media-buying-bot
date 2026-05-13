@@ -114,6 +114,18 @@ export const SettingsFormSchema = z.object({
   defaultAgeMin: z.coerce.number().int().min(13).max(65),
   defaultAgeMax: z.coerce.number().int().min(13).max(65),
 
+  // Phase 5 — kill/scale thresholds. Server clamps the budget-ish ones
+  // to the platform daily-launch ceiling (a $1000 max-budget scale
+  // can't sneak past the launch cap that already protects the user).
+  pollingIntervalMinutes: z.coerce.number().int().min(15).max(240),
+  killMaxCpcUsd: z.coerce.number().min(0.1).max(20),
+  killNoConvSpendUsd: z.coerce.number().min(1).max(200),
+  killMinCtrPct: z.coerce.number().min(0).max(10),
+  scaleMinRoas: z.coerce.number().min(0.5).max(50),
+  scaleMinSpendUsd: z.coerce.number().min(5).max(500),
+  scaleIncrementPct: z.coerce.number().min(10).max(200),
+  scaleMaxDailyBudgetUsd: z.coerce.number().min(10).max(1000),
+
   // Daily-summary timezone. Lives on users.timezone in the schema (Phase 1
   // decision), but rolled into the same form so save can write atomically.
   // Validation accepts the full IANA db, not just the picker's curated list.
@@ -153,6 +165,14 @@ export const SETTINGS_FIELD_KEYS = [
   'defaultTargetingCountries',
   'defaultAgeMin',
   'defaultAgeMax',
+  'pollingIntervalMinutes',
+  'killMaxCpcUsd',
+  'killNoConvSpendUsd',
+  'killMinCtrPct',
+  'scaleMinRoas',
+  'scaleMinSpendUsd',
+  'scaleIncrementPct',
+  'scaleMaxDailyBudgetUsd',
   'timezone',
 ] as const satisfies ReadonlyArray<keyof SettingsFormInput>;
 

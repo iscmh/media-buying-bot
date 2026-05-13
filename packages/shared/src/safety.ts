@@ -48,6 +48,30 @@ export const PLATFORM_HARD_AD_DAILY_BUDGET_USD = 200;
 export const FIRST_LIVE_LAUNCH_HARD_CAP_USD = 10;
 
 /**
+ * Phase 5: HARDCODED scale-event multiplier ceiling. Even if the user
+ * approves a scale, the new daily budget cannot exceed CURRENT × this
+ * factor. Prevents a runaway thumb-tap from 10x'ing spend.
+ */
+export const SCALE_HARD_MULTIPLIER_CAP = 2;
+
+/**
+ * Phase 5: HARDCODED first-N-scales increment ceiling. Until a user
+ * has user_settings.scale_success_count ≥ this many successful scales,
+ * each scale event is capped at +25% regardless of scale_increment_pct.
+ */
+export const FIRST_SCALES_GRACE_COUNT = 5;
+export const FIRST_SCALES_INCREMENT_PCT_CAP = 25;
+
+/**
+ * Phase 5: ROAS heuristic constant. We don't yet pull per-conversion
+ * `action_values` from Meta /insights (requires Pixel + Conversions API
+ * value tracking). Treat every conversion as worth this many USD when
+ * computing implied ROAS so the scale rule has a signal. Phase 6 should
+ * replace this with the real Meta-reported value.
+ */
+export const ASSUMED_CONVERSION_VALUE_USD = 20;
+
+/**
  * Phase 4a: Meta optimization goals we support at launch time. Values
  * match Meta's Marketing API enum literals exactly so we can pass
  * straight through once BOT_DRY_RUN flips off.
