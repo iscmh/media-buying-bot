@@ -1,4 +1,5 @@
-import { getUserSettings } from '@mbb/db';
+import { eq } from 'drizzle-orm';
+import { getDb, getUserSettings, schema } from '@mbb/db';
 import {
   PLATFORM_HARD_AD_DAILY_BUDGET_USD,
   PLATFORM_HARD_AI_CEILING_USD,
@@ -19,6 +20,16 @@ export default async function SettingsPage() {
     throw new Error('user_settings row missing for authenticated user');
   }
 
+  // Phase 4b: cached Meta Pages drive the Default Page picker. We do
+  // NOT live-fetch from Meta on every settings load — the cache is
+  // refreshed on demand from the dialog / settings refresh button so
+  // the load stays cheap and unaffected by Meta downtime.
+  const db = getDb();
+  const metaPagesRows = await db.query.metaPages.findMany({
+    where: eq(schema.metaPages.userId, userId),
+    columns: { pageId: true, pageName: true },
+  });
+
   return (
     <main className="container mx-auto max-w-3xl px-4 py-12">
       <header className="mb-6">
@@ -34,6 +45,7 @@ export default async function SettingsPage() {
         aiHardCeiling={PLATFORM_HARD_AI_CEILING_USD}
         launchHardCeiling={PLATFORM_HARD_LAUNCH_CEILING_USD}
         adDailyHardCeiling={PLATFORM_HARD_AD_DAILY_BUDGET_USD}
+        metaPages={metaPagesRows}
       />
     </main>
   );

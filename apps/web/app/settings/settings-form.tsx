@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import {
   META_OPTIMIZATION_GOALS,
   META_PLACEMENT_TYPES,
+  SUPPORTED_TARGETING_COUNTRIES,
   SettingsFormSchema,
   TIMEZONE_PICKER_GROUPS,
   type SettingsFormInput,
@@ -21,6 +22,7 @@ interface Props {
   aiHardCeiling: number;
   launchHardCeiling: number;
   adDailyHardCeiling: number;
+  metaPages: Array<{ pageId: string; pageName: string }>;
 }
 
 interface ToastState {
@@ -41,6 +43,8 @@ const FIELDS: Array<{
     | 'enum-cbo-abo'
     | 'enum-optimization-goal'
     | 'enum-placement-type'
+    | 'enum-page'
+    | 'multi-country'
     | 'boolean'
     | 'timezone';
 }> = [
@@ -151,6 +155,31 @@ const FIELDS: Array<{
     help: 'Advantage+ lets Meta auto-place; manual restricts placements per ad set.',
     type: 'enum-placement-type',
   },
+  // --- Meta launch targeting defaults (Phase 4b) ---
+  {
+    name: 'defaultPageId',
+    label: 'Default Facebook Page',
+    help: 'Page that runs your ads. Pulled from /me/accounts when you connect Meta.',
+    type: 'enum-page',
+  },
+  {
+    name: 'defaultTargetingCountries',
+    label: 'Default targeting countries',
+    help: 'ISO 3166-1 codes. At least one required. Can be overridden per launch.',
+    type: 'multi-country',
+  },
+  {
+    name: 'defaultAgeMin',
+    label: 'Default min age',
+    help: 'Minimum audience age. Meta minimum is 13; we recommend 18.',
+    type: 'integer',
+  },
+  {
+    name: 'defaultAgeMax',
+    label: 'Default max age',
+    help: 'Maximum audience age. Must be ≥ min age.',
+    type: 'integer',
+  },
   // --- Daily summaries ---
   {
     name: 'timezone',
@@ -166,6 +195,7 @@ export function SettingsForm({
   aiHardCeiling,
   launchHardCeiling,
   adDailyHardCeiling,
+  metaPages,
 }: Props) {
   const form = useForm<SettingsFormInput>({
     resolver: zodResolver(SettingsFormSchema),
@@ -248,6 +278,39 @@ export function SettingsForm({
                   </option>
                 ))}
               </select>
+            )}
+
+            {field.type === 'enum-page' &&
+              (metaPages.length === 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  No Facebook Pages cached yet. Reconnect Meta or run a Live launch — pages refresh
+                  on demand.
+                </p>
+              ) : (
+                <select
+                  id={field.name}
+                  {...form.register(field.name)}
+                  className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+                >
+                  <option value="">— Select a page —</option>
+                  {metaPages.map((p) => (
+                    <option key={p.pageId} value={p.pageId}>
+                      {p.pageName} ({p.pageId})
+                    </option>
+                  ))}
+                </select>
+              ))}
+
+            {field.type === 'multi-country' && (
+              <CountryMultiSelect
+                value={(form.watch('defaultTargetingCountries') as string[] | undefined) ?? []}
+                onChange={(next) =>
+                  form.setValue('defaultTargetingCountries', next, {
+                    shouldDirty: true,
+                    shouldValidate: true,
+                  })
+                }
+              />
             )}
 
             {field.type === 'boolean' && (
@@ -417,6 +480,44 @@ function TimezoneField({ name, value, onChange }: TimezoneFieldProps) {
           </button>
         </p>
       )}
+    </div>
+  );
+}
+
+interface CountryMultiSelectProps {
+  value: string[];
+  onChange: (next: string[]) => void;
+}
+
+/**
+ * Phase 4b countries picker. Uses a fixed allowlist from
+ * SUPPORTED_TARGETING_COUNTRIES; if we need more later, add them to
+ * the shared list. Per-country checkbox keeps the click target large
+ * and the picker accessible on mobile.
+ */
+function CountryMultiSelect({ value, onChange }: CountryMultiSelectProps) {
+  function toggle(code: string) {
+    if (value.includes(code)) {
+      onChange(value.filter((c) => c !== code));
+    } else {
+      onChange([...value, code]);
+    }
+  }
+  return (
+    <div className="border-input grid grid-cols-2 gap-2 rounded-md border p-3 sm:grid-cols-3">
+      {SUPPORTED_TARGETING_COUNTRIES.map((c) => (
+        <label key={c.code} className="flex cursor-pointer items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={value.includes(c.code)}
+            onChange={() => toggle(c.code)}
+            className="h-4 w-4"
+          />
+          <span>
+            {c.code} <span className="text-muted-foreground">— {c.name}</span>
+          </span>
+        </label>
+      ))}
     </div>
   );
 }
