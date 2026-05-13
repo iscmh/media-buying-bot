@@ -292,7 +292,16 @@ export async function uploadAdImage(input: UploadAdImageInput): Promise<UploadAd
   }
 
   const formData = new FormData();
-  formData.append('bytes', blob, 'variant.png');
+  // Phase 4b hotfix #3: Meta's /adimages endpoint treats the form field
+  // name 'bytes' as a magic keyword that expects a base64-encoded string
+  // (NOT raw binary). Sending raw PNG bytes under that key makes Meta
+  // base64-decode the first few characters as garbage and reject with
+  // "We couldn't process the image" (code 100, subcode 2446496).
+  // Using any other field name (here: the destination filename) routes
+  // the upload as a normal binary file. The response shape then keys
+  // off the same name: { images: { 'creative.png': { hash, url } } }.
+  const fieldName = 'creative.png';
+  formData.append(fieldName, blob, fieldName);
 
   try {
     const result = await callMeta({

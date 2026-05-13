@@ -265,9 +265,12 @@ describe('Phase 4b hotfix #2: uploadAdImage live path', () => {
             headers: { 'content-type': 'image/png' },
           });
         }
-        // Meta /adimages response shape.
+        // Meta /adimages response keys off the multipart field name —
+        // 'creative.png' matches the field we send.
         return new Response(
-          JSON.stringify({ images: { bytes: { hash: 'real_meta_hash_abc', url: 'cdn' } } }),
+          JSON.stringify({
+            images: { 'creative.png': { hash: 'real_meta_hash_abc', url: 'cdn' } },
+          }),
           { status: 200 },
         );
       }),
@@ -293,6 +296,43 @@ describe('Phase 4b hotfix #2: uploadAdImage live path', () => {
     const headers = (calls[1]!.init as RequestInit).headers as Record<string, string>;
     expect(headers['Content-Type']).toBeUndefined();
     expect(headers.Authorization).toBe('Bearer tok');
+  });
+
+  it("HOTFIX #3: multipart field is named '.png', NOT 'bytes' (Meta base64 magic keyword)", async () => {
+    let capturedFormData: FormData | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (url.includes('supabase')) {
+          return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 });
+        }
+        capturedFormData = (init as RequestInit).body as FormData;
+        return new Response(
+          JSON.stringify({
+            images: { 'creative.png': { hash: 'h', url: 'cdn' } },
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    await uploadAdImage({
+      userId: 'u',
+      accessToken: 'tok',
+      adAccountId: 'act_123',
+      imageUrl: 'https://stub.supabase.co/v.png',
+      mode: 'live',
+    });
+    expect(capturedFormData).not.toBeNull();
+    // Collect field names from the FormData.
+    const iter = (
+      capturedFormData! as unknown as {
+        entries(): Iterable<[string, string | Blob]>;
+      }
+    ).entries();
+    const names: string[] = [];
+    for (const [name] of iter) names.push(name);
+    expect(names).not.toContain('bytes');
+    expect(names.some((n) => n.endsWith('.png'))).toBe(true);
   });
 
   it('returns ok=false when Meta /adimages 4xx', async () => {
