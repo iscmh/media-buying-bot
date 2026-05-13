@@ -1,6 +1,7 @@
 import { Bot } from 'grammy';
-import { registerStart } from './commands/start';
+import { registerApprovalCallback } from './commands/approval-callback';
 import { registerLink } from './commands/link';
+import { registerStart } from './commands/start';
 import { registerStatus } from './commands/status';
 
 export function createBot(token: string): Bot {
@@ -9,6 +10,8 @@ export function createBot(token: string): Bot {
   registerStart(bot);
   registerLink(bot);
   registerStatus(bot);
+  // Phase 5: inline-button callback for kill/scale approval prompts.
+  registerApprovalCallback(bot);
 
   bot.catch((err) => {
     console.error('[bot] handler error', err);
