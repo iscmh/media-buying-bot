@@ -20,3 +20,16 @@ export {
   type MetaCreateResult,
 } from './launch';
 export { fetchUserPages, type MetaPageSummary } from './pages';
+export {
+  getAdInsights,
+  type AdInsights,
+  type GetAdInsightsInput,
+  type GetAdInsightsResult,
+} from './insights';
+export {
+  pauseAd,
+  scaleAdBudget,
+  type PauseAdInput,
+  type ScaleAdBudgetInput,
+  type LifecycleResult,
+} from './lifecycle';
