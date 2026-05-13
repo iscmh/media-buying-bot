@@ -213,6 +213,140 @@ export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateRe
 }
 
 // =========================================================================
+// Ad image upload (Phase 4b hotfix #2)
+// =========================================================================
+// Meta's /adimages endpoint accepts a multipart upload and returns a hash
+// that the creative call must reference via link_data.image_hash. Trying
+// to pass image_url straight into link_data — what the spec originally
+// said — gets HTTP 400 / code 100 / subcode 1443050.
+// =========================================================================
+export interface UploadAdImageInput {
+  userId: string;
+  accessToken: string;
+  adAccountId: string;
+  /** Supabase Storage public URL for the generated variant image. */
+  imageUrl: string;
+  mode: LaunchMode;
+  generationJobId?: string;
+}
+
+export interface UploadAdImageResult {
+  ok: boolean;
+  imageHash: string;
+  dryRun: boolean;
+  errorMessage?: string;
+  metaErrorCode?: number;
+}
+
+export async function uploadAdImage(input: UploadAdImageInput): Promise<UploadAdImageResult> {
+  const effective = effectiveLaunchMode(input.mode);
+  const t0 = Date.now();
+  const endpoint = `/${input.adAccountId}/adimages`;
+
+  if (effective === 'mock') {
+    const imageHash = `dry_run_hash_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await logMetaApiCall({
+      userId: input.userId,
+      endpoint,
+      method: 'POST',
+      requestBody: {
+        _dry_run: true,
+        _caller_mode: input.mode,
+        _env_override: input.mode === 'live',
+        would_upload_url: input.imageUrl,
+      },
+      responseStatus: 0,
+      responseBody: {
+        _dry_run: true,
+        would_return_hash: imageHash,
+        generation_job_id: input.generationJobId ?? null,
+      },
+      latencyMs: Date.now() - t0,
+      dryRun: true,
+    });
+    return { ok: true, imageHash, dryRun: true };
+  }
+
+  // Live path — download the variant image from Supabase Storage, POST
+  // it as multipart/form-data to Meta. Field key 'bytes' is what Meta's
+  // examples use; the response keys back on the same name.
+  let blob: Blob;
+  try {
+    const res = await fetch(input.imageUrl);
+    if (!res.ok) {
+      return {
+        ok: false,
+        imageHash: '',
+        dryRun: false,
+        errorMessage: `Failed to download image from ${input.imageUrl}: HTTP ${res.status}`,
+      };
+    }
+    blob = await res.blob();
+  } catch (err) {
+    return {
+      ok: false,
+      imageHash: '',
+      dryRun: false,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    };
+  }
+
+  const formData = new FormData();
+  formData.append('bytes', blob, 'variant.png');
+
+  try {
+    const result = await callMeta({
+      userId: input.userId,
+      endpoint,
+      method: 'POST',
+      formData,
+      accessToken: input.accessToken,
+    });
+    if (result.status < 200 || result.status >= 300) {
+      const { message, code } = extractMetaError(result.body);
+      return {
+        ok: false,
+        imageHash: '',
+        dryRun: false,
+        errorMessage: message ?? `Meta /adimages returned HTTP ${result.status}`,
+        metaErrorCode: code,
+      };
+    }
+    const hash = extractImageHash(result.body);
+    if (!hash) {
+      return {
+        ok: false,
+        imageHash: '',
+        dryRun: false,
+        errorMessage: 'Meta /adimages returned 2xx but no image hash',
+      };
+    }
+    return { ok: true, imageHash: hash, dryRun: false };
+  } catch (err) {
+    return {
+      ok: false,
+      imageHash: '',
+      dryRun: false,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function extractImageHash(body: unknown): string | null {
+  // Response shape: { images: { <filename>: { hash, url, ... } } }
+  if (!body || typeof body !== 'object') return null;
+  const images = (body as { images?: Record<string, unknown> }).images;
+  if (!images || typeof images !== 'object') return null;
+  for (const entry of Object.values(images)) {
+    if (entry && typeof entry === 'object') {
+      const hash = (entry as { hash?: unknown }).hash;
+      if (typeof hash === 'string' && hash.length > 0) return hash;
+    }
+  }
+  return null;
+}
+
+// =========================================================================
 // Ad creative
 // =========================================================================
 export interface CreateAdCreativeInput {
@@ -220,7 +354,8 @@ export interface CreateAdCreativeInput {
   accessToken: string;
   adAccountId: string;
   name: string;
-  imageUrl: string;
+  /** From uploadAdImage(). REPLACES the Phase-4b-original image_url path. */
+  imageHash: string;
   headline: string;
   primaryText: string;
   description?: string | null;
@@ -241,7 +376,10 @@ export async function createAdCreative(
     object_story_spec: {
       page_id: input.pageId,
       link_data: {
-        image_url: input.imageUrl,
+        // Phase 4b hotfix #2: Meta rejects image_url in link_data. We
+        // pre-upload via /adimages first (uploadAdImage), then reference
+        // the returned hash here.
+        image_hash: input.imageHash,
         link: input.destinationUrl,
         message: input.primaryText,
         name: input.headline,

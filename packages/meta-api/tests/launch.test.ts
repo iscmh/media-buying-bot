@@ -14,6 +14,7 @@ import {
   createAdSet,
   createCampaign,
   effectiveLaunchMode,
+  uploadAdImage,
 } from '../src/launch';
 
 const ORIGINAL_ENV = process.env;
@@ -104,7 +105,7 @@ describe('Phase 4a mock Meta CRUD — DRY_RUN gating', () => {
       accessToken: '',
       adAccountId: 'act_123',
       name: 'Creative',
-      imageUrl: 'https://example.com/img.png',
+      imageHash: 'dry_run_hash_abc123',
       headline: 'Hook line',
       primaryText: 'Body copy',
       description: 'Tiny desc',
@@ -115,12 +116,56 @@ describe('Phase 4a mock Meta CRUD — DRY_RUN gating', () => {
     const call = vi.mocked(logMetaApiCall).mock.calls[0]![0]!;
     const body = call.requestBody as {
       object_story_spec: {
-        link_data: { name: string; message: string; description?: string };
+        link_data: {
+          name: string;
+          message: string;
+          description?: string;
+          image_hash?: string;
+          image_url?: string;
+        };
       };
     };
     expect(body.object_story_spec.link_data.name).toBe('Hook line');
     expect(body.object_story_spec.link_data.message).toBe('Body copy');
     expect(body.object_story_spec.link_data.description).toBe('Tiny desc');
+  });
+
+  it('Phase 4b hotfix #2: createAdCreative link_data uses image_hash, NOT image_url', async () => {
+    await createAdCreative({
+      userId: 'u',
+      accessToken: '',
+      adAccountId: 'act_123',
+      name: 'image-hash-only',
+      imageHash: 'dry_run_hash_xyz',
+      headline: 'h',
+      primaryText: 'p',
+      destinationUrl: 'https://o.example',
+      pageId: 'page_x',
+      mode: 'mock',
+    });
+    const call = vi.mocked(logMetaApiCall).mock.calls[0]![0]!;
+    const linkData = (
+      call.requestBody as {
+        object_story_spec: {
+          link_data: { image_hash?: string; image_url?: string };
+        };
+      }
+    ).object_story_spec.link_data;
+    expect(linkData.image_hash).toBe('dry_run_hash_xyz');
+    expect(linkData.image_url).toBeUndefined();
+  });
+
+  it('uploadAdImage returns dry_run_hash_* in mock mode', async () => {
+    const result = await uploadAdImage({
+      userId: 'u',
+      accessToken: '',
+      adAccountId: 'act_123',
+      imageUrl: 'https://example.supabase.co/.../variant.png',
+      mode: 'mock',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.dryRun).toBe(true);
+    expect(result.imageHash).toMatch(/^dry_run_hash_[a-f0-9]{12}$/);
   });
 
   it('createAd returns dry_run_ad_* in mock mode', async () => {
@@ -193,6 +238,100 @@ describe('Phase 4b: HARDCODED status=PAUSED on every live payload', () => {
     });
     const adBody = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
     expect(adBody.status).toBe('PAUSED');
+  });
+});
+
+describe('Phase 4b hotfix #2: uploadAdImage live path', () => {
+  beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV, BOT_DRY_RUN: 'false' };
+    vi.mocked(logMetaApiCall).mockClear();
+  });
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+    vi.unstubAllGlobals();
+  });
+
+  it('downloads the image, POSTs multipart to /adimages, returns Meta hash', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, init: init ?? {} });
+        if (url.includes('supabase')) {
+          return new Response(new Uint8Array([1, 2, 3, 4]), {
+            status: 200,
+            headers: { 'content-type': 'image/png' },
+          });
+        }
+        // Meta /adimages response shape.
+        return new Response(
+          JSON.stringify({ images: { bytes: { hash: 'real_meta_hash_abc', url: 'cdn' } } }),
+          { status: 200 },
+        );
+      }),
+    );
+
+    const result = await uploadAdImage({
+      userId: 'u',
+      accessToken: 'tok',
+      adAccountId: 'act_123',
+      imageUrl: 'https://stub.supabase.co/storage/v1/object/public/v.png',
+      mode: 'live',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.imageHash).toBe('real_meta_hash_abc');
+
+    // First call was the Supabase download, second was the multipart
+    // POST to Meta with /adimages on the URL.
+    expect(calls[0]!.url).toContain('supabase');
+    expect(calls[1]!.url).toContain('/adimages');
+    expect((calls[1]!.init as RequestInit).method).toBe('POST');
+    // FormData boundary handling: do NOT pass a Content-Type header for
+    // multipart (fetch sets it with the boundary).
+    const headers = (calls[1]!.init as RequestInit).headers as Record<string, string>;
+    expect(headers['Content-Type']).toBeUndefined();
+    expect(headers.Authorization).toBe('Bearer tok');
+  });
+
+  it('returns ok=false when Meta /adimages 4xx', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('supabase')) {
+          return new Response(new Uint8Array([1, 2]), { status: 200 });
+        }
+        return new Response(
+          JSON.stringify({ error: { message: 'invalid image', code: 1487001 } }),
+          { status: 400 },
+        );
+      }),
+    );
+    const result = await uploadAdImage({
+      userId: 'u',
+      accessToken: 'tok',
+      adAccountId: 'act_123',
+      imageUrl: 'https://stub.supabase.co/img.png',
+      mode: 'live',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/invalid image/);
+    expect(result.metaErrorCode).toBe(1487001);
+  });
+
+  it('returns ok=false when Supabase download fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not found', { status: 404 })),
+    );
+    const result = await uploadAdImage({
+      userId: 'u',
+      accessToken: 'tok',
+      adAccountId: 'act_123',
+      imageUrl: 'https://stub.supabase.co/missing.png',
+      mode: 'live',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/HTTP 404/);
   });
 });
 

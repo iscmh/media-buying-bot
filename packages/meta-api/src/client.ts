@@ -26,6 +26,12 @@ export interface MetaCallInput {
   endpoint: string; // e.g. "/act_123456789/campaigns"
   method: 'GET' | 'POST' | 'DELETE';
   body?: Record<string, unknown>;
+  /**
+   * Phase 4b: multipart/form-data path for /adimages uploads. When set,
+   * `body` is ignored and `formData` is sent verbatim. Audit log records
+   * the field names + sizes (not the bytes themselves).
+   */
+  formData?: FormData;
   /** USD this call is expected to spend (0 for reads). */
   plannedSpend?: number;
   /** User's decrypted access token. Caller decrypts; we never see ciphertext here. */
@@ -112,14 +118,27 @@ export async function callMeta(input: MetaCallInput): Promise<MetaCallResult> {
 
   let status = 0;
   let body: unknown = null;
+  // Phase 4b: multipart branch for /adimages uploads. Caller passes
+  // pre-built FormData; we let fetch set the boundary header automatically
+  // (don't set Content-Type manually with multipart or the boundary is
+  // missing and Meta returns 400).
+  const isMultipart = !!input.formData;
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${input.accessToken}`,
+  };
+  if (!isMultipart) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const requestBody = isMultipart
+    ? (input.formData as FormData)
+    : input.body == null
+      ? undefined
+      : JSON.stringify(input.body);
   try {
     const res = await fetch(url, {
       method: input.method,
-      headers: {
-        Authorization: `Bearer ${input.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: input.body == null ? undefined : JSON.stringify(input.body),
+      headers,
+      body: requestBody,
       signal: controller.signal,
     });
     status = res.status;
@@ -145,7 +164,9 @@ export async function callMeta(input: MetaCallInput): Promise<MetaCallResult> {
       userId: input.userId,
       endpoint: input.endpoint,
       method: input.method,
-      requestBody: sanitizeRequestBody(input.body),
+      requestBody: isMultipart
+        ? sanitizeFormData(input.formData!)
+        : sanitizeRequestBody(input.body),
       responseStatus: status,
       responseBody: body,
       latencyMs: Date.now() - t0,
@@ -164,7 +185,9 @@ export async function callMeta(input: MetaCallInput): Promise<MetaCallResult> {
       userId: input.userId,
       endpoint: input.endpoint,
       method: input.method,
-      requestBody: sanitizeRequestBody(input.body),
+      requestBody: isMultipart
+        ? sanitizeFormData(input.formData!)
+        : sanitizeRequestBody(input.body),
       responseStatus: 0,
       responseBody: { _network_error: errorMessage, _timeout: isAbort },
       latencyMs: Date.now() - t0,
@@ -183,6 +206,28 @@ function extractMetaErrorCode(body: unknown): number | undefined {
   if (!body || typeof body !== 'object') return undefined;
   const error = (body as { error?: { code?: number } }).error;
   return typeof error?.code === 'number' ? error.code : undefined;
+}
+
+/**
+ * Phase 4b: audit-friendly summary of a multipart upload. We don't log
+ * file bytes — just the field names + sizes so an audit trail shows
+ * what was attempted.
+ */
+function sanitizeFormData(form: FormData): Record<string, unknown> {
+  const fields: Array<{ name: string; size?: number; type?: string }> = [];
+  // `FormData.entries()` exists at runtime under Node 20 + the DOM lib,
+  // but @types/node's FormData definition lacks the method. Cast through
+  // the minimal iterator shape we actually use.
+  const iter = (form as unknown as { entries(): Iterable<[string, string | Blob]> }).entries();
+  for (const [name, value] of iter) {
+    if (typeof value === 'string') {
+      fields.push({ name, size: value.length });
+    } else {
+      // Blob / File — log size + mime, not bytes.
+      fields.push({ name, size: value.size, type: value.type || undefined });
+    }
+  }
+  return { _multipart: true, fields };
 }
 
 /**

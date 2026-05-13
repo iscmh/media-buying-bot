@@ -5,6 +5,7 @@ import {
   createAdSet,
   createCampaign,
   effectiveLaunchMode,
+  uploadAdImage,
   type LaunchMode,
 } from '@mbb/meta-api';
 import {
@@ -286,12 +287,30 @@ export const metaAdLauncher = inngest.createFunction(
                 );
               }
 
+              // Phase 4b hotfix #2: pre-upload image to /adimages and
+              // pass the returned hash to createAdCreative. Meta rejects
+              // image_url inside link_data.
+              const imageUpload = await uploadAdImage({
+                userId,
+                accessToken: ctx.accessToken,
+                adAccountId: ctx.adAccountId,
+                imageUrl: variant.fileUrl,
+                mode: callerMode,
+                generationJobId,
+              });
+              if (!imageUpload.ok) {
+                throw new MetaCreateError(
+                  imageUpload.errorMessage ?? 'uploadAdImage failed',
+                  imageUpload.metaErrorCode,
+                );
+              }
+
               const creative = await createAdCreative({
                 userId,
                 accessToken: ctx.accessToken,
                 adAccountId: ctx.adAccountId,
                 name: `${baseName} — creative`,
-                imageUrl: variant.fileUrl,
+                imageHash: imageUpload.imageHash,
                 headline: variant.headline ?? '(no headline)',
                 primaryText: variant.primaryText ?? '(no body)',
                 description: variant.description,
