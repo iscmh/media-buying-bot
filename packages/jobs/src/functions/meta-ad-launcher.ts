@@ -1,6 +1,21 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import { createAd, createAdCreative, createAdSet, createCampaign } from '@mbb/meta-api';
-import { assertDailyLaunchBudgetCap, getDb, logAuditEvent, schema } from '@mbb/db';
+import {
+  createAd,
+  createAdCreative,
+  createAdSet,
+  createCampaign,
+  effectiveLaunchMode,
+  type LaunchMode,
+} from '@mbb/meta-api';
+import {
+  assertDailyLaunchBudgetCap,
+  assertFirstLiveLaunchCap,
+  decryptSecret,
+  getDb,
+  incrementLiveLaunchCount,
+  logAuditEvent,
+  schema,
+} from '@mbb/db';
 import {
   PLATFORM_HARD_AD_DAILY_BUDGET_USD,
   type MetaOptimizationGoal,
@@ -9,22 +24,30 @@ import {
 import { inngest } from '../client';
 
 /**
- * Phase 4a: take approved generated_creatives for a generation_job and
- * push them to Meta as paused ads. In DRY_RUN mode (the only supported
- * mode in Phase 4a) every Meta call is short-circuited at the
- * @mbb/meta-api layer and a `dry_run_<uuid>` id is returned.
+ * Phase 4a → 4b: take approved generated_creatives for a generation_job
+ * and push them to Meta as PAUSED ads. Mode precedence:
  *
- * Pipeline (per approved variant):
- *   campaign  → ad_set  → ad_creative  → ad
+ *   event.mode='mock'                      → always mock
+ *   event.mode='live' + BOT_DRY_RUN=true   → still mock (env override wins)
+ *   event.mode='live' + BOT_DRY_RUN=false  → real Meta calls
  *
- * Each variant gets its own campaign so kill/scale (Phase 5) can act on
- * one variant at a time without touching siblings. Concurrency cap of 3
- * keeps the rate-limiter happy in the eventual live path.
+ * The mode the user picked is recorded on launched_ads.mode for audit
+ * even when env downgrades it — so an operator can see "I asked for
+ * live but BOT_DRY_RUN was on" by inspecting the row.
  *
- * Failure isolation: per-variant errors land in launched_ads with
- * status='launch_failed' + error_message; siblings continue. The
- * generation_job's overall status stays 'completed' (the launch
- * pipeline is separate from generation).
+ * Pipeline per approved variant:
+ *   campaign → ad_set → ad_creative → ad
+ *
+ * Concurrency 3, retries 1 (Inngest re-runs whole job on transient
+ * failure; per-variant errors are isolated inside the step.run).
+ *
+ * Phase 4b hard safeguards (all enforced server-side):
+ *   - Every Meta payload sets status='PAUSED' (in @mbb/meta-api).
+ *   - First-ever live launch session capped at $10 total daily exposure
+ *     (assertFirstLiveLaunchCap); counter increments on success.
+ *   - 30s per-call timeout (in callMeta).
+ *   - 4xx from Meta → launched_ads.status='rejected_by_meta'; 5xx →
+ *     Inngest retry (one retry, then 'launch_failed').
  */
 
 const CONCURRENCY = 3;
@@ -34,11 +57,12 @@ export const metaAdLauncher = inngest.createFunction(
   { event: 'meta/launch.requested' },
   async ({ event, step }) => {
     const { userId, generationJobId } = event.data;
+    const callerMode: LaunchMode = event.data.mode ?? 'mock';
+    const effective = effectiveLaunchMode(callerMode);
+    const isEnvDowngrade = callerMode === 'live' && effective === 'mock';
     const startedAt = Date.now();
-    const dryRun = (process.env.BOT_DRY_RUN ?? 'true').toLowerCase() === 'true';
-    const mode: 'mock' | 'live' = dryRun ? 'mock' : 'live';
 
-    // 1. Load job, settings, concept (for offerUrl), meta connection.
+    // 1. Load context — job, settings, concept, meta connection.
     const ctx = await step.run('load-context', async () => {
       const db = getDb();
       const job = await db.query.generationJobs.findFirst({
@@ -53,6 +77,11 @@ export const metaAdLauncher = inngest.createFunction(
           defaultAdDailyBudgetUsd: true,
           defaultOptimizationGoal: true,
           defaultPlacementType: true,
+          defaultPageId: true,
+          defaultTargetingCountries: true,
+          defaultAgeMin: true,
+          defaultAgeMax: true,
+          liveLaunchCount: true,
         },
       });
       if (!settings) return { ok: false as const, error: 'User settings missing' };
@@ -61,7 +90,7 @@ export const metaAdLauncher = inngest.createFunction(
       const concept = conceptId
         ? await db.query.concepts.findFirst({
             where: eq(schema.concepts.id, conceptId),
-            columns: { id: true, offerUrl: true, nicheTag: true, staticHeadline: true },
+            columns: { id: true, offerUrl: true, nicheTag: true },
           })
         : null;
 
@@ -70,32 +99,73 @@ export const metaAdLauncher = inngest.createFunction(
           eq(schema.metaConnections.userId, userId),
           eq(schema.metaConnections.status, 'active'),
         ),
-        columns: { adAccountIds: true, businessManagerId: true },
+        columns: {
+          adAccountIds: true,
+          accessTokenEncrypted: true,
+        },
       });
       const adAccountId = metaConn?.adAccountIds?.[0];
-      // In DRY_RUN we tolerate a missing ad account — log a placeholder so
-      // the audit trail is still complete. Phase 4b must reject here.
-      const effectiveAdAccountId = adAccountId ?? (dryRun ? 'act_dry_run_placeholder' : null);
+
+      // For live mode we need the access token AND a real ad account.
+      // For mock mode the placeholder is fine — keeps the audit trail
+      // populated in dev.
+      let accessToken = '';
+      let effectiveAdAccountId = adAccountId;
+      if (effective === 'live') {
+        if (!adAccountId) {
+          return { ok: false as const, error: 'No active Meta connection / ad account' };
+        }
+        if (!metaConn?.accessTokenEncrypted) {
+          return { ok: false as const, error: 'Meta access token not stored — reconnect Meta.' };
+        }
+        try {
+          accessToken = await decryptSecret(metaConn.accessTokenEncrypted);
+        } catch (err) {
+          return {
+            ok: false as const,
+            error: `Failed to decrypt Meta access token: ${err instanceof Error ? err.message : String(err)}`,
+          };
+        }
+      } else {
+        effectiveAdAccountId = effectiveAdAccountId ?? 'act_dry_run_placeholder';
+      }
       if (!effectiveAdAccountId) {
-        return { ok: false as const, error: 'No active Meta connection / ad account' };
+        return { ok: false as const, error: 'No ad account available' };
       }
 
-      // Per-ad daily budget clamped server-side to PLATFORM_HARD_AD_DAILY_BUDGET_USD.
-      const rawBudget = Number(settings.defaultAdDailyBudgetUsd);
+      // Per-ad daily budget — event-supplied override takes precedence
+      // over user defaults, both clamped to the platform ceiling.
+      const eventBudget = event.data.perAdBudgetUsd;
+      const rawBudget = eventBudget ?? Number(settings.defaultAdDailyBudgetUsd);
       const dailyBudgetUsd = Math.min(rawBudget, PLATFORM_HARD_AD_DAILY_BUDGET_USD);
+
+      // pageId: event override > settings default > placeholder.
+      const pageId =
+        event.data.pageId ??
+        settings.defaultPageId ??
+        (effective === 'live' ? null : 'dry_run_page_id');
+      if (effective === 'live' && !pageId) {
+        return {
+          ok: false as const,
+          error: 'No Meta Page selected. Pick one in the launch dialog or in Settings.',
+        };
+      }
 
       return {
         ok: true as const,
         conceptId: concept?.id ?? null,
-        offerUrl: concept?.offerUrl ?? 'https://example.com',
+        offerUrl: event.data.offerUrl ?? concept?.offerUrl ?? 'https://example.com',
         nicheTag: concept?.nicheTag ?? null,
         adAccountId: effectiveAdAccountId,
+        accessToken,
         dailyBudgetUsd,
         optimizationGoal: settings.defaultOptimizationGoal as MetaOptimizationGoal,
         placementType: settings.defaultPlacementType as MetaPlacementType,
-        // Phase 4a has no page_id column on meta_connections yet. Use a
-        // dry-run placeholder. Phase 4b must store the user's page_id.
-        pageId: dryRun ? 'dry_run_page_id' : 'PLACEHOLDER_PAGE_ID',
+        pageId: pageId ?? 'dry_run_page_id',
+        targetingCountries: event.data.targetingCountries ?? settings.defaultTargetingCountries,
+        ageMin: event.data.ageMin ?? settings.defaultAgeMin,
+        ageMax: event.data.ageMax ?? settings.defaultAgeMax,
+        liveLaunchCount: settings.liveLaunchCount,
       };
     });
 
@@ -133,8 +203,20 @@ export const metaAdLauncher = inngest.createFunction(
       return { ok: true, launched: 0, failed: 0, reason: 'no approved variants' };
     }
 
-    // 3. Daily-launch-cap check — sum of approved * default budget.
     const plannedBudget = approved.length * ctx.dailyBudgetUsd;
+
+    // 3a. Phase-4b first-launch cap (only fires for true-live first session).
+    if (effective === 'live') {
+      const firstCap = await step.run('check-first-live-launch-cap', async () =>
+        assertFirstLiveLaunchCap(userId, plannedBudget),
+      );
+      if (!firstCap.allowed) {
+        await markJobFailed(userId, generationJobId, firstCap.reason);
+        return { ok: false, reason: firstCap.reason };
+      }
+    }
+
+    // 3b. Regular daily-launch-cap (TZ-aware).
     const cap = await step.run('check-launch-cap', async () =>
       assertDailyLaunchBudgetCap(userId, plannedBudget),
     );
@@ -147,6 +229,7 @@ export const metaAdLauncher = inngest.createFunction(
     const outcomes: Array<{
       variantId: string;
       ok: boolean;
+      rejectedByMeta?: boolean;
       campaignId?: string;
       adSetId?: string;
       creativeId?: string;
@@ -165,29 +248,47 @@ export const metaAdLauncher = inngest.createFunction(
             try {
               const campaign = await createCampaign({
                 userId,
+                accessToken: ctx.accessToken,
                 adAccountId: ctx.adAccountId,
                 name: `${baseName} — campaign`,
                 objective: ctx.optimizationGoal.startsWith('OUTCOME_')
                   ? ctx.optimizationGoal
-                  : 'OUTCOME_SALES',
+                  : 'OUTCOME_TRAFFIC',
+                mode: callerMode,
                 generationJobId,
               });
-              if (!campaign.ok) throw new Error(campaign.errorMessage ?? 'createCampaign failed');
+              if (!campaign.ok) {
+                throw new MetaCreateError(
+                  campaign.errorMessage ?? 'createCampaign failed',
+                  campaign.metaErrorCode,
+                );
+              }
 
               const adSet = await createAdSet({
                 userId,
+                accessToken: ctx.accessToken,
                 adAccountId: ctx.adAccountId,
                 campaignId: campaign.id,
                 name: `${baseName} — ad set`,
                 dailyBudgetUsd: ctx.dailyBudgetUsd,
                 optimizationGoal: ctx.optimizationGoal,
                 placementType: ctx.placementType,
+                targetingCountries: ctx.targetingCountries,
+                ageMin: ctx.ageMin,
+                ageMax: ctx.ageMax,
+                mode: callerMode,
                 generationJobId,
               });
-              if (!adSet.ok) throw new Error(adSet.errorMessage ?? 'createAdSet failed');
+              if (!adSet.ok) {
+                throw new MetaCreateError(
+                  adSet.errorMessage ?? 'createAdSet failed',
+                  adSet.metaErrorCode,
+                );
+              }
 
               const creative = await createAdCreative({
                 userId,
+                accessToken: ctx.accessToken,
                 adAccountId: ctx.adAccountId,
                 name: `${baseName} — creative`,
                 imageUrl: variant.fileUrl,
@@ -196,21 +297,31 @@ export const metaAdLauncher = inngest.createFunction(
                 description: variant.description,
                 destinationUrl: ctx.offerUrl,
                 pageId: ctx.pageId,
+                mode: callerMode,
                 generationJobId,
               });
-              if (!creative.ok) throw new Error(creative.errorMessage ?? 'createAdCreative failed');
+              if (!creative.ok) {
+                throw new MetaCreateError(
+                  creative.errorMessage ?? 'createAdCreative failed',
+                  creative.metaErrorCode,
+                );
+              }
 
               const ad = await createAd({
                 userId,
+                accessToken: ctx.accessToken,
                 adAccountId: ctx.adAccountId,
                 adSetId: adSet.id,
                 creativeId: creative.id,
                 name: baseName,
+                mode: callerMode,
                 generationJobId,
               });
-              if (!ad.ok) throw new Error(ad.errorMessage ?? 'createAd failed');
+              if (!ad.ok) {
+                throw new MetaCreateError(ad.errorMessage ?? 'createAd failed', ad.metaErrorCode);
+              }
 
-              // Persist launched_ads + audit + update variant status.
+              // Persist row + audit.
               const db = getDb();
               await db.insert(schema.launchedAds).values({
                 userId,
@@ -224,8 +335,11 @@ export const metaAdLauncher = inngest.createFunction(
                 dailyBudgetUsd: ctx.dailyBudgetUsd.toFixed(2),
                 optimizationGoal: ctx.optimizationGoal,
                 placementType: ctx.placementType,
-                status: dryRun ? 'dry_run' : 'active',
-                mode,
+                // Status mirrors effective: dry_run (mock or env-downgraded
+                // live) vs active (real-live; ad is still PAUSED on Meta,
+                // 'active' here means it exists on Meta's side).
+                status: effective === 'mock' ? 'dry_run' : 'active',
+                mode: callerMode,
               });
               await logAuditEvent({
                 userId,
@@ -240,8 +354,9 @@ export const metaAdLauncher = inngest.createFunction(
                   meta_ad_set_id: adSet.id,
                   meta_creative_id: creative.id,
                   meta_ad_id: ad.id,
-                  mode,
-                  dry_run: dryRun,
+                  caller_mode: callerMode,
+                  effective_mode: effective,
+                  env_downgrade: isEnvDowngrade,
                 },
               });
               return {
@@ -254,6 +369,7 @@ export const metaAdLauncher = inngest.createFunction(
               };
             } catch (err) {
               const errorMessage = err instanceof Error ? err.message : String(err);
+              const rejectedByMeta = err instanceof MetaCreateError && err.metaErrorCode != null;
               const db = getDb();
               await db.insert(schema.launchedAds).values({
                 userId,
@@ -263,21 +379,22 @@ export const metaAdLauncher = inngest.createFunction(
                 dailyBudgetUsd: ctx.dailyBudgetUsd.toFixed(2),
                 optimizationGoal: ctx.optimizationGoal,
                 placementType: ctx.placementType,
-                status: 'launch_failed',
-                mode,
+                status: rejectedByMeta ? 'rejected_by_meta' : 'launch_failed',
+                mode: callerMode,
                 errorMessage,
               });
               await logAuditEvent({
                 userId,
-                eventType: 'ad_launch_failed',
+                eventType: rejectedByMeta ? 'ad_rejected_by_meta' : 'ad_launch_failed',
                 eventData: {
                   variant_id: variant.id,
                   generation_job_id: generationJobId,
                   error: errorMessage,
-                  mode,
+                  caller_mode: callerMode,
+                  effective_mode: effective,
                 },
               });
-              return { variantId: variant.id, ok: false, error: errorMessage };
+              return { variantId: variant.id, ok: false, rejectedByMeta, error: errorMessage };
             }
           });
         }),
@@ -285,7 +402,7 @@ export const metaAdLauncher = inngest.createFunction(
       outcomes.push(...batchResults);
     }
 
-    // 5. Update generated_creatives.status to 'launched' / 'launch_failed'.
+    // 5. Update generated_creatives.status.
     await step.run('update-creative-statuses', async () => {
       const db = getDb();
       const launchedIds = outcomes.filter((o) => o.ok).map((o) => o.variantId);
@@ -304,17 +421,30 @@ export const metaAdLauncher = inngest.createFunction(
       }
     });
 
-    // 6. Telegram summary. Dispatched via the existing telegram/notify
-    // event so the notifier owns the chat-id lookup + send retry.
     const successCount = outcomes.filter((o) => o.ok).length;
-    const failedCount = outcomes.length - successCount;
+    const rejectedCount = outcomes.filter((o) => o.rejectedByMeta).length;
+    const failedCount = outcomes.filter((o) => !o.ok && !o.rejectedByMeta).length;
     const totalBudget = successCount * ctx.dailyBudgetUsd;
-    const summary =
-      `${dryRun ? 'DRY_RUN: ' : ''}` +
-      `${successCount} ad${successCount === 1 ? '' : 's'} launched` +
-      (failedCount > 0 ? `, ${failedCount} failed` : '') +
-      `. Daily budget committed: $${totalBudget.toFixed(2)}. ` +
-      `View at /launched.`;
+
+    // 6. Increment live-launch counter — per session, on any live success.
+    if (effective === 'live' && successCount > 0) {
+      await step.run('increment-live-launch-count', () => incrementLiveLaunchCount(userId));
+    }
+
+    // 7. Telegram summary.
+    const summary = buildSummaryMessage({
+      callerMode,
+      effective,
+      successCount,
+      rejectedCount,
+      failedCount,
+      totalBudget,
+      firstErrors: outcomes
+        .filter((o) => !o.ok)
+        .slice(0, 3)
+        .map((o) => o.error ?? 'unknown')
+        .filter(Boolean),
+    });
     await step.sendEvent('telegram-summary', {
       name: 'telegram/notify.requested',
       data: { userId, message: summary },
@@ -326,16 +456,67 @@ export const metaAdLauncher = inngest.createFunction(
       eventData: {
         generation_job_id: generationJobId,
         launched: successCount,
+        rejected_by_meta: rejectedCount,
         failed: failedCount,
         total_budget_usd: totalBudget,
-        mode,
+        caller_mode: callerMode,
+        effective_mode: effective,
+        env_downgrade: isEnvDowngrade,
         duration_ms: Date.now() - startedAt,
       },
     });
 
-    return { ok: true, launched: successCount, failed: failedCount, totalBudget };
+    return {
+      ok: true,
+      launched: successCount,
+      failed: failedCount,
+      rejectedByMeta: rejectedCount,
+      totalBudget,
+    };
   },
 );
+
+class MetaCreateError extends Error {
+  constructor(
+    message: string,
+    public readonly metaErrorCode?: number,
+  ) {
+    super(message);
+    this.name = 'MetaCreateError';
+  }
+}
+
+function buildSummaryMessage(input: {
+  callerMode: LaunchMode;
+  effective: LaunchMode;
+  successCount: number;
+  rejectedCount: number;
+  failedCount: number;
+  totalBudget: number;
+  firstErrors: string[];
+}): string {
+  const { callerMode, effective, successCount, rejectedCount, failedCount, totalBudget } = input;
+  const adsLaunched = `${successCount} ad${successCount === 1 ? '' : 's'} launched`;
+  const failsClause =
+    rejectedCount + failedCount > 0
+      ? `, ${rejectedCount} rejected${failedCount > 0 ? ` + ${failedCount} failed` : ''}`
+      : '';
+  const budgetClause = `Daily budget if all activated: $${totalBudget.toFixed(2)}`;
+
+  if (effective === 'live') {
+    let msg = `LIVE: ${adsLaunched} and PAUSED in Meta${failsClause}. ${budgetClause}. Activate them at business.facebook.com/adsmanager.`;
+    if (input.firstErrors.length > 0) {
+      msg += `\nErrors: ${input.firstErrors.join(' | ')}`;
+    }
+    return msg;
+  }
+  if (callerMode === 'live' && effective === 'mock') {
+    return `MOCK (BOT_DRY_RUN active) — would have launched ${successCount} ad${
+      successCount === 1 ? '' : 's'
+    } live. ${budgetClause}. View at /launched.`;
+  }
+  return `MOCK: ${adsLaunched}${failsClause}. ${budgetClause}. View at /launched.`;
+}
 
 async function markJobFailed(
   userId: string,

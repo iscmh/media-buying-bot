@@ -12,7 +12,20 @@ export const inngest = new Inngest({
 /** Strongly-typed event names. Add new events here, then `inngest.send({...})`. */
 export type Events = {
   'meta/launch.requested': {
-    data: { userId: string; generationJobId: string };
+    data: {
+      userId: string;
+      generationJobId: string;
+      // Phase 4b additions — caller's choice; the worker still
+      // honors BOT_DRY_RUN as the kill switch. Older callers that
+      // omit these get full backwards-compat ('mock' default).
+      mode?: 'mock' | 'live';
+      pageId?: string;
+      offerUrl?: string;
+      targetingCountries?: string[];
+      ageMin?: number;
+      ageMax?: number;
+      perAdBudgetUsd?: number;
+    };
   };
   'performance/poll.scheduled': {
     data: { userId: string; adSetId: string; hourMark: number };
