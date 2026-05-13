@@ -30,6 +30,18 @@ export type Events = {
   'performance/poll.scheduled': {
     data: { userId: string; adSetId: string; hourMark: number };
   };
+  /** Phase 5: cron-triggered full poll across active launched_ads. */
+  'performance/poll.tick': { data: Record<string, never> };
+  /**
+   * Phase 5: the bot callback handler dispatches this when the user
+   * taps Confirm / Skip on a Telegram inline-keyboard prompt. The job
+   * loads the pending_approvals row, validates ownership, executes
+   * the Meta pause/scale (live or mock), and stamps the launched_ads
+   * confirmed_at + counter.
+   */
+  'approval/decision.received': {
+    data: { approvalId: string; decision: 'confirm' | 'skip' };
+  };
   'kill_scale/evaluate.requested': {
     data: { userId: string; adId: string };
   };
@@ -52,7 +64,17 @@ export type Events = {
     data: { userId: string; date: string };
   };
   'telegram/notify.requested': {
-    data: { userId: string; message: string; requiresApproval?: boolean };
+    data: {
+      userId: string;
+      message: string;
+      requiresApproval?: boolean;
+      /**
+       * Phase 5: inline-keyboard buttons. Each row is an array of
+       * { text, callback_data } pairs. callback_data is what the bot
+       * receives in callback_query — typically `approve:<approvalId>:<decision>`.
+       */
+      inlineButtons?: Array<Array<{ text: string; callbackData: string }>>;
+    };
   };
   'token/expiry_check.scheduled': { data: Record<string, never> };
   'suspicious_activity/check.scheduled': { data: { userId: string } };

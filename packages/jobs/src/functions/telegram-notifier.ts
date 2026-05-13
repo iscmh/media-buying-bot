@@ -47,29 +47,55 @@ export const telegramNotifier = inngest.createFunction(
     const sendResult = await step.run('send-message', async () => {
       const token = process.env.TELEGRAM_BOT_TOKEN;
       if (!token) {
-        return { ok: false as const, status: 0, description: 'TELEGRAM_BOT_TOKEN not set' };
+        return {
+          ok: false as const,
+          status: 0,
+          description: 'TELEGRAM_BOT_TOKEN not set',
+          messageId: null as string | null,
+        };
+      }
+      // Phase 5: optional inline keyboard for kill/scale approval prompts.
+      // Telegram's wire format is reply_markup.inline_keyboard = [[ { text, callback_data } ]].
+      const payload: Record<string, unknown> = { chat_id: chatId, text: message };
+      const buttons = event.data.inlineButtons as
+        | Array<Array<{ text: string; callbackData: string }>>
+        | undefined;
+      if (buttons && buttons.length > 0) {
+        payload.reply_markup = {
+          inline_keyboard: buttons.map((row) =>
+            row.map((b) => ({ text: b.text, callback_data: b.callbackData })),
+          ),
+        };
       }
       try {
         const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: message }),
+          body: JSON.stringify(payload),
           signal: AbortSignal.timeout(5_000),
         });
         const json = (await res.json().catch(() => null)) as {
           ok?: boolean;
           description?: string;
+          result?: { message_id?: number };
         } | null;
+        // Capture the message_id so the caller (decision-engine prompt
+        // dispatcher) can persist it on the pending_approvals row and
+        // edit/clear the message later.
+        const messageId =
+          json?.ok && json.result?.message_id != null ? String(json.result.message_id) : null;
         return {
           ok: res.ok && json?.ok === true,
           status: res.status,
           description: json?.description,
+          messageId,
         };
       } catch (err) {
         return {
           ok: false as const,
           status: 0,
           description: err instanceof Error ? err.message : String(err),
+          messageId: null as string | null,
         };
       }
     });
