@@ -3,7 +3,15 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
-import { assertDailyLaunchBudgetCap, getDb, logAuditEvent, schema } from '@mbb/db';
+import {
+  assertDailyLaunchBudgetCap,
+  assertFirstLiveLaunchCap,
+  decryptSecret,
+  getDb,
+  logAuditEvent,
+  schema,
+} from '@mbb/db';
+import { fetchUserPages } from '@mbb/meta-api';
 import { PLATFORM_HARD_AD_DAILY_BUDGET_USD } from '@mbb/shared';
 import { auditMetaFromHeaders } from '@/lib/audit/request-meta';
 import { sendMetaLaunchEvent } from '@/lib/inngest/send';
@@ -147,6 +155,77 @@ export interface LaunchApprovedResult {
 }
 
 /**
+ * Phase 4b: first-time live launch acknowledgment. Idempotent. The
+ * triple-confirm dialog calls this AFTER all three checkboxes are
+ * checked; we trust the client to gate but server side audits the
+ * intent and persists the timestamp.
+ */
+export async function acknowledgeLiveLaunchAction(): Promise<{
+  ok: boolean;
+  errorMessage?: string;
+}> {
+  const user = await requireUser();
+  const db = getDb();
+  const existing = await db.query.userSettings.findFirst({
+    where: eq(schema.userSettings.userId, user.id),
+    columns: { liveLaunchAcknowledgedAt: true },
+  });
+  if (existing?.liveLaunchAcknowledgedAt) {
+    return { ok: true };
+  }
+  await db
+    .update(schema.userSettings)
+    .set({ liveLaunchAcknowledgedAt: new Date() })
+    .where(eq(schema.userSettings.userId, user.id));
+  await logAuditEvent({
+    userId: user.id,
+    eventType: 'live_launch_first_acknowledged',
+    eventData: { _meta: await auditMetaFromHeaders() },
+  });
+  return { ok: true };
+}
+
+/**
+ * Phase 4b: refresh the user's Facebook Pages from /me/accounts and
+ * upsert into meta_pages. Returns the freshly fetched list so the
+ * caller can update the dropdown. Falls back to cached rows on error.
+ */
+export async function refreshMetaPagesAction(): Promise<{
+  ok: boolean;
+  pages: Array<{ pageId: string; pageName: string }>;
+  errorMessage?: string;
+}> {
+  const user = await requireUser();
+  const db = getDb();
+  const metaConn = await db.query.metaConnections.findFirst({
+    where: and(
+      eq(schema.metaConnections.userId, user.id),
+      eq(schema.metaConnections.status, 'active'),
+    ),
+    columns: { accessTokenEncrypted: true },
+  });
+  if (!metaConn?.accessTokenEncrypted) {
+    return { ok: false, pages: [], errorMessage: 'No active Meta connection.' };
+  }
+  let accessToken: string;
+  try {
+    accessToken = await decryptSecret(metaConn.accessTokenEncrypted);
+  } catch (err) {
+    return {
+      ok: false,
+      pages: [],
+      errorMessage: `Failed to decrypt Meta access token: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  const result = await fetchUserPages({ userId: user.id, accessToken });
+  return {
+    ok: result.ok,
+    pages: result.pages.map((p) => ({ pageId: p.pageId, pageName: p.pageName })),
+    errorMessage: result.errorMessage,
+  };
+}
+
+/**
  * Phase 4a: dispatch the Meta launch job for every approved variant on a
  * generation job. Validates server-side that:
  *   - User has acknowledged the launch ack dialog at least once
@@ -156,21 +235,44 @@ export interface LaunchApprovedResult {
  * After validation, fires the meta/launch.requested event and returns
  * immediately — the Inngest worker does the actual Meta CRUD.
  */
-export async function launchApprovedAction(jobId: string): Promise<LaunchApprovedResult> {
+export interface LaunchApprovedInput {
+  jobId: string;
+  /** Phase 4b — 'live' triggers extra ack + first-launch cap. */
+  mode?: 'mock' | 'live';
+  pageId?: string;
+  offerUrl?: string;
+  targetingCountries?: string[];
+  ageMin?: number;
+  ageMax?: number;
+  /** Per-ad daily budget override; clamped server-side. */
+  perAdBudgetUsd?: number;
+}
+
+export async function launchApprovedAction(
+  input: LaunchApprovedInput,
+): Promise<LaunchApprovedResult> {
   const user = await requireUser();
   const db = getDb();
+  const mode: 'mock' | 'live' = input.mode ?? 'mock';
 
   // 1. Verify ownership.
   const job = await db.query.generationJobs.findFirst({
-    where: and(eq(schema.generationJobs.id, jobId), eq(schema.generationJobs.userId, user.id)),
+    where: and(
+      eq(schema.generationJobs.id, input.jobId),
+      eq(schema.generationJobs.userId, user.id),
+    ),
     columns: { id: true },
   });
   if (!job) return { ok: false, errorMessage: 'Job not found.' };
 
-  // 2. Ack must be set.
+  // 2. Phase-4a launch ack must be set (any mode).
   const settings = await db.query.userSettings.findFirst({
     where: eq(schema.userSettings.userId, user.id),
-    columns: { launchAcknowledgedAt: true, defaultAdDailyBudgetUsd: true },
+    columns: {
+      launchAcknowledgedAt: true,
+      liveLaunchAcknowledgedAt: true,
+      defaultAdDailyBudgetUsd: true,
+    },
   });
   if (!settings) {
     return { ok: false, errorMessage: 'User settings missing.' };
@@ -181,11 +283,22 @@ export async function launchApprovedAction(jobId: string): Promise<LaunchApprove
       errorMessage: 'You must acknowledge the launch confirmation dialog first.',
     };
   }
+  // Phase-4b: live mode requires the additional triple-confirm ack.
+  if (mode === 'live' && !settings.liveLaunchAcknowledgedAt) {
+    return {
+      ok: false,
+      errorMessage:
+        'You must complete the first-time live-launch confirmation before launching live.',
+    };
+  }
+  if (mode === 'live' && !input.pageId) {
+    return { ok: false, errorMessage: 'Pick a Facebook Page for the ad creative.' };
+  }
 
   // 3. Count approved variants.
   const approved = await db.query.generatedCreatives.findMany({
     where: and(
-      eq(schema.generatedCreatives.generationJobId, jobId),
+      eq(schema.generatedCreatives.generationJobId, input.jobId),
       eq(schema.generatedCreatives.userId, user.id),
       eq(schema.generatedCreatives.status, 'approved'),
     ),
@@ -196,11 +309,24 @@ export async function launchApprovedAction(jobId: string): Promise<LaunchApprove
   }
 
   // 4. Daily cap math (server-side).
-  const perAdBudget = Math.min(
-    Number(settings.defaultAdDailyBudgetUsd),
-    PLATFORM_HARD_AD_DAILY_BUDGET_USD,
-  );
+  const rawBudget = input.perAdBudgetUsd ?? Number(settings.defaultAdDailyBudgetUsd);
+  const perAdBudget = Math.min(rawBudget, PLATFORM_HARD_AD_DAILY_BUDGET_USD);
   const plannedBudgetUsd = approved.length * perAdBudget;
+
+  // 4a. Phase-4b first-launch hard cap (live only, real-live path: the
+  // launch job will re-check too — defense in depth).
+  if (mode === 'live') {
+    const firstCap = await assertFirstLiveLaunchCap(user.id, plannedBudgetUsd);
+    if (!firstCap.allowed) {
+      return {
+        ok: false,
+        errorMessage: firstCap.reason,
+        plannedBudgetUsd,
+      };
+    }
+  }
+
+  // 4b. Regular daily-launch-cap.
   const cap = await assertDailyLaunchBudgetCap(user.id, plannedBudgetUsd);
   if (!cap.allowed) {
     return {
@@ -217,15 +343,26 @@ export async function launchApprovedAction(jobId: string): Promise<LaunchApprove
     userId: user.id,
     eventType: 'ad_launch_requested',
     eventData: {
-      job_id: jobId,
+      job_id: input.jobId,
       approved_count: approved.length,
       planned_budget_usd: plannedBudgetUsd,
+      mode,
       _meta: await auditMetaFromHeaders(),
     },
   });
-  await sendMetaLaunchEvent({ userId: user.id, generationJobId: jobId });
+  await sendMetaLaunchEvent({
+    userId: user.id,
+    generationJobId: input.jobId,
+    mode,
+    pageId: input.pageId,
+    offerUrl: input.offerUrl,
+    targetingCountries: input.targetingCountries,
+    ageMin: input.ageMin,
+    ageMax: input.ageMax,
+    perAdBudgetUsd: perAdBudget,
+  });
 
-  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath(`/jobs/${input.jobId}`);
   revalidatePath('/launched');
   return {
     ok: true,

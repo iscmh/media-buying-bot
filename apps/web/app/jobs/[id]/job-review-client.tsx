@@ -12,11 +12,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   acknowledgeLaunchAction,
+  acknowledgeLiveLaunchAction,
   bulkDecideJobAction,
   decideVariantAction,
   launchApprovedAction,
+  refreshMetaPagesAction,
 } from './actions';
 
 interface Variant {
@@ -31,10 +35,21 @@ interface Variant {
 }
 
 export interface LaunchSnapshot {
+  // Phase 4a launch ack (any mode).
   acknowledged: boolean;
+  // Phase 4b live-launch ack (triple-confirm).
+  liveAcknowledged: boolean;
+  liveLaunchCount: number;
+  firstLaunchCapUsd: number;
   perAdBudgetUsd: number;
   optimizationGoal: string;
   placementType: string;
+  defaultPageId: string | null;
+  defaultOfferUrl: string;
+  defaultCountries: string[];
+  defaultAgeMin: number;
+  defaultAgeMax: number;
+  metaPages: Array<{ pageId: string; pageName: string }>;
   committedTodayUsd: number;
   capUsd: number;
   remainingUsd: number;
@@ -55,9 +70,28 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
   const [pendingId, setPendingId] = React.useState<string | null>(null);
   const [bulkPending, setBulkPending] = React.useState<'approved' | 'rejected' | null>(null);
   const [acknowledged, setAcknowledged] = React.useState(launchSnapshot.acknowledged);
+  const [liveAcknowledged, setLiveAcknowledged] = React.useState(launchSnapshot.liveAcknowledged);
   const [showLaunchDialog, setShowLaunchDialog] = React.useState(false);
   const [launchPending, setLaunchPending] = React.useState(false);
   const [launchError, setLaunchError] = React.useState<string | null>(null);
+
+  // Phase 4b: per-launch mode + dialog config.
+  const [mode, setMode] = React.useState<'mock' | 'live'>('mock');
+  const [pageId, setPageId] = React.useState<string>(launchSnapshot.defaultPageId ?? '');
+  const [offerUrl, setOfferUrl] = React.useState(launchSnapshot.defaultOfferUrl);
+  const [countries, setCountries] = React.useState<string[]>(launchSnapshot.defaultCountries);
+  const [ageMin, setAgeMin] = React.useState(launchSnapshot.defaultAgeMin);
+  const [ageMax, setAgeMax] = React.useState(launchSnapshot.defaultAgeMax);
+  const [pages, setPages] = React.useState(launchSnapshot.metaPages);
+  const [pagesRefreshing, setPagesRefreshing] = React.useState(false);
+  const [pagesError, setPagesError] = React.useState<string | null>(null);
+  const [showCustomizeTargeting, setShowCustomizeTargeting] = React.useState(false);
+  const [showTripleAck, setShowTripleAck] = React.useState(false);
+  const [ack1, setAck1] = React.useState(false);
+  const [ack2, setAck2] = React.useState(false);
+  const [ack3, setAck3] = React.useState(false);
+  const [tripleAckPending, setTripleAckPending] = React.useState(false);
+  const isFirstLiveLaunch = launchSnapshot.liveLaunchCount === 0;
 
   const total = variants.length;
   const approvedCount = variants.filter((v) => v.status === 'approved').length;
@@ -70,6 +104,10 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
   const launchableCount = variants.filter((v) => v.status === 'approved').length;
   const totalBudgetIfLaunched = launchableCount * launchSnapshot.perAdBudgetUsd;
   const exceedsCap = totalBudgetIfLaunched > launchSnapshot.remainingUsd;
+  const exceedsFirstLaunchCap =
+    mode === 'live' &&
+    isFirstLiveLaunch &&
+    totalBudgetIfLaunched > launchSnapshot.firstLaunchCapUsd;
 
   async function decide(id: string, decision: 'approved' | 'rejected') {
     setPendingId(id);
@@ -99,6 +137,53 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
     setShowLaunchDialog(true);
   }
 
+  function pickMode(next: 'mock' | 'live') {
+    setLaunchError(null);
+    if (next === 'live' && !liveAcknowledged) {
+      // Reset checkboxes each time the dialog opens to force fresh consent.
+      setAck1(false);
+      setAck2(false);
+      setAck3(false);
+      setShowTripleAck(true);
+      return;
+    }
+    setMode(next);
+  }
+
+  async function confirmTripleAck() {
+    if (!(ack1 && ack2 && ack3)) return;
+    setTripleAckPending(true);
+    try {
+      const result = await acknowledgeLiveLaunchAction();
+      if (!result.ok) {
+        setLaunchError(result.errorMessage ?? 'Could not record acknowledgment.');
+        return;
+      }
+      setLiveAcknowledged(true);
+      setMode('live');
+      setShowTripleAck(false);
+    } finally {
+      setTripleAckPending(false);
+    }
+  }
+
+  async function refreshPages() {
+    setPagesError(null);
+    setPagesRefreshing(true);
+    try {
+      const result = await refreshMetaPagesAction();
+      if (!result.ok) {
+        setPagesError(result.errorMessage ?? 'Could not refresh pages.');
+      }
+      setPages(result.pages);
+      if (!pageId && result.pages.length > 0) {
+        setPageId(result.pages[0]!.pageId);
+      }
+    } finally {
+      setPagesRefreshing(false);
+    }
+  }
+
   async function confirmLaunch() {
     setLaunchError(null);
     setLaunchPending(true);
@@ -111,7 +196,15 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
         }
         setAcknowledged(true);
       }
-      const result = await launchApprovedAction(jobId);
+      const result = await launchApprovedAction({
+        jobId,
+        mode,
+        pageId: mode === 'live' ? pageId || undefined : undefined,
+        offerUrl: mode === 'live' ? offerUrl || undefined : undefined,
+        targetingCountries: mode === 'live' ? countries : undefined,
+        ageMin: mode === 'live' ? ageMin : undefined,
+        ageMax: mode === 'live' ? ageMax : undefined,
+      });
       if (!result.ok) {
         setLaunchError(result.errorMessage ?? 'Launch failed.');
         return;
@@ -201,15 +294,164 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
       )}
 
       <Dialog open={showLaunchDialog} onOpenChange={setShowLaunchDialog}>
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Launch ads to Meta</DialogTitle>
             <DialogDescription>
-              {acknowledged
-                ? `${launchableCount} approved variant${launchableCount === 1 ? '' : 's'} will be launched as paused Meta ads.`
-                : 'Launching ads will spend real money on your Meta ad account when DRY_RUN is disabled. Phase 4a is in safe mode — no real money will be spent — but the workflow is real, so confirm you understand.'}
+              {launchableCount} approved variant{launchableCount === 1 ? '' : 's'} will be created
+              as <strong>PAUSED</strong> ads in your Meta account. You activate them manually in Ads
+              Manager.
             </DialogDescription>
           </DialogHeader>
+
+          {/* Mode toggle */}
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Mode</legend>
+            <div className="bg-card flex gap-2 rounded-lg border p-2">
+              <button
+                type="button"
+                onClick={() => pickMode('mock')}
+                className={
+                  'flex-1 rounded-md px-3 py-2 text-sm transition-colors ' +
+                  (mode === 'mock' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/30')
+                }
+              >
+                <span className="block font-semibold">Mock</span>
+                <span className="text-xs opacity-80">Placeholder IDs, no Meta call</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => pickMode('live')}
+                className={
+                  'flex-1 rounded-md px-3 py-2 text-sm transition-colors ' +
+                  (mode === 'live' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/30')
+                }
+              >
+                <span className="block font-semibold">Live</span>
+                <span className="text-xs opacity-80">Real Meta ads (PAUSED)</span>
+              </button>
+            </div>
+            {mode === 'live' && (
+              <p className="text-xs text-amber-700">
+                Live ads are created PAUSED. They do not spend money until you activate them in Meta
+                Ads Manager.
+              </p>
+            )}
+          </fieldset>
+
+          {/* Live-only fields */}
+          {mode === 'live' && (
+            <>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="pageId">Facebook Page</Label>
+                  <button
+                    type="button"
+                    onClick={refreshPages}
+                    disabled={pagesRefreshing}
+                    className="text-primary text-xs underline-offset-4 hover:underline disabled:opacity-50"
+                  >
+                    {pagesRefreshing ? 'Refreshing…' : 'Refresh pages'}
+                  </button>
+                </div>
+                {pages.length === 0 ? (
+                  <p className="text-muted-foreground text-xs">
+                    No pages cached yet. Click &quot;Refresh pages&quot; to fetch from Meta.
+                  </p>
+                ) : (
+                  <select
+                    id="pageId"
+                    value={pageId}
+                    onChange={(e) => setPageId(e.target.value)}
+                    className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+                  >
+                    <option value="">— Select a page —</option>
+                    {pages.map((p) => (
+                      <option key={p.pageId} value={p.pageId}>
+                        {p.pageName} ({p.pageId})
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {pagesError && <p className="text-destructive text-xs">{pagesError}</p>}
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="offerUrl">Offer URL</Label>
+                <Input
+                  id="offerUrl"
+                  type="url"
+                  value={offerUrl}
+                  onChange={(e) => setOfferUrl(e.target.value)}
+                  placeholder="https://your-offer.example/landing"
+                />
+                <p className="text-muted-foreground text-xs">
+                  Where clicks send users. Pre-filled from the concept&apos;s offer URL.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Targeting</Label>
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomizeTargeting((v) => !v)}
+                    className="text-primary text-xs underline-offset-4 hover:underline"
+                  >
+                    {showCustomizeTargeting ? 'Hide' : 'Customize'}
+                  </button>
+                </div>
+                <p className="text-muted-foreground text-xs">
+                  {countries.join(', ')} · Age {ageMin}–{ageMax} · {launchSnapshot.optimizationGoal}{' '}
+                  · {launchSnapshot.placementType}
+                </p>
+                {showCustomizeTargeting && (
+                  <div className="bg-card space-y-3 rounded-md border p-3">
+                    <div>
+                      <Label className="text-xs">Countries</Label>
+                      <Input
+                        type="text"
+                        value={countries.join(', ')}
+                        onChange={(e) =>
+                          setCountries(
+                            e.target.value
+                              .split(',')
+                              .map((c) => c.trim().toUpperCase())
+                              .filter(Boolean),
+                          )
+                        }
+                        placeholder="US, CA, GB"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <Label className="text-xs">Min age</Label>
+                        <Input
+                          type="number"
+                          min={13}
+                          max={65}
+                          value={ageMin}
+                          onChange={(e) => setAgeMin(Number(e.target.value) || 13)}
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Max age</Label>
+                        <Input
+                          type="number"
+                          min={13}
+                          max={65}
+                          value={ageMax}
+                          onChange={(e) => setAgeMax(Number(e.target.value) || 65)}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {/* Budget + cap summary */}
           <div className="bg-card space-y-1 rounded-md border p-3 text-sm">
             <p>
               Variants to launch: <strong>{launchableCount}</strong>
@@ -218,15 +460,14 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
               Per-ad daily budget: <strong>${launchSnapshot.perAdBudgetUsd.toFixed(2)}</strong>
             </p>
             <p>
-              Total daily budget: <strong>${totalBudgetIfLaunched.toFixed(2)}</strong>
+              Total daily exposure: <strong>${totalBudgetIfLaunched.toFixed(2)}</strong>
             </p>
-            <p>
-              Optimization goal: <strong>{launchSnapshot.optimizationGoal}</strong> · placement{' '}
-              <strong>{launchSnapshot.placementType}</strong>
-            </p>
-            <p className="text-muted-foreground text-xs">
-              Mode: <strong>DRY_RUN</strong> — placeholder Meta IDs, no real spend.
-            </p>
+            {mode === 'live' && isFirstLiveLaunch && (
+              <p className="text-xs text-amber-700">
+                ⚠️ First live launch — capped at ${launchSnapshot.firstLaunchCapUsd.toFixed(2)}{' '}
+                total daily exposure.
+              </p>
+            )}
             <hr className="my-2" />
             <p className="text-xs">
               Daily launch cap: <strong>${launchSnapshot.capUsd.toFixed(2)}</strong> · committed
@@ -239,7 +480,14 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
                 the cap in Settings, or wait until tomorrow.
               </p>
             )}
+            {exceedsFirstLaunchCap && (
+              <p className="text-destructive text-xs">
+                First live launch cannot exceed ${launchSnapshot.firstLaunchCapUsd.toFixed(2)} total
+                daily exposure. Reduce variants or lower per-ad budget in Settings.
+              </p>
+            )}
           </div>
+
           {launchError && (
             <p className="text-destructive text-sm" role="alert">
               {launchError}
@@ -254,8 +502,90 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
             >
               Cancel
             </Button>
-            <Button type="button" onClick={confirmLaunch} disabled={launchPending || exceedsCap}>
-              {launchPending ? 'Launching…' : 'Confirm launch'}
+            <Button
+              type="button"
+              onClick={confirmLaunch}
+              disabled={
+                launchPending ||
+                exceedsCap ||
+                exceedsFirstLaunchCap ||
+                (mode === 'live' && (!pageId || !offerUrl || countries.length === 0))
+              }
+            >
+              {launchPending
+                ? 'Launching…'
+                : mode === 'live'
+                  ? 'Launch (PAUSED in Meta — activate manually)'
+                  : 'Confirm launch'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Phase 4b triple-confirm dialog. Required once per user before
+          any live launch. */}
+      <Dialog open={showTripleAck} onOpenChange={setShowTripleAck}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>First-time live launch — read carefully</DialogTitle>
+            <DialogDescription>
+              Live launches push real ads to your Meta ad account. They are created PAUSED, so no
+              money moves until you activate them. Still — confirm you understand each statement
+              below before continuing.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={ack1}
+                onChange={(e) => setAck1(e.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>I have funds available in my Meta ad account.</span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={ack2}
+                onChange={(e) => setAck2(e.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                I understand each ad will spend real money up to its daily budget once activated.
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={ack3}
+                onChange={(e) => setAck3(e.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                I will manually activate ads in Meta Ads Manager — they always start PAUSED.
+              </span>
+            </label>
+          </div>
+          <p className="text-muted-foreground text-xs">
+            Your first live launch is hard-capped at ${launchSnapshot.firstLaunchCapUsd.toFixed(2)}{' '}
+            total daily exposure. Subsequent launches use your daily launch cap from Settings.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setShowTripleAck(false)}
+              disabled={tripleAckPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={confirmTripleAck}
+              disabled={!(ack1 && ack2 && ack3) || tripleAckPending}
+            >
+              {tripleAckPending ? 'Saving…' : 'Continue to launch'}
             </Button>
           </div>
         </DialogContent>

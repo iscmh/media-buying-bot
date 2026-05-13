@@ -37,12 +37,26 @@ export async function sendGenerationJobEvent(input: {
 export async function sendMetaLaunchEvent(input: {
   userId: string;
   generationJobId: string;
+  mode?: 'mock' | 'live';
+  pageId?: string;
+  offerUrl?: string;
+  targetingCountries?: string[];
+  ageMin?: number;
+  ageMax?: number;
+  perAdBudgetUsd?: number;
 }): Promise<void> {
   await inngest.send({
     name: 'meta/launch.requested',
     data: {
       userId: input.userId,
       generationJobId: input.generationJobId,
+      mode: input.mode,
+      pageId: input.pageId,
+      offerUrl: input.offerUrl,
+      targetingCountries: input.targetingCountries,
+      ageMin: input.ageMin,
+      ageMax: input.ageMax,
+      perAdBudgetUsd: input.perAdBudgetUsd,
     },
   });
 }

@@ -1,7 +1,7 @@
 import { notFound } from 'next/navigation';
 import { and, asc, eq } from 'drizzle-orm';
 import { assertDailyLaunchBudgetCap, getDb, schema } from '@mbb/db';
-import { PLATFORM_HARD_AD_DAILY_BUDGET_USD } from '@mbb/shared';
+import { FIRST_LIVE_LAUNCH_HARD_CAP_USD, PLATFORM_HARD_AD_DAILY_BUDGET_USD } from '@mbb/shared';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
@@ -34,21 +34,32 @@ export default async function JobReviewPage({ params }: Props) {
     conceptIds.length > 0
       ? await db.query.concepts.findFirst({
           where: eq(schema.concepts.id, conceptIds[0]!),
-          columns: { contentType: true },
+          columns: { contentType: true, offerUrl: true },
         })
       : null;
   const conceptType = concept?.contentType ?? 'static';
 
-  // Phase 4a: launch context — ack + budget cap snapshot so the dialog
-  // can show "you have $X remaining today" without an extra round trip.
+  // Phase 4a + 4b launch context: settings, cached pages, cap snapshot,
+  // first-live-launch state. Passed into the client so the dialog
+  // doesn't need a follow-up fetch on open.
   const settings = await db.query.userSettings.findFirst({
     where: eq(schema.userSettings.userId, userId),
     columns: {
       launchAcknowledgedAt: true,
+      liveLaunchAcknowledgedAt: true,
+      liveLaunchCount: true,
       defaultAdDailyBudgetUsd: true,
       defaultOptimizationGoal: true,
       defaultPlacementType: true,
+      defaultPageId: true,
+      defaultTargetingCountries: true,
+      defaultAgeMin: true,
+      defaultAgeMax: true,
     },
+  });
+  const metaPages = await db.query.metaPages.findMany({
+    where: eq(schema.metaPages.userId, userId),
+    columns: { pageId: true, pageName: true },
   });
   const perAdBudget = Math.min(
     Number(settings?.defaultAdDailyBudgetUsd ?? 10),
@@ -57,12 +68,19 @@ export default async function JobReviewPage({ params }: Props) {
   const launchCap = await assertDailyLaunchBudgetCap(userId, 0);
   const launchSnapshot = {
     acknowledged: !!settings?.launchAcknowledgedAt,
+    liveAcknowledged: !!settings?.liveLaunchAcknowledgedAt,
+    liveLaunchCount: settings?.liveLaunchCount ?? 0,
+    firstLaunchCapUsd: FIRST_LIVE_LAUNCH_HARD_CAP_USD,
     perAdBudgetUsd: perAdBudget,
     optimizationGoal: settings?.defaultOptimizationGoal ?? 'CONVERSIONS',
     placementType: settings?.defaultPlacementType ?? 'advantage_plus',
-    committedTodayUsd: launchCap.allowed
-      ? launchCap.committedTodayUsd
-      : launchCap.committedTodayUsd,
+    defaultPageId: settings?.defaultPageId ?? null,
+    defaultOfferUrl: concept?.offerUrl ?? '',
+    defaultCountries: settings?.defaultTargetingCountries ?? ['US'],
+    defaultAgeMin: settings?.defaultAgeMin ?? 18,
+    defaultAgeMax: settings?.defaultAgeMax ?? 65,
+    metaPages: metaPages.map((p) => ({ pageId: p.pageId, pageName: p.pageName })),
+    committedTodayUsd: launchCap.committedTodayUsd,
     capUsd: launchCap.capUsd,
     remainingUsd: launchCap.allowed
       ? launchCap.remainingUsd
