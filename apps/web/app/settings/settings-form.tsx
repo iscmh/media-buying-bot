@@ -180,6 +180,55 @@ const FIELDS: Array<{
     help: 'Maximum audience age. Must be ≥ min age.',
     type: 'integer',
   },
+  // --- Kill / scale thresholds (Phase 5) ---
+  {
+    name: 'pollingIntervalMinutes',
+    label: 'Polling interval (min)',
+    help: 'How often the bot checks each active ad. 15–240 min. Lower = faster reaction, more Meta API calls.',
+    type: 'integer',
+  },
+  {
+    name: 'killMaxCpcUsd',
+    label: 'Kill: max CPC (USD)',
+    help: 'Above this CPC (after ≥ $3 spent), the bot proposes killing the ad.',
+    type: 'currency',
+  },
+  {
+    name: 'killNoConvSpendUsd',
+    label: 'Kill: zero-conversion spend (USD)',
+    help: 'If the ad has spent this much with no conversions, propose killing.',
+    type: 'currency',
+  },
+  {
+    name: 'killMinCtrPct',
+    label: 'Kill: min CTR (%)',
+    help: 'Below this CTR (after ≥ 1000 impressions), propose killing.',
+    type: 'percent',
+  },
+  {
+    name: 'scaleMinRoas',
+    label: 'Scale: min implied ROAS',
+    help: 'Conversion-count × $20 / spend. (Real per-conversion value lands in Phase 6.)',
+    type: 'number',
+  },
+  {
+    name: 'scaleMinSpendUsd',
+    label: 'Scale: min spend before considering (USD)',
+    help: 'Wait until the ad has spent at least this much before considering a scale.',
+    type: 'currency',
+  },
+  {
+    name: 'scaleIncrementPct',
+    label: 'Scale: increment (%)',
+    help: 'How much to raise daily budget per scale event. Capped at +25% for your first 5 scales, +200% absolute. 10–200%.',
+    type: 'percent',
+  },
+  {
+    name: 'scaleMaxDailyBudgetUsd',
+    label: 'Scale: max daily budget per ad (USD)',
+    help: 'Hard ceiling on per-ad daily budget after scaling. 10–1000.',
+    type: 'currency',
+  },
   // --- Daily summaries ---
   {
     name: 'timezone',

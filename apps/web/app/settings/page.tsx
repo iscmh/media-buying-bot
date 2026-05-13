@@ -7,6 +7,7 @@ import {
   PLATFORM_HARD_LAUNCH_CEILING_USD,
 } from '@mbb/shared';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { AutomationAcks } from './automation-acks';
 import { SettingsForm } from './settings-form';
 
 export const metadata = { title: 'Settings — Media Buying Bot' };
@@ -30,6 +31,13 @@ export default async function SettingsPage() {
     columns: { pageId: true, pageName: true },
   });
 
+  // Phase 5: kill/scale ack flags drive the Automation acks card state
+  // (read-only display + first-time confirm buttons).
+  const ackSettings = await db.query.userSettings.findFirst({
+    where: eq(schema.userSettings.userId, userId),
+    columns: { killAcknowledgedAt: true, scaleAcknowledgedAt: true },
+  });
+
   return (
     <main className="container mx-auto max-w-3xl px-4 py-12">
       <header className="mb-6">
@@ -38,6 +46,11 @@ export default async function SettingsPage() {
           Bot configuration. Changes apply on the next launch / poll cycle.
         </p>
       </header>
+
+      <AutomationAcks
+        killAcknowledgedAt={ackSettings?.killAcknowledgedAt?.toISOString() ?? null}
+        scaleAcknowledgedAt={ackSettings?.scaleAcknowledgedAt?.toISOString() ?? null}
+      />
 
       <SettingsForm
         initialValues={current}
