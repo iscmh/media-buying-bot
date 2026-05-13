@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { boolean, integer, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { campaignObjectiveEnum } from './enums';
 import { users } from './users';
@@ -73,6 +74,19 @@ export const userSettings = pgTable('user_settings', {
     .default('10.00'),
   defaultOptimizationGoal: text('default_optimization_goal').notNull().default('CONVERSIONS'),
   defaultPlacementType: text('default_placement_type').notNull().default('advantage_plus'),
+
+  // Phase 4b: live (real Meta) launch gates + defaults.
+  liveLaunchAcknowledgedAt: timestamp('live_launch_acknowledged_at', { withTimezone: true }),
+  // Counter, not boolean — drives the $10 first-launch cap. Increments
+  // by 1 per successful live launch SESSION (not per ad).
+  liveLaunchCount: integer('live_launch_count').notNull().default(0),
+  defaultPageId: text('default_page_id'),
+  defaultTargetingCountries: text('default_targeting_countries')
+    .array()
+    .notNull()
+    .default(sql`array['US']::text[]`),
+  defaultAgeMin: integer('default_age_min').notNull().default(18),
+  defaultAgeMax: integer('default_age_max').notNull().default(65),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

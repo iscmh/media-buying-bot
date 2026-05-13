@@ -13,6 +13,7 @@ export * from './concepts';
 export * from './generation';
 export * from './ads';
 export * from './launched-ads';
+export * from './meta-pages';
 export * from './performance';
 export * from './logs';
 export * from './ops';
