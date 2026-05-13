@@ -126,6 +126,10 @@ export const SettingsFormSchema = z.object({
   scaleIncrementPct: z.coerce.number().min(10).max(200),
   scaleMaxDailyBudgetUsd: z.coerce.number().min(10).max(1000),
 
+  // Phase 6 — daily Telegram digest. Hour is 0–23 in the user's tz.
+  dailySummaryEnabled: z.coerce.boolean(),
+  dailySummaryHourLocal: z.coerce.number().int().min(0).max(23),
+
   // Daily-summary timezone. Lives on users.timezone in the schema (Phase 1
   // decision), but rolled into the same form so save can write atomically.
   // Validation accepts the full IANA db, not just the picker's curated list.
@@ -173,6 +177,8 @@ export const SETTINGS_FIELD_KEYS = [
   'scaleMinSpendUsd',
   'scaleIncrementPct',
   'scaleMaxDailyBudgetUsd',
+  'dailySummaryEnabled',
+  'dailySummaryHourLocal',
   'timezone',
 ] as const satisfies ReadonlyArray<keyof SettingsFormInput>;
 

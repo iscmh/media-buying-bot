@@ -110,6 +110,10 @@ export const userSettings = pgTable('user_settings', {
   // Per-user counter feeding the first-5-scales +25% hardcoded cap.
   scaleSuccessCount: integer('scale_success_count').notNull().default(0),
 
+  // Phase 6 — daily Telegram digest.
+  dailySummaryEnabled: boolean('daily_summary_enabled').notNull().default(true),
+  dailySummaryHourLocal: integer('daily_summary_hour_local').notNull().default(9),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

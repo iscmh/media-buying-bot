@@ -133,6 +133,8 @@ function baseline(overrides: Partial<Record<string, unknown>>) {
     scaleMinSpendUsd: 20,
     scaleIncrementPct: 50,
     scaleMaxDailyBudgetUsd: 100,
+    dailySummaryEnabled: true,
+    dailySummaryHourLocal: 9,
     timezone: 'America/New_York',
     ...overrides,
   };

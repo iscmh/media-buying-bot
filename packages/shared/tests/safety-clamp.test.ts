@@ -74,6 +74,8 @@ function validBaseline(overrides: Partial<Record<string, number | string | boole
     scaleMinSpendUsd: 20,
     scaleIncrementPct: 50,
     scaleMaxDailyBudgetUsd: 100,
+    dailySummaryEnabled: true,
+    dailySummaryHourLocal: 9,
     timezone: 'America/New_York',
     ...overrides,
   };

@@ -50,6 +50,9 @@ export interface SettingsRow {
   scaleMinSpendUsd: number;
   scaleIncrementPct: number;
   scaleMaxDailyBudgetUsd: number;
+  // Phase 6 — daily Telegram digest.
+  dailySummaryEnabled: boolean;
+  dailySummaryHourLocal: number;
   timezone: string;
 }
 
@@ -93,6 +96,8 @@ export async function getUserSettings(userId: string): Promise<SettingsRow | nul
     scaleMinSpendUsd: Number(settingsRow.scaleMinSpendUsd),
     scaleIncrementPct: Number(settingsRow.scaleIncrementPct),
     scaleMaxDailyBudgetUsd: Number(settingsRow.scaleMaxDailyBudgetUsd),
+    dailySummaryEnabled: settingsRow.dailySummaryEnabled,
+    dailySummaryHourLocal: settingsRow.dailySummaryHourLocal,
     timezone: userRow.timezone,
   };
 }
@@ -179,6 +184,8 @@ export async function saveUserSettings(
         scaleMinSpendUsd: next.scaleMinSpendUsd.toFixed(2),
         scaleIncrementPct: next.scaleIncrementPct.toFixed(2),
         scaleMaxDailyBudgetUsd: next.scaleMaxDailyBudgetUsd.toFixed(2),
+        dailySummaryEnabled: next.dailySummaryEnabled,
+        dailySummaryHourLocal: next.dailySummaryHourLocal,
       })
       .where(eq(userSettings.userId, userId));
 
