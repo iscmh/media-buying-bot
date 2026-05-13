@@ -6,6 +6,8 @@ export {
   createAdCreative,
   createAd,
   uploadAdImage,
+  deleteCampaign,
+  deleteAdSet,
   effectiveLaunchMode,
   type CreateCampaignInput,
   type CreateAdSetInput,
@@ -13,6 +15,7 @@ export {
   type CreateAdInput,
   type UploadAdImageInput,
   type UploadAdImageResult,
+  type DeleteMetaObjectInput,
   type LaunchMode,
   type MetaCreateResult,
 } from './launch';

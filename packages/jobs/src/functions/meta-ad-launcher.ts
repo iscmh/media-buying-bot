@@ -4,6 +4,8 @@ import {
   createAdCreative,
   createAdSet,
   createCampaign,
+  deleteAdSet,
+  deleteCampaign,
   effectiveLaunchMode,
   uploadAdImage,
   type LaunchMode,
@@ -246,6 +248,11 @@ export const metaAdLauncher = inngest.createFunction(
           const baseName = `MBB ${ctx.nicheTag ?? 'concept'} v${variantIndex} ${shortId(variant.id)}`;
 
           return step.run(`launch-${variant.id}`, async () => {
+            // Phase 4b hotfix #2: track which Meta objects we've created
+            // so a mid-pipeline failure can roll them back instead of
+            // leaving orphans on the user's ad account.
+            let createdCampaignId: string | null = null;
+            let createdAdSetId: string | null = null;
             try {
               const campaign = await createCampaign({
                 userId,
@@ -264,6 +271,7 @@ export const metaAdLauncher = inngest.createFunction(
                   campaign.metaErrorCode,
                 );
               }
+              createdCampaignId = campaign.id;
 
               const adSet = await createAdSet({
                 userId,
@@ -286,6 +294,7 @@ export const metaAdLauncher = inngest.createFunction(
                   adSet.metaErrorCode,
                 );
               }
+              createdAdSetId = adSet.id;
 
               // Phase 4b hotfix #2: pre-upload image to /adimages and
               // pass the returned hash to createAdCreative. Meta rejects
@@ -389,12 +398,72 @@ export const metaAdLauncher = inngest.createFunction(
             } catch (err) {
               const errorMessage = err instanceof Error ? err.message : String(err);
               const rejectedByMeta = err instanceof MetaCreateError && err.metaErrorCode != null;
+
+              // Phase 4b hotfix #2: best-effort orphan cleanup. If we
+              // created a campaign and/or ad set before the failure,
+              // delete them so the user doesn't see dangling rows in
+              // Ads Manager. Each delete is wrapped — cleanup failures
+              // are logged but never crash the per-variant outcome.
+              const cleanup: {
+                attempted: boolean;
+                campaign: { id: string; ok: boolean; error?: string } | null;
+                adSet: { id: string; ok: boolean; error?: string } | null;
+              } = { attempted: false, campaign: null, adSet: null };
+              if (createdAdSetId || createdCampaignId) {
+                cleanup.attempted = true;
+                // Delete ad set first — campaign delete is more likely
+                // to succeed once children are gone.
+                if (createdAdSetId) {
+                  const r = await deleteAdSet({
+                    userId,
+                    accessToken: ctx.accessToken,
+                    objectId: createdAdSetId,
+                    mode: callerMode,
+                    generationJobId,
+                  });
+                  cleanup.adSet = { id: createdAdSetId, ok: r.ok, error: r.errorMessage };
+                }
+                if (createdCampaignId) {
+                  const r = await deleteCampaign({
+                    userId,
+                    accessToken: ctx.accessToken,
+                    objectId: createdCampaignId,
+                    mode: callerMode,
+                    generationJobId,
+                  });
+                  cleanup.campaign = { id: createdCampaignId, ok: r.ok, error: r.errorMessage };
+                }
+                await logAuditEvent({
+                  userId,
+                  eventType: 'meta_orphan_cleanup',
+                  eventData: {
+                    variant_id: variant.id,
+                    generation_job_id: generationJobId,
+                    triggering_error: errorMessage,
+                    campaign_cleanup: cleanup.campaign,
+                    adset_cleanup: cleanup.adSet,
+                    caller_mode: callerMode,
+                    effective_mode: effective,
+                  },
+                });
+              }
+
+              // Decide which Meta IDs to record on the row. If cleanup
+              // succeeded the IDs are gone from Meta — null them out so
+              // /launched doesn't link to a nonexistent campaign. If
+              // cleanup failed we keep the IDs as a forensic breadcrumb.
+              const persistCampaignId =
+                createdCampaignId && cleanup.campaign?.ok ? null : createdCampaignId;
+              const persistAdSetId = createdAdSetId && cleanup.adSet?.ok ? null : createdAdSetId;
+
               const db = getDb();
               await db.insert(schema.launchedAds).values({
                 userId,
                 generatedCreativeId: variant.id,
                 generationJobId,
                 conceptId: ctx.conceptId,
+                metaCampaignId: persistCampaignId,
+                metaAdSetId: persistAdSetId,
                 dailyBudgetUsd: ctx.dailyBudgetUsd.toFixed(2),
                 optimizationGoal: ctx.optimizationGoal,
                 placementType: ctx.placementType,
@@ -411,6 +480,7 @@ export const metaAdLauncher = inngest.createFunction(
                   error: errorMessage,
                   caller_mode: callerMode,
                   effective_mode: effective,
+                  cleanup_attempted: cleanup.attempted,
                 },
               });
               return { variantId: variant.id, ok: false, rejectedByMeta, error: errorMessage };

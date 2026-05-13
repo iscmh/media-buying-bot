@@ -13,6 +13,8 @@ import {
   createAdCreative,
   createAdSet,
   createCampaign,
+  deleteAdSet,
+  deleteCampaign,
   effectiveLaunchMode,
   uploadAdImage,
 } from '../src/launch';
@@ -422,5 +424,87 @@ describe('Phase 4b: Meta error response surfaces in MetaCreateResult', () => {
     });
     expect(result.ok).toBe(false);
     expect(result.errorMessage).toMatch(/no id field/);
+  });
+});
+
+describe('Phase 4b hotfix #2: orphan cleanup helpers', () => {
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+    vi.unstubAllGlobals();
+  });
+
+  it('deleteCampaign returns ok=true in mock mode (no fetch)', async () => {
+    process.env = { ...ORIGINAL_ENV, BOT_DRY_RUN: 'true' };
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await deleteCampaign({
+      userId: 'u',
+      accessToken: 'tok',
+      objectId: '12345',
+      mode: 'mock',
+    });
+    expect(result.ok).toBe(true);
+    expect(result.dryRun).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('deleteCampaign issues a DELETE to /<id> in live mode', async () => {
+    process.env = { ...ORIGINAL_ENV, BOT_DRY_RUN: 'false' };
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response('{}', { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await deleteCampaign({
+      userId: 'u',
+      accessToken: 'tok',
+      objectId: '52552097768220',
+      mode: 'live',
+    });
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toContain('/52552097768220');
+    expect((init as RequestInit).method).toBe('DELETE');
+  });
+
+  it('deleteAdSet issues a DELETE to /<id> in live mode', async () => {
+    process.env = { ...ORIGINAL_ENV, BOT_DRY_RUN: 'false' };
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response('{}', { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await deleteAdSet({
+      userId: 'u',
+      accessToken: 'tok',
+      objectId: '52552097774020',
+      mode: 'live',
+    });
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const call = fetchMock.mock.calls[0]!;
+    expect(call[0]).toContain('/52552097774020');
+    expect((call[1] as RequestInit).method).toBe('DELETE');
+  });
+
+  it('delete helpers swallow 4xx — ok=false but no throw (best-effort)', async () => {
+    process.env = { ...ORIGINAL_ENV, BOT_DRY_RUN: 'false' };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { message: 'gone already', code: 100 } }), {
+            status: 400,
+          }),
+      ),
+    );
+    const result = await deleteCampaign({
+      userId: 'u',
+      accessToken: 'tok',
+      objectId: 'already_deleted',
+      mode: 'live',
+    });
+    expect(result.ok).toBe(false);
+    expect(result.errorMessage).toMatch(/gone already/);
+    // No throw — caller can move on.
   });
 });

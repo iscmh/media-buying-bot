@@ -555,3 +555,81 @@ function extractMetaError(body: unknown): { message?: string; code?: number } {
   if (!error) return {};
   return { message: error.message, code: error.code };
 }
+
+// =========================================================================
+// Orphan cleanup (Phase 4b hotfix #2 — part 2).
+//
+// When the per-variant pipeline fails AFTER createCampaign + createAdSet
+// succeed (e.g. uploadAdImage rejects, createAdCreative errors), the
+// campaign + ad set are left dangling on Meta. Best-effort: try to
+// delete them; if cleanup itself fails, log and move on. The user's
+// launched_ads row records the failure regardless.
+// =========================================================================
+
+export interface DeleteMetaObjectInput {
+  userId: string;
+  accessToken: string;
+  /** The full Meta object id, e.g. '52552097768220'. */
+  objectId: string;
+  mode: LaunchMode;
+  generationJobId?: string;
+}
+
+async function deleteMetaObject(
+  input: DeleteMetaObjectInput,
+  endpoint: string,
+): Promise<{ ok: boolean; dryRun: boolean; errorMessage?: string }> {
+  const effective = effectiveLaunchMode(input.mode);
+  const t0 = Date.now();
+
+  if (effective === 'mock') {
+    await logMetaApiCall({
+      userId: input.userId,
+      endpoint,
+      method: 'DELETE',
+      requestBody: {
+        _dry_run: true,
+        _caller_mode: input.mode,
+        _env_override: input.mode === 'live',
+        generation_job_id: input.generationJobId ?? null,
+      },
+      responseStatus: 0,
+      responseBody: { _dry_run: true },
+      latencyMs: Date.now() - t0,
+      dryRun: true,
+    });
+    return { ok: true, dryRun: true };
+  }
+
+  try {
+    const result = await callMeta({
+      userId: input.userId,
+      endpoint,
+      method: 'DELETE',
+      accessToken: input.accessToken,
+    });
+    if (result.status >= 200 && result.status < 300) {
+      return { ok: true, dryRun: false };
+    }
+    const { message } = extractMetaError(result.body);
+    return {
+      ok: false,
+      dryRun: false,
+      errorMessage: message ?? `Meta DELETE returned HTTP ${result.status}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      dryRun: false,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+export async function deleteCampaign(input: DeleteMetaObjectInput) {
+  return deleteMetaObject(input, `/${input.objectId}`);
+}
+
+export async function deleteAdSet(input: DeleteMetaObjectInput) {
+  return deleteMetaObject(input, `/${input.objectId}`);
+}
