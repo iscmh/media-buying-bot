@@ -6,11 +6,19 @@ const PUBLIC_PATHS = new Set([
   '/signup',
   '/login',
   '/waitlist',
+  '/apply',
   '/legal/tos',
   '/legal/privacy',
 ]);
 
-const PUBLIC_PREFIXES = ['/api/auth', '/api/inngest', '/api/health', '/_next', '/favicon'];
+const PUBLIC_PREFIXES = [
+  '/api/auth',
+  '/api/inngest',
+  '/api/health',
+  '/api/webhooks',
+  '/_next',
+  '/favicon',
+];
 
 /**
  * Middleware does ONE job: redirect unauthenticated requests on protected
