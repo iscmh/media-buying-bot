@@ -51,6 +51,21 @@ export const ResendEnvSchema = z.object({
   RESEND_FROM_EMAIL: z.string().email().optional(),
 });
 
+/**
+ * Phase 8: Whop billing integration. All optional at the schema level —
+ * the app boots without them and falls back to "no subscription" gating.
+ * Production must set every field; dev can leave them blank and the
+ * webhook endpoint will reject every incoming probe with 401.
+ */
+export const WhopEnvSchema = z.object({
+  WHOP_API_KEY: z.string().min(1).optional(),
+  WHOP_WEBHOOK_SECRET: z.string().min(1).optional(),
+  WHOP_PRODUCT_ID_MONTHLY: z.string().min(1).optional(),
+  WHOP_PRODUCT_ID_ANNUAL: z.string().min(1).optional(),
+  WHOP_PRODUCT_ID_LIFETIME: z.string().min(1).optional(),
+  WHOP_ADDON_PRODUCT_ID_AD_ACCOUNT: z.string().min(1).optional(),
+});
+
 /** Parse a slice of process.env, throwing a helpful error on failure. */
 export function parseEnv<T extends z.ZodTypeAny>(schema: T, source: NodeJS.ProcessEnv): z.infer<T> {
   const result = schema.safeParse(source);

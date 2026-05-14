@@ -41,6 +41,13 @@ export {
   type TimeRange,
 } from './dashboard';
 export {
+  checkActiveSubscription,
+  checkAdAccountSlotQuota,
+  type SubscriptionGateResult,
+  type SubscriptionGateReason,
+  type QuotaResult,
+} from './subscription';
+export {
   validateInviteCode,
   createInviteCode,
   revokeInviteCode,
