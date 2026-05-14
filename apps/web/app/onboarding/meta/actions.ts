@@ -3,7 +3,14 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { decryptSecret, encryptSecret, getDb, logAuditEvent, schema } from '@mbb/db';
+import {
+  checkAdAccountSlotQuota,
+  decryptSecret,
+  encryptSecret,
+  getDb,
+  logAuditEvent,
+  schema,
+} from '@mbb/db';
 import { MetaSelectionSchema, MetaTokenInputSchema } from '@mbb/shared';
 import { listAdAccounts, listBusinesses, verifyMetaToken } from '@/lib/meta/graph-api';
 import { isAdAccountSelectable, type AdAccountRow, type BusinessRow } from '@/lib/meta/types';
@@ -192,6 +199,21 @@ export async function selectMetaBusinessAction(
         errorMessage: `Ad account ${aa.name} is not active and cannot be selected.`,
       };
     }
+  }
+
+  // Phase 8: ad-account-slot quota. Default entitlement is 1 slot;
+  // add-on Whop purchases bump it. Don't let a 2nd+ ad-account land
+  // if the user hasn't paid for the extra slot. Because this code
+  // OVERWRITES adAccountIds on the user's single meta_connections
+  // row, the post-write total equals the selection length — compare
+  // directly against the limit rather than using helper.allowed
+  // (which would double-count the current row).
+  const quota = await checkAdAccountSlotQuota({ userId: user.id });
+  if (parsed.data.adAccountIds.length > quota.limit) {
+    return {
+      ok: false,
+      errorMessage: `You've selected ${parsed.data.adAccountIds.length} ad accounts but your plan includes ${quota.limit}. Add the $49/mo per-ad-account slot at whop.com/orders to connect more.`,
+    };
   }
 
   await db

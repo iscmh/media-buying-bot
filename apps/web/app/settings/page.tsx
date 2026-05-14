@@ -1,5 +1,11 @@
 import { eq } from 'drizzle-orm';
-import { getDb, getUserSettings, schema } from '@mbb/db';
+import {
+  checkActiveSubscription,
+  checkAdAccountSlotQuota,
+  getDb,
+  getUserSettings,
+  schema,
+} from '@mbb/db';
 import {
   PLATFORM_HARD_AD_DAILY_BUDGET_USD,
   PLATFORM_HARD_AI_CEILING_USD,
@@ -8,6 +14,7 @@ import {
 } from '@mbb/shared';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { AutomationAcks } from './automation-acks';
+import { BillingSection } from './billing-section';
 import { SettingsForm } from './settings-form';
 
 export const metadata = { title: 'Settings — Media Buying Bot' };
@@ -38,6 +45,14 @@ export default async function SettingsPage() {
     columns: { killAcknowledgedAt: true, scaleAcknowledgedAt: true },
   });
 
+  // Phase 8: billing card snapshot (subscription status + ad-account
+  // slot quota). The /billing-required gate already handles the
+  // hard-no-access path; on /settings we just surface the state.
+  const [sub, quota] = await Promise.all([
+    checkActiveSubscription(userId),
+    checkAdAccountSlotQuota({ userId }),
+  ]);
+
   return (
     <main className="container mx-auto max-w-3xl px-4 py-12">
       <header className="mb-6">
@@ -46,6 +61,28 @@ export default async function SettingsPage() {
           Bot configuration. Changes apply on the next launch / poll cycle.
         </p>
       </header>
+
+      <BillingSection
+        isFoundingMember={sub.isFoundingMember}
+        plan={sub.plan ?? null}
+        status={
+          sub.isFoundingMember
+            ? null
+            : sub.reason === 'active'
+              ? 'active'
+              : sub.reason === 'past_due'
+                ? 'past_due'
+                : sub.reason === 'canceled'
+                  ? 'canceled'
+                  : sub.reason === 'expired'
+                    ? 'expired'
+                    : null
+        }
+        currentPeriodEnd={sub.currentPeriodEnd ?? null}
+        adAccountSlotsUsed={quota.used}
+        adAccountSlotsLimit={quota.limit}
+        whopAddonProductId={process.env.WHOP_ADDON_PRODUCT_ID_AD_ACCOUNT ?? null}
+      />
 
       <AutomationAcks
         killAcknowledgedAt={ackSettings?.killAcknowledgedAt?.toISOString() ?? null}
