@@ -114,6 +114,10 @@ export const userSettings = pgTable('user_settings', {
   dailySummaryEnabled: boolean('daily_summary_enabled').notNull().default(true),
   dailySummaryHourLocal: integer('daily_summary_hour_local').notNull().default(9),
 
+  // Phase 7 — founding-member tier flag. Auto-set on signup for the
+  // first FOUNDING_MEMBER_CAP users (see @mbb/shared/safety.ts).
+  isFoundingMember: boolean('is_founding_member').notNull().default(false),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

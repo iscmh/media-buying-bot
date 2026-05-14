@@ -15,6 +15,7 @@ export * from './ads';
 export * from './launched-ads';
 export * from './meta-pages';
 export * from './pending-approvals';
+export * from './beta-access';
 export * from './performance';
 export * from './logs';
 export * from './ops';

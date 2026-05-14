@@ -40,3 +40,18 @@ export {
   type PerAdRow,
   type TimeRange,
 } from './dashboard';
+export {
+  validateInviteCode,
+  createInviteCode,
+  revokeInviteCode,
+  listInviteCodes,
+  joinWaitlist,
+  listWaitlistEntries,
+  approveWaitlistEntry,
+  countFoundingMembers,
+  type InviteCodeValidationResult,
+  type CreateInviteCodeInput,
+  type CreateInviteCodeResult,
+  type JoinWaitlistResult,
+  type ApproveWaitlistEntryResult,
+} from './beta-access';

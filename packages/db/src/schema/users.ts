@@ -37,6 +37,11 @@ export const users = pgTable('users', {
   tosAcceptedAt: timestamp('tos_accepted_at', { withTimezone: true }),
   tosVersion: text('tos_version'),
 
+  // Phase 7: which invite_codes row this user redeemed at signup.
+  // Filled in by the auth.users INSERT trigger from
+  // raw_user_meta_data.invite_code_id.
+  signedUpViaInviteCodeId: uuid('signed_up_via_invite_code_id'),
+
   // Soft delete.
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 

@@ -72,6 +72,24 @@ export const FIRST_SCALES_INCREMENT_PCT_CAP = 25;
 export const ASSUMED_CONVERSION_VALUE_USD = 20;
 
 /**
+ * Phase 7: cap on auto-granted founding-member flags. The first N
+ * users get is_founding_member = true at signup; once we hit N the
+ * SQL function check_founding_member_eligibility() returns false and
+ * later signups are regular users.
+ *
+ * MUST stay in sync with the `founding_member_cap` constant inside
+ * public.check_founding_member_eligibility() (supabase/migrations/
+ * 0015_beta_access.sql). They're enforced on different sides; both
+ * have to agree.
+ */
+export const FOUNDING_MEMBER_CAP = 50;
+
+/** Phase 7: default lifetime of a fresh invite code, in days. */
+export const INVITE_CODE_DEFAULT_TTL_DAYS = 30;
+/** Phase 7: length of a generated invite code (uppercase alphanumeric). */
+export const INVITE_CODE_LENGTH = 8;
+
+/**
  * Phase 4a: Meta optimization goals we support at launch time. Values
  * match Meta's Marketing API enum literals exactly so we can pass
  * straight through once BOT_DRY_RUN flips off.
