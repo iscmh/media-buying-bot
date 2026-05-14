@@ -9,6 +9,7 @@ import {
   schema,
   type TimeRange,
 } from '@mbb/db';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
@@ -47,6 +48,11 @@ export default async function DashboardPage({ searchParams }: Props) {
     where: eq(schema.users.id, user.userId),
     columns: { isPaused: true },
   });
+  const userSettingsRow = await db.query.userSettings.findFirst({
+    where: eq(schema.userSettings.userId, user.userId),
+    columns: { isFoundingMember: true },
+  });
+  const isFoundingMember = !!userSettingsRow?.isFoundingMember;
 
   const [pauseReason, summaries, userTimezone] = await Promise.all([
     userRow?.isPaused ? getLatestPauseReason(user.userId) : Promise.resolve(null),
@@ -81,7 +87,14 @@ export default async function DashboardPage({ searchParams }: Props) {
 
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-3xl font-bold">Dashboard</h1>
+            {isFoundingMember && (
+              <Badge variant="gold" title="Phase 7 founding-member tier — perks land in Phase 8.">
+                ⭐ Founding Member
+              </Badge>
+            )}
+          </div>
           <p className="text-muted-foreground text-sm">
             {user.email} · timezone {userTimezone}
           </p>
