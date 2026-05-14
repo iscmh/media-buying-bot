@@ -1,6 +1,6 @@
 import 'server-only';
 import { redirect } from 'next/navigation';
-import { getOnboardingState } from '@mbb/db';
+import { checkActiveSubscription, getOnboardingState } from '@mbb/db';
 import { ONBOARDING_STEPS, ONBOARDING_STEP_PATHS, type OnboardingStep } from '@mbb/shared';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -72,6 +72,15 @@ export async function requireOnboardingComplete(): Promise<{
   const state = await getOnboardingState(user.id);
   if (state.nextStep) {
     redirect(ONBOARDING_STEP_PATHS[state.nextStep]);
+  }
+
+  // Phase 8: subscription paywall. Founding members bypass (they got
+  // perpetual access pre-monetization). Everyone else needs an
+  // `active` subscription. /billing-required is the soft paywall that
+  // explains the state + sends them to /apply or the Whop portal.
+  const sub = await checkActiveSubscription(user.id);
+  if (!sub.hasAccess) {
+    redirect(`/billing-required?reason=${encodeURIComponent(sub.reason)}`);
   }
   return { userId: user.id, email: user.email ?? '' };
 }
