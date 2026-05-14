@@ -1,7 +1,14 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = new Set(['/', '/signup', '/login', '/legal/tos', '/legal/privacy']);
+const PUBLIC_PATHS = new Set([
+  '/',
+  '/signup',
+  '/login',
+  '/waitlist',
+  '/legal/tos',
+  '/legal/privacy',
+]);
 
 const PUBLIC_PREFIXES = ['/api/auth', '/api/inngest', '/api/health', '/_next', '/favicon'];
 
