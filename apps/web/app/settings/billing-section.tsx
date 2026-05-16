@@ -85,7 +85,7 @@ export function BillingSection({
         <div className="flex flex-wrap gap-2 pt-2">
           <Button asChild variant="outline" size="sm">
             <a href="https://whop.com/orders" target="_blank" rel="noopener noreferrer">
-              Manage billing on Whop ↗
+              Manage billing on Whop
             </a>
           </Button>
           {whopAddonProductId && (
@@ -95,7 +95,7 @@ export function BillingSection({
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                Add another ad account slot · $49/mo ↗
+                Add another ad account slot · $49/mo
               </a>
             </Button>
           )}

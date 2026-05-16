@@ -47,7 +47,7 @@ export function WaitlistAdminClient({ unapproved: initial, approved }: Props) {
     const result = await approveWaitlistEntryAction(id);
     setPendingId(null);
     if (!result.ok) {
-      setToast(`✗ ${result.errorMessage ?? 'Approval failed.'}`);
+      setToast(`Error: ${result.errorMessage ?? 'Approval failed.'}`);
       return;
     }
     setUnapproved((prev) => prev.filter((e) => e.id !== id));
@@ -56,7 +56,7 @@ export function WaitlistAdminClient({ unapproved: initial, approved }: Props) {
       : result.emailSent
         ? 'email sent'
         : 'but email send failed';
-    setToast(`✓ Approved. Code ${result.code} — ${where}.`);
+    setToast(`Approved. Code ${result.code} — ${where}.`);
     // Auto-clear toast after a few seconds.
     setTimeout(() => setToast(null), 6000);
   }

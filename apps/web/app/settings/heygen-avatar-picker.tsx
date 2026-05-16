@@ -115,7 +115,7 @@ export function AvatarPickerForm({ avatars, currentDefaultId, totalAvailable }: 
             target="_blank"
             rel="noopener noreferrer"
           >
-            Browse the full catalog on HeyGen ↗
+            Browse the full catalog on HeyGen
           </a>
         </p>
         {selectedId && (

@@ -464,8 +464,8 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
             </p>
             {mode === 'live' && isFirstLiveLaunch && (
               <p className="text-xs text-amber-700">
-                ⚠️ First live launch — capped at ${launchSnapshot.firstLaunchCapUsd.toFixed(2)}{' '}
-                total daily exposure.
+                First live launch — capped at ${launchSnapshot.firstLaunchCapUsd.toFixed(2)} total
+                daily exposure.
               </p>
             )}
             <hr className="my-2" />

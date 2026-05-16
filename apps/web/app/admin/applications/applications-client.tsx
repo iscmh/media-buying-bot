@@ -60,7 +60,7 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
     setBusy(false);
     setApproveDialogId(null);
     if (!result.ok) {
-      setToast(`✗ ${result.errorMessage ?? 'Approval failed.'}`);
+      setToast(`Error: ${result.errorMessage ?? 'Approval failed.'}`);
       return;
     }
     setPending((prev) => prev.filter((a) => a.id !== applicationId));
@@ -69,7 +69,7 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
       : result.emailSent
         ? 'email sent'
         : 'email FAILED';
-    setToast(`✓ Approved. Code ${result.inviteCode} · ${emailState}.`);
+    setToast(`Approved. Code ${result.inviteCode} · ${emailState}.`);
     setTimeout(() => setToast(null), 8000);
   }
 
@@ -83,11 +83,11 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
     setRejectDialogId(null);
     setRejectReason('');
     if (!result.ok) {
-      setToast(`✗ ${result.errorMessage ?? 'Rejection failed.'}`);
+      setToast(`Error: ${result.errorMessage ?? 'Rejection failed.'}`);
       return;
     }
     setPending((prev) => prev.filter((a) => a.id !== applicationId));
-    setToast('✓ Rejected.');
+    setToast('Rejected.');
     setTimeout(() => setToast(null), 3000);
   }
 
@@ -224,7 +224,7 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
                           rel="noopener noreferrer"
                           className="text-primary underline underline-offset-4"
                         >
-                          link ↗
+                          link
                         </a>
                       ) : (
                         '—'
