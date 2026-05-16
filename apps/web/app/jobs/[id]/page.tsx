@@ -2,13 +2,15 @@ import { notFound } from 'next/navigation';
 import { and, asc, eq } from 'drizzle-orm';
 import { assertDailyLaunchBudgetCap, getDb, schema } from '@mbb/db';
 import { FIRST_LIVE_LAUNCH_HARD_CAP_USD, PLATFORM_HARD_AD_DAILY_BUDGET_USD } from '@mbb/shared';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge, type BadgeVariant } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { JobReviewClient } from './job-review-client';
+import { JobTimeline } from './job-timeline';
 
-export const metadata = { title: 'Variant review — Ads Bot' };
+export const metadata = { title: 'Variant review' };
 export const dynamic = 'force-dynamic';
 
 interface Props {
@@ -88,46 +90,90 @@ export default async function JobReviewPage({ params }: Props) {
       : Math.max(0, launchCap.capUsd - launchCap.committedTodayUsd),
   };
 
+  const isProcessing = job.status === 'queued' || job.status === 'processing';
+  const isFailed = job.status === 'failed';
+
   return (
     <AppShell
       crumbs={[{ label: 'Jobs', href: '/concepts' }, { label: job.id.slice(0, 8) }]}
       contentClass="max-w-5xl"
     >
       <header className="mb-6">
-        <h1 className="text-fg text-2xl font-semibold tracking-tight">Variants</h1>
-        <p className="text-fg-muted mt-1 text-sm">
-          {job.variantCount ?? variants.length} requested · {job.providerChoice ?? 'gemini+claude'}{' '}
-          · status <strong>{job.status}</strong>
-          {job.mode === 'mock' && ' · MOCK'}
-          {job.estimatedCostUsd != null && ` · est $${job.estimatedCostUsd}`}
-          {' · queued '}
-          {formatDateTime(job.requestedAt)}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-fg text-2xl font-semibold tracking-tight">Variants</h1>
+          <Badge variant={jobStatusVariant(job.status)}>{job.status.replace(/_/g, ' ')}</Badge>
+          {job.mode === 'mock' && <Badge variant="outline">Mock</Badge>}
+        </div>
+        <div className="text-fg-muted mt-2 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 md:grid-cols-4">
+          <div>
+            <span className="text-fg-subtle">Requested </span>
+            <span className="font-mono">{job.variantCount ?? variants.length} variants</span>
+          </div>
+          <div>
+            <span className="text-fg-subtle">Provider </span>
+            <span className="font-mono">{job.providerChoice ?? 'gemini+claude'}</span>
+          </div>
+          {job.estimatedCostUsd != null && (
+            <div>
+              <span className="text-fg-subtle">Est cost </span>
+              <span className="font-mono">${job.estimatedCostUsd}</span>
+            </div>
+          )}
+          <div>
+            <span className="text-fg-subtle">Queued </span>
+            <span className="font-mono">{formatDateTime(job.requestedAt)}</span>
+          </div>
+        </div>
       </header>
 
-      {job.status === 'queued' || job.status === 'processing' ? (
+      <div className="mb-6">
+        <JobTimeline
+          conceptType={conceptType as 'static' | 'ugc'}
+          job={{
+            status: job.status,
+            mode: job.mode ?? 'live',
+            requestedAt: job.requestedAt,
+            completedAt: job.completedAt,
+            variantCount: job.variantCount,
+            providerChoice: job.providerChoice,
+            errorMessage: job.errorMessage,
+            metadata: job.metadata,
+          }}
+          variants={variants.map((v) => ({
+            id: v.id,
+            status: v.status,
+            fileUrl: v.fileUrl,
+            createdAtIso: v.createdAt.toISOString(),
+          }))}
+        />
+      </div>
+
+      {isProcessing && (
         <Card>
           <CardHeader>
-            <CardTitle>Generating…</CardTitle>
-            <CardDescription>
-              {conceptType === 'ugc'
-                ? 'Analyzing the source clip then generating variants.'
-                : 'Generating image + copy variants.'}{' '}
-              This page auto-refreshes every 4 seconds.
-            </CardDescription>
+            <CardTitle className="text-base">Working…</CardTitle>
           </CardHeader>
-          <CardContent>
-            <RefreshHint />
+          <CardContent className="text-fg-muted text-sm">
+            This page auto-refreshes every 4 seconds.
+            <meta httpEquiv="refresh" content="4" />
           </CardContent>
         </Card>
-      ) : job.status === 'failed' ? (
-        <Card className="border-destructive/40 bg-destructive/5">
+      )}
+
+      {isFailed && (
+        <Card>
           <CardHeader>
-            <CardTitle>Generation failed</CardTitle>
-            <CardDescription>{job.errorMessage ?? 'Unknown error.'}</CardDescription>
+            <CardTitle className="text-base text-[color:var(--destructive-color)]">
+              Generation failed
+            </CardTitle>
           </CardHeader>
+          <CardContent className="text-fg-muted text-sm">
+            {job.errorMessage ?? 'Unknown error.'}
+          </CardContent>
         </Card>
-      ) : (
+      )}
+
+      {!isProcessing && !isFailed && (
         <JobReviewClient
           jobId={job.id}
           conceptType={conceptType as 'static' | 'ugc'}
@@ -148,12 +194,9 @@ export default async function JobReviewPage({ params }: Props) {
   );
 }
 
-function RefreshHint() {
-  return (
-    <>
-      <div className="bg-muted-foreground/40 inline-block h-2 w-2 animate-pulse rounded-full" />
-      <span className="ml-2 text-sm">Working…</span>
-      <meta httpEquiv="refresh" content="4" />
-    </>
-  );
+function jobStatusVariant(status: string): BadgeVariant {
+  if (status === 'completed') return 'success';
+  if (status === 'failed') return 'destructive';
+  if (status === 'processing' || status === 'queued') return 'warning';
+  return 'outline';
 }
