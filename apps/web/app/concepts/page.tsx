@@ -1,13 +1,15 @@
 import Link from 'next/link';
 import { and, desc, eq, isNull } from 'drizzle-orm';
+import { FileVideo, ImageIcon } from 'lucide-react';
 import { getDb, schema } from '@mbb/db';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { ConceptUploadTabs } from './concept-upload-tabs';
 
-export const metadata = { title: 'Concepts — Ads Bot' };
+export const metadata = { title: 'Concepts' };
 
 export default async function ConceptsPage() {
   const { userId } = await requireOnboardingComplete();
@@ -31,14 +33,13 @@ export default async function ConceptsPage() {
       <header className="mb-6">
         <h1 className="text-fg text-2xl font-semibold tracking-tight">Concepts</h1>
         <p className="text-fg-muted mt-1 text-sm">
-          Upload winning creative concepts. The bot uses them as references when generating fresh
-          variants.
+          Upload winning creatives. The bot uses them as references when generating fresh variants.
         </p>
       </header>
 
       <Card>
         <CardHeader>
-          <CardTitle>Upload a concept</CardTitle>
+          <CardTitle className="text-base">Upload a concept</CardTitle>
           <CardDescription>
             Pick the path that matches the source — image with copy (Static) or video (UGC).
           </CardDescription>
@@ -50,29 +51,37 @@ export default async function ConceptsPage() {
 
       {recent.length > 0 && (
         <section className="mt-10">
-          <h2 className="mb-3 text-lg font-semibold">Recent concepts</h2>
+          <h2 className="text-fg mb-3 text-base font-semibold">Recent concepts</h2>
           <ul className="space-y-2">
-            {recent.map((c) => (
-              <li key={c.id}>
-                <Link
-                  href={`/concepts/${c.id}`}
-                  className="bg-card hover:bg-accent/30 flex items-center justify-between rounded-lg border p-4 transition-colors"
-                >
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-sm font-medium">
-                      {c.staticHeadline ?? labelForContentType(c.contentType)}
-                    </span>
-                    <span className="text-muted-foreground text-xs">
+            {recent.map((c) => {
+              const Icon = c.contentType === 'ugc' ? FileVideo : ImageIcon;
+              return (
+                <li key={c.id}>
+                  <Link
+                    href={`/concepts/${c.id}`}
+                    className="bg-bg-elevated hover:bg-bg-hover group flex items-center justify-between gap-3 rounded-md border p-3 transition-colors"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="bg-bg-active text-fg-muted flex h-9 w-9 shrink-0 items-center justify-center rounded">
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-fg truncate text-sm font-medium">
+                          {c.staticHeadline ?? labelForContentType(c.contentType)}
+                        </p>
+                        <p className="text-fg-muted text-xs">
+                          {c.nicheTag ? `${c.nicheTag} · ` : ''}
+                          {formatDateTime(c.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="shrink-0">
                       {labelForContentType(c.contentType)}
-                      {c.nicheTag ? ` · ${c.nicheTag}` : ''}
-                      {' · '}
-                      {formatDateTime(c.createdAt)}
-                    </span>
-                  </div>
-                  <span className="text-muted-foreground text-xs">View →</span>
-                </Link>
-              </li>
-            ))}
+                    </Badge>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
