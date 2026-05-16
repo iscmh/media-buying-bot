@@ -1,12 +1,15 @@
 import { eq } from 'drizzle-orm';
 import {
+  HeyGenAvatarNotConfiguredError,
   callClaude,
   checkHeyGenVideoStatus,
   checkKieAiVideoStatus,
+  classifyHeyGenError,
   listHeyGenAvatars,
   pickHeyGenAvatar,
   submitHeyGenVideo,
   submitKieAiVideo,
+  type HeyGenErrorCategory,
 } from '@mbb/ai-providers';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { SORA_PROMPT_OPTIMIZER_SYSTEM_PROMPT } from '@mbb/shared';
@@ -14,28 +17,34 @@ import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys, type ProviderKey } from '../lib/load-keys';
 
 /**
- * Phase 3b: real UGC variant generator. Triggered by analyze-concept's
- * fan-out (so this job runs AFTER vision deconstruction completes).
+ * Phase 3f: UGC variant generator — HeyGen Avatar Mode happy path.
  *
- * Live pipeline:
+ * Live pipeline (HeyGen):
  *   1. mark processing
  *   2. Claude refinement: send analysis JSON + intensity + count → get N
- *      Sora-shaped prompts back
+ *      script-shaped prompts back
  *   3. for each variant in batches of CONCURRENCY (3 — videos are slow,
- *      smaller concurrency keeps polling sane): submit to chosen provider
- *      (Kie.ai or HeyGen), poll until done, write generated_creatives row
+ *      smaller concurrency keeps polling sane):
+ *        - load user_settings.default_heygen_avatar_id (or env fallback)
+ *        - submit to HeyGen /v2/video/generate
+ *        - poll /v1/video_status.get every 10s for up to 20 minutes
+ *        - write generated_creatives row pointing at the video URL
  *   4. roll up cost, mark completed (or partially)
  *
- * Arcads: not implemented Phase 3b. Mark variants as failed with a
- * pointer-to-Phase-3.5 error message.
+ * Kie.ai (Sora 2) and Arcads paths are retained for backward compat with
+ * any stale jobs sitting in the queue, but no new UI surfaces them —
+ * see actions.ts auto-pick of 'heygen' for ugc concepts. Hold-the-line
+ * Phase 3f #1: don't delete, just stop calling.
  */
 
 const CONCURRENCY = 3;
 
-// Polling cadence: 10s × 30 = 5 minutes max wait per video. Inngest's
+// Polling cadence: 10s × 120 = 20 minutes max wait per HeyGen video.
+// Phase 3f bumps from 5 → 20 minutes — HeyGen avatar renders are
+// typically 2-7 minutes but queue spikes do happen. Inngest's
 // step.sleep + step.run pattern makes this durable across worker restarts.
 const POLL_INTERVAL_SECONDS = 10;
-const POLL_MAX_ATTEMPTS = 30;
+const POLL_MAX_ATTEMPTS = 120;
 
 const MOCK_VIDEO_URL = 'https://samplelib.com/lib/preview/mp4/sample-5s.mp4';
 
@@ -226,7 +235,15 @@ export const generateUgcVariants = inngest.createFunction(
               break;
             }
             if (checkOutcome.status === 'failed') {
-              pollError = checkOutcome.errorMessage ?? 'Provider reported failure';
+              // Map HeyGen-style errors (httpStatus surfaced by client) to
+              // user-facing copy; Kie.ai errors fall through unchanged.
+              pollError =
+                liveProvider === 'heygen'
+                  ? friendlyHeyGenError(
+                      classifyHeyGenError(checkOutcome.httpStatus, checkOutcome.errorMessage),
+                      checkOutcome.errorMessage,
+                    )
+                  : (checkOutcome.errorMessage ?? 'Provider reported failure');
               break;
             }
             // status === 'processing' → keep polling
@@ -236,13 +253,15 @@ export const generateUgcVariants = inngest.createFunction(
             await step.run(`write-failed-${variantIndex}`, () =>
               writeFailedVariant(userId, jobId, variantIndex),
             );
+            const timeoutMessage =
+              liveProvider === 'heygen'
+                ? 'HeyGen taking too long, try again in a few minutes.'
+                : `Provider did not finish within ${POLL_MAX_ATTEMPTS * POLL_INTERVAL_SECONDS}s`;
             return {
               index: variantIndex,
               ok: false,
               costUsd: pollCostUsd,
-              error:
-                pollError ??
-                `Provider did not finish within ${POLL_MAX_ATTEMPTS * POLL_INTERVAL_SECONDS}s`,
+              error: pollError ?? timeoutMessage,
             };
           }
 
@@ -340,6 +359,9 @@ async function submitOne(
     throw err;
   }
 
+  // DEPRECATED Phase 3f: Kie.ai (Sora 2) branch retained for stale
+  // jobs only. New UGC jobs are forced to providerChoice='heygen' by
+  // the generation form. Don't delete — safety net for in-flight queues.
   if (input.providerChoice === 'kie_ai') {
     const apiKey = keys.kie_ai!;
     const submission = await submitKieAiVideo({
@@ -357,40 +379,124 @@ async function submitOne(
     return { ok: true, taskId: submission.taskId, provider: 'kie_ai' };
   }
 
-  // HeyGen path: avatar matching + submit.
+  // HeyGen Avatar Mode happy path (Phase 3f).
   const apiKey = keys.heygen!;
-  const avatars = await listHeyGenAvatars({
-    userId: input.userId,
-    apiKey,
-    generationJobId: input.jobId,
-  });
-  if (!avatars.ok) {
-    return { ok: false, error: avatars.errorMessage ?? 'HeyGen /v2/avatars failed' };
-  }
-  const persona = extractPersonaFromAnalysis(input.analysisMetadata);
-  const matched = pickHeyGenAvatar(avatars.avatars, persona);
-  const fallbackId = process.env.HEYGEN_DEFAULT_AVATAR_ID;
-  const avatarId = matched?.avatar_id ?? fallbackId;
-  if (!avatarId) {
-    return {
-      ok: false,
-      error: 'No HeyGen avatar matched and HEYGEN_DEFAULT_AVATAR_ID not set',
-    };
+
+  let avatarId: string;
+  try {
+    avatarId = await selectHeyGenAvatar({
+      userId: input.userId,
+      apiKey,
+      analysisMetadata: input.analysisMetadata,
+      jobId: input.jobId,
+    });
+  } catch (err) {
+    if (err instanceof HeyGenAvatarNotConfiguredError) {
+      return { ok: false, error: err.message };
+    }
+    throw err;
   }
 
   // Use the operator prompt's Dialogue section as the spoken script.
   const script = extractDialogueFromSoraPrompt(input.soraPrompt);
+
+  // Optional voice id from user_settings — if absent HeyGen picks the
+  // avatar's default voice automatically.
+  const voiceId = await loadDefaultVoiceId(input.userId);
+
   const submission = await submitHeyGenVideo({
     userId: input.userId,
     apiKey,
     avatarId,
+    voiceId: voiceId ?? undefined,
     script,
     generationJobId: input.jobId,
   });
   if (!submission.ok || !submission.videoId) {
-    return { ok: false, error: submission.errorMessage ?? 'HeyGen submit failed' };
+    return {
+      ok: false,
+      error: friendlyHeyGenError(
+        classifyHeyGenError(submission.httpStatus, submission.errorMessage),
+        submission.errorMessage,
+      ),
+    };
   }
   return { ok: true, taskId: submission.videoId, provider: 'heygen' };
+}
+
+/**
+ * Phase 3f avatar-selection priority:
+ *   1. user_settings.default_heygen_avatar_id (UI-configured per user)
+ *   2. process.env.HEYGEN_DEFAULT_AVATAR_ID (platform-wide fallback)
+ *   3. SMART_AVATAR_MATCH=true → heuristic match from /v2/avatars
+ *   4. throw HeyGenAvatarNotConfiguredError (user-facing copy points
+ *      them to /settings)
+ *
+ * Steps 3 + 4 only run when nothing else matched. Step 3 silently falls
+ * through to step 4 if the matcher returns null OR if listAvatars fails.
+ */
+async function selectHeyGenAvatar(input: {
+  userId: string;
+  apiKey: string;
+  analysisMetadata: Record<string, unknown>;
+  jobId: string;
+}): Promise<string> {
+  const db = getDb();
+  const settings = await db.query.userSettings.findFirst({
+    where: eq(schema.userSettings.userId, input.userId),
+    columns: { defaultHeygenAvatarId: true },
+  });
+  if (settings?.defaultHeygenAvatarId) {
+    return settings.defaultHeygenAvatarId;
+  }
+
+  const envFallback = process.env.HEYGEN_DEFAULT_AVATAR_ID;
+  if (envFallback && envFallback.trim().length > 0) {
+    return envFallback;
+  }
+
+  if (process.env.SMART_AVATAR_MATCH === 'true') {
+    const avatars = await listHeyGenAvatars({
+      userId: input.userId,
+      apiKey: input.apiKey,
+      generationJobId: input.jobId,
+    });
+    if (avatars.ok) {
+      const matched = pickHeyGenAvatar(
+        avatars.avatars,
+        extractPersonaFromAnalysis(input.analysisMetadata),
+      );
+      if (matched) return matched.avatar_id;
+    }
+  }
+
+  throw new HeyGenAvatarNotConfiguredError();
+}
+
+async function loadDefaultVoiceId(userId: string): Promise<string | null> {
+  const db = getDb();
+  const row = await db.query.userSettings.findFirst({
+    where: eq(schema.userSettings.userId, userId),
+    columns: { defaultHeygenVoiceId: true },
+  });
+  return row?.defaultHeygenVoiceId ?? null;
+}
+
+function friendlyHeyGenError(category: HeyGenErrorCategory, raw: string | undefined): string {
+  switch (category) {
+    case 'auth':
+      return 'HeyGen rejected your API key. Reconnect HeyGen in settings.';
+    case 'credits':
+      return 'HeyGen is out of credits or rate-limited. Top up HeyGen API credits.';
+    case 'avatar_missing':
+      return 'Selected HeyGen avatar was not found. Pick a different default avatar in /settings.';
+    case 'timeout':
+      return 'HeyGen took too long to respond. Try again in a few minutes.';
+    case 'server':
+      return 'HeyGen had a server-side error. Try again shortly.';
+    default:
+      return raw ?? 'HeyGen submission failed.';
+  }
 }
 
 async function checkOne(
@@ -401,6 +507,7 @@ async function checkOne(
   videoUrl?: string;
   costUsd: number;
   errorMessage?: string;
+  httpStatus?: number;
 }> {
   const required: ProviderKey[] = [input.providerChoice];
   let keys;
