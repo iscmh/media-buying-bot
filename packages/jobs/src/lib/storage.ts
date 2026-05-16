@@ -23,11 +23,11 @@ export function getServiceRoleSupabase() {
 
 /**
  * Download a file from Supabase Storage and return base64 + mime type.
- * Used by analyze-concept for video → Gemini Vision inline_data.
+ * Used by analyze-concept for video → Gemini Vision.
  *
- * Hard cap of 20 MB — Gemini Vision inline_data limit. Caller should
- * pre-validate at job-submit time so we get a clean error before we burn
- * an Inngest step on a too-large file.
+ * Caller passes `maxBytes` as a defense-in-depth cap (post Phase 3h,
+ * 2 GB to match the Gemini Files API ceiling — callGeminiVision routes
+ * inline ≤ 20 MB and Files API for everything larger).
  */
 export async function downloadAsBase64(input: {
   bucket: string;

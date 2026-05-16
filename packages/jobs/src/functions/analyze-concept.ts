@@ -25,11 +25,14 @@ import { downloadAsBase64 } from '../lib/storage';
  *
  * On failure: mark job failed with a sanitized message, don't fan out.
  *
- * Concept video size cap: 20 MB. Caller (createGenerationJobAction)
- * pre-validates at submit; this is a defense-in-depth check.
+ * Concept video size cap: 2 GB — matches Gemini Files API's per-file
+ * ceiling (Phase 3h). callGeminiVision routes inline ≤ 20 MB and
+ * Files API for the rest; this cap is defense-in-depth so we don't
+ * burn an Inngest step on a file that the downstream call would
+ * reject anyway.
  */
 
-const GEMINI_VISION_MAX_BYTES = 20 * 1024 * 1024;
+const GEMINI_VISION_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const MOCK_METADATA = {
   _mock: true,
   analysis_version: 'phase-3a-stub',
