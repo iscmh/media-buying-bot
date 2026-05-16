@@ -435,7 +435,7 @@ async function submitOne(
  * Steps 3 + 4 only run when nothing else matched. Step 3 silently falls
  * through to step 4 if the matcher returns null OR if listAvatars fails.
  */
-async function selectHeyGenAvatar(input: {
+export async function selectHeyGenAvatar(input: {
   userId: string;
   apiKey: string;
   analysisMetadata: Record<string, unknown>;
@@ -482,7 +482,10 @@ async function loadDefaultVoiceId(userId: string): Promise<string | null> {
   return row?.defaultHeygenVoiceId ?? null;
 }
 
-function friendlyHeyGenError(category: HeyGenErrorCategory, raw: string | undefined): string {
+export function friendlyHeyGenError(
+  category: HeyGenErrorCategory,
+  raw: string | undefined,
+): string {
   switch (category) {
     case 'auth':
       return 'HeyGen rejected your API key. Reconnect HeyGen in settings.';
