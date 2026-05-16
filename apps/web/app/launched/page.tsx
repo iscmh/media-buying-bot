@@ -10,10 +10,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 
-export const metadata = { title: 'Launched ads — Media Buying Bot' };
+export const metadata = { title: 'Launched ads — Ads Bot' };
 export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 20;
@@ -51,10 +52,10 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
   const creativeById = new Map(creatives.map((c) => [c.id, c]));
 
   return (
-    <main className="container mx-auto max-w-6xl px-4 py-12">
+    <AppShell crumbs={[{ label: 'Launched ads' }]}>
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Launched ads</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Launched ads</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           Every ad the bot has pushed to Meta. Phase 4a runs in DRY_RUN — IDs show{' '}
           <code className="font-mono">dry_run_*</code> placeholders and no real money is spent.
         </p>
@@ -192,7 +193,7 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
           )}
         </nav>
       )}
-    </main>
+    </AppShell>
   );
 }
 

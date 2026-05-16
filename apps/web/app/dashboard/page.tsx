@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { MetricCard } from './_components/metric-card';
@@ -27,7 +28,7 @@ import { SpendChart } from './_components/spend-chart';
 import { TimeRangePicker } from './_components/time-range-picker';
 import { getConnectionSummaries } from './_lib/connection-summaries';
 
-export const metadata = { title: 'Dashboard — Media Buying Bot' };
+export const metadata = { title: 'Dashboard — Ads Bot' };
 export const dynamic = 'force-dynamic';
 
 const VALID_RANGES: TimeRange[] = ['24h', '7d', '30d', 'all'];
@@ -75,7 +76,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           : 'neutral';
 
   return (
-    <main className="container mx-auto px-4 py-12">
+    <AppShell crumbs={[{ label: 'Dashboard' }]} action={<TimeRangePicker current={range} />}>
       {pauseReason && (
         <PauseBanner
           reason={pauseReason.reason}
@@ -85,17 +86,14 @@ export default async function DashboardPage({ searchParams }: Props) {
         />
       )}
 
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-3xl font-bold">Dashboard</h1>
-            {isFoundingMember && <Badge variant="secondary">Founding member</Badge>}
-          </div>
-          <p className="text-muted-foreground text-sm">
-            {user.email} · timezone {userTimezone}
-          </p>
+      <div className="mb-6">
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-fg text-2xl font-semibold tracking-tight">Dashboard</h1>
+          {isFoundingMember && <Badge variant="secondary">Founding member</Badge>}
         </div>
-        <TimeRangePicker current={range} />
+        <p className="text-fg-muted mt-1 text-sm">
+          {user.email} · timezone {userTimezone}
+        </p>
       </div>
 
       {/* Metric cards — 2×3 on desktop. */}
@@ -310,6 +308,6 @@ export default async function DashboardPage({ searchParams }: Props) {
           </Card>
         </Link>
       </div>
-    </main>
+    </AppShell>
   );
 }

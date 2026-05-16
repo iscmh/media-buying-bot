@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { useFormStatus } from 'react-dom';
+import { AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   AD_ACCOUNT_STATUS_LABELS,
@@ -144,8 +145,9 @@ export function MetaSelectionForm({ businesses, adAccounts }: Props) {
                             <span className="font-mono text-xs">{aa.id}</span>
                             <span>{aa.name}</span>
                             {!selectable && (
-                              <span className="text-destructive ml-auto text-xs">
-                                ⚠ {AD_ACCOUNT_STATUS_LABELS[aa.account_status] ?? 'unavailable'} —
+                              <span className="ml-auto inline-flex items-center gap-1 text-xs text-[color:var(--destructive-color)]">
+                                <AlertTriangle className="h-3.5 w-3.5" />
+                                {AD_ACCOUNT_STATUS_LABELS[aa.account_status] ?? 'unavailable'} —
                                 reactivate before selecting
                               </span>
                             )}

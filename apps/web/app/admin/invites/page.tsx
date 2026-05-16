@@ -1,6 +1,7 @@
 import { countFoundingMembers, listInviteCodes } from '@mbb/db';
 import { FOUNDING_MEMBER_CAP } from '@mbb/shared';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireAdmin } from '@/lib/admin-gate';
 import { InvitesClient } from './invites-client';
@@ -13,10 +14,10 @@ export default async function AdminInvitesPage() {
   const [codes, foundingCount] = await Promise.all([listInviteCodes(), countFoundingMembers()]);
 
   return (
-    <main className="container mx-auto max-w-5xl px-4 py-12">
+    <AppShell crumbs={[{ label: 'Admin' }, { label: 'Invites' }]} contentClass="max-w-5xl">
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Invite codes</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Invite codes</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           Generate codes for direct invites. Codes are single-use and expire after 30 days unless
           you flip multi-use.
         </p>
@@ -62,10 +63,10 @@ export default async function AdminInvitesPage() {
         }))}
       />
 
-      <p className="text-muted-foreground mt-6 text-xs">
+      <p className="text-fg-muted mt-6 text-xs">
         Latest server time: {formatDateTime(new Date())}.
       </p>
-    </main>
+    </AppShell>
   );
 }
 

@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Link from 'next/link';
+import { CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -69,15 +70,18 @@ export function ApplyForm() {
   if (success) {
     return (
       <div className="space-y-3 text-sm">
-        <p className="text-foreground font-medium">Application received. ✓</p>
-        <p className="text-muted-foreground">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="text-success h-4 w-4" />
+          <p className="text-fg font-medium">Application received.</p>
+        </div>
+        <p className="text-fg-muted">
           We review every application personally. You&apos;ll hear from us within 48 hours at{' '}
           <code className="font-mono">{email}</code>.
         </p>
-        <p className="text-muted-foreground text-xs">
+        <p className="text-fg-muted text-xs">
           Already have an invite code?{' '}
-          <Link href="/signup" className="text-primary underline underline-offset-4">
-            Sign up →
+          <Link href="/signup" className="hover:text-fg underline transition-colors">
+            Sign up
           </Link>
         </p>
       </div>

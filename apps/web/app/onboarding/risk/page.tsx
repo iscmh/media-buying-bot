@@ -2,7 +2,7 @@ import { RISK_ACKNOWLEDGMENT_LABELS, RISK_SECTIONS } from '@/lib/content/risk';
 import { requireOnboardingStep } from '@/lib/onboarding-gate';
 import { RiskAcknowledgmentForm } from './risk-form';
 
-export const metadata = { title: 'Risk Acknowledgment — Media Buying Bot' };
+export const metadata = { title: 'Risk Acknowledgment' };
 
 export default async function OnboardingRiskPage() {
   await requireOnboardingStep('risk');

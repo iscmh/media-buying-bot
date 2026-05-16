@@ -17,7 +17,7 @@ export const TOS_SECTIONS: TosSection[] = [
   {
     heading: 'What this platform does',
     body: [
-      'Media Buying Bot automates Meta ad creative generation, launch, kill, and scale on behalf of customers running paid acquisition campaigns. You provide your own Meta Business Manager and your own AI UGC provider. We orchestrate the API calls and apply your kill/scale rules.',
+      'Ads Bot automates Meta ad creative generation, launch, kill, and scale on behalf of customers running paid acquisition campaigns. You provide your own Meta Business Manager and your own AI UGC provider. We orchestrate the API calls and apply your kill/scale rules.',
     ],
   },
   {
@@ -37,7 +37,7 @@ export const TOS_SECTIONS: TosSection[] = [
   {
     heading: 'Indemnification',
     body: [
-      "You indemnify and hold harmless Media Buying Bot, its operators, and its successors against any claims, damages, fines, or losses arising from: (a) the content of your ads, (b) your use of Meta's platforms in violation of Meta's policies, (c) the suspension, restriction, or banning of your Meta accounts, (d) regulatory action (FTC, state AGs, foreign equivalents) related to your offers, (e) chargebacks, refunds, or disputes from end-customers of your ads, (f) any third-party intellectual property claims relating to creative you upload or generate.",
+      "You indemnify and hold harmless Ads Bot, its operators, and its successors against any claims, damages, fines, or losses arising from: (a) the content of your ads, (b) your use of Meta's platforms in violation of Meta's policies, (c) the suspension, restriction, or banning of your Meta accounts, (d) regulatory action (FTC, state AGs, foreign equivalents) related to your offers, (e) chargebacks, refunds, or disputes from end-customers of your ads, (f) any third-party intellectual property claims relating to creative you upload or generate.",
     ],
   },
   {

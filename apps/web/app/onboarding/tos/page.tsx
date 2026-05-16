@@ -3,7 +3,7 @@ import { TOS_DISCLOSURE_BANNER, TOS_SECTIONS } from '@/lib/content/tos';
 import { requireOnboardingStep } from '@/lib/onboarding-gate';
 import { TosAcceptForm } from './tos-form';
 
-export const metadata = { title: 'Terms — Media Buying Bot' };
+export const metadata = { title: 'Terms' };
 
 export default async function OnboardingTosPage() {
   await requireOnboardingStep('tos');

@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { eq } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDate } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { TelegramConnectedSummary } from './connected-summary';
 
-export const metadata = { title: 'Telegram bot — Media Buying Bot' };
+export const metadata = { title: 'Telegram bot — Ads Bot' };
 
 export default async function ConnectTelegramPage() {
   const { userId } = await requireOnboardingComplete();
@@ -20,8 +21,8 @@ export default async function ConnectTelegramPage() {
   // "Disconnected · Reconnect →" line rather than an empty state.
   if (!conn || conn.status !== 'active' || !conn.tgChatId) {
     return (
-      <main className="container mx-auto max-w-2xl px-4 py-12">
-        <h1 className="mb-2 text-3xl font-bold">Telegram</h1>
+      <AppShell crumbs={[{ label: 'Connections' }, { label: 'Telegram' }]} contentClass="max-w-2xl">
+        <h1 className="text-fg mb-2 text-2xl font-semibold tracking-tight">Telegram</h1>
         <p className="text-destructive text-sm">
           Disconnected
           {conn?.updatedAt && <> · last linked {formatDate(conn.updatedAt)}</>}.{' '}
@@ -29,15 +30,15 @@ export default async function ConnectTelegramPage() {
             Reconnect →
           </Link>
         </p>
-      </main>
+      </AppShell>
     );
   }
 
   return (
-    <main className="container mx-auto max-w-2xl px-4 py-12">
+    <AppShell crumbs={[{ label: 'Connections' }, { label: 'Telegram' }]} contentClass="max-w-2xl">
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Telegram</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Telegram</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           Where the bot pings you for kill/scale decisions and daily summaries.
         </p>
       </header>
@@ -47,6 +48,6 @@ export default async function ConnectTelegramPage() {
         tgUsername={conn.metadata?.tgUsername ?? null}
         linkedAt={conn.linkedAt}
       />
-    </main>
+    </AppShell>
   );
 }

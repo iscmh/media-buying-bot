@@ -19,7 +19,7 @@ export function registerStatus(bot: Bot): void {
     const link = await getActiveLinkByChatId(tgChatId);
     if (!link) {
       await ctx.reply(
-        "This chat isn't linked to a Media Buying Bot account yet. Send `/start <code>` from the web app.",
+        "This chat isn't linked to a Ads Bot account yet. Send `/start <code>` from the web app.",
       );
       return;
     }

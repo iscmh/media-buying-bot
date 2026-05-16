@@ -63,7 +63,7 @@ export function registerStart(bot: Bot): void {
     }
 
     await ctx.reply(
-      'Welcome to Media Buying Bot.\n\nOpen the web app, finish the Meta connect step, then send the link code from the Telegram step here as `/start <code>`.',
+      'Welcome to Ads Bot.\n\nOpen the web app, finish the Meta connect step, then send the link code from the Telegram step here as `/start <code>`.',
     );
   });
 }

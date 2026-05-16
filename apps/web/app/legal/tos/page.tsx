@@ -1,7 +1,7 @@
 import { TOS_VERSION } from '@mbb/shared';
 import { TOS_DISCLOSURE_BANNER, TOS_SECTIONS } from '@/lib/content/tos';
 
-export const metadata = { title: 'Terms of Service — Media Buying Bot' };
+export const metadata = { title: 'Terms of Service' };
 
 /**
  * Publicly-readable canonical ToS. Same content source as /onboarding/tos

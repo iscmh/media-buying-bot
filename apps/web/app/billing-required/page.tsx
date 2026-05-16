@@ -3,9 +3,10 @@ import { redirect } from 'next/navigation';
 import { checkActiveSubscription } from '@mbb/db';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { PublicShell } from '@/components/shell/public-shell';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
-export const metadata = { title: 'Subscription required — Media Buying Bot' };
+export const metadata = { title: 'Subscription required' };
 export const dynamic = 'force-dynamic';
 
 type Reason = 'no_subscription' | 'past_due' | 'canceled' | 'expired';
@@ -32,40 +33,42 @@ export default async function BillingRequiredPage({ searchParams }: Props) {
   const copy = REASON_COPY[reason];
 
   return (
-    <main className="container mx-auto flex min-h-screen items-center justify-center px-4 py-12">
-      <Card className="w-full max-w-lg">
-        <CardHeader>
-          <CardTitle>{copy.title}</CardTitle>
-          <CardDescription>{copy.description}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {sub.currentPeriodEnd && (
-            <p className="text-muted-foreground text-sm">
-              Last period ended {sub.currentPeriodEnd.toISOString().slice(0, 10)}.
-            </p>
-          )}
-          <div className="flex flex-col gap-2 sm:flex-row">
-            {reason === 'no_subscription' ? (
-              <Button asChild>
-                <Link href="/apply">Apply for access</Link>
-              </Button>
-            ) : (
-              <Button asChild>
-                <a href="https://whop.com/orders" target="_blank" rel="noopener noreferrer">
-                  Manage billing on Whop ↗
-                </a>
-              </Button>
+    <PublicShell>
+      <div className="flex flex-1 items-center justify-center px-6 py-12">
+        <Card className="w-full max-w-lg">
+          <CardHeader>
+            <CardTitle className="text-xl">{copy.title}</CardTitle>
+            <CardDescription>{copy.description}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {sub.currentPeriodEnd && (
+              <p className="text-fg-muted text-sm">
+                Last period ended {sub.currentPeriodEnd.toISOString().slice(0, 10)}.
+              </p>
             )}
-            <Button asChild variant="outline">
-              <Link href="/apply">Re-apply</Link>
-            </Button>
-          </div>
-          <p className="text-muted-foreground text-xs">
-            Trouble accessing your account? Reply to your invite email and we&apos;ll sort it.
-          </p>
-        </CardContent>
-      </Card>
-    </main>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {reason === 'no_subscription' ? (
+                <Button asChild>
+                  <Link href="/apply">Apply for access</Link>
+                </Button>
+              ) : (
+                <Button asChild>
+                  <a href="https://whop.com/orders" target="_blank" rel="noopener noreferrer">
+                    Manage billing on Whop
+                  </a>
+                </Button>
+              )}
+              <Button asChild variant="outline">
+                <Link href="/apply">Re-apply</Link>
+              </Button>
+            </div>
+            <p className="text-fg-subtle text-xs">
+              Trouble accessing your account? Reply to your invite email and we&apos;ll sort it.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </PublicShell>
   );
 }
 
@@ -85,7 +88,7 @@ const REASON_COPY: Record<Reason, { title: string; description: string }> = {
   no_subscription: {
     title: 'Subscription required',
     description:
-      'Access to Media Buying Bot is by application. Apply below and we review every submission personally — usually within 48 hours.',
+      'Access to Ads Bot is by application. Apply below and we review every submission personally — usually within 48 hours.',
   },
   past_due: {
     title: 'Payment failed',

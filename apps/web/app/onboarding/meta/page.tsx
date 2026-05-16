@@ -6,7 +6,7 @@ import { MetaTokenPasteForm } from './token-form';
 import { MetaSelectionForm } from './selection-form';
 import { MetaConnectedSummary } from './connected-summary';
 
-export const metadata = { title: 'Connect Meta — Media Buying Bot' };
+export const metadata = { title: 'Connect Meta' };
 
 export default async function OnboardingMetaPage() {
   // allowComplete: page renders summary card if user is already connected.

@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDate } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { MetaConnectedSummary } from './connected-summary';
 
-export const metadata = { title: 'Meta connection — Media Buying Bot' };
+export const metadata = { title: 'Meta connection — Ads Bot' };
 
 export default async function ConnectMetaPage() {
   const { userId } = await requireOnboardingComplete();
@@ -34,8 +35,8 @@ export default async function ConnectMetaPage() {
       columns: { deletedAt: true },
     });
     return (
-      <main className="container mx-auto max-w-2xl px-4 py-12">
-        <h1 className="mb-2 text-3xl font-bold">Meta connection</h1>
+      <AppShell crumbs={[{ label: 'Connections' }, { label: 'Meta' }]} contentClass="max-w-2xl">
+        <h1 className="text-fg mb-2 text-2xl font-semibold tracking-tight">Meta connection</h1>
         <p className="text-destructive text-sm">
           Disconnected
           {lastRevoked?.deletedAt && (
@@ -45,15 +46,15 @@ export default async function ConnectMetaPage() {
             Reconnect →
           </Link>
         </p>
-      </main>
+      </AppShell>
     );
   }
 
   return (
-    <main className="container mx-auto max-w-2xl px-4 py-12">
+    <AppShell crumbs={[{ label: 'Connections' }, { label: 'Meta' }]} contentClass="max-w-2xl">
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Meta connection</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Meta connection</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           BYO token — you own the credential, we never see your password.
         </p>
       </header>
@@ -64,6 +65,6 @@ export default async function ConnectMetaPage() {
         tokenExpiresAt={conn.tokenExpiresAt}
         lastVerifiedAt={conn.lastVerifiedAt}
       />
-    </main>
+    </AppShell>
   );
 }

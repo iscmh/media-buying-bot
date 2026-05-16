@@ -1,5 +1,6 @@
 import { asc, desc, eq } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireAdmin } from '@/lib/admin-gate';
 import { ApplicationsClient } from './applications-client';
@@ -21,17 +22,17 @@ export default async function AdminApplicationsPage() {
   });
 
   return (
-    <main className="container mx-auto max-w-6xl px-4 py-12">
+    <AppShell crumbs={[{ label: 'Admin' }, { label: 'Applications' }]}>
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Applications</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Applications</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           Approve generates a Whop checkout link + an invite code, then emails the applicant (Resend
           or stub).
         </p>
       </header>
 
       <ApplicationsClient pending={pending.map(serialize)} processed={processed.map(serialize)} />
-    </main>
+    </AppShell>
   );
 }
 

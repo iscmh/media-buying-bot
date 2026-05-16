@@ -12,13 +12,14 @@ import {
   PLATFORM_HARD_CEILING_USD,
   PLATFORM_HARD_LAUNCH_CEILING_USD,
 } from '@mbb/shared';
+import { AppShell } from '@/components/shell/app-shell';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { AutomationAcks } from './automation-acks';
 import { BillingSection } from './billing-section';
 import { HeygenAvatarSection } from './heygen-avatar-section';
 import { SettingsForm } from './settings-form';
 
-export const metadata = { title: 'Settings — Media Buying Bot' };
+export const metadata = { title: 'Settings — Ads Bot' };
 
 export default async function SettingsPage() {
   const { userId } = await requireOnboardingComplete();
@@ -55,10 +56,10 @@ export default async function SettingsPage() {
   ]);
 
   return (
-    <main className="container mx-auto max-w-3xl px-4 py-12">
+    <AppShell crumbs={[{ label: 'Settings' }]} contentClass="max-w-3xl">
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Settings</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           Bot configuration. Changes apply on the next launch / poll cycle.
         </p>
       </header>
@@ -100,6 +101,6 @@ export default async function SettingsPage() {
         adDailyHardCeiling={PLATFORM_HARD_AD_DAILY_BUDGET_USD}
         metaPages={metaPagesRows}
       />
-    </main>
+    </AppShell>
   );
 }

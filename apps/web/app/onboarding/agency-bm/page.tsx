@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
-export const metadata = { title: 'Agency BM — Media Buying Bot' };
+export const metadata = { title: 'Agency BM' };
 
 /**
  * Agency BM partner referral information page. Phase 7 will turn this into

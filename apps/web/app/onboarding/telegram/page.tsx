@@ -4,7 +4,7 @@ import { requireOnboardingStep } from '@/lib/onboarding-gate';
 import { generateTelegramLinkCode } from './actions';
 import { TelegramLinkClient } from './telegram-client';
 
-export const metadata = { title: 'Link Telegram — Media Buying Bot' };
+export const metadata = { title: 'Link Telegram' };
 
 export default async function OnboardingTelegramPage() {
   const { userId } = await requireOnboardingStep('telegram');

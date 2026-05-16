@@ -1,14 +1,15 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AppShell } from '@/components/shell/app-shell';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 
-export const metadata = { title: 'Performance — Media Buying Bot' };
+export const metadata = { title: 'Performance — Ads Bot' };
 
 export default async function PerformancePage() {
   await requireOnboardingComplete();
 
   return (
-    <main className="container mx-auto px-4 py-12">
-      <h1 className="mb-6 text-3xl font-bold">Performance</h1>
+    <AppShell crumbs={[{ label: 'Performance' }]}>
+      <h1 className="text-fg mb-6 text-2xl font-semibold tracking-tight">Performance</h1>
       <Card>
         <CardHeader>
           <CardTitle>Daily P&amp;L</CardTitle>
@@ -17,9 +18,9 @@ export default async function PerformancePage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="text-muted-foreground text-sm">Phase 6 — coming soon.</p>
+          <p className="text-fg-muted text-sm">Phase 6 — coming soon.</p>
         </CardContent>
       </Card>
-    </main>
+    </AppShell>
   );
 }

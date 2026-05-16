@@ -2,10 +2,11 @@ import { notFound } from 'next/navigation';
 import { and, eq, isNull } from 'drizzle-orm';
 import { assertDailyCostCap, getDb, schema } from '@mbb/db';
 import { type ConceptType } from '@mbb/shared';
+import { AppShell } from '@/components/shell/app-shell';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { GenerationRequestForm } from './generation-request-form';
 
-export const metadata = { title: 'Generate variants — Media Buying Bot' };
+export const metadata = { title: 'Generate variants — Ads Bot' };
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -49,10 +50,13 @@ export default async function GenerateRequestPage({ params }: Props) {
   const liveAcknowledged = !!settings?.liveGenerationAcknowledgedAt;
 
   return (
-    <main className="container mx-auto max-w-2xl px-4 py-12">
+    <AppShell
+      crumbs={[{ label: 'Concepts', href: '/concepts' }, { label: 'Generate variants' }]}
+      contentClass="max-w-2xl"
+    >
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Generate variants</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Generate variants</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           {concept.staticHeadline
             ? `From: "${concept.staticHeadline}"`
             : 'From your uploaded concept'}
@@ -67,6 +71,6 @@ export default async function GenerateRequestPage({ params }: Props) {
         capUsd={capUsd}
         liveAcknowledged={liveAcknowledged}
       />
-    </main>
+    </AppShell>
   );
 }

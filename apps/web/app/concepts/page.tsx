@@ -2,11 +2,12 @@ import Link from 'next/link';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { ConceptUploadTabs } from './concept-upload-tabs';
 
-export const metadata = { title: 'Concepts — Media Buying Bot' };
+export const metadata = { title: 'Concepts — Ads Bot' };
 
 export default async function ConceptsPage() {
   const { userId } = await requireOnboardingComplete();
@@ -26,10 +27,10 @@ export default async function ConceptsPage() {
   });
 
   return (
-    <main className="container mx-auto max-w-3xl px-4 py-12">
+    <AppShell crumbs={[{ label: 'Concepts' }]} contentClass="max-w-3xl">
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Concepts</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Concepts</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           Upload winning creative concepts. The bot uses them as references when generating fresh
           variants.
         </p>
@@ -75,7 +76,7 @@ export default async function ConceptsPage() {
           </ul>
         </section>
       )}
-    </main>
+    </AppShell>
   );
 }
 

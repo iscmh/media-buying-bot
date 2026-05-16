@@ -1,4 +1,4 @@
-export const metadata = { title: 'Privacy Policy — Media Buying Bot' };
+export const metadata = { title: 'Privacy Policy' };
 
 export default function PrivacyPage() {
   return (

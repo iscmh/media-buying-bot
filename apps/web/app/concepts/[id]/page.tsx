@@ -4,10 +4,11 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 
-export const metadata = { title: 'Concept — Media Buying Bot' };
+export const metadata = { title: 'Concept — Ads Bot' };
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -45,24 +46,27 @@ export default async function ConceptDetailPage({ params }: Props) {
   });
   const ourJobs = jobs.filter((j) => j.conceptIds?.includes(id));
 
+  const title = concept.staticHeadline ?? labelForType(concept.contentType);
+
   return (
-    <main className="container mx-auto max-w-3xl px-4 py-12">
-      <header className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">
-            {concept.staticHeadline ?? labelForType(concept.contentType)}
-          </h1>
-          <p className="text-muted-foreground mt-1 text-sm">
-            {labelForType(concept.contentType)}
-            {concept.nicheTag ? ` · ${concept.nicheTag}` : ''}
-            {concept.sourcePlatform ? ` · from ${concept.sourcePlatform}` : ''}
-            {' · uploaded '}
-            {formatDateTime(concept.createdAt)}
-          </p>
-        </div>
-        <Button asChild size="lg">
+    <AppShell
+      crumbs={[{ label: 'Concepts', href: '/concepts' }, { label: title }]}
+      contentClass="max-w-3xl"
+      action={
+        <Button asChild>
           <Link href={`/concepts/${concept.id}/generate`}>Generate variants</Link>
         </Button>
+      }
+    >
+      <header className="mb-6">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">{title}</h1>
+        <p className="text-fg-muted mt-1 text-sm">
+          {labelForType(concept.contentType)}
+          {concept.nicheTag ? ` · ${concept.nicheTag}` : ''}
+          {concept.sourcePlatform ? ` · from ${concept.sourcePlatform}` : ''}
+          {' · uploaded '}
+          {formatDateTime(concept.createdAt)}
+        </p>
       </header>
 
       <Card className="mb-6">
@@ -126,7 +130,7 @@ export default async function ConceptDetailPage({ params }: Props) {
           </ul>
         </section>
       )}
-    </main>
+    </AppShell>
   );
 }
 

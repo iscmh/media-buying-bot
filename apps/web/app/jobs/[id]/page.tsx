@@ -3,11 +3,12 @@ import { and, asc, eq } from 'drizzle-orm';
 import { assertDailyLaunchBudgetCap, getDb, schema } from '@mbb/db';
 import { FIRST_LIVE_LAUNCH_HARD_CAP_USD, PLATFORM_HARD_AD_DAILY_BUDGET_USD } from '@mbb/shared';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { JobReviewClient } from './job-review-client';
 
-export const metadata = { title: 'Variant review — Media Buying Bot' };
+export const metadata = { title: 'Variant review — Ads Bot' };
 export const dynamic = 'force-dynamic';
 
 interface Props {
@@ -88,10 +89,13 @@ export default async function JobReviewPage({ params }: Props) {
   };
 
   return (
-    <main className="container mx-auto max-w-5xl px-4 py-12">
+    <AppShell
+      crumbs={[{ label: 'Jobs', href: '/concepts' }, { label: job.id.slice(0, 8) }]}
+      contentClass="max-w-5xl"
+    >
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">Variants</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">Variants</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           {job.variantCount ?? variants.length} requested · {job.providerChoice ?? 'gemini+claude'}{' '}
           · status <strong>{job.status}</strong>
           {job.mode === 'mock' && ' · MOCK'}
@@ -140,7 +144,7 @@ export default async function JobReviewPage({ params }: Props) {
           launchSnapshot={launchSnapshot}
         />
       )}
-    </main>
+    </AppShell>
   );
 }
 

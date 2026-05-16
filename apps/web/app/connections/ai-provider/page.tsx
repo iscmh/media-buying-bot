@@ -1,11 +1,12 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { AI_PROVIDER_META, type AIProviderName } from '@mbb/shared';
+import { AppShell } from '@/components/shell/app-shell';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { ProviderConnectForm } from './connect-form';
 import { ProviderConnectedSummary } from './connected-summary';
 
-export const metadata = { title: 'AI provider — Media Buying Bot' };
+export const metadata = { title: 'AI provider — Ads Bot' };
 
 export default async function ConnectAIProviderPage() {
   const { userId } = await requireOnboardingComplete();
@@ -25,9 +26,12 @@ export default async function ConnectAIProviderPage() {
   if (conn?.status === 'active') {
     const meta = AI_PROVIDER_META[conn.provider as AIProviderName];
     return (
-      <main className="container mx-auto max-w-2xl px-4 py-12">
+      <AppShell
+        crumbs={[{ label: 'Connections' }, { label: 'AI provider' }]}
+        contentClass="max-w-2xl"
+      >
         <header className="mb-6">
-          <h1 className="text-3xl font-bold">AI UGC provider</h1>
+          <h1 className="text-fg text-2xl font-semibold tracking-tight">AI UGC provider</h1>
         </header>
         <ProviderConnectedSummary
           provider={conn.provider as AIProviderName}
@@ -35,20 +39,23 @@ export default async function ConnectAIProviderPage() {
           verificationMethod={meta.verificationMethod}
           apiKeyVerifiedAt={conn.apiKeyVerifiedAt}
         />
-      </main>
+      </AppShell>
     );
   }
 
   return (
-    <main className="container mx-auto max-w-2xl px-4 py-12">
+    <AppShell
+      crumbs={[{ label: 'Connections' }, { label: 'AI provider' }]}
+      contentClass="max-w-2xl"
+    >
       <header className="mb-6">
-        <h1 className="text-3xl font-bold">AI UGC provider</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
+        <h1 className="text-fg text-2xl font-semibold tracking-tight">AI UGC provider</h1>
+        <p className="text-fg-muted mt-1 text-sm">
           Pick one. Bring your own API key. We encrypt it at rest and use it on your behalf during
           generation.
         </p>
       </header>
       <ProviderConnectForm />
-    </main>
+    </AppShell>
   );
 }
