@@ -5,16 +5,21 @@ import {
   checkHeyGenVideoStatus,
   checkKieAiVideoStatus,
   classifyHeyGenError,
+  claudeRankAvatars,
   listHeyGenAvatars,
-  pickHeyGenAvatar,
   submitHeyGenVideo,
   submitKieAiVideo,
+  type HeyGenAvatar,
   type HeyGenErrorCategory,
 } from '@mbb/ai-providers';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { SORA_PROMPT_OPTIMIZER_SYSTEM_PROMPT } from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys, type ProviderKey } from '../lib/load-keys';
+
+// Avatar pool capped before sending to Claude — keeps the ranking call
+// under ~$0.02 even when a HeyGen account has hundreds of stock avatars.
+const AVATAR_POOL_CAP = 60;
 
 /**
  * Phase 3f: UGC variant generator — HeyGen Avatar Mode happy path.
@@ -181,13 +186,40 @@ export const generateUgcVariants = inngest.createFunction(
       return { jobId, mode, generated: 0 };
     }
 
-    // Step 2: for each variant, submit to provider + poll. Each step.run
-    // does its own retry-on-failure inside; failure of one variant does
-    // not crash the whole job.
     const videoOutcomes: Array<{ index: number; ok: boolean; costUsd: number; error?: string }> =
       [];
     const analysisMetadata = (job?.metadata ?? {}) as Record<string, unknown>;
     const liveProvider = providerChoice as 'kie_ai' | 'heygen';
+
+    // Phase 3g: pick N different avatars upfront (HeyGen only). One step
+    // for durability — Claude ranking is a real API call so it deserves
+    // a retry boundary. Kie.ai path skips this entirely; it doesn't take
+    // an avatar.
+    const avatarPickResult =
+      liveProvider === 'heygen'
+        ? await step.run('pick-avatars', async () =>
+            pickAvatarsForJob({
+              userId,
+              variantCount: refineResult.variants.length,
+              analysisMetadata,
+              jobId,
+            }),
+          )
+        : { ok: true as const, avatarIds: [] as string[], costUsd: 0 };
+
+    if (!avatarPickResult.ok) {
+      await markJobFailed(
+        jobId,
+        userId,
+        avatarPickResult.error,
+        refineResult.costUsd + (avatarPickResult.costUsd ?? 0),
+      );
+      return { jobId, mode, generated: 0 };
+    }
+
+    // Step 2: for each variant, submit to provider + poll. Each step.run
+    // does its own retry-on-failure inside; failure of one variant does
+    // not crash the whole job.
 
     for (let batchStart = 0; batchStart < refineResult.variants.length; batchStart += CONCURRENCY) {
       const batch = refineResult.variants.slice(batchStart, batchStart + CONCURRENCY);
@@ -201,6 +233,8 @@ export const generateUgcVariants = inngest.createFunction(
             providerChoice: liveProvider,
             soraPrompt: variant.prompt,
             analysisMetadata,
+            assignedAvatarId:
+              liveProvider === 'heygen' ? avatarPickResult.avatarIds[variantIndex] : undefined,
           };
 
           // 1. Submit
@@ -285,7 +319,10 @@ export const generateUgcVariants = inngest.createFunction(
       videoOutcomes.push(...batchResults);
     }
 
-    const totalCost = refineResult.costUsd + videoOutcomes.reduce((s, r) => s + r.costUsd, 0);
+    const totalCost =
+      refineResult.costUsd +
+      (avatarPickResult.costUsd ?? 0) +
+      videoOutcomes.reduce((s, r) => s + r.costUsd, 0);
     const successCount = videoOutcomes.filter((r) => r.ok).length;
 
     await markJobCompleted({
@@ -341,6 +378,8 @@ interface GenerateOneVariantInput {
   providerChoice: 'kie_ai' | 'heygen';
   soraPrompt: string;
   analysisMetadata: Record<string, unknown>;
+  /** Phase 3g: avatar picked upfront by the pick-avatars step (HeyGen only). */
+  assignedAvatarId?: string;
 }
 
 async function submitOne(
@@ -379,22 +418,16 @@ async function submitOne(
     return { ok: true, taskId: submission.taskId, provider: 'kie_ai' };
   }
 
-  // HeyGen Avatar Mode happy path (Phase 3f).
+  // HeyGen Avatar Mode happy path (Phase 3f/3g). Avatar was picked by
+  // the upstream pick-avatars step — this branch just submits.
   const apiKey = keys.heygen!;
-
-  let avatarId: string;
-  try {
-    avatarId = await selectHeyGenAvatar({
-      userId: input.userId,
-      apiKey,
-      analysisMetadata: input.analysisMetadata,
-      jobId: input.jobId,
-    });
-  } catch (err) {
-    if (err instanceof HeyGenAvatarNotConfiguredError) {
-      return { ok: false, error: err.message };
-    }
-    throw err;
+  if (!input.assignedAvatarId) {
+    // Defensive: pick-avatars should have failed the job before we got
+    // here. If we land here anyway, surface the avatar-config message.
+    return {
+      ok: false,
+      error: new HeyGenAvatarNotConfiguredError().message,
+    };
   }
 
   // Use the operator prompt's Dialogue section as the spoken script.
@@ -407,7 +440,7 @@ async function submitOne(
   const submission = await submitHeyGenVideo({
     userId: input.userId,
     apiKey,
-    avatarId,
+    avatarId: input.assignedAvatarId,
     voiceId: voiceId ?? undefined,
     script,
     generationJobId: input.jobId,
@@ -425,52 +458,213 @@ async function submitOne(
 }
 
 /**
- * Phase 3f avatar-selection priority:
- *   1. user_settings.default_heygen_avatar_id (UI-configured per user)
- *   2. process.env.HEYGEN_DEFAULT_AVATAR_ID (platform-wide fallback)
- *   3. SMART_AVATAR_MATCH=true → heuristic match from /v2/avatars
- *   4. throw HeyGenAvatarNotConfiguredError (user-facing copy points
- *      them to /settings)
+ * Phase 3g avatar-selection priority (returns variantCount different
+ * avatars whenever possible):
+ *   1. user_settings.default_heygen_avatar_id is a FORCED OVERRIDE —
+ *      if set, every variant uses that avatar (consistent branding).
+ *   2. Otherwise: Claude ranks the user's HeyGen catalog against the
+ *      analysis persona; pipeline takes top N. If fewer strong matches
+ *      than variants, fills with shuffled remainder for diversity.
+ *   3. On any failure (ranking error, empty catalog, etc.):
+ *      HEYGEN_DEFAULT_AVATAR_ID env → array filled with that single id.
+ *   4. Last resort: HeyGenAvatarNotConfiguredError pointing at /settings.
  *
- * Steps 3 + 4 only run when nothing else matched. Step 3 silently falls
- * through to step 4 if the matcher returns null OR if listAvatars fails.
+ * Same-avatar-twice in a single generation is a Hold-the-Line bug —
+ * we de-dup + backfill to guarantee diversity when the pool allows.
  */
-export async function selectHeyGenAvatar(input: {
+export async function selectHeyGenAvatars(input: {
   userId: string;
-  apiKey: string;
+  heygenApiKey: string;
+  claudeApiKey: string;
+  variantCount: number;
   analysisMetadata: Record<string, unknown>;
   jobId: string;
-}): Promise<string> {
+}): Promise<{ avatarIds: string[]; rankingCostUsd: number }> {
+  if (input.variantCount <= 0) {
+    return { avatarIds: [], rankingCostUsd: 0 };
+  }
+
+  // 1. Forced override wins.
   const db = getDb();
   const settings = await db.query.userSettings.findFirst({
     where: eq(schema.userSettings.userId, input.userId),
     columns: { defaultHeygenAvatarId: true },
   });
   if (settings?.defaultHeygenAvatarId) {
-    return settings.defaultHeygenAvatarId;
+    return {
+      avatarIds: Array(input.variantCount).fill(settings.defaultHeygenAvatarId),
+      rankingCostUsd: 0,
+    };
   }
 
-  const envFallback = process.env.HEYGEN_DEFAULT_AVATAR_ID;
-  if (envFallback && envFallback.trim().length > 0) {
-    return envFallback;
-  }
-
-  if (process.env.SMART_AVATAR_MATCH === 'true') {
-    const avatars = await listHeyGenAvatars({
+  // 2. Smart match — Claude ranks the catalog.
+  try {
+    const fetchResult = await listHeyGenAvatars({
       userId: input.userId,
-      apiKey: input.apiKey,
+      apiKey: input.heygenApiKey,
       generationJobId: input.jobId,
     });
-    if (avatars.ok) {
-      const matched = pickHeyGenAvatar(
-        avatars.avatars,
-        extractPersonaFromAnalysis(input.analysisMetadata),
-      );
-      if (matched) return matched.avatar_id;
+    if (!fetchResult.ok) {
+      throw new Error(`HeyGen /v2/avatars failed: ${fetchResult.errorMessage ?? 'unknown'}`);
+    }
+    if (fetchResult.avatars.length === 0) {
+      throw new Error('HeyGen catalog is empty');
+    }
+
+    const pool = buildAvatarPool(fetchResult.avatars, input.analysisMetadata);
+    const ranking = await claudeRankAvatars({
+      userId: input.userId,
+      apiKey: input.claudeApiKey,
+      personaDescription: buildPersonaDescription(input.analysisMetadata),
+      avatars: pool.map((a) => ({
+        id: a.avatar_id,
+        name: a.avatar_name,
+        gender: a.gender,
+      })),
+      generationJobId: input.jobId,
+    });
+    if (!ranking.ok) {
+      throw new Error(ranking.errorMessage ?? 'Claude ranking failed');
+    }
+
+    // Take top N, then backfill with shuffled remainder so we always
+    // return variantCount UNIQUE ids whenever the pool allows it.
+    const picked: string[] = [];
+    const seen = new Set<string>();
+    for (const id of ranking.rankedIds) {
+      if (picked.length >= input.variantCount) break;
+      if (!seen.has(id)) {
+        seen.add(id);
+        picked.push(id);
+      }
+    }
+    if (picked.length < input.variantCount) {
+      const remainder = pool.map((a) => a.avatar_id).filter((id) => !seen.has(id));
+      shuffleInPlace(remainder);
+      for (const id of remainder) {
+        if (picked.length >= input.variantCount) break;
+        picked.push(id);
+        seen.add(id);
+      }
+    }
+    // Pool genuinely smaller than variantCount → last resort, repeat the
+    // first id rather than fail the whole job. Rare in practice (HeyGen
+    // stock catalogs are 50+).
+    while (picked.length < input.variantCount) {
+      picked.push(picked[0] ?? pool[0]?.avatar_id ?? '');
+    }
+    return { avatarIds: picked, rankingCostUsd: ranking.costUsd };
+  } catch {
+    // 3. Env fallback.
+    const envFallback = process.env.HEYGEN_DEFAULT_AVATAR_ID;
+    if (envFallback && envFallback.trim().length > 0) {
+      return {
+        avatarIds: Array(input.variantCount).fill(envFallback),
+        rankingCostUsd: 0,
+      };
+    }
+    // 4. Last resort.
+    throw new HeyGenAvatarNotConfiguredError();
+  }
+}
+
+/**
+ * Pre-filter + cap the avatar pool before sending to Claude. When Gemini
+ * gave us a clear gender signal and there are enough same-gender avatars
+ * to satisfy the variant count, we restrict the pool — wrong gender is
+ * the most visible casting error. Capped at AVATAR_POOL_CAP to keep the
+ * Claude prompt cheap.
+ */
+function buildAvatarPool(
+  avatars: HeyGenAvatar[],
+  analysisMetadata: Record<string, unknown>,
+): HeyGenAvatar[] {
+  const genderHint = extractGenderHint(analysisMetadata);
+  let pool = avatars;
+  if (genderHint) {
+    const sameGender = avatars.filter(
+      (a) => typeof a.gender === 'string' && a.gender.toLowerCase() === genderHint,
+    );
+    if (sameGender.length >= AVATAR_POOL_CAP / 2) {
+      pool = sameGender;
     }
   }
+  return pool.slice(0, AVATAR_POOL_CAP);
+}
 
-  throw new HeyGenAvatarNotConfiguredError();
+function extractGenderHint(analysis: Record<string, unknown>): 'male' | 'female' | null {
+  const inner = (analysis.analysis as Record<string, unknown> | undefined) ?? analysis;
+  const subj = inner.subject as Record<string, unknown> | undefined;
+  const g = subj?.gender;
+  if (typeof g === 'string') {
+    const lower = g.toLowerCase();
+    if (lower === 'male' || lower === 'female') return lower;
+  }
+  return null;
+}
+
+function buildPersonaDescription(analysis: Record<string, unknown>): string {
+  // Concentrate Claude on persona-relevant fields when the Gemini
+  // analysis is structured; fall back to the full blob otherwise so we
+  // never starve the model of signal.
+  const inner = (analysis.analysis as Record<string, unknown> | undefined) ?? analysis;
+  const slice: Record<string, unknown> = {};
+  for (const key of ['subject', 'social_context', 'target_demographic', 'tone', 'setting']) {
+    if (inner[key] !== undefined) slice[key] = inner[key];
+  }
+  const body = Object.keys(slice).length > 0 ? slice : inner;
+  return JSON.stringify(body, null, 2);
+}
+
+function shuffleInPlace<T>(arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i]!;
+    arr[i] = arr[j]!;
+    arr[j] = tmp;
+  }
+}
+
+/**
+ * Pipeline-facing wrapper around selectHeyGenAvatars. Handles key
+ * loading + maps HeyGenAvatarNotConfiguredError to the Inngest step's
+ * `{ ok: false }` shape so the job can fail cleanly without a thrown
+ * exception killing the run.
+ */
+async function pickAvatarsForJob(input: {
+  userId: string;
+  variantCount: number;
+  analysisMetadata: Record<string, unknown>;
+  jobId: string;
+}): Promise<
+  { ok: true; avatarIds: string[]; costUsd: number } | { ok: false; error: string; costUsd: number }
+> {
+  let keys;
+  try {
+    keys = await loadDecryptedKeys(input.userId, ['heygen', 'claude']);
+  } catch (err) {
+    if (err instanceof MissingProviderKeyError) {
+      return { ok: false, error: err.message, costUsd: 0 };
+    }
+    throw err;
+  }
+
+  try {
+    const result = await selectHeyGenAvatars({
+      userId: input.userId,
+      heygenApiKey: keys.heygen!,
+      claudeApiKey: keys.claude!,
+      variantCount: input.variantCount,
+      analysisMetadata: input.analysisMetadata,
+      jobId: input.jobId,
+    });
+    return { ok: true, avatarIds: result.avatarIds, costUsd: result.rankingCostUsd };
+  } catch (err) {
+    if (err instanceof HeyGenAvatarNotConfiguredError) {
+      return { ok: false, error: err.message, costUsd: 0 };
+    }
+    throw err;
+  }
 }
 
 async function loadDefaultVoiceId(userId: string): Promise<string | null> {
@@ -535,25 +729,6 @@ async function checkOne(
     videoId: taskId,
     generationJobId: input.jobId,
   });
-}
-
-function extractPersonaFromAnalysis(analysis: Record<string, unknown>): {
-  age?: string;
-  gender?: string;
-  vibe?: string;
-  setting?: string;
-} {
-  const subj = (analysis.analysis as Record<string, unknown> | undefined)?.subject as
-    | Record<string, unknown>
-    | undefined;
-  const social = (analysis.analysis as Record<string, unknown> | undefined)?.social_context;
-  const appearance = subj?.appearance;
-  return {
-    age: typeof appearance === 'string' ? appearance : undefined,
-    gender: typeof appearance === 'string' ? appearance : undefined,
-    vibe: typeof appearance === 'string' ? appearance : undefined,
-    setting: typeof social === 'string' ? social : undefined,
-  };
 }
 
 function extractDialogueFromSoraPrompt(prompt: string): string {
