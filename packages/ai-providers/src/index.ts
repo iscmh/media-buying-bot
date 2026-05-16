@@ -14,10 +14,17 @@ export {
   callGeminiVision,
   callGeminiImage,
   verifyGeminiKey,
+  uploadGeminiFile,
+  pollGeminiFileReady,
+  deleteGeminiFile,
   type GeminiVisionInput,
   type GeminiVisionResult,
   type GeminiImageInput,
   type GeminiImageResult,
+  type UploadGeminiFileInput,
+  type UploadGeminiFileResult,
+  type PollGeminiFileInput,
+  type PollGeminiFileResult,
 } from './gemini-client';
 export {
   callClaude,
