@@ -6,7 +6,7 @@ import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { ToolCard } from './tool-card';
 
-export const metadata = { title: 'AI tools — Ads Bot' };
+export const metadata = { title: 'AI tools' };
 
 export default async function ConnectToolsPage() {
   const { userId } = await requireOnboardingComplete();

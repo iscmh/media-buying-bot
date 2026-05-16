@@ -41,9 +41,12 @@ export function ProviderConnectedSummary({
   const verified = apiKeyVerifiedAt ? formatDateTime(apiKeyVerifiedAt) : 'unknown';
 
   return (
-    <div className="space-y-6">
-      <div className="bg-card space-y-3 rounded-lg border p-6 text-sm">
-        <Row label="Provider" value={<span className="font-semibold">{providerLabel}</span>} />
+    <div className="space-y-4">
+      <div className="bg-bg-elevated space-y-3 rounded-md border p-5 text-sm">
+        <Row
+          label="Provider"
+          value={<span className="text-fg font-semibold">{providerLabel}</span>}
+        />
         <Row
           label="Verification"
           value={
@@ -52,21 +55,24 @@ export function ProviderConnectedSummary({
               : 'Format-only (verifies at first generation)'
           }
         />
-        <Row label="Last verified" value={verified} />
+        <Row label="Last verified" value={<span className="font-mono">{verified}</span>} />
       </div>
 
-      <div className="bg-card flex flex-col gap-3 rounded-lg border p-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="font-medium">Switch or disconnect</p>
-          <p className="text-muted-foreground mt-1 text-sm">
+      <div className="bg-bg-elevated flex flex-col gap-3 rounded-md border p-5 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-fg font-medium">Switch or disconnect</p>
+          <p className="text-fg-muted mt-1 text-sm">
             Disconnecting clears your stored key, pauses the bot, and sends you back to the provider
-            picker. You&rsquo;ll need to re-paste your key (or a different provider&rsquo;s key) to
-            resume.
+            picker.
           </p>
         </div>
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline" className="text-destructive">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-[color:var(--destructive-color)]/40 hover:bg-[color:var(--destructive-color)]/10 shrink-0 text-[color:var(--destructive-color)]"
+            >
               Disconnect
             </Button>
           </DialogTrigger>
@@ -75,7 +81,7 @@ export function ProviderConnectedSummary({
               <DialogTitle>Disconnect {providerLabel}?</DialogTitle>
               <DialogDescription>
                 This pauses the bot and clears your stored credential. You&rsquo;ll be sent to the
-                provider picker. Continue?
+                provider picker.
               </DialogDescription>
             </DialogHeader>
             <form action={disconnectAiProviderAction} className="flex justify-end gap-2">
@@ -96,8 +102,8 @@ export function ProviderConnectedSummary({
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:gap-4">
-      <span className="text-muted-foreground sm:w-44">{label}</span>
-      <span className="font-medium">{value}</span>
+      <span className="text-fg-muted sm:w-44">{label}</span>
+      <span className="text-fg font-medium">{value}</span>
     </div>
   );
 }

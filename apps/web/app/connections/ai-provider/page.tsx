@@ -6,7 +6,7 @@ import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { ProviderConnectForm } from './connect-form';
 import { ProviderConnectedSummary } from './connected-summary';
 
-export const metadata = { title: 'AI provider — Ads Bot' };
+export const metadata = { title: 'AI provider' };
 
 export default async function ConnectAIProviderPage() {
   const { userId } = await requireOnboardingComplete();

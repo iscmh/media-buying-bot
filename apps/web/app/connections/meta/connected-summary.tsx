@@ -42,8 +42,8 @@ export function MetaConnectedSummary({
   const verified = lastVerifiedAt ? formatDateTime(lastVerifiedAt) : 'unknown';
 
   return (
-    <div className="space-y-6">
-      <div className="bg-card space-y-3 rounded-lg border p-6 text-sm">
+    <div className="space-y-4">
+      <div className="bg-bg-elevated space-y-3 rounded-md border p-5 text-sm">
         <Row
           label="Business Manager ID"
           value={<code className="font-mono">{businessManagerId}</code>}
@@ -59,21 +59,25 @@ export function MetaConnectedSummary({
             </ul>
           }
         />
-        <Row label="Token expires" value={expiry} />
-        <Row label="Last verified" value={verified} />
+        <Row label="Token expires" value={<span className="font-mono">{expiry}</span>} />
+        <Row label="Last verified" value={<span className="font-mono">{verified}</span>} />
       </div>
 
-      <div className="bg-card flex flex-col gap-3 rounded-lg border p-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="font-medium">Disconnect Meta</p>
-          <p className="text-muted-foreground mt-1 text-sm">
+      <div className="bg-bg-elevated flex flex-col gap-3 rounded-md border p-5 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-fg font-medium">Disconnect Meta</p>
+          <p className="text-fg-muted mt-1 text-sm">
             Revokes the token at Meta (best-effort), clears it locally, pauses the bot, and sends
             you back to the Meta onboarding step.
           </p>
         </div>
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline" className="text-destructive">
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-[color:var(--destructive-color)]/40 hover:bg-[color:var(--destructive-color)]/10 shrink-0 text-[color:var(--destructive-color)]"
+            >
               Disconnect
             </Button>
           </DialogTrigger>
@@ -81,8 +85,8 @@ export function MetaConnectedSummary({
             <DialogHeader>
               <DialogTitle>Disconnect Meta?</DialogTitle>
               <DialogDescription>
-                This pauses the bot and clears your stored Meta token. You&rsquo;ll be sent to the
-                Meta onboarding step to reconnect. Continue?
+                This pauses the bot and clears your stored Meta token. You&rsquo;ll be sent back to
+                the Meta onboarding step.
               </DialogDescription>
             </DialogHeader>
             <form action={disconnectMetaAction} className="flex justify-end gap-2">
@@ -103,8 +107,8 @@ export function MetaConnectedSummary({
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:gap-4">
-      <span className="text-muted-foreground sm:w-44">{label}</span>
-      <span className="font-medium">{value}</span>
+      <span className="text-fg-muted sm:w-44">{label}</span>
+      <span className="text-fg font-medium">{value}</span>
     </div>
   );
 }
