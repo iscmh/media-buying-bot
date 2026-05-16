@@ -153,3 +153,115 @@ export async function verifyClaudeKey(
   });
   return result.ok ? { ok: true } : { ok: false, errorMessage: result.errorMessage };
 }
+
+// =========================================================================
+// Phase 3g — Claude-based HeyGen avatar ranking.
+// =========================================================================
+
+export interface CompactAvatar {
+  id: string;
+  name: string;
+  gender?: string;
+}
+
+export interface ClaudeRankAvatarsResult {
+  ok: boolean;
+  /** Avatar ids ordered best → worst match, filtered to ids present in the input. */
+  rankedIds: string[];
+  costUsd: number;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+const RANK_SYSTEM_PROMPT = `You are a casting director for short-form UGC ads. You receive:
+  1. A persona analysis JSON describing the actor in the source winning ad.
+  2. A list of available avatars with id, name, and (sometimes) gender.
+
+Rank the avatars by how well they match the source persona. Match priority:
+  1. Gender match (hardest constraint — wrong gender ruins the variant).
+  2. Apparent age range (avatar names often hint at age — "young", "20s", "teen", etc.).
+  3. Vibe / style alignment (casual, professional, fitness, etc.).
+  4. Setting / context fit (home, office, gym, outdoor).
+
+Output ONLY a JSON array of avatar id strings, best match first. Include EVERY input avatar exactly once. No commentary, no markdown fences.
+
+Example output: ["a_123","a_456","a_789"]`;
+
+/**
+ * Phase 3g: ask Claude to rank a (small) list of HeyGen avatars by match
+ * quality against a persona description / analysis blob. Returns the
+ * IDs filtered to those that exist in the input — Claude occasionally
+ * hallucinates an id, which we silently drop.
+ *
+ * Caller passes the compact avatar list pre-filtered + capped (~60 max)
+ * so the prompt stays cheap. One call per generation regardless of
+ * variant count — pipeline takes the top N from the returned ranking.
+ */
+export async function claudeRankAvatars(input: {
+  userId: string;
+  apiKey: string;
+  /** Stringified persona — usually the analysis JSON, or a synthesized blurb. */
+  personaDescription: string;
+  avatars: CompactAvatar[];
+  generationJobId?: string;
+}): Promise<ClaudeRankAvatarsResult> {
+  if (input.avatars.length === 0) {
+    return {
+      ok: false,
+      rankedIds: [],
+      costUsd: 0,
+      latencyMs: 0,
+      errorMessage: 'No avatars to rank',
+    };
+  }
+
+  const userMessage = `Source persona:\n${input.personaDescription}\n\nAvailable avatars (${input.avatars.length}):\n${JSON.stringify(input.avatars)}`;
+
+  const claude = await callClaude({
+    userId: input.userId,
+    apiKey: input.apiKey,
+    systemPrompt: RANK_SYSTEM_PROMPT,
+    userMessage,
+    // Each id ≈ 10-20 tokens; even 60 avatars only needs ~2k.
+    maxTokens: 2048,
+    generationJobId: input.generationJobId,
+  });
+
+  if (!claude.ok) {
+    return {
+      ok: false,
+      rankedIds: [],
+      costUsd: claude.costUsd,
+      latencyMs: claude.latencyMs,
+      errorMessage: claude.errorMessage,
+    };
+  }
+
+  if (!Array.isArray(claude.json) || claude.json.some((x) => typeof x !== 'string')) {
+    return {
+      ok: false,
+      rankedIds: [],
+      costUsd: claude.costUsd,
+      latencyMs: claude.latencyMs,
+      errorMessage: 'Claude did not return a JSON array of avatar ids',
+    };
+  }
+
+  // Drop hallucinated ids + de-dup while preserving order.
+  const validIds = new Set(input.avatars.map((a) => a.id));
+  const seen = new Set<string>();
+  const rankedIds: string[] = [];
+  for (const id of claude.json as string[]) {
+    if (validIds.has(id) && !seen.has(id)) {
+      seen.add(id);
+      rankedIds.push(id);
+    }
+  }
+
+  return {
+    ok: true,
+    rankedIds,
+    costUsd: claude.costUsd,
+    latencyMs: claude.latencyMs,
+  };
+}

@@ -21,9 +21,12 @@ export {
 } from './gemini-client';
 export {
   callClaude,
+  claudeRankAvatars,
   verifyClaudeKey,
   type ClaudeMessagesInput,
   type ClaudeMessagesResult,
+  type ClaudeRankAvatarsResult,
+  type CompactAvatar,
 } from './claude-client';
 export {
   submitKieAiVideo,
