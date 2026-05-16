@@ -2,22 +2,22 @@ import Link from 'next/link';
 import { and, eq, isNull } from 'drizzle-orm';
 import { listHeyGenAvatars, type HeyGenAvatar } from '@mbb/ai-providers';
 import { decryptSecret, getDb, schema } from '@mbb/db';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AvatarPickerForm } from './heygen-avatar-picker';
 
 /**
- * Phase 3f: Default UGC Avatar section on /settings.
+ * Phase 3f/3g: HeyGen avatar section on /settings.
+ *
+ * Phase 3g made the avatar grid a FORCED OVERRIDE rather than a default.
+ * By default (no avatar picked), the UGC pipeline asks Claude to match
+ * N different avatars to the source persona — one avatar per variant.
+ * Setting a forced override here switches the whole account back to
+ * "same avatar for every variant" (consistent branding).
  *
  * Fetches the user's avatar catalog from HeyGen on every settings load.
- * No caching by design — section is rarely visited and HeyGen's /v2/avatars
- * is cheap. Failures degrade to a "couldn't load" message instead of
- * breaking the whole settings page.
- *
- * Renders one of three states:
- *   - No HeyGen key connected → CTA to /connections/ai-provider
- *   - Key present but listAvatars failed → error with retry hint
- *   - Avatars loaded → 2x3 grid; currently-selected has a primary border
+ * No caching by design — section is rarely visited.
  */
 export async function HeygenAvatarSection({ userId }: { userId: string }) {
   const db = getDb();
@@ -44,7 +44,7 @@ export async function HeygenAvatarSection({ userId }: { userId: string }) {
     return (
       <Card id="heygen-avatar" className="mb-8">
         <CardHeader>
-          <CardTitle className="text-base">Default UGC Avatar</CardTitle>
+          <CardTitle className="text-base">Force Specific Avatar (Optional)</CardTitle>
           <CardDescription>
             UGC variants use HeyGen Avatar Mode. Connect your HeyGen API key first.
           </CardDescription>
@@ -67,7 +67,7 @@ export async function HeygenAvatarSection({ userId }: { userId: string }) {
     return (
       <Card id="heygen-avatar" className="mb-8">
         <CardHeader>
-          <CardTitle className="text-base">Default UGC Avatar</CardTitle>
+          <CardTitle className="text-base">Force Specific Avatar (Optional)</CardTitle>
           <CardDescription>
             Couldn&apos;t decrypt your HeyGen key. Reconnect it on the connections page.
           </CardDescription>
@@ -82,7 +82,7 @@ export async function HeygenAvatarSection({ userId }: { userId: string }) {
     return (
       <Card id="heygen-avatar" className="mb-8">
         <CardHeader>
-          <CardTitle className="text-base">Default UGC Avatar</CardTitle>
+          <CardTitle className="text-base">Force Specific Avatar (Optional)</CardTitle>
           <CardDescription>
             HeyGen wouldn&apos;t return your avatar list ({fetchResult.errorMessage ?? 'unknown'}).
             Refresh this page in a minute, or reconnect HeyGen if the problem persists.
@@ -101,10 +101,19 @@ export async function HeygenAvatarSection({ userId }: { userId: string }) {
   return (
     <Card id="heygen-avatar" className="mb-8">
       <CardHeader>
-        <CardTitle className="text-base">Default UGC Avatar</CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">Force Specific Avatar (Optional)</CardTitle>
+          {currentDefaultId ? (
+            <Badge variant="secondary">Override active</Badge>
+          ) : (
+            <Badge variant="outline">Auto-match ON</Badge>
+          )}
+        </div>
         <CardDescription>
-          The avatar HeyGen uses for every new UGC variant. Pick one matching your typical target
-          persona; you can change it any time.
+          By default the bot asks Claude to match a different HeyGen avatar to your source persona
+          for each variant in a generation. Set one here only if you want every variant in every
+          generation to use the same avatar — useful for consistent branding, but you lose the
+          diversity that beats ad fatigue.
         </CardDescription>
       </CardHeader>
       <CardContent>

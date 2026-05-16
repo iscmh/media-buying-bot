@@ -216,11 +216,12 @@ export function GenerationRequestForm({
       {/* Video provider note (UGC only) */}
       {conceptType === 'ugc' && (
         <div className="bg-card text-muted-foreground rounded-lg border p-3 text-xs">
-          UGC variants use HeyGen Avatar Mode. Pick your default avatar in{' '}
+          UGC variants use HeyGen Avatar Mode — Claude matches a different avatar to your source
+          persona for each variant. Want every variant to use the same avatar instead? Force one in{' '}
           <a className="underline" href="/settings#heygen-avatar">
-            Settings → Default UGC Avatar
-          </a>{' '}
-          if you haven&apos;t yet.
+            Settings → Force Specific Avatar
+          </a>
+          .
         </div>
       )}
 

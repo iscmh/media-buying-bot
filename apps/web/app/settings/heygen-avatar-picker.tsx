@@ -98,7 +98,7 @@ export function AvatarPickerForm({ avatars, currentDefaultId, totalAvailable }: 
               </div>
               {isSelected && (
                 <span className="bg-primary text-primary-foreground absolute right-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-medium">
-                  Default
+                  Forced
                 </span>
               )}
             </button>
@@ -126,7 +126,7 @@ export function AvatarPickerForm({ avatars, currentDefaultId, totalAvailable }: 
             disabled={pending}
             onClick={() => pick('')}
           >
-            Clear default
+            Use auto-match
           </Button>
         )}
       </div>
