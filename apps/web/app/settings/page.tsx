@@ -15,6 +15,7 @@ import {
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { AutomationAcks } from './automation-acks';
 import { BillingSection } from './billing-section';
+import { HeygenAvatarSection } from './heygen-avatar-section';
 import { SettingsForm } from './settings-form';
 
 export const metadata = { title: 'Settings — Media Buying Bot' };
@@ -88,6 +89,8 @@ export default async function SettingsPage() {
         killAcknowledgedAt={ackSettings?.killAcknowledgedAt?.toISOString() ?? null}
         scaleAcknowledgedAt={ackSettings?.scaleAcknowledgedAt?.toISOString() ?? null}
       />
+
+      <HeygenAvatarSection userId={userId} />
 
       <SettingsForm
         initialValues={current}
