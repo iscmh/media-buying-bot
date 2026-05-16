@@ -35,6 +35,7 @@ beforeEach(() => {
 
 interface SettingsRow {
   defaultHeygenAvatarId: string | null;
+  defaultHeygenVoiceId?: string | null;
 }
 
 function mockDb(settings: SettingsRow | undefined) {
@@ -49,28 +50,45 @@ function mockDb(settings: SettingsRow | undefined) {
   }));
 }
 
-function mockProviders(opts: {
-  avatars: Array<{ avatar_id: string; avatar_name: string; gender?: string }>;
-  ranking: { ok: boolean; rankedIds?: string[]; errorMessage?: string; costUsd?: number };
-  listOk?: boolean;
-}) {
+const DEFAULT_VOICES = [
+  { voice_id: 'v_en_female_1', name: 'Friendly EN F', gender: 'female', language: 'en-US' },
+  { voice_id: 'v_en_male_1', name: 'Friendly EN M', gender: 'male', language: 'en-US' },
+  { voice_id: 'v_fr_female_1', name: 'FR F', gender: 'female', language: 'fr-FR' },
+];
+
+function mockProviders(
+  opts: {
+    avatars?: Array<{ avatar_id: string; avatar_name: string; gender?: string }>;
+    ranking?: { ok: boolean; rankedIds?: string[]; errorMessage?: string; costUsd?: number };
+    listOk?: boolean;
+    voices?: Array<{ voice_id: string; name: string; gender?: string; language?: string }>;
+    voicesOk?: boolean;
+  } = {},
+) {
   vi.doMock('@mbb/ai-providers', async () => {
     const actual = await vi.importActual<typeof import('@mbb/ai-providers')>('@mbb/ai-providers');
     return {
       ...actual,
       listHeyGenAvatars: vi.fn().mockResolvedValue({
         ok: opts.listOk ?? true,
-        avatars: opts.avatars,
+        avatars: opts.avatars ?? [],
         latencyMs: 1,
         httpStatus: opts.listOk === false ? 500 : 200,
         errorMessage: opts.listOk === false ? 'mock list failure' : undefined,
       }),
+      listHeyGenVoices: vi.fn().mockResolvedValue({
+        ok: opts.voicesOk ?? true,
+        voices: opts.voices ?? DEFAULT_VOICES,
+        latencyMs: 1,
+        httpStatus: opts.voicesOk === false ? 500 : 200,
+        errorMessage: opts.voicesOk === false ? 'mock voices failure' : undefined,
+      }),
       claudeRankAvatars: vi.fn().mockResolvedValue({
-        ok: opts.ranking.ok,
-        rankedIds: opts.ranking.rankedIds ?? [],
-        costUsd: opts.ranking.costUsd ?? 0.02,
+        ok: opts.ranking?.ok ?? true,
+        rankedIds: opts.ranking?.rankedIds ?? [],
+        costUsd: opts.ranking?.costUsd ?? 0.02,
         latencyMs: 100,
-        errorMessage: opts.ranking.errorMessage,
+        errorMessage: opts.ranking?.errorMessage,
       }),
     };
   });
@@ -87,6 +105,7 @@ const CATALOG = [
 describe('selectHeyGenAvatars — forced override', () => {
   it('returns N identical entries when user_settings.default_heygen_avatar_id is set', async () => {
     mockDb({ defaultHeygenAvatarId: 'forced_avatar' });
+    mockProviders(); // voices still need to be picked even when avatar is forced
     process.env.HEYGEN_DEFAULT_AVATAR_ID = 'env_fallback'; // should be ignored
 
     const { selectHeyGenAvatars } = await import('../src/functions/generate-ugc-variants');
@@ -102,6 +121,10 @@ describe('selectHeyGenAvatars — forced override', () => {
     expect(new Set(result.avatarIds).size).toBe(1);
     expect(result.avatarIds[0]).toBe('forced_avatar');
     expect(result.rankingCostUsd).toBe(0);
+    // Voice still got picked (first English voice — avatar gender unknown
+    // when the avatar comes from the forced-override path).
+    expect(result.voiceIds).toHaveLength(5);
+    expect(result.voiceIds.every((v) => typeof v === 'string' && v.length > 0)).toBe(true);
   });
 });
 
@@ -287,5 +310,138 @@ describe('selectHeyGenAvatars — edge cases', () => {
     // Last-resort path: pad with repeats rather than fail the job.
     expect(result.avatarIds).toHaveLength(3);
     expect(result.avatarIds[0]).toBe('only_one');
+  });
+});
+
+// =========================================================================
+// Phase 3i — voice pairing.
+// =========================================================================
+
+describe('selectHeyGenAvatars — voice pairing', () => {
+  it('pairs each variant with a gender-matched English voice', async () => {
+    mockDb({ defaultHeygenAvatarId: null });
+    mockProviders({
+      avatars: CATALOG,
+      // Force a deterministic mix of female + male avatars in the result.
+      ranking: { ok: true, rankedIds: ['f1', 'm1', 'f2', 'm2'] },
+    });
+
+    const { selectHeyGenAvatars } = await import('../src/functions/generate-ugc-variants');
+    const result = await selectHeyGenAvatars({
+      userId: 'u',
+      heygenApiKey: 'h',
+      claudeApiKey: 'c',
+      variantCount: 4,
+      analysisMetadata: {},
+      jobId: 'job',
+    });
+
+    expect(result.avatarIds).toEqual(['f1', 'm1', 'f2', 'm2']);
+    expect(result.voiceIds).toEqual([
+      'v_en_female_1', // f1 → female voice
+      'v_en_male_1', // m1 → male voice
+      'v_en_female_1', // f2 → female voice
+      'v_en_male_1', // m2 → male voice
+    ]);
+  });
+
+  it('forced voice override fills every slot regardless of avatar gender', async () => {
+    mockDb({ defaultHeygenAvatarId: null, defaultHeygenVoiceId: 'forced_voice' });
+    mockProviders({
+      avatars: CATALOG,
+      ranking: { ok: true, rankedIds: ['f1', 'm1'] },
+    });
+
+    const { selectHeyGenAvatars } = await import('../src/functions/generate-ugc-variants');
+    const result = await selectHeyGenAvatars({
+      userId: 'u',
+      heygenApiKey: 'h',
+      claudeApiKey: 'c',
+      variantCount: 2,
+      analysisMetadata: {},
+      jobId: 'job',
+    });
+    expect(result.voiceIds).toEqual(['forced_voice', 'forced_voice']);
+  });
+
+  it('falls back to first English voice when no gender match exists', async () => {
+    mockDb({ defaultHeygenAvatarId: null });
+    mockProviders({
+      avatars: CATALOG,
+      ranking: { ok: true, rankedIds: ['f1', 'f2'] },
+      // Only male English voices available — female avatars get the
+      // first English voice instead of failing.
+      voices: [{ voice_id: 'v_en_m', name: 'Male EN', gender: 'male', language: 'en-US' }],
+    });
+
+    const { selectHeyGenAvatars } = await import('../src/functions/generate-ugc-variants');
+    const result = await selectHeyGenAvatars({
+      userId: 'u',
+      heygenApiKey: 'h',
+      claudeApiKey: 'c',
+      variantCount: 2,
+      analysisMetadata: {},
+      jobId: 'job',
+    });
+    expect(result.voiceIds).toEqual(['v_en_m', 'v_en_m']);
+  });
+
+  it('falls back to any voice when no English voice is available', async () => {
+    mockDb({ defaultHeygenAvatarId: null });
+    mockProviders({
+      avatars: CATALOG,
+      ranking: { ok: true, rankedIds: ['f1'] },
+      voices: [{ voice_id: 'v_fr_f', name: 'FR F', gender: 'female', language: 'fr-FR' }],
+    });
+
+    const { selectHeyGenAvatars } = await import('../src/functions/generate-ugc-variants');
+    const result = await selectHeyGenAvatars({
+      userId: 'u',
+      heygenApiKey: 'h',
+      claudeApiKey: 'c',
+      variantCount: 1,
+      analysisMetadata: {},
+      jobId: 'job',
+    });
+    expect(result.voiceIds).toEqual(['v_fr_f']);
+  });
+
+  it('throws when listHeyGenVoices fails AND no forced voice is configured', async () => {
+    mockDb({ defaultHeygenAvatarId: null });
+    mockProviders({
+      avatars: CATALOG,
+      ranking: { ok: true, rankedIds: ['f1'] },
+      voicesOk: false,
+    });
+
+    const { selectHeyGenAvatars } = await import('../src/functions/generate-ugc-variants');
+    await expect(
+      selectHeyGenAvatars({
+        userId: 'u',
+        heygenApiKey: 'h',
+        claudeApiKey: 'c',
+        variantCount: 1,
+        analysisMetadata: {},
+        jobId: 'job',
+      }),
+    ).rejects.toThrow(/Could not load HeyGen voices/);
+  });
+
+  it('skips listHeyGenVoices entirely when a forced voice override is set', async () => {
+    mockDb({ defaultHeygenAvatarId: 'forced_avatar', defaultHeygenVoiceId: 'forced_voice' });
+    // Voices intentionally broken — must NOT be consulted because of the override.
+    mockProviders({ voicesOk: false });
+
+    const { selectHeyGenAvatars } = await import('../src/functions/generate-ugc-variants');
+    const result = await selectHeyGenAvatars({
+      userId: 'u',
+      heygenApiKey: 'h',
+      claudeApiKey: 'c',
+      variantCount: 2,
+      analysisMetadata: {},
+      jobId: 'job',
+    });
+    expect(result.avatarIds).toEqual(['forced_avatar', 'forced_avatar']);
+    expect(result.voiceIds).toEqual(['forced_voice', 'forced_voice']);
   });
 });

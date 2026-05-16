@@ -7,6 +7,7 @@ import {
   classifyHeyGenError,
   claudeRankAvatars,
   listHeyGenAvatars,
+  listHeyGenVoices,
   submitHeyGenVideo,
   submitKieAiVideo,
   type HeyGenAvatar,
@@ -205,7 +206,12 @@ export const generateUgcVariants = inngest.createFunction(
               jobId,
             }),
           )
-        : { ok: true as const, avatarIds: [] as string[], costUsd: 0 };
+        : {
+            ok: true as const,
+            avatarIds: [] as string[],
+            voiceIds: [] as string[],
+            costUsd: 0,
+          };
 
     if (!avatarPickResult.ok) {
       await markJobFailed(
@@ -235,6 +241,8 @@ export const generateUgcVariants = inngest.createFunction(
             analysisMetadata,
             assignedAvatarId:
               liveProvider === 'heygen' ? avatarPickResult.avatarIds[variantIndex] : undefined,
+            assignedVoiceId:
+              liveProvider === 'heygen' ? avatarPickResult.voiceIds[variantIndex] : undefined,
           };
 
           // 1. Submit
@@ -380,6 +388,8 @@ interface GenerateOneVariantInput {
   analysisMetadata: Record<string, unknown>;
   /** Phase 3g: avatar picked upfront by the pick-avatars step (HeyGen only). */
   assignedAvatarId?: string;
+  /** Phase 3i: voice paired with the avatar (gender-matched, English). */
+  assignedVoiceId?: string;
 }
 
 async function submitOne(
@@ -433,15 +443,21 @@ async function submitOne(
   // Use the operator prompt's Dialogue section as the spoken script.
   const script = extractDialogueFromSoraPrompt(input.soraPrompt);
 
-  // Optional voice id from user_settings — if absent HeyGen picks the
-  // avatar's default voice automatically.
-  const voiceId = await loadDefaultVoiceId(input.userId);
+  // Voice was paired with the avatar by the pick-avatars step (Phase 3i).
+  // HeyGen v2 rejects submissions without voice_id; defending against an
+  // upstream regression rather than silently falling back.
+  if (!input.assignedVoiceId) {
+    return {
+      ok: false,
+      error: 'No HeyGen voice paired with this avatar. Pick a default voice in /settings.',
+    };
+  }
 
   const submission = await submitHeyGenVideo({
     userId: input.userId,
     apiKey,
     avatarId: input.assignedAvatarId,
-    voiceId: voiceId ?? undefined,
+    voiceId: input.assignedVoiceId,
     script,
     generationJobId: input.jobId,
   });
@@ -479,93 +495,157 @@ export async function selectHeyGenAvatars(input: {
   variantCount: number;
   analysisMetadata: Record<string, unknown>;
   jobId: string;
-}): Promise<{ avatarIds: string[]; rankingCostUsd: number }> {
+}): Promise<{ avatarIds: string[]; voiceIds: string[]; rankingCostUsd: number }> {
   if (input.variantCount <= 0) {
-    return { avatarIds: [], rankingCostUsd: 0 };
+    return { avatarIds: [], voiceIds: [], rankingCostUsd: 0 };
   }
 
-  // 1. Forced override wins.
+  // User-level overrides — both columns are independent; either can be
+  // set without the other.
   const db = getDb();
   const settings = await db.query.userSettings.findFirst({
     where: eq(schema.userSettings.userId, input.userId),
-    columns: { defaultHeygenAvatarId: true },
+    columns: { defaultHeygenAvatarId: true, defaultHeygenVoiceId: true },
   });
+
+  // --- Avatar selection ---
+  let avatarIds: string[];
+  let rankingCostUsd = 0;
+  /** Populated only on the smart-match path; used by voice gender matching. */
+  const avatarsById = new Map<string, HeyGenAvatar>();
+
   if (settings?.defaultHeygenAvatarId) {
-    return {
-      avatarIds: Array(input.variantCount).fill(settings.defaultHeygenAvatarId),
-      rankingCostUsd: 0,
-    };
-  }
-
-  // 2. Smart match — Claude ranks the catalog.
-  try {
-    const fetchResult = await listHeyGenAvatars({
-      userId: input.userId,
-      apiKey: input.heygenApiKey,
-      generationJobId: input.jobId,
-    });
-    if (!fetchResult.ok) {
-      throw new Error(`HeyGen /v2/avatars failed: ${fetchResult.errorMessage ?? 'unknown'}`);
-    }
-    if (fetchResult.avatars.length === 0) {
-      throw new Error('HeyGen catalog is empty');
-    }
-
-    const pool = buildAvatarPool(fetchResult.avatars, input.analysisMetadata);
-    const ranking = await claudeRankAvatars({
-      userId: input.userId,
-      apiKey: input.claudeApiKey,
-      personaDescription: buildPersonaDescription(input.analysisMetadata),
-      avatars: pool.map((a) => ({
-        id: a.avatar_id,
-        name: a.avatar_name,
-        gender: a.gender,
-      })),
-      generationJobId: input.jobId,
-    });
-    if (!ranking.ok) {
-      throw new Error(ranking.errorMessage ?? 'Claude ranking failed');
-    }
-
-    // Take top N, then backfill with shuffled remainder so we always
-    // return variantCount UNIQUE ids whenever the pool allows it.
-    const picked: string[] = [];
-    const seen = new Set<string>();
-    for (const id of ranking.rankedIds) {
-      if (picked.length >= input.variantCount) break;
-      if (!seen.has(id)) {
-        seen.add(id);
-        picked.push(id);
+    avatarIds = Array(input.variantCount).fill(settings.defaultHeygenAvatarId);
+  } else {
+    try {
+      const fetchResult = await listHeyGenAvatars({
+        userId: input.userId,
+        apiKey: input.heygenApiKey,
+        generationJobId: input.jobId,
+      });
+      if (!fetchResult.ok) {
+        throw new Error(`HeyGen /v2/avatars failed: ${fetchResult.errorMessage ?? 'unknown'}`);
       }
-    }
-    if (picked.length < input.variantCount) {
-      const remainder = pool.map((a) => a.avatar_id).filter((id) => !seen.has(id));
-      shuffleInPlace(remainder);
-      for (const id of remainder) {
+      if (fetchResult.avatars.length === 0) {
+        throw new Error('HeyGen catalog is empty');
+      }
+      for (const a of fetchResult.avatars) avatarsById.set(a.avatar_id, a);
+
+      const pool = buildAvatarPool(fetchResult.avatars, input.analysisMetadata);
+      const ranking = await claudeRankAvatars({
+        userId: input.userId,
+        apiKey: input.claudeApiKey,
+        personaDescription: buildPersonaDescription(input.analysisMetadata),
+        avatars: pool.map((a) => ({
+          id: a.avatar_id,
+          name: a.avatar_name,
+          gender: a.gender,
+        })),
+        generationJobId: input.jobId,
+      });
+      if (!ranking.ok) {
+        throw new Error(ranking.errorMessage ?? 'Claude ranking failed');
+      }
+
+      // Take top N, then backfill with shuffled remainder so we always
+      // return variantCount UNIQUE ids whenever the pool allows it.
+      const picked: string[] = [];
+      const seen = new Set<string>();
+      for (const id of ranking.rankedIds) {
         if (picked.length >= input.variantCount) break;
-        picked.push(id);
-        seen.add(id);
+        if (!seen.has(id)) {
+          seen.add(id);
+          picked.push(id);
+        }
+      }
+      if (picked.length < input.variantCount) {
+        const remainder = pool.map((a) => a.avatar_id).filter((id) => !seen.has(id));
+        shuffleInPlace(remainder);
+        for (const id of remainder) {
+          if (picked.length >= input.variantCount) break;
+          picked.push(id);
+          seen.add(id);
+        }
+      }
+      // Pool genuinely smaller than variantCount → last resort, repeat the
+      // first id rather than fail the whole job. Rare in practice (HeyGen
+      // stock catalogs are 50+).
+      while (picked.length < input.variantCount) {
+        picked.push(picked[0] ?? pool[0]?.avatar_id ?? '');
+      }
+      avatarIds = picked;
+      rankingCostUsd = ranking.costUsd;
+    } catch {
+      const envFallback = process.env.HEYGEN_DEFAULT_AVATAR_ID;
+      if (envFallback && envFallback.trim().length > 0) {
+        avatarIds = Array(input.variantCount).fill(envFallback);
+      } else {
+        throw new HeyGenAvatarNotConfiguredError();
       }
     }
-    // Pool genuinely smaller than variantCount → last resort, repeat the
-    // first id rather than fail the whole job. Rare in practice (HeyGen
-    // stock catalogs are 50+).
-    while (picked.length < input.variantCount) {
-      picked.push(picked[0] ?? pool[0]?.avatar_id ?? '');
-    }
-    return { avatarIds: picked, rankingCostUsd: ranking.costUsd };
-  } catch {
-    // 3. Env fallback.
-    const envFallback = process.env.HEYGEN_DEFAULT_AVATAR_ID;
-    if (envFallback && envFallback.trim().length > 0) {
-      return {
-        avatarIds: Array(input.variantCount).fill(envFallback),
-        rankingCostUsd: 0,
-      };
-    }
-    // 4. Last resort.
-    throw new HeyGenAvatarNotConfiguredError();
   }
+
+  // --- Voice selection ---
+  // Phase 3i: HeyGen v2 rejects submissions without a voice_id. Stock
+  // avatars have no default_voice_id, so we pick one per avatar:
+  //   1. user_settings.default_heygen_voice_id → forced override for all.
+  //   2. listHeyGenVoices once → filter to English → match by avatar
+  //      gender → fall back to first English voice (or any if none).
+  //   3. listVoices failure with no override → fail the whole pick step
+  //      with a copy that points the operator at /settings.
+  const voiceIds = await selectVoiceIds({
+    variantCount: input.variantCount,
+    avatarIds,
+    avatarsById,
+    forcedVoiceId: settings?.defaultHeygenVoiceId ?? null,
+    userId: input.userId,
+    apiKey: input.heygenApiKey,
+    jobId: input.jobId,
+  });
+
+  return { avatarIds, voiceIds, rankingCostUsd };
+}
+
+async function selectVoiceIds(input: {
+  variantCount: number;
+  avatarIds: string[];
+  avatarsById: Map<string, HeyGenAvatar>;
+  forcedVoiceId: string | null;
+  userId: string;
+  apiKey: string;
+  jobId: string;
+}): Promise<string[]> {
+  if (input.forcedVoiceId) {
+    return Array(input.variantCount).fill(input.forcedVoiceId);
+  }
+
+  const fetchResult = await listHeyGenVoices({
+    userId: input.userId,
+    apiKey: input.apiKey,
+    generationJobId: input.jobId,
+  });
+  if (!fetchResult.ok || fetchResult.voices.length === 0) {
+    throw new Error(
+      'Could not load HeyGen voices. Set a default voice in /settings or check your HeyGen API quota.',
+    );
+  }
+
+  const englishVoices = fetchResult.voices.filter(
+    (v) => typeof v.language === 'string' && v.language.toLowerCase().startsWith('en'),
+  );
+  // Prefer English; fall back to any voice if HeyGen surfaced no language
+  // tags (the field is optional in their schema).
+  const pool = englishVoices.length > 0 ? englishVoices : fetchResult.voices;
+  const fallbackId = pool[0]!.voice_id;
+
+  return input.avatarIds.map((avatarId) => {
+    const gender = input.avatarsById.get(avatarId)?.gender?.toLowerCase();
+    if (!gender) return fallbackId;
+    const sameGender = pool.find(
+      (v) => typeof v.gender === 'string' && v.gender.toLowerCase() === gender,
+    );
+    return sameGender?.voice_id ?? fallbackId;
+  });
 }
 
 /**
@@ -637,7 +717,8 @@ async function pickAvatarsForJob(input: {
   analysisMetadata: Record<string, unknown>;
   jobId: string;
 }): Promise<
-  { ok: true; avatarIds: string[]; costUsd: number } | { ok: false; error: string; costUsd: number }
+  | { ok: true; avatarIds: string[]; voiceIds: string[]; costUsd: number }
+  | { ok: false; error: string; costUsd: number }
 > {
   let keys;
   try {
@@ -658,22 +739,21 @@ async function pickAvatarsForJob(input: {
       analysisMetadata: input.analysisMetadata,
       jobId: input.jobId,
     });
-    return { ok: true, avatarIds: result.avatarIds, costUsd: result.rankingCostUsd };
+    return {
+      ok: true,
+      avatarIds: result.avatarIds,
+      voiceIds: result.voiceIds,
+      costUsd: result.rankingCostUsd,
+    };
   } catch (err) {
     if (err instanceof HeyGenAvatarNotConfiguredError) {
       return { ok: false, error: err.message, costUsd: 0 };
     }
+    if (err instanceof Error) {
+      return { ok: false, error: err.message, costUsd: 0 };
+    }
     throw err;
   }
-}
-
-async function loadDefaultVoiceId(userId: string): Promise<string | null> {
-  const db = getDb();
-  const row = await db.query.userSettings.findFirst({
-    where: eq(schema.userSettings.userId, userId),
-    columns: { defaultHeygenVoiceId: true },
-  });
-  return row?.defaultHeygenVoiceId ?? null;
 }
 
 export function friendlyHeyGenError(
