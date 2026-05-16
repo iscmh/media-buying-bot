@@ -118,6 +118,13 @@ export const userSettings = pgTable('user_settings', {
   // first FOUNDING_MEMBER_CAP users (see @mbb/shared/safety.ts).
   isFoundingMember: boolean('is_founding_member').notNull().default(false),
 
+  // Phase 3f — HeyGen Avatar Mode defaults. The UGC pipeline reads
+  // default_heygen_avatar_id on every generation; if NULL, falls back
+  // to HEYGEN_DEFAULT_AVATAR_ID env var; if both unset, throws a
+  // helpful AvatarNotConfiguredError pointing the user at /settings.
+  defaultHeygenAvatarId: text('default_heygen_avatar_id'),
+  defaultHeygenVoiceId: text('default_heygen_voice_id'),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
