@@ -80,13 +80,17 @@ export async function createGenerationJobAction(
   }
   const contentType = concept.contentType as ConceptType;
 
-  // UGC needs a provider; static infers Gemini+Claude on the server.
+  // UGC: provider is force-picked to 'heygen' (Phase 3f — Avatar Mode is
+  // the only supported path; Kie.ai/Arcads code retained but unused).
+  // If a stale client still POSTs `provider`, honor it only when valid;
+  // otherwise default to heygen so the call doesn't error out.
   let pickedProvider: UgcVideoProvider | undefined;
   if (contentType === 'ugc') {
-    if (!provider || !VALID_UGC_PROVIDERS.has(provider as UgcVideoProvider)) {
-      return { ok: false, errorMessage: 'Pick a video provider for UGC.' };
+    if (provider && VALID_UGC_PROVIDERS.has(provider as UgcVideoProvider)) {
+      pickedProvider = provider as UgcVideoProvider;
+    } else {
+      pickedProvider = 'heygen';
     }
-    pickedProvider = provider as UgcVideoProvider;
   }
 
   // Estimate cost server-side (don't trust the client's display).

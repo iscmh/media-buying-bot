@@ -2,13 +2,7 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  MAX_VARIANTS_PER_JOB,
-  estimateGenerationCost,
-  labelForProvider,
-  type ConceptType,
-  type UgcVideoProvider,
-} from '@mbb/shared';
+import { MAX_VARIANTS_PER_JOB, estimateGenerationCost, type ConceptType } from '@mbb/shared';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -53,12 +47,6 @@ const INTENSITIES: Array<{
   },
 ];
 
-const UGC_PROVIDERS: Array<{ value: UgcVideoProvider; recommended?: boolean }> = [
-  { value: 'kie_ai', recommended: true },
-  { value: 'heygen' },
-  { value: 'arcads' },
-];
-
 export function GenerationRequestForm({
   conceptId,
   conceptType,
@@ -69,7 +57,9 @@ export function GenerationRequestForm({
   const router = useRouter();
   const [intensity, setIntensity] = React.useState<'small' | 'medium' | 'big'>('medium');
   const [variantCount, setVariantCount] = React.useState<number>(10);
-  const [provider, setProvider] = React.useState<UgcVideoProvider>('kie_ai');
+  // Phase 3f: UGC always uses HeyGen Avatar Mode. Provider picker
+  // retired — the form just submits without a provider field and the
+  // server action auto-picks 'heygen' for ugc concepts.
   const [mode, setMode] = React.useState<'mock' | 'live'>('mock');
   const [liveAck, setLiveAck] = React.useState(initialLiveAck);
   const [showLiveDialog, setShowLiveDialog] = React.useState(false);
@@ -81,9 +71,9 @@ export function GenerationRequestForm({
       estimateGenerationCost({
         conceptType,
         variantCount: Math.max(1, Math.min(MAX_VARIANTS_PER_JOB, variantCount || 1)),
-        provider: conceptType === 'ugc' ? provider : undefined,
+        provider: conceptType === 'ugc' ? 'heygen' : undefined,
       }),
-    [conceptType, variantCount, provider],
+    [conceptType, variantCount],
   );
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
@@ -118,7 +108,8 @@ export function GenerationRequestForm({
     formData.set('intensity', intensity);
     formData.set('variantCount', String(variantCount));
     formData.set('mode', mode);
-    if (conceptType === 'ugc') formData.set('provider', provider);
+    // Provider field omitted intentionally — server action auto-picks
+    // 'heygen' for ugc concepts (Phase 3f).
 
     startTransition(async () => {
       setError(null);
@@ -222,39 +213,15 @@ export function GenerationRequestForm({
         )}
       </div>
 
-      {/* Provider (UGC only) */}
+      {/* Video provider note (UGC only) */}
       {conceptType === 'ugc' && (
-        <fieldset className="space-y-3">
-          <legend className="text-sm font-medium">Video provider</legend>
-          {UGC_PROVIDERS.map((p) => (
-            <label
-              key={p.value}
-              className={
-                'flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ' +
-                (provider === p.value
-                  ? 'border-primary bg-primary/5'
-                  : 'bg-card hover:bg-accent/30')
-              }
-            >
-              <input
-                type="radio"
-                name="provider"
-                value={p.value}
-                checked={provider === p.value}
-                onChange={() => setProvider(p.value)}
-                className="mt-1 h-4 w-4"
-              />
-              <span className="flex-1">
-                <span className="block font-semibold">
-                  {labelForProvider(p.value)}{' '}
-                  {p.recommended && (
-                    <span className="text-muted-foreground text-xs font-normal">· recommended</span>
-                  )}
-                </span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
+        <div className="bg-card text-muted-foreground rounded-lg border p-3 text-xs">
+          UGC variants use HeyGen Avatar Mode. Pick your default avatar in{' '}
+          <a className="underline" href="/settings#heygen-avatar">
+            Settings → Default UGC Avatar
+          </a>{' '}
+          if you haven&apos;t yet.
+        </div>
       )}
 
       {/* Cost estimator */}

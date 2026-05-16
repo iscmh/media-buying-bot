@@ -2,20 +2,25 @@ import { computeKieAiCost } from '@mbb/shared';
 import { callProvider } from './chokepoint';
 
 /**
- * Kie.ai Sora 2 video generation client. Async — submit returns a task ID,
- * caller polls until the video is ready.
+ * DEPRECATED Phase 3f — Kie.ai (Sora 2) video generation client.
  *
- * Endpoints (verified against kie.ai docs, May 2025 — re-pin in Phase 3.5
- * when their docs URL stabilizes):
+ * UGC pipeline now defaults to HeyGen Avatar Mode (cheaper, faster, more
+ * reliable for talking-head ads). This module stays so any stale jobs in
+ * the Inngest queue can drain — but no new code path selects 'kie_ai'
+ * for UGC generation. Form layer auto-picks 'heygen' on submit.
+ *
+ * If we ever want full-scene generative video back (vs talking-avatar),
+ * this is the entry point — flip the form picker back on and bump the
+ * version. Keeping the integration warm is cheap.
+ *
+ * --- Original Phase 3b documentation ---
+ * Async — submit returns a task ID, caller polls until video is ready.
+ *
+ * Endpoints (verified against kie.ai docs, May 2025):
  *   - POST /api/v1/sora-2/generate           — submit; returns { taskId }
  *   - GET  /api/v1/sora-2/status?taskId=...  — poll; returns { status, videoUrl? }
  *
  * Auth: `Authorization: Bearer <apiKey>`.
- *
- * Polling is delegated to the Inngest job — this client provides primitives
- * (submit, checkStatus) that the job composes with `step.sleep`. Doing
- * polling inside one client method would make Inngest's durable-execution
- * model unhappy (polls would burn step budget).
  */
 
 const KIE_BASE = 'https://api.kie.ai/api/v1';
