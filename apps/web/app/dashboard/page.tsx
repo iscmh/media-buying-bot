@@ -89,11 +89,7 @@ export default async function DashboardPage({ searchParams }: Props) {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-3xl font-bold">Dashboard</h1>
-            {isFoundingMember && (
-              <Badge variant="gold" title="Phase 7 founding-member tier — perks land in Phase 8.">
-                ⭐ Founding Member
-              </Badge>
-            )}
+            {isFoundingMember && <Badge variant="secondary">Founding member</Badge>}
           </div>
           <p className="text-muted-foreground text-sm">
             {user.email} · timezone {userTimezone}

@@ -36,7 +36,7 @@ export function BillingSection({
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Billing</CardTitle>
-            <Badge variant="gold">⭐ Founding Member</Badge>
+            <Badge variant="secondary">Founding member</Badge>
           </div>
         </CardHeader>
         <CardContent className="text-sm">

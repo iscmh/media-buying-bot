@@ -2,10 +2,25 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * Phase 7: minimal Badge primitive. shadcn ships one of these but it
- * wasn't imported into this project; this is the same API.
+ * Ads Bot badge — status pills only. No emoji prefixes, no playful
+ * variants. Use outline + state color for status pills; solid only for
+ * the rare destructive-emphasis case.
+ *
+ * Variants:
+ *   default     — neutral filled (primary bg, dark text). Sparingly.
+ *   secondary   — neutral filled grey.
+ *   outline     — neutral border-only.
+ *   destructive — red border + text for negative states (rejected, errored).
+ *   success     — desaturated green border + text for "active" pills.
+ *   warning     — desaturated amber for "needs review" / "kill recommended".
  */
-export type BadgeVariant = 'default' | 'secondary' | 'outline' | 'destructive' | 'gold';
+export type BadgeVariant =
+  | 'default'
+  | 'secondary'
+  | 'outline'
+  | 'destructive'
+  | 'success'
+  | 'warning';
 
 interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
   variant?: BadgeVariant;
@@ -14,11 +29,10 @@ interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 const variantClass: Record<BadgeVariant, string> = {
   default: 'bg-primary text-primary-foreground border-transparent',
   secondary: 'bg-secondary text-secondary-foreground border-transparent',
-  outline: 'text-foreground border-border',
-  destructive: 'bg-destructive text-destructive-foreground border-transparent',
-  // Phase 7 founding-member accent. Tailwind's amber-500 reads gold-ish
-  // in both light + dark themes without dragging in a new palette.
-  gold: 'bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300',
+  outline: 'text-fg border-border',
+  destructive: 'text-[color:var(--destructive-color)] border-[color:var(--destructive-color)]/40',
+  success: 'text-[color:var(--success)] border-[color:var(--success)]/40',
+  warning: 'text-[color:var(--warning)] border-[color:var(--warning)]/40',
 };
 
 export function Badge({ className, variant = 'default', ...props }: BadgeProps) {
