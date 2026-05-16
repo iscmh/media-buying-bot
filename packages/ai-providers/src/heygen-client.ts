@@ -17,6 +17,45 @@ const HEYGEN_BASE = 'https://api.heygen.com';
 const SUBMIT_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_MS = 15_000;
 const AVATARS_TIMEOUT_MS = 15_000;
+const VOICES_TIMEOUT_MS = 15_000;
+
+/**
+ * Phase 3f: thrown by the UGC pipeline when neither
+ * user_settings.default_heygen_avatar_id nor HEYGEN_DEFAULT_AVATAR_ID
+ * env var is set. Surfaced to the job UI verbatim so the operator
+ * knows where to fix it.
+ */
+export class HeyGenAvatarNotConfiguredError extends Error {
+  constructor(message = 'Set your default avatar in /settings before generating UGC variants.') {
+    super(message);
+    this.name = 'HeyGenAvatarNotConfiguredError';
+  }
+}
+
+/**
+ * Phase 3f: translate raw HTTP status from the HeyGen API into a
+ * user-facing category the pipeline maps to friendly copy. Anything
+ * we don't classify falls through to 'unknown' (generic error message).
+ */
+export type HeyGenErrorCategory =
+  | 'auth' // 401/403 — bad key, revoked, or wrong env
+  | 'credits' // 402/429 — out of credits or rate-limited
+  | 'avatar_missing' // 404 + "avatar" in error message
+  | 'timeout' // request aborted (chokepoint timeout)
+  | 'server' // 5xx — HeyGen-side problem
+  | 'unknown';
+
+export function classifyHeyGenError(
+  status: number | undefined,
+  message: string | undefined,
+): HeyGenErrorCategory {
+  if (status === 401 || status === 403) return 'auth';
+  if (status === 402 || status === 429) return 'credits';
+  if (status === 404 && /avatar/i.test(message ?? '')) return 'avatar_missing';
+  if (status === 0 && /timeout|aborted/i.test(message ?? '')) return 'timeout';
+  if (typeof status === 'number' && status >= 500) return 'server';
+  return 'unknown';
+}
 
 export interface HeyGenAvatar {
   avatar_id: string;
@@ -31,6 +70,8 @@ export interface HeyGenAvatarsListResult {
   ok: boolean;
   avatars: HeyGenAvatar[];
   latencyMs: number;
+  /** HTTP status from HeyGen (or 0 on timeout/network error). */
+  httpStatus?: number;
   errorMessage?: string;
 }
 
@@ -61,6 +102,7 @@ export async function listHeyGenAvatars(input: {
       ok: false,
       avatars: [],
       latencyMs: result.latencyMs,
+      httpStatus: result.status,
       errorMessage: result.errorMessage,
     };
   }
@@ -69,6 +111,69 @@ export async function listHeyGenAvatars(input: {
     ok: true,
     avatars: result.data.data?.avatars ?? [],
     latencyMs: result.latencyMs,
+    httpStatus: result.status,
+  };
+}
+
+// =========================================================================
+// Voices
+// =========================================================================
+
+export interface HeyGenVoice {
+  voice_id: string;
+  language?: string;
+  gender?: string;
+  name: string;
+  preview_audio?: string;
+}
+
+export interface HeyGenVoicesListResult {
+  ok: boolean;
+  voices: HeyGenVoice[];
+  latencyMs: number;
+  httpStatus?: number;
+  errorMessage?: string;
+}
+
+/**
+ * Phase 3f: list the voices available to the user's HeyGen account.
+ * Settings UI uses this to render the optional "default voice" picker
+ * alongside the avatar picker. Pipeline doesn't call this on every job —
+ * if a voice id is configured the submit call uses it directly, and if
+ * not HeyGen picks the avatar's default voice automatically.
+ */
+export async function listHeyGenVoices(input: {
+  userId: string;
+  apiKey: string;
+  generationJobId?: string;
+}): Promise<HeyGenVoicesListResult> {
+  const result = await callProvider<{
+    data?: { voices?: HeyGenVoice[] };
+  }>({
+    userId: input.userId,
+    provider: 'heygen',
+    url: `${HEYGEN_BASE}/v2/voices`,
+    method: 'GET',
+    headers: { 'X-Api-Key': input.apiKey },
+    timeoutMs: VOICES_TIMEOUT_MS,
+    requestBodyForLog: { _list_voices: true },
+    generationJobId: input.generationJobId,
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      voices: [],
+      latencyMs: result.latencyMs,
+      httpStatus: result.status,
+      errorMessage: result.errorMessage,
+    };
+  }
+  return {
+    ok: true,
+    voices: result.data.data?.voices ?? [],
+    latencyMs: result.latencyMs,
+    httpStatus: result.status,
   };
 }
 
@@ -129,6 +234,7 @@ export interface HeyGenSubmitResult {
   ok: boolean;
   videoId?: string;
   latencyMs: number;
+  httpStatus?: number;
   errorMessage?: string;
 }
 
@@ -141,12 +247,14 @@ export async function submitHeyGenVideo(input: HeyGenSubmitInput): Promise<HeyGe
         character: {
           type: 'avatar',
           avatar_id: input.avatarId,
+          avatar_style: 'normal',
         },
         voice: {
           type: 'text',
           input_text: input.script,
           ...(input.voiceId ? { voice_id: input.voiceId } : {}),
         },
+        background: { type: 'color', value: '#ffffff' },
       },
     ],
     dimension: { width: 720, height: 1280 },
@@ -176,7 +284,12 @@ export async function submitHeyGenVideo(input: HeyGenSubmitInput): Promise<HeyGe
   });
 
   if (!result.ok) {
-    return { ok: false, latencyMs: result.latencyMs, errorMessage: result.errorMessage };
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      httpStatus: result.status,
+      errorMessage: result.errorMessage,
+    };
   }
 
   const videoId = result.data.data?.video_id;
@@ -184,10 +297,11 @@ export async function submitHeyGenVideo(input: HeyGenSubmitInput): Promise<HeyGe
     return {
       ok: false,
       latencyMs: result.latencyMs,
+      httpStatus: result.status,
       errorMessage: 'HeyGen response did not include a video_id',
     };
   }
-  return { ok: true, videoId, latencyMs: result.latencyMs };
+  return { ok: true, videoId, latencyMs: result.latencyMs, httpStatus: result.status };
 }
 
 export interface HeyGenCheckInput {
@@ -205,6 +319,7 @@ export interface HeyGenCheckResult {
   videoUrl?: string;
   costUsd: number;
   latencyMs: number;
+  httpStatus?: number;
   errorMessage?: string;
 }
 
@@ -236,6 +351,7 @@ export async function checkHeyGenVideoStatus(input: HeyGenCheckInput): Promise<H
       status: 'failed',
       costUsd: 0,
       latencyMs: result.latencyMs,
+      httpStatus: result.status,
       errorMessage: result.errorMessage,
     };
   }
@@ -256,6 +372,7 @@ export async function checkHeyGenVideoStatus(input: HeyGenCheckInput): Promise<H
     videoUrl: data.video_url,
     costUsd: status === 'completed' ? computeHeygenCost() : 0,
     latencyMs: result.latencyMs,
+    httpStatus: result.status,
     errorMessage: status === 'failed' ? data.error?.message : undefined,
   };
 }

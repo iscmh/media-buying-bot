@@ -36,16 +36,22 @@ export {
 } from './kie-ai-client';
 export {
   listHeyGenAvatars,
+  listHeyGenVoices,
   pickHeyGenAvatar,
   submitHeyGenVideo,
   checkHeyGenVideoStatus,
+  classifyHeyGenError,
+  HeyGenAvatarNotConfiguredError,
   type HeyGenAvatar,
   type HeyGenAvatarsListResult,
+  type HeyGenVoice,
+  type HeyGenVoicesListResult,
   type HeyGenSubmitInput,
   type HeyGenSubmitResult,
   type HeyGenCheckInput,
   type HeyGenCheckResult,
   type HeyGenStatus,
+  type HeyGenErrorCategory,
 } from './heygen-client';
 export {
   callProvider,
