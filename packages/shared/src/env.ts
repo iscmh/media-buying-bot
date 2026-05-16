@@ -67,15 +67,14 @@ export const WhopEnvSchema = z.object({
 });
 
 /**
- * Phase 3f: HeyGen Avatar Mode pipeline. The default-avatar env var is
- * the platform-wide fallback used when a user hasn't picked their own
- * avatar in /settings. SMART_AVATAR_MATCH gates the heuristic matcher;
- * default off because the matcher is naive and a user-picked default
- * almost always beats it.
+ * Phase 3f/3g: HeyGen Avatar Mode pipeline. The default-avatar env var
+ * is the platform-wide fallback used when smart matching fails AND the
+ * user hasn't forced an avatar override in /settings. Phase 3g made
+ * Claude-based ranking the default behavior; the previous
+ * SMART_AVATAR_MATCH feature flag has been retired.
  */
 export const HeygenEnvSchema = z.object({
   HEYGEN_DEFAULT_AVATAR_ID: z.string().min(1).optional(),
-  SMART_AVATAR_MATCH: boolish.default(false),
 });
 
 /** Parse a slice of process.env, throwing a helpful error on failure. */
