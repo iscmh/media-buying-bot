@@ -1,7 +1,8 @@
 import Link from 'next/link';
-import { desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, not } from 'drizzle-orm';
+import { Rocket } from 'lucide-react';
 import { getDb, schema } from '@mbb/db';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -11,27 +12,42 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { AppShell } from '@/components/shell/app-shell';
+import { EmptyState } from '@/components/shell/empty-state';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 
-export const metadata = { title: 'Launched ads — Ads Bot' };
+export const metadata = { title: 'Launched ads' };
 export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 20;
 
+/**
+ * Statuses considered "test data" — hidden from the table by default so
+ * the launched view reads as production-ish. Toggle via ?show_test=1.
+ */
+const TEST_STATUSES = ['dry_run', 'rejected_by_meta', 'launch_failed'] satisfies Array<
+  'dry_run' | 'rejected_by_meta' | 'launch_failed' | 'active' | 'killed' | 'paused'
+>;
+
 interface Props {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; show_test?: string }>;
 }
 
 export default async function LaunchedAdsPage({ searchParams }: Props) {
   const { userId } = await requireOnboardingComplete();
-  const { page: pageParam } = await searchParams;
+  const { page: pageParam, show_test: showTestParam } = await searchParams;
   const page = Math.max(1, Number(pageParam ?? '1') || 1);
   const offset = (page - 1) * PAGE_SIZE;
+  const showTest = showTestParam === '1';
 
   const db = getDb();
   const rows = await db.query.launchedAds.findMany({
-    where: eq(schema.launchedAds.userId, userId),
+    where: showTest
+      ? eq(schema.launchedAds.userId, userId)
+      : and(
+          eq(schema.launchedAds.userId, userId),
+          not(inArray(schema.launchedAds.status, TEST_STATUSES)),
+        ),
     orderBy: desc(schema.launchedAds.launchedAt),
     limit: PAGE_SIZE + 1,
     offset,
@@ -51,28 +67,49 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
       : [];
   const creativeById = new Map(creatives.map((c) => [c.id, c]));
 
+  const toggleHref = `/launched?show_test=${showTest ? '0' : '1'}`;
+
   return (
     <AppShell crumbs={[{ label: 'Launched ads' }]}>
-      <header className="mb-6">
-        <h1 className="text-fg text-2xl font-semibold tracking-tight">Launched ads</h1>
-        <p className="text-fg-muted mt-1 text-sm">
-          Every ad the bot has pushed to Meta. Phase 4a runs in DRY_RUN — IDs show{' '}
-          <code className="font-mono">dry_run_*</code> placeholders and no real money is spent.
-        </p>
+      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-fg text-2xl font-semibold tracking-tight">Launched ads</h1>
+          <p className="text-fg-muted mt-1 text-sm">
+            Every ad the bot has pushed to Meta.{' '}
+            {!showTest && (
+              <span>
+                Test rows (dry-run, rejected, failed) hidden by default.{' '}
+                <Link href={toggleHref} className="hover:text-fg underline transition-colors">
+                  Show
+                </Link>
+                .
+              </span>
+            )}
+            {showTest && (
+              <span>
+                Showing test rows.{' '}
+                <Link href={toggleHref} className="hover:text-fg underline transition-colors">
+                  Hide
+                </Link>
+                .
+              </span>
+            )}
+          </p>
+        </div>
       </header>
 
       {visible.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>No launches yet</CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground text-sm">
-            Approve variants on a generation job, then click &quot;Launch approved&quot; to push
-            them to Meta.
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Rocket}
+          title={showTest ? 'No launches yet.' : 'No live ads launched yet.'}
+          description={
+            showTest
+              ? 'Approve variants on a generation job, then launch them to see rows here.'
+              : 'Approve and launch variants to see them here. Test rows are hidden — toggle "Show" above to include them.'
+          }
+        />
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
+        <div className="overflow-x-auto rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -109,23 +146,21 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                             <img
                               src={creative.fileUrl}
                               alt={creative.headline ?? 'variant'}
-                              className="bg-muted h-16 w-16 rounded object-cover"
+                              className="bg-bg-active h-14 w-14 rounded object-cover"
                             />
                           </Link>
                         ) : (
-                          <div className="bg-muted h-16 w-16 rounded" />
+                          <div className="bg-bg-active h-14 w-14 rounded" />
                         )}
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">
+                          <p className="text-fg truncate text-sm font-medium">
                             {creative?.headline ?? '(no headline)'}
                           </p>
-                          <p className="text-muted-foreground line-clamp-2 text-xs">
+                          <p className="text-fg-muted line-clamp-2 text-xs">
                             {creative?.primaryText ?? ''}
                           </p>
                           {row.scaleCount > 0 && (
-                            <p className="text-muted-foreground text-xs">
-                              Scaled {row.scaleCount}×
-                            </p>
+                            <p className="text-fg-muted text-xs">Scaled {row.scaleCount}×</p>
                           )}
                         </div>
                       </div>
@@ -133,33 +168,44 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                     <TableCell className="font-mono text-xs">
                       <div className="space-y-0.5">
                         <p>
-                          <span className="text-muted-foreground">camp:</span>{' '}
-                          {row.metaCampaignId ?? '—'}
+                          <span className="text-fg-subtle">camp:</span>{' '}
+                          <span className="text-fg-muted">
+                            {truncateMiddle(row.metaCampaignId ?? '—', 14)}
+                          </span>
                         </p>
                         <p>
-                          <span className="text-muted-foreground">ad:</span> {row.metaAdId ?? '—'}
+                          <span className="text-fg-subtle">ad:</span>{' '}
+                          <span className="text-fg-muted">
+                            {truncateMiddle(row.metaAdId ?? '—', 14)}
+                          </span>
                         </p>
                       </div>
                     </TableCell>
-                    <TableCell>${Number(row.dailyBudgetUsd).toFixed(2)}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={displayStatus} mode={row.mode} />
+                    <TableCell className="font-mono text-xs">
+                      ${Number(row.dailyBudgetUsd).toFixed(2)}
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell>
+                      <Badge variant={statusVariant(displayStatus)}>
+                        {displayStatus.replace(/_/g, ' ')}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
                       {spend != null ? `$${spend.toFixed(2)}` : '—'}
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell className="font-mono text-xs">
                       {impressions != null
                         ? `${impressions.toLocaleString()} / ${ctrPct != null ? `${ctrPct.toFixed(2)}%` : '—'}`
                         : '—'}
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell className="font-mono text-xs">
                       {clicks != null
                         ? `${clicks.toLocaleString()} / ${cpc != null ? `$${cpc.toFixed(2)}` : '—'}`
                         : '—'}
                     </TableCell>
-                    <TableCell className="text-xs">{conversions ?? '—'}</TableCell>
-                    <TableCell className="text-xs">{formatDateTime(row.launchedAt)}</TableCell>
+                    <TableCell className="font-mono text-xs">{conversions ?? '—'}</TableCell>
+                    <TableCell className="text-fg-muted font-mono text-xs">
+                      {formatDateTime(row.launchedAt)}
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -172,21 +218,21 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
         <nav className="mt-4 flex items-center justify-between text-sm" aria-label="Pagination">
           {page > 1 ? (
             <Link
-              href={`/launched?page=${page - 1}`}
-              className="text-primary underline-offset-4 hover:underline"
+              href={`/launched?page=${page - 1}${showTest ? '&show_test=1' : ''}`}
+              className="text-fg-muted hover:text-fg underline-offset-4 transition-colors hover:underline"
             >
-              ← Previous
+              Previous
             </Link>
           ) : (
             <span />
           )}
-          <span className="text-muted-foreground text-xs">Page {page}</span>
+          <span className="text-fg-subtle font-mono text-xs">Page {page}</span>
           {hasNextPage ? (
             <Link
-              href={`/launched?page=${page + 1}`}
-              className="text-primary underline-offset-4 hover:underline"
+              href={`/launched?page=${page + 1}${showTest ? '&show_test=1' : ''}`}
+              className="text-fg-muted hover:text-fg underline-offset-4 transition-colors hover:underline"
             >
-              Next →
+              Next
             </Link>
           ) : (
             <span />
@@ -199,9 +245,7 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
 
 /**
  * Phase 5: collapse the raw launched_ads.status + recommendation
- * timestamps into one display label so the table communicates
- * "kill recommended" / "scale recommended" / "awaiting approval"
- * without adding another column. Precedence (highest wins):
+ * timestamps into one display label. Precedence (highest wins):
  *   killed > kill_recommended > scale_recommended > paused > active > dry_run > *
  */
 function computeDisplayStatus(row: {
@@ -215,27 +259,29 @@ function computeDisplayStatus(row: {
   return row.status;
 }
 
-function StatusBadge({ status, mode }: { status: string; mode: string }) {
-  const palette: Record<string, string> = {
-    dry_run: 'bg-muted text-muted-foreground',
-    active: 'bg-green-500/10 text-green-700 border border-green-500/40',
-    paused: 'bg-yellow-500/10 text-yellow-700 border border-yellow-500/40',
-    killed: 'bg-destructive/10 text-destructive border border-destructive/40',
-    rejected_by_meta: 'bg-destructive/10 text-destructive border border-destructive/40',
-    launch_failed: 'bg-destructive/10 text-destructive border border-destructive/40',
-    // Phase 5 recommendation states.
-    kill_recommended: 'bg-yellow-500/10 text-yellow-700 border border-yellow-500/40',
-    scale_recommended: 'bg-blue-500/10 text-blue-700 border border-blue-500/40',
-    awaiting_approval: 'bg-purple-500/10 text-purple-700 border border-purple-500/40',
-    scaled: 'bg-green-500/10 text-green-700 border border-green-500/40',
-  };
-  const label = status.replace(/_/g, ' ');
-  const className = `inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-    palette[status] ?? 'bg-muted text-muted-foreground'
-  }`;
-  return (
-    <span className={className} title={`mode=${mode}`}>
-      {label}
-    </span>
-  );
+function statusVariant(status: string): BadgeVariant {
+  switch (status) {
+    case 'active':
+    case 'scaled':
+      return 'success';
+    case 'killed':
+    case 'rejected_by_meta':
+    case 'launch_failed':
+      return 'destructive';
+    case 'kill_recommended':
+    case 'paused':
+    case 'awaiting_approval':
+      return 'warning';
+    case 'scale_recommended':
+      return 'outline';
+    default:
+      return 'outline';
+  }
+}
+
+function truncateMiddle(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const head = Math.ceil(max / 2) - 1;
+  const tail = Math.floor(max / 2) - 2;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }

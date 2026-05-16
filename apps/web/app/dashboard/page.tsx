@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { eq } from 'drizzle-orm';
+import { BarChart3, Rocket, Skull, Target, TrendingUp, Wallet } from 'lucide-react';
 import {
   getDashboardMetrics,
   getDb,
@@ -10,7 +11,6 @@ import {
   type TimeRange,
 } from '@mbb/db';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
   TableBody,
@@ -20,29 +20,37 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { AppShell } from '@/components/shell/app-shell';
+import { EmptyState } from '@/components/shell/empty-state';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { MetricCard } from './_components/metric-card';
 import { PauseBanner } from './_components/pause-banner';
 import { SpendChart } from './_components/spend-chart';
 import { TimeRangePicker } from './_components/time-range-picker';
-import { getConnectionSummaries } from './_lib/connection-summaries';
 
-export const metadata = { title: 'Dashboard — Ads Bot' };
+export const metadata = { title: 'Dashboard' };
 export const dynamic = 'force-dynamic';
 
 const VALID_RANGES: TimeRange[] = ['24h', '7d', '30d', 'all'];
 
+/**
+ * Statuses that represent test / dead-end ads. Hidden from the
+ * per-ad table by default so the dashboard reads as production-ish
+ * even with mock-mode rows in the database.
+ */
+const TEST_STATUSES = new Set(['dry_run', 'rejected_by_meta', 'launch_failed']);
+
 interface Props {
-  searchParams: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string; show_test?: string }>;
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
   const user = await requireOnboardingComplete();
-  const { range: rangeParam } = await searchParams;
+  const { range: rangeParam, show_test: showTestParam } = await searchParams;
   const range: TimeRange = VALID_RANGES.includes(rangeParam as TimeRange)
     ? (rangeParam as TimeRange)
     : '7d';
+  const showTest = showTestParam === '1';
 
   const db = getDb();
   const userRow = await db.query.users.findFirst({
@@ -55,16 +63,17 @@ export default async function DashboardPage({ searchParams }: Props) {
   });
   const isFoundingMember = !!userSettingsRow?.isFoundingMember;
 
-  const [pauseReason, summaries, userTimezone] = await Promise.all([
+  const [pauseReason, userTimezone] = await Promise.all([
     userRow?.isPaused ? getLatestPauseReason(user.userId) : Promise.resolve(null),
-    getConnectionSummaries(user.userId),
     getUserTimezone(user.userId),
   ]);
 
-  const [metrics, perAd] = await Promise.all([
+  const [metrics, perAdRaw] = await Promise.all([
     getDashboardMetrics({ userId: user.userId, range, userTimezone }),
     getPerAdBreakdown({ userId: user.userId, range, userTimezone, sortBy: 'spend', limit: 50 }),
   ]);
+
+  const perAd = showTest ? perAdRaw : perAdRaw.filter((r) => !TEST_STATUSES.has(r.status));
 
   const roasTone =
     metrics.impliedRoas == null
@@ -74,6 +83,9 @@ export default async function DashboardPage({ searchParams }: Props) {
         : metrics.impliedRoas < 1
           ? 'bad'
           : 'neutral';
+
+  // Build show/hide test-ads link preserving the current range param.
+  const toggleHref = `/dashboard?range=${range}&show_test=${showTest ? '0' : '1'}`;
 
   return (
     <AppShell crumbs={[{ label: 'Dashboard' }]} action={<TimeRangePicker current={range} />}>
@@ -96,18 +108,18 @@ export default async function DashboardPage({ searchParams }: Props) {
         </p>
       </div>
 
-      {/* Metric cards — 2×3 on desktop. */}
+      {/* Metric cards — 3 columns on desktop, 2 on tablet, 1 on mobile. */}
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <MetricCard
           label="Total spend"
           value={`$${metrics.totalSpendUsd.toFixed(2)}`}
-          emoji="💸"
+          icon={Wallet}
           hint={`${metrics.totalImpressions.toLocaleString()} impressions · ${metrics.totalClicks.toLocaleString()} clicks`}
         />
         <MetricCard
           label="Conversions"
           value={metrics.totalConversions.toLocaleString()}
-          emoji="🎯"
+          icon={Target}
           hint={
             metrics.avgCtrPct != null
               ? `CTR ${metrics.avgCtrPct.toFixed(2)}% · CPC $${(metrics.avgCpcUsd ?? 0).toFixed(2)}`
@@ -117,21 +129,21 @@ export default async function DashboardPage({ searchParams }: Props) {
         <MetricCard
           label="Implied ROAS"
           value={metrics.impliedRoas != null ? `${metrics.impliedRoas.toFixed(2)}x` : '—'}
-          emoji={roasTone === 'good' ? '🟢' : roasTone === 'bad' ? '🔴' : '🟡'}
+          icon={TrendingUp}
           tone={roasTone}
-          hint="Heuristic — $20 assumed per conv. Phase 6+ wires real value."
+          hint="Heuristic — $20 assumed per conv."
         />
-        <MetricCard label="Active ads" value={metrics.adsActiveCount.toString()} emoji="🟢" />
+        <MetricCard label="Active ads" value={metrics.adsActiveCount.toString()} icon={Rocket} />
         <MetricCard
           label="Killed (period)"
           value={metrics.adsKilledCount.toString()}
-          emoji="💀"
+          icon={Skull}
           tone={metrics.adsKilledCount > 0 ? 'bad' : 'neutral'}
         />
         <MetricCard
           label="Scaled (period)"
           value={metrics.adsScaledCount.toString()}
-          emoji="📈"
+          icon={TrendingUp}
           tone={metrics.adsScaledCount > 0 ? 'good' : 'neutral'}
         />
       </div>
@@ -143,23 +155,35 @@ export default async function DashboardPage({ searchParams }: Props) {
 
       {/* Per-ad breakdown */}
       <div className="mb-8">
-        <div className="mb-2 flex items-baseline justify-between">
-          <h2 className="text-lg font-semibold">Per-ad performance</h2>
-          <Link
-            href="/launched"
-            className="text-primary text-sm underline-offset-4 hover:underline"
-          >
-            View full /launched →
-          </Link>
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-fg text-base font-semibold">Per-ad performance</h2>
+          <div className="text-fg-muted flex items-center gap-3 text-xs">
+            <Link
+              href={toggleHref}
+              className="hover:text-fg underline-offset-4 transition-colors hover:underline"
+            >
+              {showTest ? 'Hide test ads' : 'Show test ads'}
+            </Link>
+            <Link
+              href="/launched"
+              className="hover:text-fg underline-offset-4 transition-colors hover:underline"
+            >
+              View all
+            </Link>
+          </div>
         </div>
         {perAd.length === 0 ? (
-          <Card>
-            <CardContent className="text-muted-foreground py-8 text-center text-sm">
-              No launched ads in this window yet.
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={BarChart3}
+            title={showTest ? 'No ads in this window yet.' : 'No live ads in this window yet.'}
+            description={
+              showTest
+                ? 'Generate variants and launch them to see performance numbers here.'
+                : 'Toggle "Show test ads" to include dry-run and rejected rows.'
+            }
+          />
         ) : (
-          <div className="overflow-x-auto rounded-lg border">
+          <div className="overflow-x-auto rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -184,36 +208,42 @@ export default async function DashboardPage({ searchParams }: Props) {
                             <img
                               src={r.imageUrl}
                               alt={r.headline ?? 'variant'}
-                              className="bg-muted h-10 w-10 rounded object-cover"
+                              className="bg-bg-active h-10 w-10 rounded object-cover"
                             />
                           </Link>
                         ) : (
-                          <div className="bg-muted h-10 w-10 rounded" />
+                          <div className="bg-bg-active h-10 w-10 rounded" />
                         )}
-                        <p className="line-clamp-2 max-w-[16ch] text-xs font-medium">
+                        <p className="text-fg line-clamp-2 max-w-[16ch] text-xs font-medium">
                           {r.headline ?? '(no headline)'}
                         </p>
                       </div>
                     </TableCell>
-                    <TableCell className="text-xs">{r.status}</TableCell>
-                    <TableCell className="text-xs">${r.dailyBudgetUsd.toFixed(2)}</TableCell>
-                    <TableCell className="text-xs">${r.totalSpendUsd.toFixed(2)}</TableCell>
-                    <TableCell className="text-xs">{r.totalConversions}</TableCell>
-                    <TableCell className="text-xs">{r.ctrPct.toFixed(2)}%</TableCell>
-                    <TableCell className="text-xs">${r.cpcUsd.toFixed(2)}</TableCell>
+                    <TableCell className="text-fg-muted font-mono text-xs">
+                      {r.status.replace(/_/g, ' ')}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      ${r.dailyBudgetUsd.toFixed(2)}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">
+                      ${r.totalSpendUsd.toFixed(2)}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{r.totalConversions}</TableCell>
+                    <TableCell className="font-mono text-xs">{r.ctrPct.toFixed(2)}%</TableCell>
+                    <TableCell className="font-mono text-xs">${r.cpcUsd.toFixed(2)}</TableCell>
                     <TableCell
                       className={
-                        'text-xs ' +
+                        'font-mono text-xs ' +
                         (r.impliedRoas >= 2
-                          ? 'text-green-700'
+                          ? 'text-success'
                           : r.impliedRoas < 1 && r.totalSpendUsd > 0
-                            ? 'text-destructive'
-                            : '')
+                            ? 'text-[color:var(--destructive-color)]'
+                            : 'text-fg')
                       }
                     >
                       {r.totalSpendUsd > 0 ? `${r.impliedRoas.toFixed(2)}x` : '—'}
                     </TableCell>
-                    <TableCell className="text-xs">
+                    <TableCell className="text-fg-muted font-mono text-xs">
                       {formatDateTime(new Date(r.launchedAtIso))}
                     </TableCell>
                   </TableRow>
@@ -222,91 +252,6 @@ export default async function DashboardPage({ searchParams }: Props) {
             </Table>
           </div>
         )}
-      </div>
-
-      {/* Quick links — was the original dashboard */}
-      <h2 className="mb-3 text-lg font-semibold">Quick links</h2>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <Link href="/connections/meta">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Meta connection</CardTitle>
-              <CardDescription>Manage your Business Manager + ad accounts.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {summaries.meta.connected ? (
-                <p className="text-sm">
-                  <span className="font-medium">Connected</span>{' '}
-                  <span className="text-muted-foreground">
-                    · BM …{summaries.meta.bmIdShort} · {summaries.meta.adAccountCount} ad account
-                    {summaries.meta.adAccountCount === 1 ? '' : 's'}
-                  </span>
-                </p>
-              ) : (
-                <p className="text-destructive text-sm">Disconnected — reconnect →</p>
-              )}
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/connections/telegram">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Telegram bot</CardTitle>
-              <CardDescription>Where you receive kill/scale alerts.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {summaries.telegram.connected ? (
-                <p className="text-sm">
-                  <span className="font-medium">Linked</span>{' '}
-                  {summaries.telegram.username && (
-                    <span className="text-muted-foreground font-mono">
-                      as @{summaries.telegram.username}
-                    </span>
-                  )}
-                </p>
-              ) : (
-                <p className="text-destructive text-sm">Disconnected — reconnect →</p>
-              )}
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/concepts">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Concepts</CardTitle>
-              <CardDescription>Upload winning creatives.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground text-sm">Launch new variants →</p>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/launched">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Launched ads</CardTitle>
-              <CardDescription>Full management table.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground text-sm">All launches across all time →</p>
-            </CardContent>
-          </Card>
-        </Link>
-
-        <Link href="/settings">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Settings</CardTitle>
-              <CardDescription>Caps · kill/scale · daily summaries.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground text-sm">Configure bot rules →</p>
-            </CardContent>
-          </Card>
-        </Link>
       </div>
     </AppShell>
   );
