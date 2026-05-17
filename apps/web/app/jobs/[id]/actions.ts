@@ -253,7 +253,10 @@ export async function launchApprovedAction(
 ): Promise<LaunchApprovedResult> {
   const user = await requireUser();
   const db = getDb();
-  const mode: 'mock' | 'live' = input.mode ?? 'mock';
+  // Polish-3.5: UI no longer surfaces a mode toggle on launch. Default
+  // is 'live'; the 'mock' branch survives for CLI/test callers that
+  // explicitly post it.
+  const mode: 'mock' | 'live' = input.mode ?? 'live';
 
   // 1. Verify ownership.
   const job = await db.query.generationJobs.findFirst({

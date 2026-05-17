@@ -75,8 +75,9 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
   const [launchPending, setLaunchPending] = React.useState(false);
   const [launchError, setLaunchError] = React.useState<string | null>(null);
 
-  // Phase 4b: per-launch mode + dialog config.
-  const [mode, setMode] = React.useState<'mock' | 'live'>('mock');
+  // Polish-3.5: launch is always live. The mock back door survives in
+  // the server action for tests / CLI; the UI never reaches it.
+  const mode = 'live' as const;
   const [pageId, setPageId] = React.useState<string>(launchSnapshot.defaultPageId ?? '');
   const [offerUrl, setOfferUrl] = React.useState(launchSnapshot.defaultOfferUrl);
   const [countries, setCountries] = React.useState<string[]>(launchSnapshot.defaultCountries);
@@ -105,9 +106,7 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
   const totalBudgetIfLaunched = launchableCount * launchSnapshot.perAdBudgetUsd;
   const exceedsCap = totalBudgetIfLaunched > launchSnapshot.remainingUsd;
   const exceedsFirstLaunchCap =
-    mode === 'live' &&
-    isFirstLiveLaunch &&
-    totalBudgetIfLaunched > launchSnapshot.firstLaunchCapUsd;
+    isFirstLiveLaunch && totalBudgetIfLaunched > launchSnapshot.firstLaunchCapUsd;
 
   async function decide(id: string, decision: 'approved' | 'rejected') {
     setPendingId(id);
@@ -134,20 +133,17 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
 
   function onLaunchClick() {
     setLaunchError(null);
-    setShowLaunchDialog(true);
-  }
-
-  function pickMode(next: 'mock' | 'live') {
-    setLaunchError(null);
-    if (next === 'live' && !liveAcknowledged) {
-      // Reset checkboxes each time the dialog opens to force fresh consent.
+    if (!liveAcknowledged) {
+      // First-ever live launch — block the dialog behind the triple-ack
+      // checklist. Resetting the checkboxes here guarantees fresh
+      // consent if the user dismissed it earlier.
       setAck1(false);
       setAck2(false);
       setAck3(false);
       setShowTripleAck(true);
       return;
     }
-    setMode(next);
+    setShowLaunchDialog(true);
   }
 
   async function confirmTripleAck() {
@@ -160,8 +156,8 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
         return;
       }
       setLiveAcknowledged(true);
-      setMode('live');
       setShowTripleAck(false);
+      setShowLaunchDialog(true);
     } finally {
       setTripleAckPending(false);
     }
@@ -199,11 +195,11 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
       const result = await launchApprovedAction({
         jobId,
         mode,
-        pageId: mode === 'live' ? pageId || undefined : undefined,
-        offerUrl: mode === 'live' ? offerUrl || undefined : undefined,
-        targetingCountries: mode === 'live' ? countries : undefined,
-        ageMin: mode === 'live' ? ageMin : undefined,
-        ageMax: mode === 'live' ? ageMax : undefined,
+        pageId: pageId || undefined,
+        offerUrl: offerUrl || undefined,
+        targetingCountries: countries,
+        ageMin,
+        ageMax,
       });
       if (!result.ok) {
         setLaunchError(result.errorMessage ?? 'Launch failed.');
@@ -304,152 +300,120 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
             </DialogDescription>
           </DialogHeader>
 
-          {/* Mode toggle */}
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Mode</legend>
-            <div className="bg-card flex gap-2 rounded-lg border p-2">
-              <button
-                type="button"
-                onClick={() => pickMode('mock')}
-                className={
-                  'flex-1 rounded-md px-3 py-2 text-sm transition-colors ' +
-                  (mode === 'mock' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/30')
-                }
-              >
-                <span className="block font-semibold">Mock</span>
-                <span className="text-xs opacity-80">Placeholder IDs, no Meta call</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => pickMode('live')}
-                className={
-                  'flex-1 rounded-md px-3 py-2 text-sm transition-colors ' +
-                  (mode === 'live' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/30')
-                }
-              >
-                <span className="block font-semibold">Live</span>
-                <span className="text-xs opacity-80">Real Meta ads (PAUSED)</span>
-              </button>
+          <p className="text-fg-muted text-xs">
+            Ads are created PAUSED. They do not spend money until you activate them in Meta Ads
+            Manager.
+          </p>
+
+          {/* Launch settings */}
+          <>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="pageId">Facebook Page</Label>
+                <button
+                  type="button"
+                  onClick={refreshPages}
+                  disabled={pagesRefreshing}
+                  className="text-primary text-xs underline-offset-4 hover:underline disabled:opacity-50"
+                >
+                  {pagesRefreshing ? 'Refreshing…' : 'Refresh pages'}
+                </button>
+              </div>
+              {pages.length === 0 ? (
+                <p className="text-muted-foreground text-xs">
+                  No pages cached yet. Click &quot;Refresh pages&quot; to fetch from Meta.
+                </p>
+              ) : (
+                <select
+                  id="pageId"
+                  value={pageId}
+                  onChange={(e) => setPageId(e.target.value)}
+                  className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+                >
+                  <option value="">— Select a page —</option>
+                  {pages.map((p) => (
+                    <option key={p.pageId} value={p.pageId}>
+                      {p.pageName} ({p.pageId})
+                    </option>
+                  ))}
+                </select>
+              )}
+              {pagesError && <p className="text-destructive text-xs">{pagesError}</p>}
             </div>
-            {mode === 'live' && (
-              <p className="text-xs text-amber-700">
-                Live ads are created PAUSED. They do not spend money until you activate them in Meta
-                Ads Manager.
+
+            <div className="space-y-1.5">
+              <Label htmlFor="offerUrl">Offer URL</Label>
+              <Input
+                id="offerUrl"
+                type="url"
+                value={offerUrl}
+                onChange={(e) => setOfferUrl(e.target.value)}
+                placeholder="https://your-offer.example/landing"
+              />
+              <p className="text-muted-foreground text-xs">
+                Where clicks send users. Pre-filled from the concept&apos;s offer URL.
               </p>
-            )}
-          </fieldset>
+            </div>
 
-          {/* Live-only fields */}
-          {mode === 'live' && (
-            <>
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="pageId">Facebook Page</Label>
-                  <button
-                    type="button"
-                    onClick={refreshPages}
-                    disabled={pagesRefreshing}
-                    className="text-primary text-xs underline-offset-4 hover:underline disabled:opacity-50"
-                  >
-                    {pagesRefreshing ? 'Refreshing…' : 'Refresh pages'}
-                  </button>
-                </div>
-                {pages.length === 0 ? (
-                  <p className="text-muted-foreground text-xs">
-                    No pages cached yet. Click &quot;Refresh pages&quot; to fetch from Meta.
-                  </p>
-                ) : (
-                  <select
-                    id="pageId"
-                    value={pageId}
-                    onChange={(e) => setPageId(e.target.value)}
-                    className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
-                  >
-                    <option value="">— Select a page —</option>
-                    {pages.map((p) => (
-                      <option key={p.pageId} value={p.pageId}>
-                        {p.pageName} ({p.pageId})
-                      </option>
-                    ))}
-                  </select>
-                )}
-                {pagesError && <p className="text-destructive text-xs">{pagesError}</p>}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Targeting</Label>
+                <button
+                  type="button"
+                  onClick={() => setShowCustomizeTargeting((v) => !v)}
+                  className="text-primary text-xs underline-offset-4 hover:underline"
+                >
+                  {showCustomizeTargeting ? 'Hide' : 'Customize'}
+                </button>
               </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="offerUrl">Offer URL</Label>
-                <Input
-                  id="offerUrl"
-                  type="url"
-                  value={offerUrl}
-                  onChange={(e) => setOfferUrl(e.target.value)}
-                  placeholder="https://your-offer.example/landing"
-                />
-                <p className="text-muted-foreground text-xs">
-                  Where clicks send users. Pre-filled from the concept&apos;s offer URL.
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>Targeting</Label>
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomizeTargeting((v) => !v)}
-                    className="text-primary text-xs underline-offset-4 hover:underline"
-                  >
-                    {showCustomizeTargeting ? 'Hide' : 'Customize'}
-                  </button>
-                </div>
-                <p className="text-muted-foreground text-xs">
-                  {countries.join(', ')} · Age {ageMin}–{ageMax} · {launchSnapshot.optimizationGoal}{' '}
-                  · {launchSnapshot.placementType}
-                </p>
-                {showCustomizeTargeting && (
-                  <div className="bg-card space-y-3 rounded-md border p-3">
+              <p className="text-muted-foreground text-xs">
+                {countries.join(', ')} · Age {ageMin}–{ageMax} · {launchSnapshot.optimizationGoal} ·{' '}
+                {launchSnapshot.placementType}
+              </p>
+              {showCustomizeTargeting && (
+                <div className="bg-card space-y-3 rounded-md border p-3">
+                  <div>
+                    <Label className="text-xs">Countries</Label>
+                    <Input
+                      type="text"
+                      value={countries.join(', ')}
+                      onChange={(e) =>
+                        setCountries(
+                          e.target.value
+                            .split(',')
+                            .map((c) => c.trim().toUpperCase())
+                            .filter(Boolean),
+                        )
+                      }
+                      placeholder="US, CA, GB"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <Label className="text-xs">Countries</Label>
+                      <Label className="text-xs">Min age</Label>
                       <Input
-                        type="text"
-                        value={countries.join(', ')}
-                        onChange={(e) =>
-                          setCountries(
-                            e.target.value
-                              .split(',')
-                              .map((c) => c.trim().toUpperCase())
-                              .filter(Boolean),
-                          )
-                        }
-                        placeholder="US, CA, GB"
+                        type="number"
+                        min={13}
+                        max={65}
+                        value={ageMin}
+                        onChange={(e) => setAgeMin(Number(e.target.value) || 13)}
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <Label className="text-xs">Min age</Label>
-                        <Input
-                          type="number"
-                          min={13}
-                          max={65}
-                          value={ageMin}
-                          onChange={(e) => setAgeMin(Number(e.target.value) || 13)}
-                        />
-                      </div>
-                      <div>
-                        <Label className="text-xs">Max age</Label>
-                        <Input
-                          type="number"
-                          min={13}
-                          max={65}
-                          value={ageMax}
-                          onChange={(e) => setAgeMax(Number(e.target.value) || 65)}
-                        />
-                      </div>
+                    <div>
+                      <Label className="text-xs">Max age</Label>
+                      <Input
+                        type="number"
+                        min={13}
+                        max={65}
+                        value={ageMax}
+                        onChange={(e) => setAgeMax(Number(e.target.value) || 65)}
+                      />
                     </div>
                   </div>
-                )}
-              </div>
-            </>
-          )}
+                </div>
+              )}
+            </div>
+          </>
 
           {/* Budget + cap summary */}
           <div className="bg-card space-y-1 rounded-md border p-3 text-sm">
@@ -462,8 +426,8 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
             <p>
               Total daily exposure: <strong>${totalBudgetIfLaunched.toFixed(2)}</strong>
             </p>
-            {mode === 'live' && isFirstLiveLaunch && (
-              <p className="text-xs text-amber-700">
+            {isFirstLiveLaunch && (
+              <p className="text-fg-muted text-xs">
                 First live launch — capped at ${launchSnapshot.firstLaunchCapUsd.toFixed(2)} total
                 daily exposure.
               </p>
@@ -509,14 +473,12 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
                 launchPending ||
                 exceedsCap ||
                 exceedsFirstLaunchCap ||
-                (mode === 'live' && (!pageId || !offerUrl || countries.length === 0))
+                !pageId ||
+                !offerUrl ||
+                countries.length === 0
               }
             >
-              {launchPending
-                ? 'Launching…'
-                : mode === 'live'
-                  ? 'Launch (PAUSED in Meta — activate manually)'
-                  : 'Confirm launch'}
+              {launchPending ? 'Launching…' : 'Launch (paused in Meta — activate manually)'}
             </Button>
           </div>
         </DialogContent>
