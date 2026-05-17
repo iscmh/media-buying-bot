@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { GeistMono } from 'geist/font/mono';
 import { GeistSans } from 'geist/font/sans';
+import { NavProgress } from '@/components/shell/nav-progress';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -25,7 +27,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       suppressHydrationWarning
       className={`dark ${GeistSans.variable} ${GeistMono.variable}`}
     >
-      <body className="bg-bg text-fg min-h-screen font-sans antialiased">{children}</body>
+      <body className="bg-bg text-fg min-h-screen font-sans antialiased">
+        {/* Top-bar navigation progress indicator. useSearchParams
+            requires a Suspense boundary on SSR. */}
+        <Suspense fallback={null}>
+          <NavProgress />
+        </Suspense>
+        {children}
+      </body>
     </html>
   );
 }
