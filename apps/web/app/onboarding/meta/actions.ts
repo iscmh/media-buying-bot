@@ -11,8 +11,13 @@ import {
   logAuditEvent,
   schema,
 } from '@mbb/db';
-import { MetaSelectionSchema, MetaTokenInputSchema } from '@mbb/shared';
-import { listAdAccounts, listBusinesses, verifyMetaToken } from '@/lib/meta/graph-api';
+import { metaMinimumMinor, MetaSelectionSchema, MetaTokenInputSchema } from '@mbb/shared';
+import {
+  listAdAccounts,
+  listBusinesses,
+  listUserPages,
+  verifyMetaToken,
+} from '@/lib/meta/graph-api';
 import { isAdAccountSelectable, type AdAccountRow, type BusinessRow } from '@/lib/meta/types';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -104,6 +109,21 @@ export async function verifyMetaTokenAction(formData: FormData): Promise<VerifyT
 }
 
 // ----- list BMs + ad accounts (called from server component, not via form) -----
+
+/**
+ * Polish-3.5: helper for selectMetaBusinessAction — fetches the
+ * currently-active decrypted access token. Throws if none. Keeps the
+ * select-time pages fetch from duplicating the decrypt path.
+ */
+async function getActiveToken(userId: string): Promise<string> {
+  const db = getDb();
+  const conn = await db.query.metaConnections.findFirst({
+    where: and(eq(schema.metaConnections.userId, userId), isNull(schema.metaConnections.deletedAt)),
+    columns: { accessTokenEncrypted: true },
+  });
+  if (!conn?.accessTokenEncrypted) throw new Error('No Meta token on file.');
+  return decryptSecret(conn.accessTokenEncrypted);
+}
 
 export async function listMetaResources(userId: string): Promise<
   | {
@@ -216,6 +236,33 @@ export async function selectMetaBusinessAction(
     };
   }
 
+  // Polish-3.5: capture account currency / tz / min-budget + page list at
+  // selection time. Currency drives launch-time USD→account conversion;
+  // pages let the launch path validate the user-picked page id without
+  // re-hitting /me/accounts.
+  const primaryAccount = resources.adAccounts.find((a) => a.id === parsed.data.adAccountIds[0]);
+  const accountCurrency = primaryAccount?.currency ?? null;
+  const accountTimezone = primaryAccount?.timezone_name ?? null;
+  const minDailyBudgetMinor = accountCurrency ? metaMinimumMinor(accountCurrency) : null;
+
+  let pagesPayload: Array<{ id: string; name: string; accessToken?: string; tasks?: string[] }> =
+    [];
+  try {
+    // Pull pages with the same token used for the listing flow; if it
+    // fails, we don't block selection — launch path will surface a
+    // clearer error than Meta's "Invalid parameter".
+    const fetched = await listUserPages(user.id, await getActiveToken(user.id));
+    pagesPayload = fetched.map((p) => ({
+      id: p.id,
+      name: p.name,
+      accessToken: p.access_token,
+      tasks: p.tasks,
+    }));
+  } catch {
+    // Swallow — non-blocking. The launch dialog already has a Refresh
+    // Pages button that retries this call.
+  }
+
   await db
     .update(schema.metaConnections)
     .set({
@@ -223,6 +270,10 @@ export async function selectMetaBusinessAction(
       adAccountIds: parsed.data.adAccountIds,
       status: 'active',
       lastVerifiedAt: new Date(),
+      accountCurrency,
+      accountTimezone,
+      minDailyBudgetMinor,
+      pages: pagesPayload,
     })
     .where(
       and(eq(schema.metaConnections.userId, user.id), isNull(schema.metaConnections.deletedAt)),

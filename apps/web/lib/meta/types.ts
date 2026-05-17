@@ -23,6 +23,24 @@ export interface AdAccountRow {
   name: string;
   account_status: number;
   business?: { id: string; name: string };
+  /** Polish-3.5: ISO currency code (USD/RON/...). Drives launch-time
+   *  USD→account conversion. */
+  currency?: string;
+  /** IANA tz name (e.g. "Europe/Bucharest"). Display only for now. */
+  timezone_name?: string;
+}
+
+/**
+ * Polish-3.5: per-page record from /me/accounts?fields=id,name,
+ * access_token,tasks. Stored on meta_connections.pages at select-time
+ * so the launch path can validate the picked page id + pull the
+ * page-scoped access token without re-hitting Meta.
+ */
+export interface MetaPageRow {
+  id: string;
+  name: string;
+  access_token?: string;
+  tasks?: string[];
 }
 
 /** account_status: 1=active, 2=disabled, 3=unsettled, 7=pending_risk, 8=pending_settlement, 9=in_grace_period, 100=closed */

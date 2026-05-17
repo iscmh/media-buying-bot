@@ -155,7 +155,27 @@ export async function listBusinesses(userId: string, token: string): Promise<Bus
 
 export async function listAdAccounts(userId: string, token: string): Promise<AdAccountRow[]> {
   const res = await get<{ data: AdAccountRow[] }>(userId, '/me/adaccounts', token, {
-    fields: 'id,name,account_status,business{id,name}',
+    // Polish-3.5: pulls currency + timezone_name on the listing call so we
+    // can persist them on meta_connections at select-time. No extra
+    // round-trip per account.
+    fields: 'id,name,account_status,currency,timezone_name,business{id,name}',
+    limit: '100',
+  });
+  if (!res.ok) throw new Error(res.message);
+  return res.data?.data ?? [];
+}
+
+/**
+ * Polish-3.5: list the FB Pages the user is admin of. Returns page id,
+ * name, page-scoped access token, and the tasks array (used to confirm
+ * the user can CREATE_CONTENT). Persisted on meta_connections.pages.
+ */
+export async function listUserPages(
+  userId: string,
+  token: string,
+): Promise<import('./types').MetaPageRow[]> {
+  const res = await get<{ data: import('./types').MetaPageRow[] }>(userId, '/me/accounts', token, {
+    fields: 'id,name,access_token,tasks',
     limit: '100',
   });
   if (!res.ok) throw new Error(res.message);
