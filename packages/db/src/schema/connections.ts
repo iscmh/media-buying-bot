@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import {
   aiProviderEnum,
   connectionMethodEnum,
@@ -39,6 +39,21 @@ export const metaConnections = pgTable('meta_connections', {
 
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
   lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+
+  // Polish-3.5: per-account currency + tz + min-budget override. Populated
+  // by the OAuth flow from /act_<id>?fields=currency,timezone_name; the
+  // launch path reads these to convert USD → account currency / minor
+  // units before calling Meta.
+  accountCurrency: text('account_currency'),
+  accountTimezone: text('account_timezone'),
+  minDailyBudgetMinor: integer('min_daily_budget_minor'),
+  // Page list captured at connect time. {id, name, accessToken, tasks[]}.
+  // Used at launch to validate the picked page id + pull the page-scoped
+  // token without re-hitting /me/accounts.
+  pages:
+    jsonb('pages').$type<
+      Array<{ id: string; name: string; accessToken?: string; tasks?: string[] }>
+    >(),
 
   // Soft delete.
   deletedAt: timestamp('deleted_at', { withTimezone: true }),

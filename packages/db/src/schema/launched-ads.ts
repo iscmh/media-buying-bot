@@ -1,4 +1,4 @@
-import { integer, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { concepts } from './concepts';
 import { launchedAdStatusEnum } from './enums';
 import { generatedCreatives, generationJobs } from './generation';
@@ -43,6 +43,10 @@ export const launchedAds = pgTable('launched_ads', {
   // BOT_DRY_RUN to false.
   mode: text('mode').notNull().default('mock'),
   errorMessage: text('error_message'),
+  // Polish-3.5: full Meta API response body on the creating call, success
+  // or failure. Lets the UI surface error_user_msg / error_subcode
+  // instead of the opaque "Invalid parameter" rollup we used to store.
+  metaResponseRaw: jsonb('meta_response_raw').$type<Record<string, unknown>>(),
 
   launchedAt: timestamp('launched_at', { withTimezone: true }).notNull().defaultNow(),
   pausedAt: timestamp('paused_at', { withTimezone: true }),
