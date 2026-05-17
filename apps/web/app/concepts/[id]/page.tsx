@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { ConceptNameEdit } from './concept-name-edit';
 
 export const metadata = { title: 'Concept' };
@@ -47,6 +48,16 @@ export default async function ConceptDetailPage({ params }: Props) {
   });
   const ourJobs = jobs.filter((j) => j.conceptIds?.includes(id));
 
+  // Sign a short-lived URL for the source file so the hero preview can
+  // render it. Concepts bucket is private; getPublicUrl would 401.
+  // 1h expiry — page is short-lived; user re-loads if they linger.
+  let previewUrl: string | null = null;
+  if (concept.fileUrl) {
+    const supabase = await getSupabaseServerClient();
+    const { data } = await supabase.storage.from('concepts').createSignedUrl(concept.fileUrl, 3600);
+    previewUrl = data?.signedUrl ?? null;
+  }
+
   const displayName = concept.name ?? concept.staticHeadline ?? labelForType(concept.contentType);
 
   return (
@@ -70,10 +81,31 @@ export default async function ConceptDetailPage({ params }: Props) {
         </p>
       </header>
 
+      {/* Hero preview — image or video based on contentType. Bucket
+          is private; previewUrl is a 1h signed URL generated above. */}
+      {previewUrl && (
+        <div className="bg-bg-elevated mb-6 overflow-hidden rounded-md border">
+          {concept.contentType === 'ugc' ? (
+            <video
+              src={previewUrl}
+              controls
+              playsInline
+              className="block max-h-[70vh] w-full bg-black object-contain"
+            />
+          ) : (
+            <img
+              src={previewUrl}
+              alt={displayName}
+              className="block max-h-[70vh] w-full bg-black object-contain"
+            />
+          )}
+        </div>
+      )}
+
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>Source</CardTitle>
-          <CardDescription>Storage path: {concept.fileUrl ?? '—'}</CardDescription>
+          <CardTitle className="text-base">Source metadata</CardTitle>
+          <CardDescription className="font-mono text-xs">{concept.fileUrl ?? '—'}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
           {concept.contentType === 'static' && (
@@ -101,29 +133,32 @@ export default async function ConceptDetailPage({ params }: Props) {
 
       {ourJobs.length > 0 && (
         <section>
-          <h2 className="mb-3 text-lg font-semibold">Generation history</h2>
+          <h2 className="text-fg mb-3 text-base font-semibold">Generation history</h2>
           <ul className="space-y-2">
             {ourJobs.map((j) => (
               <li key={j.id}>
                 <Link
                   href={`/jobs/${j.id}`}
-                  className="bg-card hover:bg-accent/30 flex items-center justify-between rounded-lg border p-4 transition-colors"
+                  className="bg-bg-elevated hover:bg-bg-hover flex items-center justify-between rounded-md border p-3 transition-colors"
                 >
                   <div className="flex flex-col gap-0.5 text-sm">
-                    <span className="font-medium">
+                    <span className="text-fg font-medium">
                       {j.variantCount ?? 0} variants{' '}
                       {j.providerChoice && (
-                        <span className="text-muted-foreground">· {j.providerChoice}</span>
+                        <span className="text-fg-muted font-mono text-xs">
+                          · {j.providerChoice}
+                        </span>
                       )}
                     </span>
-                    <span className="text-muted-foreground text-xs">
+                    <span className="text-fg-muted text-xs">
                       {j.status}
-                      {j.estimatedCostUsd != null && ` · est $${j.estimatedCostUsd}`}
+                      {j.estimatedCostUsd != null && (
+                        <span className="font-mono"> · est ${j.estimatedCostUsd}</span>
+                      )}
                       {' · '}
-                      {formatDateTime(j.requestedAt)}
+                      <span className="font-mono">{formatDateTime(j.requestedAt)}</span>
                     </span>
                   </div>
-                  <span className="text-muted-foreground text-xs">View →</span>
                 </Link>
               </li>
             ))}
@@ -137,8 +172,8 @@ export default async function ConceptDetailPage({ params }: Props) {
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:gap-4">
-      <span className="text-muted-foreground sm:w-44">{label}</span>
-      <span className="whitespace-pre-line">{value}</span>
+      <span className="text-fg-muted sm:w-44">{label}</span>
+      <span className="text-fg whitespace-pre-line">{value}</span>
     </div>
   );
 }
