@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { and, eq } from 'drizzle-orm';
 import { ConceptInputSchema, StaticConceptInputSchema, UgcConceptInputSchema } from '@mbb/shared';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { auditMetaFromHeaders } from '@/lib/audit/request-meta';
@@ -104,6 +105,11 @@ export async function createConceptAction(formData: FormData): Promise<CreateCon
   const ext = sanitizeExt(file.name);
   const storagePath = `${user.id}/concepts/${conceptId}/source${ext}`;
 
+  // Polish-3 display name. Form may post an explicit `name`; otherwise
+  // default to the uploaded filename with extension stripped.
+  const explicitName = stringField(formData, 'name');
+  const name = explicitName ?? stripExtension(file.name);
+
   // Upload via the user-scoped Supabase client so RLS applies. Service-
   // role would also work but using the user's session keeps the audit
   // trail honest (the user uploaded it, not the server).
@@ -131,6 +137,7 @@ export async function createConceptAction(formData: FormData): Promise<CreateCon
     id: conceptId,
     userId: user.id,
     contentType: data.contentType,
+    name,
     fileUrl: storagePath,
     description: data.description ?? null,
     nicheTag: data.nicheTag ?? null,
@@ -162,6 +169,49 @@ export async function createConceptAction(formData: FormData): Promise<CreateCon
   return { ok: true, conceptId };
 }
 
+/**
+ * Polish-3: inline rename from /concepts/[id]. Server-validates ownership
+ * via service-role + explicit user_id match (RLS would also catch this,
+ * but the redundancy is cheap and the error message is friendlier).
+ */
+export async function renameConceptAction(input: {
+  conceptId: string;
+  name: string;
+}): Promise<{ ok: boolean; errorMessage?: string }> {
+  const trimmed = input.name.trim();
+  if (trimmed.length === 0) {
+    return { ok: false, errorMessage: 'Name cannot be empty.' };
+  }
+  if (trimmed.length > 120) {
+    return { ok: false, errorMessage: 'Name capped at 120 characters.' };
+  }
+
+  const user = await requireUser();
+  const db = getDb();
+  const result = await db
+    .update(schema.concepts)
+    .set({ name: trimmed, updatedAt: new Date() })
+    .where(and(eq(schema.concepts.id, input.conceptId), eq(schema.concepts.userId, user.id)))
+    .returning({ id: schema.concepts.id });
+  if (result.length === 0) {
+    return { ok: false, errorMessage: 'Concept not found.' };
+  }
+
+  await logAuditEvent({
+    userId: user.id,
+    eventType: 'concept_renamed',
+    eventData: {
+      concept_id: input.conceptId,
+      new_name: trimmed,
+      _meta: await auditMetaFromHeaders(),
+    },
+  });
+
+  revalidatePath('/concepts');
+  revalidatePath(`/concepts/${input.conceptId}`);
+  return { ok: true };
+}
+
 function stringField(formData: FormData, key: string): string | undefined {
   const v = formData.get(key);
   if (typeof v !== 'string') return undefined;
@@ -176,6 +226,14 @@ function sanitizeExt(filename: string): string {
   // Allow only a small whitelist of extensions matching our MIME allow-list.
   const allowed = new Set(['.png', '.jpg', '.jpeg', '.webp', '.mp4', '.mov']);
   return allowed.has(ext) ? ext : '';
+}
+
+function stripExtension(filename: string): string {
+  const idx = filename.lastIndexOf('.');
+  const base = idx > 0 ? filename.slice(0, idx) : filename;
+  // Trim path separators if the browser ever leaks them, and cap length so
+  // a 300-char filename doesn't blow the column.
+  return base.split(/[\\/]/).pop()!.trim().slice(0, 120) || 'Untitled concept';
 }
 
 function formatMB(bytes: number): string {

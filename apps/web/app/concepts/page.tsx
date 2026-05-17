@@ -21,6 +21,7 @@ export default async function ConceptsPage() {
     columns: {
       id: true,
       contentType: true,
+      name: true,
       nicheTag: true,
       createdAt: true,
       staticHeadline: true,
@@ -67,7 +68,7 @@ export default async function ConceptsPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="text-fg truncate text-sm font-medium">
-                          {c.staticHeadline ?? labelForContentType(c.contentType)}
+                          {c.name ?? c.staticHeadline ?? labelForContentType(c.contentType)}
                         </p>
                         <p className="text-fg-muted text-xs">
                           {c.nicheTag ? `${c.nicheTag} · ` : ''}

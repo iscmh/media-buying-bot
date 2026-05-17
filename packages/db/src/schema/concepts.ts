@@ -18,6 +18,11 @@ export const concepts = pgTable('concepts', {
 
   contentType: conceptContentTypeEnum('content_type').notNull(),
 
+  // Polish-3: user-editable display name. Defaulted from the upload
+  // filename (extension stripped) at create time; nullable for legacy
+  // rows that predate this column.
+  name: text('name'),
+
   // Stored in Supabase Storage at <user_id>/concepts/<concept_id>/...
   fileUrl: text('file_url'),
   description: text('description'),

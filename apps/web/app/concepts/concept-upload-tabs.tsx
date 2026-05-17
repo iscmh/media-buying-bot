@@ -50,9 +50,19 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
   const [error, setError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
   const [file, setFile] = React.useState<File | null>(null);
+  const [name, setName] = React.useState<string>('');
   const [niche, setNiche] = React.useState<string>('');
   const [platform, setPlatform] = React.useState<string>('');
   const formRef = React.useRef<HTMLFormElement>(null);
+
+  // Auto-fill the name from the filename on first pick. If the user
+  // typed something custom, we don't overwrite.
+  function handleFileChange(next: File | null) {
+    setFile(next);
+    if (next && name.trim().length === 0) {
+      setName(stripExtension(next.name));
+    }
+  }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -64,6 +74,7 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
     const formData = new FormData(formRef.current);
     formData.set('contentType', contentType);
     formData.set('file', file);
+    if (name.trim().length > 0) formData.set('name', name.trim());
     if (niche) formData.set('nicheTag', niche);
     if (platform) formData.set('sourcePlatform', platform);
     startTransition(async () => {
@@ -88,8 +99,20 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
         accept={accept}
         maxLabel={maxLabel}
         file={file}
-        onFileChange={setFile}
+        onFileChange={handleFileChange}
       />
+
+      <div className="space-y-1.5">
+        <Label htmlFor="name">Concept name</Label>
+        <Input
+          id="name"
+          name="name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={120}
+          placeholder="Defaults to the uploaded filename"
+        />
+      </div>
 
       {contentType === 'static' && (
         <>
@@ -332,6 +355,12 @@ interface SelectFieldProps {
   value: string;
   onChange: (next: string) => void;
   placeholder: string;
+}
+
+function stripExtension(filename: string): string {
+  const idx = filename.lastIndexOf('.');
+  const base = idx > 0 ? filename.slice(0, idx) : filename;
+  return base.split(/[\\/]/).pop()!.trim().slice(0, 120) || 'Untitled concept';
 }
 
 function SelectField({ name, label, options, value, onChange, placeholder }: SelectFieldProps) {

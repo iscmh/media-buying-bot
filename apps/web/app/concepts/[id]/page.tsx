@@ -7,8 +7,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { ConceptNameEdit } from './concept-name-edit';
 
-export const metadata = { title: 'Concept — Ads Bot' };
+export const metadata = { title: 'Concept' };
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -46,11 +47,11 @@ export default async function ConceptDetailPage({ params }: Props) {
   });
   const ourJobs = jobs.filter((j) => j.conceptIds?.includes(id));
 
-  const title = concept.staticHeadline ?? labelForType(concept.contentType);
+  const displayName = concept.name ?? concept.staticHeadline ?? labelForType(concept.contentType);
 
   return (
     <AppShell
-      crumbs={[{ label: 'Concepts', href: '/concepts' }, { label: title }]}
+      crumbs={[{ label: 'Concepts', href: '/concepts' }, { label: displayName }]}
       contentClass="max-w-3xl"
       action={
         <Button asChild>
@@ -59,7 +60,7 @@ export default async function ConceptDetailPage({ params }: Props) {
       }
     >
       <header className="mb-6">
-        <h1 className="text-fg text-2xl font-semibold tracking-tight">{title}</h1>
+        <ConceptNameEdit conceptId={concept.id} initialName={displayName} />
         <p className="text-fg-muted mt-1 text-sm">
           {labelForType(concept.contentType)}
           {concept.nicheTag ? ` · ${concept.nicheTag}` : ''}
