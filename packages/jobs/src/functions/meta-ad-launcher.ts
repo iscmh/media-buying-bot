@@ -7,7 +7,11 @@ import {
   deleteAdSet,
   deleteCampaign,
   effectiveLaunchMode,
+  fetchMetaVideoThumbnail,
+  pollMetaVideoReady,
   uploadAdImage,
+  uploadAdVideo,
+  type CreativeMedia,
   type LaunchMode,
 } from '@mbb/meta-api';
 import {
@@ -93,7 +97,10 @@ export const metaAdLauncher = inngest.createFunction(
       const concept = conceptId
         ? await db.query.concepts.findFirst({
             where: eq(schema.concepts.id, conceptId),
-            columns: { id: true, offerUrl: true, nicheTag: true },
+            // Polish-3.6: pull contentType so the launch path can route
+            // UGC variants through the video creative pipeline instead
+            // of the image one.
+            columns: { id: true, offerUrl: true, nicheTag: true, contentType: true },
           })
         : null;
 
@@ -161,6 +168,9 @@ export const metaAdLauncher = inngest.createFunction(
       return {
         ok: true as const,
         conceptId: concept?.id ?? null,
+        // Polish-3.6: drives image-vs-video routing in the per-variant
+        // creative builder below.
+        conceptContentType: (concept?.contentType ?? 'static') as 'static' | 'ugc' | string,
         offerUrl: event.data.offerUrl ?? concept?.offerUrl ?? 'https://example.com',
         nicheTag: concept?.nicheTag ?? null,
         adAccountId: effectiveAdAccountId,
@@ -309,25 +319,100 @@ export const metaAdLauncher = inngest.createFunction(
               }
               createdAdSetId = adSet.id;
 
-              // Phase 4b hotfix #2: pre-upload image to /adimages and
-              // pass the returned hash to createAdCreative. Meta rejects
-              // image_url inside link_data.
-              const imageUpload = await uploadAdImage({
-                userId,
-                accessToken: ctx.accessToken,
-                adAccountId: ctx.adAccountId,
-                imageUrl: variant.fileUrl,
-                mode: callerMode,
-                generationJobId,
-              });
-              if (!imageUpload.ok) {
+              // Polish-3.6: branch by media kind. UGC variants are
+              // HeyGen video URLs (.mp4 or similar); static variants are
+              // Supabase-hosted PNG/JPEG. Meta has separate upload paths
+              // (/adimages vs /advideos) and different creative shapes.
+              const media = inferMediaKind(variant.fileUrl, ctx.conceptContentType);
+              if (media === 'unsupported') {
                 throw new MetaCreateError(
-                  imageUpload.errorMessage ?? 'uploadAdImage failed',
-                  imageUpload.metaErrorCode,
+                  `Unsupported variant content type for ${variant.fileUrl}. Supported: jpg, png, webp, mp4, mov, webm.`,
                 );
-                // uploadAdImage doesn't surface rawResponse yet — fine
-                // for the demo, future patch can extend if a 4xx here
-                // ever lands in front of Denis.
+              }
+
+              let creativeMedia: CreativeMedia;
+              if (media === 'image') {
+                // Phase 4b hotfix #2: pre-upload to /adimages, reference
+                // the returned hash on link_data.image_hash.
+                const imageUpload = await uploadAdImage({
+                  userId,
+                  accessToken: ctx.accessToken,
+                  adAccountId: ctx.adAccountId,
+                  imageUrl: variant.fileUrl,
+                  mode: callerMode,
+                  generationJobId,
+                });
+                if (!imageUpload.ok) {
+                  throw new MetaCreateError(
+                    imageUpload.errorMessage ?? 'uploadAdImage failed',
+                    imageUpload.metaErrorCode,
+                  );
+                }
+                creativeMedia = { kind: 'image', imageHash: imageUpload.imageHash };
+              } else {
+                // Polish-3.6 video path: upload → poll for ready → fetch
+                // thumbnail → build a video_data creative.
+                await sendProgress(
+                  step,
+                  userId,
+                  `Uploading variant ${variantIndex + 1}/${approved.length} to Meta…`,
+                );
+                const videoUpload = await uploadAdVideo({
+                  userId,
+                  accessToken: ctx.accessToken,
+                  adAccountId: ctx.adAccountId,
+                  videoUrl: variant.fileUrl,
+                  mode: callerMode,
+                  generationJobId,
+                });
+                if (!videoUpload.ok) {
+                  throw new MetaCreateError(
+                    videoUpload.errorMessage ?? 'uploadAdVideo failed',
+                    videoUpload.metaErrorCode,
+                  );
+                }
+
+                // Mock mode short-circuits poll + thumbnail — both would
+                // hit Meta. Build a dry-run media with a placeholder
+                // thumbnail URL.
+                if (callerMode === 'mock' || videoUpload.dryRun) {
+                  creativeMedia = {
+                    kind: 'video',
+                    videoId: videoUpload.videoId,
+                    thumbnailUrl: 'https://placehold.co/720x1280/png?text=dry+run',
+                  };
+                } else {
+                  await sendProgress(
+                    step,
+                    userId,
+                    `Variant ${variantIndex + 1}/${approved.length} uploaded. Building creative…`,
+                  );
+                  const ready = await pollMetaVideoReady({
+                    userId,
+                    accessToken: ctx.accessToken,
+                    videoId: videoUpload.videoId,
+                  });
+                  if (!ready.ok) {
+                    throw new MetaCreateError(
+                      ready.errorMessage ?? 'Video did not finish processing',
+                    );
+                  }
+                  const thumb = await fetchMetaVideoThumbnail({
+                    userId,
+                    accessToken: ctx.accessToken,
+                    videoId: videoUpload.videoId,
+                  });
+                  if (!thumb.ok || !thumb.thumbnailUrl) {
+                    throw new MetaCreateError(
+                      thumb.errorMessage ?? 'Could not fetch Meta video thumbnail',
+                    );
+                  }
+                  creativeMedia = {
+                    kind: 'video',
+                    videoId: videoUpload.videoId,
+                    thumbnailUrl: thumb.thumbnailUrl,
+                  };
+                }
               }
 
               const creative = await createAdCreative({
@@ -335,7 +420,7 @@ export const metaAdLauncher = inngest.createFunction(
                 accessToken: ctx.accessToken,
                 adAccountId: ctx.adAccountId,
                 name: `${baseName} — creative`,
-                imageHash: imageUpload.imageHash,
+                media: creativeMedia,
                 headline: variant.headline ?? '(no headline)',
                 primaryText: variant.primaryText ?? '(no body)',
                 description: variant.description,
@@ -653,4 +738,55 @@ async function markJobFailed(
 
 function shortId(uuid: string): string {
   return uuid.replace(/-/g, '').slice(0, 6);
+}
+
+/**
+ * Polish-3.6 media-kind detector.
+ *  - Filename extension is the primary signal (works for both Supabase-
+ *    hosted images and HeyGen CDN URLs).
+ *  - Falls back to the concept's contentType when the extension is
+ *    missing (e.g. signed URLs without an extension component).
+ *  - Returns 'unsupported' so the caller can fail loud with a clear
+ *    error before hitting Meta.
+ */
+function inferMediaKind(
+  fileUrl: string,
+  conceptContentType: string,
+): 'image' | 'video' | 'unsupported' {
+  const lower = fileUrl.toLowerCase();
+  if (/\.(jpe?g|png|webp)(\?|#|$)/.test(lower)) return 'image';
+  if (/\.(mp4|mov|webm)(\?|#|$)/.test(lower)) return 'video';
+  // Extension absent — trust the concept's type. UGC concepts always
+  // produce video variants (HeyGen Avatar Mode); static concepts always
+  // produce images.
+  if (conceptContentType === 'ugc') return 'video';
+  if (conceptContentType === 'static') return 'image';
+  return 'unsupported';
+}
+
+/**
+ * Polish-3.6: per-variant progress beacon. Fires a telegram/notify
+ * event from inside the launch step so the user sees Meta-side
+ * activity even when video upload + processing takes 30-90s.
+ *
+ * Best-effort — if step.sendEvent rejects we don't fail the launch.
+ */
+async function sendProgress(
+  step: {
+    sendEvent: (
+      id: string,
+      evt: { name: string; data: Record<string, unknown> },
+    ) => Promise<unknown>;
+  },
+  userId: string,
+  message: string,
+): Promise<void> {
+  try {
+    await step.sendEvent(`progress-${Date.now()}`, {
+      name: 'telegram/notify.requested',
+      data: { userId, message },
+    });
+  } catch {
+    // Swallow — progress chatter shouldn't block the launch.
+  }
 }
