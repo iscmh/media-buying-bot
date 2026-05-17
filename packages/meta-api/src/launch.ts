@@ -19,6 +19,31 @@ import { callMeta } from './client';
  * status='PAUSED'. Cannot be overridden — the user must manually
  * activate in Meta Ads Manager. This is the safety net protecting
  * against any UI / job / DB bug from spending money unattended.
+ *
+ * Polish-3.6: creative builder is now content-type aware.
+ *
+ * Audit of the old path (which broke Denis's UGC launch):
+ *   For every variant — image OR video — the worker called
+ *   uploadAdImage(variant.fileUrl) → /act_<id>/adimages, then built a
+ *   creative with link_data.image_hash. Meta's /adimages endpoint
+ *   rejects MP4 binaries; the response in Romanian read "Tipul de
+ *   imagine folosit nu este acceptat" ("Unsupported image type").
+ *
+ * New control flow (createAdCreative now dispatches on `media`):
+ *   - media={ kind: 'image', imageHash }:
+ *         POST /adimages → hash → link_data.image_hash       (existing)
+ *   - media={ kind: 'video', videoId, thumbnailUrl }:
+ *         POST /advideos → video_id (async-processed)
+ *         poll GET /<video_id>?fields=status until ready
+ *         fetch /<video_id>/thumbnails → preferred image_url
+ *         build creative with video_data { video_id, image_url,
+ *         call_to_action, message, link_description }
+ *
+ * The worker (meta-ad-launcher.ts) is responsible for inspecting
+ * variant.fileUrl + concept.contentType, picking the right pre-upload
+ * helper (uploadAdImage vs uploadAdVideo + pollMetaVideoReady +
+ * fetchMetaVideoThumbnail), and passing the corresponding `media`
+ * discriminator down.
  */
 
 export type LaunchMode = 'mock' | 'live';
@@ -396,15 +421,264 @@ function extractImageHash(body: unknown): string | null {
 }
 
 // =========================================================================
+// Ad video upload (Polish-3.6)
+// =========================================================================
+// Meta's /advideos endpoint takes a file_url (or a multipart upload) and
+// returns a video_id. Videos are processed asynchronously — pollMeta
+// VideoReady waits for status.video_status === 'ready' before letting
+// the creative call go through. After processing, fetchMetaVideoThumbnail
+// pulls a preferred thumbnail uri to satisfy the creative's required
+// image_url field on video_data.
+//
+// Endpoint host note: video uploads go to graph-video.facebook.com
+// (NOT graph.facebook.com) per Meta's docs. We POST file_url with no
+// multipart so Meta does the fetch — works for any publicly-resolvable
+// URL including Supabase signed URLs.
+// =========================================================================
+
+const GRAPH_VIDEO_BASE = 'https://graph-video.facebook.com';
+const META_API_VERSION = process.env.META_API_VERSION ?? 'v21.0';
+
+export interface UploadAdVideoInput {
+  userId: string;
+  accessToken: string;
+  adAccountId: string;
+  /** Public URL Meta can fetch (Supabase signed URL or HeyGen CDN URL). */
+  videoUrl: string;
+  mode: LaunchMode;
+  generationJobId?: string;
+}
+
+export interface UploadAdVideoResult {
+  ok: boolean;
+  /** Meta video id. dry_run_video_* in mock mode. */
+  videoId: string;
+  dryRun: boolean;
+  errorMessage?: string;
+  metaErrorCode?: number;
+}
+
+export async function uploadAdVideo(input: UploadAdVideoInput): Promise<UploadAdVideoResult> {
+  const effective = effectiveLaunchMode(input.mode);
+  const t0 = Date.now();
+  const endpoint = `/${input.adAccountId}/advideos`;
+
+  if (effective === 'mock') {
+    const videoId = `dry_run_video_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
+    await logMetaApiCall({
+      userId: input.userId,
+      endpoint,
+      method: 'POST',
+      requestBody: {
+        _dry_run: true,
+        _caller_mode: input.mode,
+        _env_override: input.mode === 'live',
+        would_upload_url: input.videoUrl,
+      },
+      responseStatus: 0,
+      responseBody: {
+        _dry_run: true,
+        would_return_video_id: videoId,
+        generation_job_id: input.generationJobId ?? null,
+      },
+      latencyMs: Date.now() - t0,
+      dryRun: true,
+    });
+    return { ok: true, videoId, dryRun: true };
+  }
+
+  // Live: hit graph-video.facebook.com (NOT graph.facebook.com). file_url
+  // tells Meta to fetch the video itself, which works for any publicly
+  // resolvable URL including Supabase signed URLs (~1h validity).
+  const url = `${GRAPH_VIDEO_BASE}/${META_API_VERSION}${endpoint}`;
+  const form = new URLSearchParams();
+  form.set('file_url', input.videoUrl);
+  form.set('access_token', input.accessToken);
+
+  let status = 0;
+  let body: unknown = null;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    status = res.status;
+    body = await res.json().catch(() => null);
+  } catch (err) {
+    body = { _fetch_error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    await logMetaApiCall({
+      userId: input.userId,
+      endpoint,
+      method: 'POST',
+      requestBody: { file_url: input.videoUrl },
+      responseStatus: status,
+      responseBody: body,
+      latencyMs: Date.now() - t0,
+      dryRun: false,
+    });
+  }
+
+  if (status >= 200 && status < 300 && body && typeof body === 'object' && 'id' in body) {
+    return {
+      ok: true,
+      videoId: String((body as { id: unknown }).id),
+      dryRun: false,
+    };
+  }
+  const { message, code } = extractMetaError(body);
+  return {
+    ok: false,
+    videoId: '',
+    dryRun: false,
+    errorMessage: message ?? `Meta /advideos returned HTTP ${status}`,
+    metaErrorCode: code,
+  };
+}
+
+export interface PollMetaVideoReadyInput {
+  userId: string;
+  accessToken: string;
+  videoId: string;
+  /** Defaults to 60s. Meta typically finishes processing in 10-30s. */
+  timeoutMs?: number;
+  /** Poll cadence. Defaults to 2s. */
+  intervalMs?: number;
+}
+
+export interface PollMetaVideoReadyResult {
+  ok: boolean;
+  status?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Poll a video's processing status until `video_status === 'ready'` or
+ * the deadline elapses. Returns ok=false on timeout / error / FAILED.
+ */
+export async function pollMetaVideoReady(
+  input: PollMetaVideoReadyInput,
+): Promise<PollMetaVideoReadyResult> {
+  const deadline = Date.now() + (input.timeoutMs ?? 60_000);
+  const intervalMs = input.intervalMs ?? 2_000;
+  let lastStatus: string | undefined;
+
+  while (Date.now() < deadline) {
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://graph.facebook.com/${META_API_VERSION}/${input.videoId}?fields=status&access_token=${encodeURIComponent(input.accessToken)}`,
+        { method: 'GET' },
+      );
+    } catch (err) {
+      return {
+        ok: false,
+        errorMessage: `Video status poll failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    if (!res.ok) {
+      // 4xx during poll is fatal (video disappeared, bad token).
+      return { ok: false, errorMessage: `Video status poll HTTP ${res.status}` };
+    }
+    const body = (await res.json().catch(() => ({}))) as {
+      status?: { video_status?: string };
+    };
+    const videoStatus = body.status?.video_status;
+    lastStatus = videoStatus;
+    if (videoStatus === 'ready') {
+      return { ok: true, status: videoStatus };
+    }
+    if (videoStatus === 'error' || videoStatus === 'expired') {
+      return {
+        ok: false,
+        status: videoStatus,
+        errorMessage: `Meta reported video_status=${videoStatus}`,
+      };
+    }
+    await sleep(intervalMs);
+  }
+  return {
+    ok: false,
+    status: lastStatus,
+    errorMessage: `Video did not finish processing within ${(input.timeoutMs ?? 60_000) / 1000}s.`,
+  };
+}
+
+export interface FetchMetaVideoThumbnailInput {
+  userId: string;
+  accessToken: string;
+  videoId: string;
+}
+
+export interface FetchMetaVideoThumbnailResult {
+  ok: boolean;
+  thumbnailUrl?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Pull the preferred thumbnail uri for an uploaded video. Required by
+ * the creative call — Meta wants an image_url on video_data even though
+ * it ALSO has the video itself.
+ */
+export async function fetchMetaVideoThumbnail(
+  input: FetchMetaVideoThumbnailInput,
+): Promise<FetchMetaVideoThumbnailResult> {
+  let res: Response;
+  try {
+    res = await fetch(
+      `https://graph.facebook.com/${META_API_VERSION}/${input.videoId}/thumbnails?fields=uri,is_preferred&access_token=${encodeURIComponent(input.accessToken)}`,
+      { method: 'GET' },
+    );
+  } catch (err) {
+    return {
+      ok: false,
+      errorMessage: `Thumbnail fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+  if (!res.ok) {
+    return { ok: false, errorMessage: `Thumbnail fetch HTTP ${res.status}` };
+  }
+  const body = (await res.json().catch(() => ({}))) as {
+    data?: Array<{ uri?: string; is_preferred?: boolean }>;
+  };
+  const thumbs = body.data ?? [];
+  if (thumbs.length === 0) {
+    return { ok: false, errorMessage: 'Meta returned no thumbnails for video.' };
+  }
+  const preferred = thumbs.find((t) => t.is_preferred) ?? thumbs[0];
+  if (!preferred?.uri) {
+    return { ok: false, errorMessage: 'Meta thumbnail entry has no uri.' };
+  }
+  return { ok: true, thumbnailUrl: preferred.uri };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// =========================================================================
 // Ad creative
 // =========================================================================
+/**
+ * Polish-3.6 discriminated media payload. Image variants reach Meta via
+ * link_data.image_hash; video variants reach it via video_data
+ * { video_id, image_url }.
+ */
+export type CreativeMedia =
+  | { kind: 'image'; imageHash: string }
+  | { kind: 'video'; videoId: string; thumbnailUrl: string };
+
 export interface CreateAdCreativeInput {
   userId: string;
   accessToken: string;
   adAccountId: string;
   name: string;
-  /** From uploadAdImage(). REPLACES the Phase-4b-original image_url path. */
-  imageHash: string;
+  /** Polish-3.6: image vs video. Old callers can keep passing imageHash. */
+  media?: CreativeMedia;
+  /** Deprecated — pass via media={kind:'image',imageHash} instead. */
+  imageHash?: string;
   headline: string;
   primaryText: string;
   description?: string | null;
@@ -420,22 +694,57 @@ export async function createAdCreative(
   const effective = effectiveLaunchMode(input.mode);
   const t0 = Date.now();
   const endpoint = `/${input.adAccountId}/adcreatives`;
-  const body = {
-    name: input.name,
-    object_story_spec: {
+
+  // Polish-3.6: normalize the back-compat shape. Old callers pass
+  // imageHash directly; new callers pass media. Internally we always
+  // operate on the discriminated CreativeMedia.
+  const media: CreativeMedia =
+    input.media ??
+    (input.imageHash
+      ? { kind: 'image', imageHash: input.imageHash }
+      : { kind: 'image', imageHash: '' });
+
+  // Image vs video diverge on object_story_spec content.
+  //   Image: link_data.image_hash (Phase-4b hotfix #2 — Meta rejects
+  //          image_url here, must pre-upload via /adimages).
+  //   Video: video_data { video_id, image_url, call_to_action,
+  //          link_description }. image_url is the thumbnail.
+  let objectStorySpec: Record<string, unknown>;
+  if (media.kind === 'image') {
+    objectStorySpec = {
       page_id: input.pageId,
       link_data: {
-        // Phase 4b hotfix #2: Meta rejects image_url in link_data. We
-        // pre-upload via /adimages first (uploadAdImage), then reference
-        // the returned hash here.
-        image_hash: input.imageHash,
+        image_hash: media.imageHash,
         link: input.destinationUrl,
         message: input.primaryText,
         name: input.headline,
         description: input.description ?? undefined,
         call_to_action: { type: 'LEARN_MORE' },
       },
-    },
+    };
+  } else {
+    objectStorySpec = {
+      page_id: input.pageId,
+      video_data: {
+        video_id: media.videoId,
+        // Required by Meta — the still frame shown before play starts.
+        image_url: media.thumbnailUrl,
+        message: input.primaryText,
+        title: input.headline,
+        link_description: input.description ?? undefined,
+        call_to_action: {
+          type: 'LEARN_MORE',
+          // Video CTAs need link.value on the call_to_action itself, not
+          // on a sibling link field like link_data has.
+          value: { link: input.destinationUrl },
+        },
+      },
+    };
+  }
+
+  const body = {
+    name: input.name,
+    object_story_spec: objectStorySpec,
   };
 
   if (effective === 'mock') {
