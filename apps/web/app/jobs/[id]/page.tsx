@@ -102,7 +102,6 @@ export default async function JobReviewPage({ params }: Props) {
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-fg text-2xl font-semibold tracking-tight">Variants</h1>
           <Badge variant={jobStatusVariant(job.status)}>{job.status.replace(/_/g, ' ')}</Badge>
-          {job.mode === 'mock' && <Badge variant="outline">Mock</Badge>}
         </div>
         <div className="text-fg-muted mt-2 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 md:grid-cols-4">
           <div>

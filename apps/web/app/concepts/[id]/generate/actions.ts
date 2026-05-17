@@ -107,12 +107,12 @@ export async function createGenerationJobAction(
     return { ok: false, errorMessage: cap.reason };
   }
 
-  // Phase 3b: per-job mode opt-in. Form posts 'mock' (default) or 'live';
-  // server only allows 'live' if the user has acknowledged the spend
-  // dialog at least once. Fresh users default to mock until they explicitly
-  // confirm. BOT_DRY_RUN no longer gates AI mode — it stays a Phase 4
-  // Meta-launching kill switch.
-  const requestedMode = String(formData.get('mode') ?? 'mock');
+  // UI no longer surfaces a mode toggle (Polish-3) — every job is 'live'.
+  // The form data may still carry 'mode' from CLI/dev callers; respect
+  // it for tests but default to 'live'. The liveGenerationAcknowledgedAt
+  // check stays as defense in depth — the form gates the dialog
+  // client-side too.
+  const requestedMode = String(formData.get('mode') ?? 'live');
   let mode: 'mock' | 'live';
   if (requestedMode === 'live') {
     const userRow = await db.query.users.findFirst({
@@ -129,15 +129,9 @@ export async function createGenerationJobAction(
     if (!settings?.liveGenerationAcknowledgedAt) {
       return {
         ok: false,
-        errorMessage:
-          'Live mode requires acknowledgment. Switch back to Live and confirm the dialog.',
+        errorMessage: 'Confirm the live-spend dialog before generating.',
       };
     }
-    // UGC live requires Claude (refinement) + Kie.ai/HeyGen (video gen).
-    // Static live requires Claude (copy) + Gemini (image gen). For Phase 3b,
-    // we don't pre-flight check tool_connections here — the Inngest job
-    // will surface a clean error if a key is missing. Future Phase 3.5
-    // could pre-check.
     mode = 'live';
   } else {
     mode = 'mock';

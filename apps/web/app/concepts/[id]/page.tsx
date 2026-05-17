@@ -117,7 +117,6 @@ export default async function ConceptDetailPage({ params }: Props) {
                     </span>
                     <span className="text-muted-foreground text-xs">
                       {j.status}
-                      {j.mode === 'mock' ? ' · MOCK' : ''}
                       {j.estimatedCostUsd != null && ` · est $${j.estimatedCostUsd}`}
                       {' · '}
                       {formatDateTime(j.requestedAt)}

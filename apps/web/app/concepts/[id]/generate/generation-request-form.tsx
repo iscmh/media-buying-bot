@@ -47,6 +47,13 @@ const INTENSITIES: Array<{
   },
 ];
 
+/**
+ * Generation request form. Polish-3: mock-mode toggle retired — every
+ * submission goes live. First-time users still hit the spend-
+ * acknowledgment dialog; subsequent submits skip it. Server action
+ * (createGenerationJobAction) defaults to mode='live' too — see
+ * actions.ts for the dev/CLI mock back door.
+ */
 export function GenerationRequestForm({
   conceptId,
   conceptType,
@@ -57,10 +64,6 @@ export function GenerationRequestForm({
   const router = useRouter();
   const [intensity, setIntensity] = React.useState<'small' | 'medium' | 'big'>('medium');
   const [variantCount, setVariantCount] = React.useState<number>(10);
-  // Phase 3f: UGC always uses HeyGen Avatar Mode. Provider picker
-  // retired — the form just submits without a provider field and the
-  // server action auto-picks 'heygen' for ugc concepts.
-  const [mode, setMode] = React.useState<'mock' | 'live'>('mock');
   const [liveAck, setLiveAck] = React.useState(initialLiveAck);
   const [showLiveDialog, setShowLiveDialog] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -81,35 +84,14 @@ export function GenerationRequestForm({
   const overVariantCap = variantCount > MAX_VARIANTS_PER_JOB;
   const usedPct = capUsd > 0 ? Math.round((spentTodayUsd / capUsd) * 100) : 0;
 
-  function pickMode(next: 'mock' | 'live') {
-    if (next === 'live' && !liveAck) {
-      setShowLiveDialog(true);
-      return;
-    }
-    setMode(next);
-  }
-
-  async function confirmLiveDialog() {
-    setError(null);
-    const result = await acknowledgeLiveGenerationAction();
-    if (!result.ok) {
-      setError(result.errorMessage ?? 'Could not record acknowledgment.');
-      return;
-    }
-    setLiveAck(true);
-    setMode('live');
-    setShowLiveDialog(false);
-  }
-
-  function submit() {
+  function performSubmit() {
     if (overCap || overVariantCap) return;
     const formData = new FormData();
     formData.set('conceptId', conceptId);
     formData.set('intensity', intensity);
     formData.set('variantCount', String(variantCount));
-    formData.set('mode', mode);
-    // Provider field omitted intentionally — server action auto-picks
-    // 'heygen' for ugc concepts (Phase 3f).
+    // mode defaults to 'live' server-side; explicit for log clarity.
+    formData.set('mode', 'live');
 
     startTransition(async () => {
       setError(null);
@@ -122,58 +104,40 @@ export function GenerationRequestForm({
     });
   }
 
+  async function confirmLiveDialog() {
+    setError(null);
+    const result = await acknowledgeLiveGenerationAction();
+    if (!result.ok) {
+      setError(result.errorMessage ?? 'Could not record acknowledgment.');
+      return;
+    }
+    setLiveAck(true);
+    setShowLiveDialog(false);
+    performSubmit();
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    submit();
+    if (!liveAck) {
+      setShowLiveDialog(true);
+      return;
+    }
+    performSubmit();
   }
 
   return (
     <form onSubmit={onSubmit} className="space-y-6">
-      {/* Mode toggle (Phase 3b) */}
-      <fieldset className="space-y-2">
-        <legend className="text-sm font-medium">Mode</legend>
-        <div className="bg-card flex gap-2 rounded-lg border p-2">
-          <button
-            type="button"
-            onClick={() => pickMode('mock')}
-            className={
-              'flex-1 rounded-md px-3 py-2 text-sm transition-colors ' +
-              (mode === 'mock' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/30')
-            }
-          >
-            <span className="block font-semibold">Mock</span>
-            <span className="text-xs opacity-80">Free placeholder data</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => pickMode('live')}
-            className={
-              'flex-1 rounded-md px-3 py-2 text-sm transition-colors ' +
-              (mode === 'live' ? 'bg-primary text-primary-foreground' : 'hover:bg-accent/30')
-            }
-          >
-            <span className="block font-semibold">Live</span>
-            <span className="text-xs opacity-80">Real spend on your API keys</span>
-          </button>
-        </div>
-        {mode === 'live' && (
-          <p className="text-xs text-amber-700">
-            Live mode will spend real money on your connected provider keys.
-          </p>
-        )}
-      </fieldset>
-
       {/* Intensity */}
       <fieldset className="space-y-3">
-        <legend className="text-sm font-medium">Intensity</legend>
+        <legend className="text-fg text-sm font-medium">Intensity</legend>
         {INTENSITIES.map((opt) => (
           <label
             key={opt.value}
             className={
-              'flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ' +
+              'flex cursor-pointer items-start gap-3 rounded-md border p-4 transition-colors ' +
               (intensity === opt.value
-                ? 'border-primary bg-primary/5'
-                : 'bg-card hover:bg-accent/30')
+                ? 'border-fg-muted bg-bg-hover'
+                : 'bg-bg-elevated hover:bg-bg-hover')
             }
           >
             <input
@@ -185,8 +149,8 @@ export function GenerationRequestForm({
               className="mt-1 h-4 w-4"
             />
             <span>
-              <span className="block font-semibold">{opt.label}</span>
-              <span className="text-muted-foreground block text-sm">{opt.description}</span>
+              <span className="text-fg block font-medium">{opt.label}</span>
+              <span className="text-fg-muted block text-sm">{opt.description}</span>
             </span>
           </label>
         ))}
@@ -202,12 +166,13 @@ export function GenerationRequestForm({
           max={MAX_VARIANTS_PER_JOB}
           value={variantCount}
           onChange={(e) => setVariantCount(Math.floor(Number(e.target.value) || 0))}
+          className="font-mono"
         />
-        <p className="text-muted-foreground text-xs">
+        <p className="text-fg-muted text-xs">
           1–{MAX_VARIANTS_PER_JOB} per job. More variants = more cost; cost scales linearly.
         </p>
         {overVariantCap && (
-          <p className="text-destructive text-xs">
+          <p className="text-xs text-[color:var(--destructive-color)]">
             Maximum {MAX_VARIANTS_PER_JOB} variants per job.
           </p>
         )}
@@ -215,10 +180,10 @@ export function GenerationRequestForm({
 
       {/* Video provider note (UGC only) */}
       {conceptType === 'ugc' && (
-        <div className="bg-card text-muted-foreground rounded-lg border p-3 text-xs">
+        <div className="bg-bg-elevated text-fg-muted rounded-md border p-3 text-xs">
           UGC variants use HeyGen Avatar Mode — Claude matches a different avatar to your source
           persona for each variant. Want every variant to use the same avatar instead? Force one in{' '}
-          <a className="underline" href="/settings#heygen-avatar">
+          <a className="hover:text-fg underline transition-colors" href="/settings#heygen-avatar">
             Settings → Force Specific Avatar
           </a>
           .
@@ -226,67 +191,68 @@ export function GenerationRequestForm({
       )}
 
       {/* Cost estimator */}
-      <div className="bg-card space-y-2 rounded-lg border p-4 text-sm">
-        <p className="font-medium">Estimated cost: ${estimate.estimateUsd.toFixed(2)}</p>
-        <ul className="text-muted-foreground space-y-0.5 text-xs">
+      <div className="bg-bg-elevated space-y-2 rounded-md border p-4 text-sm">
+        <p className="text-fg font-medium">
+          Estimated cost: <span className="font-mono">${estimate.estimateUsd.toFixed(2)}</span>
+        </p>
+        <ul className="text-fg-muted space-y-0.5 text-xs">
           {estimate.breakdown.map((b, i) => (
             <li key={i} className="flex justify-between">
               <span>{b.item}</span>
-              <span>${b.cost.toFixed(2)}</span>
+              <span className="font-mono">${b.cost.toFixed(2)}</span>
             </li>
           ))}
         </ul>
-        <hr className="my-2" />
-        <p className="text-muted-foreground text-xs">
-          Daily cap: <strong>${capUsd.toFixed(2)}</strong> · used{' '}
-          <strong>${spentTodayUsd.toFixed(2)}</strong> ({usedPct}%) · remaining{' '}
-          <strong>${remaining.toFixed(2)}</strong>
+        <hr className="border-border my-2" />
+        <p className="text-fg-muted text-xs">
+          Daily cap: <span className="text-fg font-mono">${capUsd.toFixed(2)}</span> · used{' '}
+          <span className="text-fg font-mono">${spentTodayUsd.toFixed(2)}</span> ({usedPct}%) ·
+          remaining <span className="text-fg font-mono">${remaining.toFixed(2)}</span>
         </p>
         {overCap && (
-          <p className="text-destructive text-xs">
-            This job would exceed your remaining daily cap. Reduce variant count, switch provider,
-            or wait for the cap to reset.
+          <p className="text-xs text-[color:var(--destructive-color)]">
+            This job would exceed your remaining daily cap. Reduce variant count or wait for the cap
+            to reset.
           </p>
         )}
       </div>
 
       {error && (
-        <p className="text-destructive text-sm" role="alert">
+        <p className="text-sm text-[color:var(--destructive-color)]" role="alert">
           {error}
         </p>
       )}
 
-      <Button type="submit" size="lg" disabled={pending || overCap || overVariantCap}>
-        {pending
-          ? 'Creating job…'
-          : mode === 'live'
-            ? `Generate live · ${variantCount} variants · $${estimate.estimateUsd.toFixed(2)}`
-            : `Generate ${variantCount} variants ($${estimate.estimateUsd.toFixed(2)})`}
-      </Button>
+      <div className="flex justify-end">
+        <Button type="submit" disabled={pending || overCap || overVariantCap}>
+          {pending
+            ? 'Creating job…'
+            : `Generate ${variantCount} variants · $${estimate.estimateUsd.toFixed(2)}`}
+        </Button>
+      </div>
 
-      {/* First-time live-mode confirmation dialog (Phase 3b) */}
+      {/* First-time spend confirmation dialog. */}
       <Dialog open={showLiveDialog} onOpenChange={setShowLiveDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Live mode — real spend</DialogTitle>
+            <DialogTitle>Real spend ahead</DialogTitle>
             <DialogDescription>
-              This generation will use your connected API keys (Gemini, Claude, and your chosen
-              video provider) and spend real money. You can monitor your daily AI spend in settings.
+              This generation uses your connected API keys (Gemini, Claude, and HeyGen for UGC) and
+              spends real money. You can monitor your daily AI spend in settings.
             </DialogDescription>
           </DialogHeader>
-          <div className="bg-card space-y-1 rounded-md border p-3 text-sm">
+          <div className="bg-bg-elevated space-y-1 rounded-md border p-3 text-sm">
             <p>
-              Estimated cost for this job: <strong>${estimate.estimateUsd.toFixed(2)}</strong>
+              Estimated cost: <span className="font-mono">${estimate.estimateUsd.toFixed(2)}</span>
             </p>
-            <p>
-              Daily cap: <strong>${capUsd.toFixed(2)}</strong> · used{' '}
-              <strong>${spentTodayUsd.toFixed(2)}</strong> · remaining{' '}
-              <strong>${remaining.toFixed(2)}</strong>
+            <p className="text-fg-muted text-xs">
+              Daily cap: <span className="font-mono">${capUsd.toFixed(2)}</span> · used{' '}
+              <span className="font-mono">${spentTodayUsd.toFixed(2)}</span> · remaining{' '}
+              <span className="font-mono">${remaining.toFixed(2)}</span>
             </p>
           </div>
-          <p className="text-muted-foreground text-xs">
-            Future live submissions skip this dialog. You can revoke API keys anytime from
-            Connections.
+          <p className="text-fg-muted text-xs">
+            Future submissions skip this dialog. You can revoke API keys anytime from Connections.
           </p>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
@@ -294,8 +260,8 @@ export function GenerationRequestForm({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="button" onClick={confirmLiveDialog}>
-              I understand, proceed
+            <Button type="button" onClick={confirmLiveDialog} disabled={pending}>
+              I understand, generate
             </Button>
           </div>
         </DialogContent>
