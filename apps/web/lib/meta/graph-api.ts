@@ -1,7 +1,7 @@
 import 'server-only';
 import { logMetaApiCall } from '@mbb/db';
 import { META_REQUIRED_SCOPES } from '@mbb/shared';
-import type { AdAccountRow, BusinessRow, DebugTokenData } from './types';
+import type { AdAccountRow, BusinessRow, DebugTokenData, MetaPageRow } from './types';
 
 /**
  * Read-only Meta Graph API helpers used during onboarding.
@@ -170,11 +170,8 @@ export async function listAdAccounts(userId: string, token: string): Promise<AdA
  * name, page-scoped access token, and the tasks array (used to confirm
  * the user can CREATE_CONTENT). Persisted on meta_connections.pages.
  */
-export async function listUserPages(
-  userId: string,
-  token: string,
-): Promise<import('./types').MetaPageRow[]> {
-  const res = await get<{ data: import('./types').MetaPageRow[] }>(userId, '/me/accounts', token, {
+export async function listUserPages(userId: string, token: string): Promise<MetaPageRow[]> {
+  const res = await get<{ data: MetaPageRow[] }>(userId, '/me/accounts', token, {
     fields: 'id,name,access_token,tasks',
     limit: '100',
   });
