@@ -18,6 +18,11 @@ export default async function ConnectMetaPage() {
       adAccountIds: true,
       tokenExpiresAt: true,
       lastVerifiedAt: true,
+      // Polish-3.5: surface account currency + tz + page count on the
+      // connected card so the user can see what the launch path is using.
+      accountCurrency: true,
+      accountTimezone: true,
+      pages: true,
     },
   });
 
@@ -66,6 +71,9 @@ export default async function ConnectMetaPage() {
         adAccountIds={conn.adAccountIds ?? []}
         tokenExpiresAt={conn.tokenExpiresAt}
         lastVerifiedAt={conn.lastVerifiedAt}
+        accountCurrency={conn.accountCurrency ?? null}
+        accountTimezone={conn.accountTimezone ?? null}
+        pageCount={(conn.pages ?? []).length}
       />
     </AppShell>
   );

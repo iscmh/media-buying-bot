@@ -105,6 +105,10 @@ export const metaAdLauncher = inngest.createFunction(
         columns: {
           adAccountIds: true,
           accessTokenEncrypted: true,
+          // Polish-3.5: per-account currency + min-budget override drive
+          // USD→minor-units conversion inside createAdSet.
+          accountCurrency: true,
+          minDailyBudgetMinor: true,
         },
       });
       const adAccountId = metaConn?.adAccountIds?.[0];
@@ -168,6 +172,11 @@ export const metaAdLauncher = inngest.createFunction(
         targetingCountries: event.data.targetingCountries ?? settings.defaultTargetingCountries,
         ageMin: event.data.ageMin ?? settings.defaultAgeMin,
         ageMax: event.data.ageMax ?? settings.defaultAgeMax,
+        // Polish-3.5: pass currency + per-account min into createAdSet so
+        // the daily_budget field reaches Meta in the right currency +
+        // minor units.
+        accountCurrency: metaConn?.accountCurrency ?? null,
+        minDailyBudgetMinor: metaConn?.minDailyBudgetMinor ?? null,
         liveLaunchCount: settings.liveLaunchCount,
       };
     });
@@ -269,6 +278,7 @@ export const metaAdLauncher = inngest.createFunction(
                 throw new MetaCreateError(
                   campaign.errorMessage ?? 'createCampaign failed',
                   campaign.metaErrorCode,
+                  campaign.rawResponse,
                 );
               }
               createdCampaignId = campaign.id;
@@ -285,6 +295,8 @@ export const metaAdLauncher = inngest.createFunction(
                 targetingCountries: ctx.targetingCountries,
                 ageMin: ctx.ageMin,
                 ageMax: ctx.ageMax,
+                accountCurrency: ctx.accountCurrency ?? undefined,
+                minDailyBudgetMinor: ctx.minDailyBudgetMinor ?? undefined,
                 mode: callerMode,
                 generationJobId,
               });
@@ -292,6 +304,7 @@ export const metaAdLauncher = inngest.createFunction(
                 throw new MetaCreateError(
                   adSet.errorMessage ?? 'createAdSet failed',
                   adSet.metaErrorCode,
+                  adSet.rawResponse,
                 );
               }
               createdAdSetId = adSet.id;
@@ -312,6 +325,9 @@ export const metaAdLauncher = inngest.createFunction(
                   imageUpload.errorMessage ?? 'uploadAdImage failed',
                   imageUpload.metaErrorCode,
                 );
+                // uploadAdImage doesn't surface rawResponse yet — fine
+                // for the demo, future patch can extend if a 4xx here
+                // ever lands in front of Denis.
               }
 
               const creative = await createAdCreative({
@@ -332,6 +348,7 @@ export const metaAdLauncher = inngest.createFunction(
                 throw new MetaCreateError(
                   creative.errorMessage ?? 'createAdCreative failed',
                   creative.metaErrorCode,
+                  creative.rawResponse,
                 );
               }
 
@@ -346,7 +363,11 @@ export const metaAdLauncher = inngest.createFunction(
                 generationJobId,
               });
               if (!ad.ok) {
-                throw new MetaCreateError(ad.errorMessage ?? 'createAd failed', ad.metaErrorCode);
+                throw new MetaCreateError(
+                  ad.errorMessage ?? 'createAd failed',
+                  ad.metaErrorCode,
+                  ad.rawResponse,
+                );
               }
 
               // Persist row + audit.
@@ -398,6 +419,14 @@ export const metaAdLauncher = inngest.createFunction(
             } catch (err) {
               const errorMessage = err instanceof Error ? err.message : String(err);
               const rejectedByMeta = err instanceof MetaCreateError && err.metaErrorCode != null;
+              // Polish-3.5: surface the raw Meta body (when we have it)
+              // on launched_ads.meta_response_raw so the UI / Telegram
+              // can render error_user_msg + fbtrace_id instead of the
+              // generic "Invalid parameter".
+              const metaResponseRaw =
+                err instanceof MetaCreateError && err.rawResponse !== undefined
+                  ? (err.rawResponse as Record<string, unknown>)
+                  : undefined;
 
               // Phase 4b hotfix #2: best-effort orphan cleanup. If we
               // created a campaign and/or ad set before the failure,
@@ -470,6 +499,7 @@ export const metaAdLauncher = inngest.createFunction(
                 status: rejectedByMeta ? 'rejected_by_meta' : 'launch_failed',
                 mode: callerMode,
                 errorMessage,
+                metaResponseRaw,
               });
               await logAuditEvent({
                 userId,
@@ -569,6 +599,8 @@ class MetaCreateError extends Error {
   constructor(
     message: string,
     public readonly metaErrorCode?: number,
+    /** Polish-3.5: raw Meta API response body for forensic display. */
+    public readonly rawResponse?: unknown,
   ) {
     super(message);
     this.name = 'MetaCreateError';

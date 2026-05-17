@@ -21,6 +21,10 @@ interface Props {
   adAccountIds: string[];
   tokenExpiresAt: Date | null;
   lastVerifiedAt: Date | null;
+  /** Polish-3.5: ad account currency + tz + page count for the summary card. */
+  accountCurrency: string | null;
+  accountTimezone: string | null;
+  pageCount: number;
 }
 
 function DisconnectButton() {
@@ -37,6 +41,9 @@ export function MetaConnectedSummary({
   adAccountIds,
   tokenExpiresAt,
   lastVerifiedAt,
+  accountCurrency,
+  accountTimezone,
+  pageCount,
 }: Props) {
   const expiry = tokenExpiresAt ? formatDate(tokenExpiresAt) : 'never';
   const verified = lastVerifiedAt ? formatDateTime(lastVerifiedAt) : 'unknown';
@@ -58,6 +65,30 @@ export function MetaConnectedSummary({
               ))}
             </ul>
           }
+        />
+        <Row
+          label="Account currency"
+          value={
+            accountCurrency ? (
+              <span className="font-mono">{accountCurrency}</span>
+            ) : (
+              <span className="text-fg-muted text-xs">not set — reconnect Meta to capture</span>
+            )
+          }
+        />
+        <Row
+          label="Account timezone"
+          value={
+            accountTimezone ? (
+              <span className="font-mono">{accountTimezone}</span>
+            ) : (
+              <span className="text-fg-muted text-xs">not set</span>
+            )
+          }
+        />
+        <Row
+          label="Facebook Pages"
+          value={<span className="font-mono">{pageCount} cached at connect time</span>}
         />
         <Row label="Token expires" value={<span className="font-mono">{expiry}</span>} />
         <Row label="Last verified" value={<span className="font-mono">{verified}</span>} />

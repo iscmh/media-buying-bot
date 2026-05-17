@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { logMetaApiCall } from '@mbb/db';
 import type { MetaOptimizationGoal, MetaPlacementType } from '@mbb/shared';
+import { checkBudgetMeetsMetaMinimum } from '@mbb/shared';
 import { callMeta } from './client';
 
 /**
@@ -54,6 +55,13 @@ export interface MetaCreateResult<T extends string> {
   errorMessage?: string;
   /** Meta error code if rejected at the 4xx level. */
   metaErrorCode?: number;
+  /**
+   * Polish-3.5: full Meta API response body (success or failure). The
+   * launcher persists this on launched_ads.meta_response_raw so the UI
+   * can surface error_user_msg / error_subcode / fbtrace_id instead of
+   * the generic "Invalid parameter" rollup.
+   */
+  rawResponse?: unknown;
 }
 
 // =========================================================================
@@ -140,6 +148,14 @@ export interface CreateAdSetInput {
   ageMax?: number;
   mode: LaunchMode;
   generationJobId?: string;
+  /**
+   * Polish-3.5: ISO currency the ad account is denominated in. Drives
+   * USD→account-currency conversion before computing daily_budget in
+   * minor units. Defaults to USD when unknown.
+   */
+  accountCurrency?: string;
+  /** Per-account override for Meta's minimum daily budget (minor units). */
+  minDailyBudgetMinor?: number | null;
 }
 
 export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateResult<'ad_set_id'>> {
@@ -168,10 +184,34 @@ export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateRe
   // more campaign objectives. Passing CONVERSIONS / etc. here against an
   // OUTCOME_TRAFFIC campaign returns HTTP 400 from Meta.
   void input.optimizationGoal;
+
+  // Polish-3.5: Meta's daily_budget is in the ad account's currency, in
+  // MINOR units. Default to USD-cents when no currency is supplied so
+  // existing callers keep working. Pre-flight against the account's
+  // minimum daily budget — failing here surfaces a clear, actionable
+  // error instead of Meta's generic "Invalid parameter" 4xx.
+  const currency = input.accountCurrency ?? 'USD';
+  const budgetCheck = checkBudgetMeetsMetaMinimum({
+    usdAmount: input.dailyBudgetUsd,
+    currency,
+    connectionMin: input.minDailyBudgetMinor ?? null,
+  });
+  if (!budgetCheck.ok) {
+    return {
+      ok: false,
+      id: '',
+      idKey: 'ad_set_id' as const,
+      dryRun: false,
+      callerMode: input.mode,
+      errorMessage: budgetCheck.reason,
+    };
+  }
+  const dailyBudgetMinor = budgetCheck.minor;
+
   const body = {
     name: input.name,
     campaign_id: input.campaignId,
-    daily_budget: Math.round(input.dailyBudgetUsd * 100), // Meta wants cents
+    daily_budget: dailyBudgetMinor,
     billing_event: 'IMPRESSIONS',
     optimization_goal: 'LINK_CLICKS',
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
@@ -525,9 +565,17 @@ async function invokeMetaCreate<T extends string>(input: {
           dryRun: false,
           callerMode: input.callerMode,
           errorMessage: 'Meta returned 2xx but no id field',
+          rawResponse: result.body,
         };
       }
-      return { ok: true, id, idKey: input.idKey, dryRun: false, callerMode: input.callerMode };
+      return {
+        ok: true,
+        id,
+        idKey: input.idKey,
+        dryRun: false,
+        callerMode: input.callerMode,
+        rawResponse: result.body,
+      };
     }
 
     const { message, code } = extractMetaError(result.body);
@@ -539,6 +587,7 @@ async function invokeMetaCreate<T extends string>(input: {
       callerMode: input.callerMode,
       errorMessage: message ?? `Meta returned HTTP ${result.status}`,
       metaErrorCode: code,
+      rawResponse: result.body,
     };
   } catch (err) {
     return {
@@ -560,9 +609,23 @@ function extractId(body: unknown, idField: string): string | null {
 
 function extractMetaError(body: unknown): { message?: string; code?: number } {
   if (!body || typeof body !== 'object') return {};
-  const error = (body as { error?: { message?: string; code?: number } }).error;
+  const error = (
+    body as {
+      error?: {
+        message?: string;
+        code?: number;
+        error_user_msg?: string;
+        error_user_title?: string;
+      };
+    }
+  ).error;
   if (!error) return {};
-  return { message: error.message, code: error.code };
+  // Polish-3.5: prefer error_user_msg / error_user_title when Meta provides
+  // them — they're the actionable copy ("This page can't be used for ads
+  // because…") vs. the generic "Invalid parameter" Meta returns in
+  // error.message for most 4xx failures.
+  const friendly = error.error_user_msg ?? error.error_user_title;
+  return { message: friendly ?? error.message, code: error.code };
 }
 
 // =========================================================================

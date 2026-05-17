@@ -188,6 +188,17 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                       <Badge variant={statusVariant(displayStatus)}>
                         {displayStatus.replace(/_/g, ' ')}
                       </Badge>
+                      {/* Polish-3.5: surface Meta's actual error for
+                          rejected / failed launches. errorMessage is
+                          already preferred to be error_user_msg from
+                          extractMetaError (launch.ts). */}
+                      {(displayStatus === 'rejected_by_meta' ||
+                        displayStatus === 'launch_failed') &&
+                        row.errorMessage && (
+                          <p className="text-fg-muted mt-1 font-mono text-xs leading-snug">
+                            {row.errorMessage}
+                          </p>
+                        )}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {spend != null ? `$${spend.toFixed(2)}` : '—'}

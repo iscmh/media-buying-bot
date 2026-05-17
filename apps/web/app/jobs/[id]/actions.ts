@@ -12,7 +12,7 @@ import {
   schema,
 } from '@mbb/db';
 import { fetchUserPages } from '@mbb/meta-api';
-import { PLATFORM_HARD_AD_DAILY_BUDGET_USD } from '@mbb/shared';
+import { PLATFORM_HARD_AD_DAILY_BUDGET_USD, checkBudgetMeetsMetaMinimum } from '@mbb/shared';
 import { auditMetaFromHeaders } from '@/lib/audit/request-meta';
 import { sendMetaLaunchEvent } from '@/lib/inngest/send';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
@@ -296,6 +296,58 @@ export async function launchApprovedAction(
   }
   if (mode === 'live' && !input.pageId) {
     return { ok: false, errorMessage: 'Pick a Facebook Page for the ad creative.' };
+  }
+
+  // Polish-3.5: validate the picked page against the snapshot we stored
+  // at connect time. Catches stale UI state (page deleted from Meta,
+  // user revoked admin) BEFORE the launch hits Meta with a generic
+  // "Invalid parameter".
+  if (mode === 'live' && input.pageId) {
+    const conn = await db.query.metaConnections.findFirst({
+      where: and(
+        eq(schema.metaConnections.userId, user.id),
+        eq(schema.metaConnections.status, 'active'),
+      ),
+      columns: { pages: true, accountCurrency: true, minDailyBudgetMinor: true },
+    });
+    const pages = (conn?.pages ?? []) as Array<{ id: string; tasks?: string[] }>;
+    if (pages.length === 0) {
+      return {
+        ok: false,
+        errorMessage:
+          'No Facebook Pages on your Meta connection. Reconnect Meta in /connections/meta — the bot needs at least one Page you admin to create ads.',
+      };
+    }
+    const match = pages.find((p) => p.id === input.pageId);
+    if (!match) {
+      return {
+        ok: false,
+        errorMessage: `Page ${input.pageId} is not in your Meta connection. Pick one from the dropdown or reconnect to refresh.`,
+      };
+    }
+    // Optional but actionable: warn if the user can't post on this page.
+    if (match.tasks && !match.tasks.includes('CREATE_CONTENT')) {
+      return {
+        ok: false,
+        errorMessage: `You don't have CREATE_CONTENT permission on this Page in Meta. Pick a different Page or update your role at business.facebook.com.`,
+      };
+    }
+
+    // Polish-3.5: pre-flight the budget against the account's currency
+    // minimum. Surfaces a clear message BEFORE the Inngest worker hits
+    // Meta with a 4xx.
+    if (conn?.accountCurrency) {
+      const rawBudget = input.perAdBudgetUsd ?? Number(settings.defaultAdDailyBudgetUsd);
+      const perAd = Math.min(rawBudget, PLATFORM_HARD_AD_DAILY_BUDGET_USD);
+      const budgetCheck = checkBudgetMeetsMetaMinimum({
+        usdAmount: perAd,
+        currency: conn.accountCurrency,
+        connectionMin: conn.minDailyBudgetMinor ?? null,
+      });
+      if (!budgetCheck.ok) {
+        return { ok: false, errorMessage: budgetCheck.reason };
+      }
+    }
   }
 
   // 3. Count approved variants.

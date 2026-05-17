@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, Download, Rocket, X } from 'lucide-react';
+import { checkBudgetMeetsMetaMinimum } from '@mbb/shared';
 import { formatDateTime } from '@/lib/format/date';
 import { Button } from '@/components/ui/button';
 import {
@@ -50,6 +51,10 @@ export interface LaunchSnapshot {
   defaultAgeMin: number;
   defaultAgeMax: number;
   metaPages: Array<{ pageId: string; pageName: string }>;
+  /** Polish-3.5: per-account currency for the budget preview. */
+  accountCurrency: string;
+  /** Per-account override for Meta's minimum daily budget (minor units). */
+  minDailyBudgetMinor: number | null;
   committedTodayUsd: number;
   capUsd: number;
   remainingUsd: number;
@@ -416,13 +421,22 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
           </>
 
           {/* Budget + cap summary */}
-          <div className="bg-card space-y-1 rounded-md border p-3 text-sm">
+          <div className="bg-bg-elevated space-y-1 rounded-md border p-3 text-sm">
             <p>
               Variants to launch: <strong>{launchableCount}</strong>
             </p>
             <p>
               Per-ad daily budget: <strong>${launchSnapshot.perAdBudgetUsd.toFixed(2)}</strong>
             </p>
+            {/* Polish-3.5: show the budget in the ad account's currency
+                so non-USD accounts can see exactly what Meta receives. */}
+            {launchSnapshot.accountCurrency !== 'USD' && (
+              <BudgetPreview
+                usdAmount={launchSnapshot.perAdBudgetUsd}
+                currency={launchSnapshot.accountCurrency}
+                connectionMin={launchSnapshot.minDailyBudgetMinor}
+              />
+            )}
             <p>
               Total daily exposure: <strong>${totalBudgetIfLaunched.toFixed(2)}</strong>
             </p>
@@ -582,6 +596,38 @@ interface VariantCardProps {
   conceptType: 'static' | 'ugc';
   onApprove: () => void;
   onReject: () => void;
+}
+
+/**
+ * Polish-3.5: live USD→account-currency preview for the launch dialog.
+ * Re-runs checkBudgetMeetsMetaMinimum so the user sees both the conversion
+ * AND any "below Meta minimum" reject reason inline.
+ */
+function BudgetPreview({
+  usdAmount,
+  currency,
+  connectionMin,
+}: {
+  usdAmount: number;
+  currency: string;
+  connectionMin: number | null;
+}) {
+  const check = checkBudgetMeetsMetaMinimum({
+    usdAmount,
+    currency,
+    connectionMin: connectionMin ?? null,
+  });
+  if (check.ok) {
+    return (
+      <p className="text-fg-muted text-xs">
+        Account currency: <strong>{currency}</strong> · sent to Meta as{' '}
+        <span className="font-mono">
+          {check.major.toFixed(2)} {currency} ({check.minor} minor)
+        </span>
+      </p>
+    );
+  }
+  return <p className="text-xs text-[color:var(--destructive-color)]">{check.reason}</p>;
 }
 
 function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: VariantCardProps) {

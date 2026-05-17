@@ -64,6 +64,16 @@ export default async function JobReviewPage({ params }: Props) {
     where: eq(schema.metaPages.userId, userId),
     columns: { pageId: true, pageName: true },
   });
+  // Polish-3.5: pull the active Meta connection so the launch dialog can
+  // surface the account currency + min-budget for the budget preview
+  // ("USD $10 → RON 45.50").
+  const metaConn = await db.query.metaConnections.findFirst({
+    where: and(
+      eq(schema.metaConnections.userId, userId),
+      eq(schema.metaConnections.status, 'active'),
+    ),
+    columns: { accountCurrency: true, minDailyBudgetMinor: true },
+  });
   const perAdBudget = Math.min(
     Number(settings?.defaultAdDailyBudgetUsd ?? 10),
     PLATFORM_HARD_AD_DAILY_BUDGET_USD,
@@ -83,6 +93,8 @@ export default async function JobReviewPage({ params }: Props) {
     defaultAgeMin: settings?.defaultAgeMin ?? 18,
     defaultAgeMax: settings?.defaultAgeMax ?? 65,
     metaPages: metaPages.map((p) => ({ pageId: p.pageId, pageName: p.pageName })),
+    accountCurrency: metaConn?.accountCurrency ?? 'USD',
+    minDailyBudgetMinor: metaConn?.minDailyBudgetMinor ?? null,
     committedTodayUsd: launchCap.committedTodayUsd,
     capUsd: launchCap.capUsd,
     remainingUsd: launchCap.allowed
