@@ -352,11 +352,11 @@ export const metaAdLauncher = inngest.createFunction(
               } else {
                 // Polish-3.6 video path: upload → poll for ready → fetch
                 // thumbnail → build a video_data creative.
-                await sendProgress(
-                  step,
-                  userId,
-                  `Uploading variant ${variantIndex + 1}/${approved.length} to Meta…`,
-                );
+                // Polish-3.7: per-variant progress beacons removed —
+                // sendProgress nested step.sendEvent inside step.run
+                // which Inngest rejects (NESTING_STEPS), causing the
+                // function to fail silently. The batch-summary message
+                // at the end of the launcher already covers the user.
                 const videoUpload = await uploadAdVideo({
                   userId,
                   accessToken: ctx.accessToken,
@@ -382,11 +382,6 @@ export const metaAdLauncher = inngest.createFunction(
                     thumbnailUrl: 'https://placehold.co/720x1280/png?text=dry+run',
                   };
                 } else {
-                  await sendProgress(
-                    step,
-                    userId,
-                    `Variant ${variantIndex + 1}/${approved.length} uploaded. Building creative…`,
-                  );
                   const ready = await pollMetaVideoReady({
                     userId,
                     accessToken: ctx.accessToken,
@@ -762,31 +757,4 @@ function inferMediaKind(
   if (conceptContentType === 'ugc') return 'video';
   if (conceptContentType === 'static') return 'image';
   return 'unsupported';
-}
-
-/**
- * Polish-3.6: per-variant progress beacon. Fires a telegram/notify
- * event from inside the launch step so the user sees Meta-side
- * activity even when video upload + processing takes 30-90s.
- *
- * Best-effort — if step.sendEvent rejects we don't fail the launch.
- */
-async function sendProgress(
-  step: {
-    sendEvent: (
-      id: string,
-      evt: { name: string; data: Record<string, unknown> },
-    ) => Promise<unknown>;
-  },
-  userId: string,
-  message: string,
-): Promise<void> {
-  try {
-    await step.sendEvent(`progress-${Date.now()}`, {
-      name: 'telegram/notify.requested',
-      data: { userId, message },
-    });
-  } catch {
-    // Swallow — progress chatter shouldn't block the launch.
-  }
 }
