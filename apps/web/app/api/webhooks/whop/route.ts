@@ -1,6 +1,12 @@
 import { eq, sql } from 'drizzle-orm';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDb, schema } from '@mbb/db';
+
+// Polish-5: Whop dispatches can fan out to several DB writes
+// (subscriptions + entitlements + applications). 60s gives plenty of
+// headroom; dynamic disables Next caching for the POST handler.
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
 import {
   isAddOnAdAccountProduct,
   parseMembership,
