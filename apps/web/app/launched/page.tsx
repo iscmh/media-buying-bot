@@ -25,8 +25,11 @@ const PAGE_SIZE = 20;
  * Statuses considered "test data" — hidden from the table by default so
  * the launched view reads as production-ish. Toggle via ?show_test=1.
  */
-const TEST_STATUSES = ['dry_run', 'rejected_by_meta', 'launch_failed'] satisfies Array<
-  'dry_run' | 'rejected_by_meta' | 'launch_failed' | 'active' | 'killed' | 'paused'
+// Polish-5: 'archived' joins the hidden-by-default set. Stale rows
+// (no meta_ad_id or last_polled_at > 24h on launched_at > 14d) get
+// archived by the cron; ops can still see them via ?show_test=1.
+const TEST_STATUSES = ['dry_run', 'rejected_by_meta', 'launch_failed', 'archived'] satisfies Array<
+  'dry_run' | 'rejected_by_meta' | 'launch_failed' | 'archived' | 'active' | 'killed' | 'paused'
 >;
 
 interface Props {

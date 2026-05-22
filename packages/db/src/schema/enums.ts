@@ -96,4 +96,9 @@ export const launchedAdStatusEnum = pgEnum('launched_ad_status', [
   'killed',
   'rejected_by_meta',
   'launch_failed',
+  // Polish-5: terminal "no longer interesting" state. Set by migration
+  // 0022 on rows that never got a meta_ad_id or that haven't been
+  // polled in 24h+ AND are older than 14 days. Excluded from the
+  // poll-ad-performance loop + /launched list.
+  'archived',
 ]);
