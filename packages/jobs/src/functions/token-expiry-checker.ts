@@ -13,6 +13,12 @@ export const tokenExpiryChecker = inngest.createFunction(
   { cron: '0 * * * *' },
   async ({ step }) => {
     void step;
-    throw new Error('tokenExpiryChecker not implemented (Phase 2)');
+    // Polish-5: the throw above was firing on every Inngest cron tick
+    // and surfacing as a red function in the dashboard, even though
+    // the feature is intentionally deferred. No-op + log + skipped:true
+    // so the dashboard stays green and ops can grep for "skipped" rows
+    // when they look for "what's not implemented yet".
+    console.log('token-expiry-checker skipped — not implemented yet');
+    return { ok: true, skipped: true };
   },
 );
