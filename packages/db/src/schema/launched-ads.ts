@@ -59,6 +59,20 @@ export const launchedAds = pgTable('launched_ads', {
   metaClicks: integer('meta_clicks'),
   metaConversions: integer('meta_conversions'),
 
+  // Polish-5: stable current-snapshot surface populated by poll-ad-
+  // performance on every tick. /launched + kill/scale evaluator read
+  // from here. Separate from the meta_* columns above so the snapshot
+  // semantics ("this is the latest poll result for `current_window_kind`")
+  // don't drift.
+  currentSpend: numeric('current_spend', { precision: 10, scale: 2 }),
+  currentImpressions: integer('current_impressions'),
+  currentClicks: integer('current_clicks'),
+  currentCtr: numeric('current_ctr', { precision: 8, scale: 4 }),
+  currentCpc: numeric('current_cpc', { precision: 10, scale: 4 }),
+  currentConversions: integer('current_conversions'),
+  currentFrequency: numeric('current_frequency', { precision: 8, scale: 4 }),
+  currentWindowKind: text('current_window_kind').default('lifetime'),
+
   // Phase 5 — kill/scale tracking. The decision engine marks
   // *_recommended_* columns; the approval handler stamps *_confirmed_at
   // once the user taps Confirm in Telegram and the Meta call succeeds.

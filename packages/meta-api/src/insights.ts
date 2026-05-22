@@ -21,6 +21,7 @@ export interface AdInsights {
   conversions: number;
   ctrPct: number; // (clicks / impressions) × 100, 0 when impressions == 0
   cpcUsd: number; // spend / clicks, 0 when clicks == 0
+  frequency: number; // Polish-5: average impressions per unique user, 0 when impressions == 0
 }
 
 export interface GetAdInsightsInput {
@@ -45,7 +46,7 @@ export async function getAdInsights(input: GetAdInsightsInput): Promise<GetAdIns
   const effective = effectiveLaunchMode(input.mode);
   const t0 = Date.now();
   const datePreset = dateRangeToPreset(input.dateRangeDays);
-  const endpoint = `/${input.adId}/insights?fields=spend,impressions,clicks,actions&date_preset=${datePreset}`;
+  const endpoint = `/${input.adId}/insights?fields=spend,impressions,clicks,actions,frequency&date_preset=${datePreset}`;
 
   if (effective === 'mock') {
     const insights = mockInsightsFor(input.adId);
@@ -111,6 +112,7 @@ function parseInsights(body: unknown): AdInsights {
     conversions: 0,
     ctrPct: 0,
     cpcUsd: 0,
+    frequency: 0,
   };
   if (!body || typeof body !== 'object') return empty;
   const data = (body as { data?: unknown }).data;
@@ -121,11 +123,12 @@ function parseInsights(body: unknown): AdInsights {
   const impressions = Math.round(numFrom(row.impressions));
   const clicks = Math.round(numFrom(row.clicks));
   const conversions = sumConversionActions(row.actions);
+  const frequency = numFrom(row.frequency);
 
   const ctrPct = impressions > 0 ? (clicks / impressions) * 100 : 0;
   const cpcUsd = clicks > 0 ? spendUsd / clicks : 0;
 
-  return { spendUsd, impressions, clicks, conversions, ctrPct, cpcUsd };
+  return { spendUsd, impressions, clicks, conversions, ctrPct, cpcUsd, frequency };
 }
 
 /**
@@ -196,7 +199,9 @@ function mockInsightsFor(adId: string): AdInsights {
   const conversions = r3 > 0.7 ? Math.floor(2 + r1 * 5) : 0;
   const ctrPct = impressions > 0 ? (clicks / impressions) * 100 : 0;
   const cpcUsd = clicks > 0 ? spendUsd / clicks : 0;
-  return { spendUsd, impressions, clicks, conversions, ctrPct, cpcUsd };
+  // Mock frequency: 1.0..3.5 range, derived from seed for stability across runs.
+  const frequency = round2(1 + r2 * 2.5);
+  return { spendUsd, impressions, clicks, conversions, ctrPct, cpcUsd, frequency };
 }
 
 function round2(n: number): number {

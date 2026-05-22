@@ -1,8 +1,31 @@
 import { and, eq, inArray } from 'drizzle-orm';
-import { getAdInsights, type LaunchMode } from '@mbb/meta-api';
+import { getAdInsights, type AdInsights, type LaunchMode } from '@mbb/meta-api';
 import { assertDailyLaunchBudgetCap, decryptSecret, getDb, logAuditEvent, schema } from '@mbb/db';
 import { evaluatePerformance } from '@mbb/shared';
 import { inngest } from '../client';
+
+/**
+ * Polish-5: shape an AdInsights into the columns we write on every poll.
+ * Pure — exposed for unit testing. The poller calls it inline below; the
+ * test mocks getAdInsights and asserts this is what gets handed to the
+ * launched_ads UPDATE.
+ */
+export function buildSnapshotUpdate(m: AdInsights, windowKind: string) {
+  return {
+    metaSpendUsd: m.spendUsd.toFixed(2),
+    metaImpressions: m.impressions,
+    metaClicks: m.clicks,
+    metaConversions: m.conversions,
+    currentSpend: m.spendUsd.toFixed(2),
+    currentImpressions: m.impressions,
+    currentClicks: m.clicks,
+    currentCtr: m.ctrPct.toFixed(4),
+    currentCpc: m.cpcUsd.toFixed(4),
+    currentConversions: m.conversions,
+    currentFrequency: m.frequency.toFixed(4),
+    currentWindowKind: windowKind,
+  };
+}
 
 /**
  * Phase 5: scheduled poll across every active launched_ads row. Runs
@@ -181,10 +204,7 @@ export const pollAdPerformance = inngest.createFunction(
                 .update(schema.launchedAds)
                 .set({
                   lastPolledAt: tickAt,
-                  metaSpendUsd: m.spendUsd.toFixed(2),
-                  metaImpressions: m.impressions,
-                  metaClicks: m.clicks,
-                  metaConversions: m.conversions,
+                  ...buildSnapshotUpdate(m, 'last_7d'),
                 })
                 .where(eq(schema.launchedAds.id, ad.id));
 

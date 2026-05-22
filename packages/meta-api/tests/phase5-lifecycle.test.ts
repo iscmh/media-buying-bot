@@ -57,6 +57,7 @@ describe('Phase 5: getAdInsights', () => {
                   spend: '15.50',
                   impressions: '2000',
                   clicks: '40',
+                  frequency: '2.35',
                   actions: [
                     { action_type: 'offsite_conversion.fb_pixel_purchase', value: '3' },
                     { action_type: 'link_click', value: '40' },
@@ -81,6 +82,24 @@ describe('Phase 5: getAdInsights', () => {
     expect(r.insights?.conversions).toBe(3);
     expect(r.insights?.ctrPct).toBeCloseTo(2);
     expect(r.insights?.cpcUsd).toBeCloseTo(15.5 / 40);
+    expect(r.insights?.frequency).toBeCloseTo(2.35);
+  });
+
+  it('also requests the frequency field from Meta', async () => {
+    process.env = { ...ORIGINAL_ENV, BOT_DRY_RUN: 'false' };
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ data: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await getAdInsights({
+      userId: 'u',
+      accessToken: 'tok',
+      adId: 'ad_freq',
+      mode: 'live',
+    });
+    const url = fetchMock.mock.calls[0]![0] as string;
+    expect(url).toContain('frequency');
   });
 
   it('returns ok=false with Meta error on 4xx', async () => {
