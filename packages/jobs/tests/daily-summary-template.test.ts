@@ -84,4 +84,48 @@ describe('Phase 6: formatDailyRecap', () => {
   it('links to /dashboard in the footer', () => {
     expect(formatDailyRecap(base)).toMatch(/\/dashboard/);
   });
+
+  it('Polish-5: renders without throwing when every field is null', () => {
+    const out = formatDailyRecap({
+      summaryDate: null,
+      totalSpendUsd: null,
+      totalConversions: null,
+      impliedRoas: null,
+      adsActiveCount: null,
+      adsKilledToday: null,
+      adsScaledToday: null,
+      bestHeadline: null,
+      bestSpendUsd: null,
+      bestConv: null,
+      bestRoas: null,
+      worstHeadline: null,
+      worstSpendUsd: null,
+      worstConv: null,
+    });
+    expect(out).toMatch(/\$0\.00/);
+    expect(out).toMatch(/ROAS: n\/a/);
+    expect(out).toMatch(/Active ads: 0/);
+    expect(out).toMatch(/\/dashboard/);
+  });
+
+  it('Polish-5: renders without throwing when every field is undefined', () => {
+    const out = formatDailyRecap({
+      summaryDate: undefined,
+      totalSpendUsd: undefined,
+      totalConversions: undefined,
+      impliedRoas: undefined,
+      adsActiveCount: undefined,
+      adsKilledToday: undefined,
+      adsScaledToday: undefined,
+      bestHeadline: undefined,
+      bestSpendUsd: undefined,
+      bestConv: undefined,
+      bestRoas: undefined,
+      worstHeadline: undefined,
+      worstSpendUsd: undefined,
+      worstConv: undefined,
+    });
+    expect(out).toMatch(/Daily Recap/);
+    expect(out).toMatch(/\/dashboard/);
+  });
 });

@@ -68,9 +68,33 @@ export const dailySummaryGenerator = inngest.createFunction(
     let sent = 0;
 
     for (const u of eligible) {
-      const result = await step.run(`build-summary-${u.userId}`, async () =>
-        computeAndUpsertSummary({ userId: u.userId, timezone: u.timezone, dryRun }),
-      );
+      // Polish-5: a single user's aggregate row going sideways used to
+      // crash the cron mid-loop and starve the remaining users. Wrap
+      // per-user so one failure logs to audit + falls back to a
+      // generic "see /dashboard" message instead of blowing up.
+      let result: SummaryResult;
+      try {
+        result = await step.run(`build-summary-${u.userId}`, async () =>
+          computeAndUpsertSummary({ userId: u.userId, timezone: u.timezone, dryRun }),
+        );
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        await logAuditEvent({
+          userId: u.userId,
+          eventType: 'daily_summary_build_failed',
+          eventData: { error: errorMessage },
+        });
+        if (!dryRun) {
+          await step.sendEvent('daily-summary-telegram-fallback', {
+            name: 'telegram/notify.requested',
+            data: {
+              userId: u.userId,
+              message: 'Daily summary unavailable — see /dashboard',
+            },
+          });
+        }
+        continue;
+      }
       if (result.alreadySentToday) continue;
       if (!result.inserted) continue;
       if (dryRun) {
@@ -298,51 +322,69 @@ async function computeAndUpsertSummary(input: {
  *   ⚪️ no spend yet
  */
 export function formatDailyRecap(input: {
-  summaryDate: string;
-  totalSpendUsd: number;
-  totalConversions: number;
-  impliedRoas: number | null;
-  adsActiveCount: number;
-  adsKilledToday: number;
-  adsScaledToday: number;
-  bestHeadline: string | null;
-  bestSpendUsd: number;
-  bestConv: number;
-  bestRoas: number;
-  worstHeadline: string | null;
-  worstSpendUsd: number;
-  worstConv: number;
+  summaryDate: string | null | undefined;
+  totalSpendUsd: number | null | undefined;
+  totalConversions: number | null | undefined;
+  impliedRoas: number | null | undefined;
+  adsActiveCount: number | null | undefined;
+  adsKilledToday: number | null | undefined;
+  adsScaledToday: number | null | undefined;
+  bestHeadline: string | null | undefined;
+  bestSpendUsd: number | null | undefined;
+  bestConv: number | null | undefined;
+  bestRoas: number | null | undefined;
+  worstHeadline: string | null | undefined;
+  worstSpendUsd: number | null | undefined;
+  worstConv: number | null | undefined;
 }): string {
-  const roasEmoji = roasIndicator(input.impliedRoas);
-  const roasText = input.impliedRoas != null ? `${input.impliedRoas.toFixed(2)}x` : 'n/a';
+  // Polish-5: bare ?? 0 defaults so a single null in the aggregate row
+  // doesn't throw on toFixed(). Prod crash: an unpolled launched_ad
+  // produced a null sum that hit Buffer.byteLength via the Telegram
+  // dispatch step. Fail soft + still ship a message.
+  try {
+    const roas = input.impliedRoas ?? null;
+    const roasEmoji = roasIndicator(roas);
+    const roasText = roas != null ? `${roas.toFixed(2)}x` : 'n/a';
+    const spend = input.totalSpendUsd ?? 0;
+    const conv = input.totalConversions ?? 0;
+    const active = input.adsActiveCount ?? 0;
+    const killed = input.adsKilledToday ?? 0;
+    const scaled = input.adsScaledToday ?? 0;
+    const date = input.summaryDate ?? '—';
 
-  const lines: string[] = [];
-  lines.push(`📊 Daily Recap — ${input.summaryDate}`);
-  lines.push('');
-  lines.push(`💸 Spent (lifetime so far): $${input.totalSpendUsd.toFixed(2)}`);
-  lines.push(`🎯 Conversions: ${input.totalConversions}`);
-  lines.push(`${roasEmoji} ROAS: ${roasText}`);
-  lines.push(`Active ads: ${input.adsActiveCount}`);
-  if (input.adsKilledToday > 0) lines.push(`💀 Killed yesterday: ${input.adsKilledToday}`);
-  if (input.adsScaledToday > 0) lines.push(`📈 Scaled yesterday: ${input.adsScaledToday}`);
-
-  if (input.bestHeadline) {
+    const lines: string[] = [];
+    lines.push(`📊 Daily Recap — ${date}`);
     lines.push('');
-    lines.push(
-      `🏆 Best performer: "${input.bestHeadline}" — $${input.bestSpendUsd.toFixed(
-        2,
-      )} → ${input.bestConv} conv (${input.bestRoas.toFixed(2)}x)`,
-    );
-  }
-  if (input.worstHeadline && input.worstHeadline !== input.bestHeadline) {
-    lines.push(
-      `💀 Worst performer: "${input.worstHeadline}" — $${input.worstSpendUsd.toFixed(2)} → ${input.worstConv} conv`,
-    );
-  }
+    lines.push(`💸 Spent (lifetime so far): $${spend.toFixed(2)}`);
+    lines.push(`🎯 Conversions: ${conv}`);
+    lines.push(`${roasEmoji} ROAS: ${roasText}`);
+    lines.push(`Active ads: ${active}`);
+    if (killed > 0) lines.push(`💀 Killed yesterday: ${killed}`);
+    if (scaled > 0) lines.push(`📈 Scaled yesterday: ${scaled}`);
 
-  lines.push('');
-  lines.push('View full dashboard: /dashboard');
-  return lines.join('\n');
+    if (input.bestHeadline) {
+      const bestSpend = input.bestSpendUsd ?? 0;
+      const bestConv = input.bestConv ?? 0;
+      const bestRoas = input.bestRoas ?? 0;
+      lines.push('');
+      lines.push(
+        `🏆 Best performer: "${input.bestHeadline}" — $${bestSpend.toFixed(2)} → ${bestConv} conv (${bestRoas.toFixed(2)}x)`,
+      );
+    }
+    if (input.worstHeadline && input.worstHeadline !== input.bestHeadline) {
+      const worstSpend = input.worstSpendUsd ?? 0;
+      const worstConv = input.worstConv ?? 0;
+      lines.push(
+        `💀 Worst performer: "${input.worstHeadline}" — $${worstSpend.toFixed(2)} → ${worstConv} conv`,
+      );
+    }
+
+    lines.push('');
+    lines.push('View full dashboard: /dashboard');
+    return lines.join('\n');
+  } catch {
+    return 'Daily summary unavailable — see /dashboard';
+  }
 }
 
 function roasIndicator(roas: number | null): string {
