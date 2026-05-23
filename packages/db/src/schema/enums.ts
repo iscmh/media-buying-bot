@@ -12,7 +12,23 @@ export const connectionStatusEnum = pgEnum('connection_status', [
   'error',
 ]);
 
-export const aiProviderEnum = pgEnum('ai_provider', ['arcads', 'heygen', 'creatify']);
+// Polish-4: + kling (Replicate cinematic-voiceover format), elevenlabs
+// (TTS for the same), replicate + tavus reserved so future providers
+// don't need another ALTER TYPE migration.
+export const aiProviderEnum = pgEnum('ai_provider', [
+  'arcads',
+  'heygen',
+  'creatify',
+  'kling',
+  'replicate',
+  'tavus',
+  'elevenlabs',
+]);
+
+// Polish-4: tier label per provider. nullable on the connection row —
+// providers without tiered APIs (Replicate, ElevenLabs) leave it null.
+// HeyGen uses it to gate Premium avatars off free plans.
+export const providerTierEnum = pgEnum('provider_tier', ['free', 'pro', 'premium']);
 
 export const campaignObjectiveEnum = pgEnum('campaign_objective', ['CBO', 'ABO']);
 

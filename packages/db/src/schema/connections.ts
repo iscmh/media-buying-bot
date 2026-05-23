@@ -4,6 +4,7 @@ import {
   aiProviderEnum,
   connectionMethodEnum,
   connectionStatusEnum,
+  providerTierEnum,
   toolProviderEnum,
 } from './enums';
 import { users } from './users';
@@ -104,6 +105,21 @@ export const aiProviderConnections = pgTable('ai_provider_connections', {
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
 
   isPrimary: boolean('is_primary').notNull().default(false),
+
+  // Polish-4: per-provider tier (HeyGen free/pro/premium). Null for
+  // providers without tiered APIs (Replicate, ElevenLabs). Drives the
+  // premium-avatar filter — don't try a Premium avatar on a free key
+  // (it 403s).
+  tier: providerTierEnum('tier'),
+  // Polish-4: last time we re-verified the connection (re-fetched
+  // avatars / refreshed tier). Distinct from apiKeyVerifiedAt, which
+  // is set on the initial connect and not bumped after.
+  lastVerifiedAt: timestamp('last_verified_at', { withTimezone: true }),
+  // Polish-4: flex bag for provider-specific cached state (e.g.
+  // { heygen: { avatar_count, premium_avatar_ids } }).
+  metadata: jsonb('metadata')
+    .notNull()
+    .default(sql`'{}'::jsonb`),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
