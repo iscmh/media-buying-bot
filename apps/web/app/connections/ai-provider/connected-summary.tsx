@@ -5,6 +5,7 @@ import { formatDateTime } from '@/lib/format/date';
 import * as React from 'react';
 import { useFormStatus } from 'react-dom';
 import type { AIProviderName } from '@mbb/shared';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -15,13 +16,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { disconnectAiProviderAction } from './actions';
+import { disconnectAiProviderAction, reverifyAiProviderAction } from './actions';
 
 interface Props {
   provider: AIProviderName;
   providerLabel: string;
   verificationMethod: 'api' | 'format_only';
   apiKeyVerifiedAt: Date | null;
+  lastVerifiedAt: Date | null;
+  tier: 'free' | 'pro' | 'premium' | null;
 }
 
 function DisconnectButton() {
@@ -33,19 +36,66 @@ function DisconnectButton() {
   );
 }
 
+function ReverifyButton() {
+  const [pending, startTransition] = React.useTransition();
+  const [result, setResult] = React.useState<{ ok?: boolean; message?: string } | null>(null);
+  return (
+    <div className="flex items-center gap-3">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            const r = await reverifyAiProviderAction();
+            setResult({
+              ok: r.ok,
+              message: r.ok
+                ? `Refreshed${r.tier ? ` — tier: ${r.tier}` : ''}`
+                : (r.errorMessage ?? 'Re-verify failed.'),
+            });
+          })
+        }
+      >
+        {pending ? 'Re-verifying…' : 'Verify connection'}
+      </Button>
+      {result?.message && (
+        <span
+          className={
+            result.ok ? 'text-fg-muted text-xs' : 'text-xs text-[color:var(--destructive-color)]'
+          }
+        >
+          {result.message}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function ProviderConnectedSummary({
+  provider,
   providerLabel,
   verificationMethod,
   apiKeyVerifiedAt,
+  lastVerifiedAt,
+  tier,
 }: Props) {
   const verified = apiKeyVerifiedAt ? formatDateTime(apiKeyVerifiedAt) : 'unknown';
+  const lastVerified = lastVerifiedAt ? formatDateTime(lastVerifiedAt) : '—';
+  const isHeyGen = provider === 'heygen';
 
   return (
     <div className="space-y-4">
       <div className="bg-bg-elevated space-y-3 rounded-md border p-5 text-sm">
         <Row
           label="Provider"
-          value={<span className="text-fg font-semibold">{providerLabel}</span>}
+          value={
+            <span className="flex items-center gap-2">
+              <span className="text-fg font-semibold">{providerLabel}</span>
+              {tier && <TierBadge tier={tier} />}
+            </span>
+          }
         />
         <Row
           label="Verification"
@@ -55,7 +105,24 @@ export function ProviderConnectedSummary({
               : 'Format-only (verifies at first generation)'
           }
         />
-        <Row label="Last verified" value={<span className="font-mono">{verified}</span>} />
+        <Row label="Connected" value={<span className="font-mono">{verified}</span>} />
+        <Row label="Last verified" value={<span className="font-mono">{lastVerified}</span>} />
+        <Row label="" value={<ReverifyButton />} />
+        {isHeyGen && tier !== 'premium' && (
+          <Row
+            label=""
+            value={
+              <a
+                href="https://app.heygen.com/upgrade"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-fg hover:text-fg-muted text-sm underline transition-colors"
+              >
+                Upgrade HeyGen to unlock premium avatars
+              </a>
+            }
+          />
+        )}
       </div>
 
       <div className="bg-bg-elevated flex flex-col gap-3 rounded-md border p-5 sm:flex-row sm:items-start sm:justify-between">
@@ -106,4 +173,14 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
       <span className="text-fg font-medium">{value}</span>
     </div>
   );
+}
+
+function TierBadge({ tier }: { tier: 'free' | 'pro' | 'premium' }) {
+  if (tier === 'premium') {
+    return <Badge variant="success">Premium</Badge>;
+  }
+  if (tier === 'pro') {
+    return <Badge variant="outline">Pro</Badge>;
+  }
+  return <Badge variant="outline">Free</Badge>;
 }

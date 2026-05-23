@@ -57,6 +57,15 @@ export function classifyHeyGenError(
   return 'unknown';
 }
 
+/**
+ * Polish-4: HeyGen surfaces premium-tier avatars under multiple field
+ * names depending on the API version. We check the documented `premium`
+ * boolean first, fall back to `tier === 'premium'`, then `is_premium`.
+ * If the avatar list is empty (free tier with no avatars seeded) we
+ * report 'free'. Override via HEYGEN_TIER_FIELD env if HeyGen renames.
+ */
+export type HeyGenTier = 'free' | 'pro' | 'premium';
+
 export interface HeyGenAvatar {
   avatar_id: string;
   avatar_name: string;
@@ -64,11 +73,72 @@ export interface HeyGenAvatar {
   preview_image_url?: string;
   /** HeyGen surfaces tags inconsistently — we use whatever's present for matching. */
   description?: string;
+  /** Polish-4: parsed tier classification, derived in normalizeHeyGenAvatar. */
+  tier?: HeyGenTier;
+  /** Raw boolean from HeyGen for forensic logging. */
+  premium?: boolean;
+}
+
+/**
+ * Polish-4: read whichever of the documented tier markers HeyGen
+ * happens to ship in this response. Defaults to 'free' if no marker.
+ */
+export function normalizeHeyGenAvatar(raw: Record<string, unknown>): HeyGenAvatar {
+  const premium =
+    raw.premium === true ||
+    raw.is_premium === true ||
+    (typeof raw.tier === 'string' && raw.tier.toLowerCase() === 'premium');
+  // 'pro' is rarer in the list response; some accounts label brand-approved
+  // avatars 'pro'. Treat that as the same access bucket as premium here —
+  // gating happens upstream via the connection's tier.
+  const isPro = typeof raw.tier === 'string' && raw.tier.toLowerCase() === 'pro';
+  return {
+    avatar_id: String(raw.avatar_id ?? ''),
+    avatar_name: String(raw.avatar_name ?? ''),
+    gender: typeof raw.gender === 'string' ? raw.gender : undefined,
+    preview_image_url:
+      typeof raw.preview_image_url === 'string' ? raw.preview_image_url : undefined,
+    description: typeof raw.description === 'string' ? raw.description : undefined,
+    tier: premium ? 'premium' : isPro ? 'pro' : 'free',
+    premium: typeof raw.premium === 'boolean' ? raw.premium : undefined,
+  };
+}
+
+/**
+ * Polish-4: infer the connection-level tier from the avatar list. Logic:
+ *   - any premium avatar visible → 'premium'
+ *   - any pro avatar visible      → 'pro'
+ *   - otherwise                   → 'free'
+ *
+ * Premium plans see premium avatars in /v2/avatars; free plans don't.
+ * This is the cheapest tier-detection signal available without a
+ * dedicated billing endpoint.
+ */
+export function detectHeyGenTier(avatars: HeyGenAvatar[]): HeyGenTier {
+  if (avatars.some((a) => a.tier === 'premium')) return 'premium';
+  if (avatars.some((a) => a.tier === 'pro')) return 'pro';
+  return 'free';
+}
+
+/**
+ * Polish-4: drop avatars the user's tier can't use. Calling generate
+ * with a Premium avatar on a free plan 403s — filter first.
+ */
+export function filterAvatarsByTier(
+  avatars: HeyGenAvatar[],
+  userTier: HeyGenTier | null | undefined,
+): HeyGenAvatar[] {
+  const tier = userTier ?? 'free';
+  if (tier === 'premium') return avatars; // premium plan sees everything
+  if (tier === 'pro') return avatars.filter((a) => a.tier !== 'premium');
+  return avatars.filter((a) => a.tier === 'free' || a.tier === undefined);
 }
 
 export interface HeyGenAvatarsListResult {
   ok: boolean;
   avatars: HeyGenAvatar[];
+  /** Polish-4: connection-level tier inferred from the avatar list. */
+  tier?: HeyGenTier;
   latencyMs: number;
   /** HTTP status from HeyGen (or 0 on timeout/network error). */
   httpStatus?: number;
@@ -83,7 +153,7 @@ export async function listHeyGenAvatars(input: {
 }): Promise<HeyGenAvatarsListResult> {
   const result = await callProvider<{
     error?: { message?: string };
-    data?: { avatars?: HeyGenAvatar[] };
+    data?: { avatars?: Array<Record<string, unknown>> };
   }>({
     userId: input.userId,
     provider: 'heygen',
@@ -107,9 +177,12 @@ export async function listHeyGenAvatars(input: {
     };
   }
 
+  const raw = result.data.data?.avatars ?? [];
+  const avatars = raw.map(normalizeHeyGenAvatar);
   return {
     ok: true,
-    avatars: result.data.data?.avatars ?? [],
+    avatars,
+    tier: detectHeyGenTier(avatars),
     latencyMs: result.latencyMs,
     httpStatus: result.status,
   };
@@ -189,8 +262,13 @@ export async function listHeyGenVoices(input: {
 export function pickHeyGenAvatar(
   avatars: HeyGenAvatar[],
   persona: { age?: string; gender?: string; vibe?: string; setting?: string },
+  // Polish-4: when set, premium avatars are dropped from the pool if
+  // the user's tier can't use them. Defaults to no filtering (i.e. the
+  // caller already filtered, OR they're fine with a 403).
+  userTier?: HeyGenTier | null,
 ): HeyGenAvatar | null {
-  if (avatars.length === 0) return null;
+  const pool = userTier === undefined ? avatars : filterAvatarsByTier(avatars, userTier);
+  if (pool.length === 0) return null;
 
   const keywords = [persona.age, persona.gender, persona.vibe, persona.setting]
     .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
@@ -199,7 +277,7 @@ export function pickHeyGenAvatar(
 
   let bestScore = 0;
   let best: HeyGenAvatar | null = null;
-  for (const a of avatars) {
+  for (const a of pool) {
     const haystack = [a.avatar_name, a.gender ?? '', a.description ?? ''].join(' ').toLowerCase();
     let score = 0;
     for (const k of keywords) {

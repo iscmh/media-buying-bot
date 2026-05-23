@@ -51,6 +51,9 @@ export {
   submitHeyGenVideo,
   checkHeyGenVideoStatus,
   classifyHeyGenError,
+  detectHeyGenTier,
+  filterAvatarsByTier,
+  normalizeHeyGenAvatar,
   HeyGenAvatarNotConfiguredError,
   type HeyGenAvatar,
   type HeyGenAvatarsListResult,
@@ -62,6 +65,7 @@ export {
   type HeyGenCheckResult,
   type HeyGenStatus,
   type HeyGenErrorCategory,
+  type HeyGenTier,
 } from './heygen-client';
 export {
   callProvider,

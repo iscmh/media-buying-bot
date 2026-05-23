@@ -19,8 +19,12 @@ import {
   HeyGenAvatarNotConfiguredError,
   checkHeyGenVideoStatus,
   classifyHeyGenError,
+  detectHeyGenTier,
+  filterAvatarsByTier,
   listHeyGenAvatars,
   listHeyGenVoices,
+  normalizeHeyGenAvatar,
+  pickHeyGenAvatar,
   submitHeyGenVideo,
 } from '../src/heygen-client';
 
@@ -175,5 +179,99 @@ describe('HeyGenAvatarNotConfiguredError', () => {
     const err = new HeyGenAvatarNotConfiguredError();
     expect(err.name).toBe('HeyGenAvatarNotConfiguredError');
     expect(err.message).toMatch(/\/settings/);
+  });
+});
+
+describe('Polish-4: HeyGen tier detection', () => {
+  it('normalizes premium=true into tier=premium', () => {
+    const a = normalizeHeyGenAvatar({ avatar_id: 'p1', avatar_name: 'Lux', premium: true });
+    expect(a.tier).toBe('premium');
+  });
+
+  it('normalizes is_premium=true as a fallback marker', () => {
+    const a = normalizeHeyGenAvatar({ avatar_id: 'p2', avatar_name: 'X', is_premium: true });
+    expect(a.tier).toBe('premium');
+  });
+
+  it("normalizes tier='premium' string fallback", () => {
+    const a = normalizeHeyGenAvatar({ avatar_id: 'p3', avatar_name: 'Y', tier: 'premium' });
+    expect(a.tier).toBe('premium');
+  });
+
+  it('defaults to free when no marker present', () => {
+    const a = normalizeHeyGenAvatar({ avatar_id: 'p4', avatar_name: 'Z' });
+    expect(a.tier).toBe('free');
+  });
+
+  it('detectHeyGenTier returns premium when any premium avatar visible', () => {
+    expect(
+      detectHeyGenTier([
+        { avatar_id: 'a', avatar_name: 'A', tier: 'free' },
+        { avatar_id: 'b', avatar_name: 'B', tier: 'premium' },
+      ]),
+    ).toBe('premium');
+  });
+
+  it('detectHeyGenTier returns free when no premium/pro avatars visible', () => {
+    expect(
+      detectHeyGenTier([
+        { avatar_id: 'a', avatar_name: 'A', tier: 'free' },
+        { avatar_id: 'b', avatar_name: 'B', tier: 'free' },
+      ]),
+    ).toBe('free');
+  });
+
+  it('detectHeyGenTier returns free when avatar list is empty', () => {
+    expect(detectHeyGenTier([])).toBe('free');
+  });
+
+  it('filterAvatarsByTier drops premium avatars when user is free', () => {
+    const out = filterAvatarsByTier(
+      [
+        { avatar_id: 'a', avatar_name: 'F', tier: 'free' },
+        { avatar_id: 'b', avatar_name: 'P', tier: 'premium' },
+      ],
+      'free',
+    );
+    expect(out.map((a) => a.avatar_id)).toEqual(['a']);
+  });
+
+  it('filterAvatarsByTier returns everything when user is premium', () => {
+    const out = filterAvatarsByTier(
+      [
+        { avatar_id: 'a', avatar_name: 'F', tier: 'free' },
+        { avatar_id: 'b', avatar_name: 'P', tier: 'premium' },
+      ],
+      'premium',
+    );
+    expect(out).toHaveLength(2);
+  });
+
+  it('pickHeyGenAvatar refuses premium avatar when user tier is free', () => {
+    const pool = [
+      { avatar_id: 'a', avatar_name: 'female premium', gender: 'female', tier: 'premium' as const },
+      { avatar_id: 'b', avatar_name: 'male free', gender: 'male', tier: 'free' as const },
+    ];
+    // persona is female — would normally pick 'a', but free tier blocks it.
+    const picked = pickHeyGenAvatar(pool, { gender: 'female' }, 'free');
+    expect(picked).toBeNull(); // no free female avatars in pool
+  });
+
+  it('listHeyGenAvatars surfaces detected tier on the result', async () => {
+    mockFetchOnce({
+      status: 200,
+      body: {
+        data: {
+          avatars: [
+            { avatar_id: 'p1', avatar_name: 'Free One', premium: false },
+            { avatar_id: 'p2', avatar_name: 'Premium One', premium: true },
+          ],
+        },
+      },
+    });
+    const r = await listHeyGenAvatars({ userId: 'u', apiKey: 'k' });
+    expect(r.ok).toBe(true);
+    expect(r.tier).toBe('premium');
+    expect(r.avatars[1]!.tier).toBe('premium');
   });
 });

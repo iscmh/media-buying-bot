@@ -19,6 +19,8 @@ export default async function ConnectAIProviderPage() {
     columns: {
       provider: true,
       apiKeyVerifiedAt: true,
+      lastVerifiedAt: true,
+      tier: true,
       status: true,
     },
   });
@@ -38,6 +40,8 @@ export default async function ConnectAIProviderPage() {
           providerLabel={meta.label}
           verificationMethod={meta.verificationMethod}
           apiKeyVerifiedAt={conn.apiKeyVerifiedAt}
+          lastVerifiedAt={conn.lastVerifiedAt}
+          tier={conn.tier}
         />
       </AppShell>
     );
