@@ -80,10 +80,21 @@ export const analyzeConcept = inngest.createFunction(
           eventData: { job_id: jobId, mode, mock: true },
         });
       });
-      await step.sendEvent('fan-out-ugc-mock', {
-        name: 'generation/ugc.requested',
-        data: { jobId, userId, mode },
-      });
+      // Polish-4: split fan-out by creative format. Cinematic voiceover
+      // (Kling + ElevenLabs) gets its own worker; avatar talking head
+      // (HeyGen) keeps the legacy event. Format is set at job creation
+      // time on the form; defaults to avatar_talking_head.
+      const mockFormat = await loadJobFormat(jobId);
+      await step.sendEvent(
+        `fan-out-${mockFormat === 'cinematic_voiceover' ? 'cinematic' : 'ugc'}-mock`,
+        {
+          name:
+            mockFormat === 'cinematic_voiceover'
+              ? 'generation/cinematic.requested'
+              : 'generation/ugc.requested',
+          data: { jobId, userId, mode },
+        },
+      );
       return { jobId, mode, path: 'mock' };
     }
 
@@ -230,11 +241,39 @@ export const analyzeConcept = inngest.createFunction(
       });
     });
 
-    await step.sendEvent('fan-out-ugc-live', {
-      name: 'generation/ugc.requested',
-      data: { jobId, userId, mode },
-    });
+    // Polish-4: split fan-out by creative format. See mock-path comment
+    // above for the routing rationale.
+    const liveFormat = await loadJobFormat(jobId);
+    await step.sendEvent(
+      `fan-out-${liveFormat === 'cinematic_voiceover' ? 'cinematic' : 'ugc'}-live`,
+      {
+        name:
+          liveFormat === 'cinematic_voiceover'
+            ? 'generation/cinematic.requested'
+            : 'generation/ugc.requested',
+        data: { jobId, userId, mode },
+      },
+    );
 
     return { jobId, mode, path: 'live', ok: true, costUsd: visionResult.costUsd };
   },
 );
+
+/**
+ * Polish-4: look up which creative format the job picked. Used to fan
+ * out to the right downstream worker. Returns the default
+ * 'avatar_talking_head' on any error so the job doesn't stall — the
+ * default worker exists for every user.
+ */
+async function loadJobFormat(jobId: string): Promise<string> {
+  try {
+    const db = getDb();
+    const row = await db.query.generationJobs.findFirst({
+      where: eq(schema.generationJobs.id, jobId),
+      columns: { format: true },
+    });
+    return row?.format ?? 'avatar_talking_head';
+  } catch {
+    return 'avatar_talking_head';
+  }
+}

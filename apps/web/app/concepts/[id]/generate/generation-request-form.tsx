@@ -2,7 +2,13 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { MAX_VARIANTS_PER_JOB, estimateGenerationCost, type ConceptType } from '@mbb/shared';
+import {
+  MAX_VARIANTS_PER_JOB,
+  estimateGenerationCost,
+  type ConceptType,
+  type CreativeFormat,
+} from '@mbb/shared';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,7 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { acknowledgeLiveGenerationAction } from './ack-action';
-import { createGenerationJobAction } from './actions';
+import { type ConnectedProviders, createGenerationJobAction } from './actions';
 
 interface Props {
   conceptId: string;
@@ -23,6 +29,8 @@ interface Props {
   spentTodayUsd: number;
   capUsd: number;
   liveAcknowledged: boolean;
+  /** Polish-4: drives the provider + format pickers. */
+  connectedProviders: ConnectedProviders;
 }
 
 const INTENSITIES: Array<{
@@ -60,6 +68,7 @@ export function GenerationRequestForm({
   spentTodayUsd,
   capUsd,
   liveAcknowledged: initialLiveAck,
+  connectedProviders,
 }: Props) {
   const router = useRouter();
   const [intensity, setIntensity] = React.useState<'small' | 'medium' | 'big'>('medium');
@@ -69,14 +78,26 @@ export function GenerationRequestForm({
   const [error, setError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
 
+  // Polish-4: format picker. cinematic_voiceover requires kling + elevenlabs.
+  const cinematicReady =
+    connectedProviders.kling.connected && connectedProviders.elevenlabs.connected;
+  const heygenReady = connectedProviders.heygen.connected;
+  const defaultFormat: CreativeFormat = heygenReady
+    ? 'avatar_talking_head'
+    : cinematicReady
+      ? 'cinematic_voiceover'
+      : 'avatar_talking_head';
+  const [format, setFormat] = React.useState<CreativeFormat>(defaultFormat);
+
   const estimate = React.useMemo(
     () =>
       estimateGenerationCost({
         conceptType,
         variantCount: Math.max(1, Math.min(MAX_VARIANTS_PER_JOB, variantCount || 1)),
         provider: conceptType === 'ugc' ? 'heygen' : undefined,
+        format: conceptType === 'ugc' ? format : undefined,
       }),
-    [conceptType, variantCount],
+    [conceptType, variantCount, format],
   );
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
@@ -92,6 +113,7 @@ export function GenerationRequestForm({
     formData.set('variantCount', String(variantCount));
     // mode defaults to 'live' server-side; explicit for log clarity.
     formData.set('mode', 'live');
+    formData.set('format', format);
 
     startTransition(async () => {
       setError(null);
@@ -178,16 +200,41 @@ export function GenerationRequestForm({
         )}
       </div>
 
-      {/* Video provider note (UGC only) */}
+      {/* Polish-4: Format picker (UGC only). Two creative formats:
+          avatar_talking_head (HeyGen) and cinematic_voiceover (Kling +
+          ElevenLabs). Options that the user doesn't have keys for are
+          disabled with an inline CTA to /connections/ai-provider. */}
       {conceptType === 'ugc' && (
-        <div className="bg-bg-elevated text-fg-muted rounded-md border p-3 text-xs">
-          UGC variants use HeyGen Avatar Mode — Claude matches a different avatar to your source
-          persona for each variant. Want every variant to use the same avatar instead? Force one in{' '}
-          <a className="hover:text-fg underline transition-colors" href="/settings#heygen-avatar">
-            Settings → Force Specific Avatar
-          </a>
-          .
-        </div>
+        <fieldset className="space-y-2">
+          <legend className="text-fg text-sm font-medium">Format</legend>
+          <FormatRadio
+            value="avatar_talking_head"
+            checked={format === 'avatar_talking_head'}
+            onSelect={() => setFormat('avatar_talking_head')}
+            disabled={!heygenReady}
+            label="Avatar talking head"
+            description="HeyGen Avatar Mode — Claude casts a different avatar per variant from your HeyGen pool."
+            badge={
+              connectedProviders.heygen.tier ? (
+                <Badge variant="outline">{connectedProviders.heygen.tier}</Badge>
+              ) : null
+            }
+            disabledHint="Connect HeyGen on /connections/ai-provider."
+          />
+          <FormatRadio
+            value="cinematic_voiceover"
+            checked={format === 'cinematic_voiceover'}
+            onSelect={() => setFormat('cinematic_voiceover')}
+            disabled={!cinematicReady}
+            label="Cinematic voiceover"
+            description="Kling 2.5 generates a cinematic 5s clip; ElevenLabs reads your script as voiceover. No on-screen actor."
+            disabledHint={
+              connectedProviders.kling.connected
+                ? 'Connect ElevenLabs on /connections/ai-provider for the voiceover.'
+                : 'Connect Kling (Replicate) + ElevenLabs on /connections/ai-provider.'
+            }
+          />
+        </fieldset>
       )}
 
       {/* Cost estimator */}
@@ -231,6 +278,18 @@ export function GenerationRequestForm({
         </Button>
       </div>
 
+      {/* Polish-4: provider-availability hint if user has connected
+          neither HeyGen nor Kling. Without keys the submit always fails. */}
+      {conceptType === 'ugc' && !heygenReady && !cinematicReady && (
+        <p className="text-xs text-[color:var(--destructive-color)]">
+          Connect at least one provider on{' '}
+          <a className="underline" href="/connections/ai-provider">
+            /connections/ai-provider
+          </a>{' '}
+          before generating.
+        </p>
+      )}
+
       {/* First-time spend confirmation dialog. */}
       <Dialog open={showLiveDialog} onOpenChange={setShowLiveDialog}>
         <DialogContent>
@@ -267,5 +326,60 @@ export function GenerationRequestForm({
         </DialogContent>
       </Dialog>
     </form>
+  );
+}
+
+interface FormatRadioProps {
+  value: CreativeFormat;
+  checked: boolean;
+  onSelect: () => void;
+  disabled?: boolean;
+  label: string;
+  description: string;
+  badge?: React.ReactNode;
+  disabledHint?: string;
+}
+
+function FormatRadio({
+  value,
+  checked,
+  onSelect,
+  disabled,
+  label,
+  description,
+  badge,
+  disabledHint,
+}: FormatRadioProps) {
+  return (
+    <label
+      className={
+        'flex cursor-pointer items-start gap-3 rounded-md border p-4 transition-colors ' +
+        (disabled
+          ? 'bg-bg-elevated text-fg-muted cursor-not-allowed opacity-60'
+          : checked
+            ? 'border-fg-muted bg-bg-hover'
+            : 'bg-bg-elevated hover:bg-bg-hover')
+      }
+    >
+      <input
+        type="radio"
+        name="format"
+        value={value}
+        checked={checked}
+        disabled={disabled}
+        onChange={onSelect}
+        className="mt-1 h-4 w-4"
+      />
+      <span className="flex-1">
+        <span className="text-fg flex items-center gap-2 font-medium">
+          {label}
+          {badge}
+        </span>
+        <span className="text-fg-muted mt-0.5 block text-sm">{description}</span>
+        {disabled && disabledHint && (
+          <span className="text-fg-muted mt-1 block text-xs italic">{disabledHint}</span>
+        )}
+      </span>
+    </label>
   );
 }

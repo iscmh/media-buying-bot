@@ -4,6 +4,7 @@ import { assertDailyCostCap, getDb, schema } from '@mbb/db';
 import { type ConceptType } from '@mbb/shared';
 import { AppShell } from '@/components/shell/app-shell';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { loadConnectedProviders } from './actions';
 import { GenerationRequestForm } from './generation-request-form';
 
 export const metadata = { title: 'Generate variants — Ads Bot' };
@@ -49,6 +50,10 @@ export default async function GenerateRequestPage({ params }: Props) {
   });
   const liveAcknowledged = !!settings?.liveGenerationAcknowledgedAt;
 
+  // Polish-4: which providers does the user have keys for? Drives the
+  // Provider + Format pickers.
+  const connectedProviders = await loadConnectedProviders(userId);
+
   return (
     <AppShell
       crumbs={[{ label: 'Concepts', href: '/concepts' }, { label: 'Generate variants' }]}
@@ -70,6 +75,7 @@ export default async function GenerateRequestPage({ params }: Props) {
         spentTodayUsd={spentTodayUsd}
         capUsd={capUsd}
         liveAcknowledged={liveAcknowledged}
+        connectedProviders={connectedProviders}
       />
     </AppShell>
   );

@@ -102,3 +102,46 @@ describe('MAX_VARIANTS_PER_JOB constant', () => {
     expect(MAX_VARIANTS_PER_JOB).toBe(100);
   });
 });
+
+describe('Polish-4: cinematic_voiceover cost path', () => {
+  it('skips Sora prompt refinement + uses Kling+TTS+prompt-build line items', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      provider: 'heygen',
+      format: 'cinematic_voiceover',
+    });
+    // vision $0.10 + prompt-build $0.01 + Kling $0.30 + TTS $0.06 = $0.47
+    expect(r.estimateUsd).toBeCloseTo(0.47, 4);
+    const items = r.breakdown.map((b) => b.item);
+    expect(items.some((i) => i.includes('Kling'))).toBe(true);
+    expect(items.some((i) => i.includes('ElevenLabs'))).toBe(true);
+    expect(items.some((i) => i.includes('Cinematic prompt'))).toBe(true);
+    expect(items.some((i) => i.includes('Sora') || i.includes('HeyGen'))).toBe(false);
+  });
+
+  it('10 cinematic variants ≈ vision $0.10 + prompts $0.10 + kling $3 + tts $0.60 = $3.80', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 10,
+      provider: 'heygen',
+      format: 'cinematic_voiceover',
+    });
+    expect(r.estimateUsd).toBeCloseTo(3.8, 4);
+  });
+
+  it('defaults to avatar_talking_head pricing when format omitted', () => {
+    const heygen = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 10,
+      provider: 'heygen',
+    });
+    const explicit = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 10,
+      provider: 'heygen',
+      format: 'avatar_talking_head',
+    });
+    expect(explicit.estimateUsd).toBe(heygen.estimateUsd);
+  });
+});

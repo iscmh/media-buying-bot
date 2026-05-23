@@ -1,5 +1,6 @@
 import { analyzeConcept } from './analyze-concept';
 import { dailySummaryGenerator } from './daily-summary-generator';
+import { generateCinematicVariants } from './generate-cinematic-variants';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -17,6 +18,8 @@ export const functions = [
   analyzeConcept,
   generateStaticVariants,
   generateUgcVariants,
+  // Polish-4: cinematic voiceover format (Kling 2.5 + ElevenLabs).
+  generateCinematicVariants,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

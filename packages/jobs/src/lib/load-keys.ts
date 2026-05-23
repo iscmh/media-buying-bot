@@ -17,6 +17,10 @@ export interface DecryptedKeys {
   heygen?: string;
   arcads?: string;
   creatify?: string;
+  // Polish-4: Kling cinematic video via Replicate + ElevenLabs TTS for
+  // the cinematic_voiceover creative format.
+  kling?: string;
+  elevenlabs?: string;
 }
 
 export type ProviderKey = keyof DecryptedKeys;
@@ -69,7 +73,9 @@ async function fetchCiphertext(userId: string, provider: ProviderKey): Promise<s
     return row?.apiKeyEncrypted ?? null;
   }
 
-  // heygen / arcads / creatify
+  // heygen / arcads / creatify / kling / elevenlabs all live in
+  // ai_provider_connections (Polish-4 added kling + elevenlabs to the
+  // ai_provider enum).
   const row = await db.query.aiProviderConnections.findFirst({
     where: and(
       eq(schema.aiProviderConnections.userId, userId),

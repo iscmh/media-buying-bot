@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, inArray } from 'drizzle-orm';
 import {
   MAX_VARIANTS_PER_JOB,
   estimateGenerationCost,
@@ -22,6 +22,8 @@ export interface CreateGenerationJobResult {
 
 const VALID_INTENSITY = new Set(['small', 'medium', 'big']);
 const VALID_UGC_PROVIDERS: ReadonlySet<UgcVideoProvider> = new Set(['kie_ai', 'heygen', 'arcads']);
+// Polish-4: creative format. avatar_talking_head=HeyGen; cinematic_voiceover=Kling+ElevenLabs.
+const VALID_FORMATS = new Set(['avatar_talking_head', 'cinematic_voiceover']);
 
 /**
  * Create a generation job. Pre-flight gates BEFORE any Inngest send:
@@ -45,6 +47,9 @@ export async function createGenerationJobAction(
   const intensity = String(formData.get('intensity') ?? '');
   const variantCount = Number(formData.get('variantCount') ?? 0);
   const provider = String(formData.get('provider') ?? '') as UgcVideoProvider | '';
+  // Polish-4: creative format. Defaults to avatar_talking_head so a
+  // client that doesn't send the field gets the legacy HeyGen path.
+  const format = String(formData.get('format') ?? 'avatar_talking_head');
 
   if (!conceptId) return { ok: false, errorMessage: 'Missing concept id.' };
   if (!VALID_INTENSITY.has(intensity)) {
@@ -58,6 +63,9 @@ export async function createGenerationJobAction(
       ok: false,
       errorMessage: `Variant count cannot exceed ${MAX_VARIANTS_PER_JOB} per job.`,
     };
+  }
+  if (!VALID_FORMATS.has(format)) {
+    return { ok: false, errorMessage: 'Unknown creative format.' };
   }
 
   const supabase = await getSupabaseServerClient();
@@ -149,6 +157,10 @@ export async function createGenerationJobAction(
       estimatedCostUsd: estimate.estimateUsd.toFixed(4),
       mode,
       status: 'queued',
+      // Polish-4: creative format persisted at job-creation time. The
+      // analyze-concept worker reads this to fan out to either the
+      // ugc.requested (HeyGen) or cinematic.requested (Kling) worker.
+      format,
       // Phase 1's enum aiProviderUsed: only populate when UGC + provider is
       // also one of arcads/heygen/creatify. Kie.ai isn't in that enum, so
       // leave null when picked.
@@ -174,6 +186,7 @@ export async function createGenerationJobAction(
       provider_choice: pickedProvider ?? 'gemini+claude',
       estimated_cost_usd: estimate.estimateUsd,
       mode,
+      format,
       _meta: await auditMetaFromHeaders(),
     },
   });
@@ -189,4 +202,39 @@ export async function createGenerationJobAction(
 
   revalidatePath(`/concepts/${conceptId}`);
   return { ok: true, jobId };
+}
+
+/**
+ * Polish-4: which providers does the user have active connections for?
+ * Powers the form's provider + format pickers — we only offer formats
+ * the user has the keys to actually generate. Returns a flat shape the
+ * client can pass into the picker without further lookups.
+ */
+export interface ConnectedProviders {
+  heygen: { connected: boolean; tier: 'free' | 'pro' | 'premium' | null };
+  kling: { connected: boolean };
+  elevenlabs: { connected: boolean };
+}
+
+export async function loadConnectedProviders(userId: string): Promise<ConnectedProviders> {
+  const db = getDb();
+  const rows = await db.query.aiProviderConnections.findMany({
+    where: and(
+      eq(schema.aiProviderConnections.userId, userId),
+      eq(schema.aiProviderConnections.status, 'active'),
+      isNull(schema.aiProviderConnections.deletedAt),
+      inArray(schema.aiProviderConnections.provider, ['heygen', 'kling', 'elevenlabs']),
+    ),
+    columns: { provider: true, tier: true },
+  });
+  const byProvider = new Map(rows.map((r) => [r.provider, r]));
+  return {
+    heygen: {
+      connected: byProvider.has('heygen'),
+      tier:
+        (byProvider.get('heygen')?.tier as 'free' | 'pro' | 'premium' | null | undefined) ?? null,
+    },
+    kling: { connected: byProvider.has('kling') },
+    elevenlabs: { connected: byProvider.has('elevenlabs') },
+  };
 }

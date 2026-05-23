@@ -60,6 +60,12 @@ export type Events = {
   'generation/ugc.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-4: cinematic_voiceover format — TTS audio (ElevenLabs) +
+  // Kling 2.5 video. analyze fans out to either ugc.requested or
+  // cinematic.requested based on generation_jobs.format.
+  'generation/cinematic.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   'summary/daily.requested': {
     data: { userId: string; date: string };
   };
