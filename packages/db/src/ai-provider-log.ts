@@ -19,7 +19,18 @@ const RESPONSE_BODY_EXCERPT_BYTES = 2048;
  */
 export async function logAiProviderApiCall(input: {
   userId: string;
-  provider: 'gemini' | 'claude' | 'kie_ai' | 'heygen' | 'arcads' | 'creatify';
+  // Polish-4: + kling (Replicate cinematic video gen), replicate
+  // (generic Replicate calls), elevenlabs (TTS voiceover).
+  provider:
+    | 'gemini'
+    | 'claude'
+    | 'kie_ai'
+    | 'heygen'
+    | 'arcads'
+    | 'creatify'
+    | 'kling'
+    | 'replicate'
+    | 'elevenlabs';
   endpoint: string;
   method: string;
   requestBody?: Record<string, unknown>;

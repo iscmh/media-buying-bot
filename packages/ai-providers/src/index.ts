@@ -30,10 +30,13 @@ export {
   callClaude,
   claudeRankAvatars,
   verifyClaudeKey,
+  buildCinematicPromptFromScript,
   type ClaudeMessagesInput,
   type ClaudeMessagesResult,
   type ClaudeRankAvatarsResult,
   type CompactAvatar,
+  type BuildCinematicPromptInput,
+  type BuildCinematicPromptResult,
 } from './claude-client';
 export {
   submitKieAiVideo,
@@ -73,3 +76,27 @@ export {
   type CallProviderInput,
   type CallProviderResult,
 } from './chokepoint';
+
+// Polish-4: Kling cinematic video via Replicate + ElevenLabs TTS for
+// the cinematic_voiceover creative format.
+export {
+  submitKlingVideo,
+  checkKlingPrediction,
+  classifyKlingError,
+  getKlingModelId,
+  estimateKlingClipCostUsd,
+  type KlingSubmitInput,
+  type KlingSubmitResult,
+  type KlingCheckInput,
+  type KlingCheckResult,
+  type KlingErrorCategory,
+  type KlingPredictionStatus,
+} from './kling';
+export {
+  submitElevenLabsTts,
+  getDefaultElevenLabsVoiceId,
+  estimateElevenLabsCostUsd,
+  estimateVoiceoverVariantCostUsd,
+  type ElevenLabsTtsInput,
+  type ElevenLabsTtsResult,
+} from './elevenlabs';

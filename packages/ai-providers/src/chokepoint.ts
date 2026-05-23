@@ -23,7 +23,18 @@ import { logAiProviderApiCall } from '@mbb/db';
  * partial successes without crashing the whole function.
  */
 
-export type ProviderName = 'gemini' | 'claude' | 'kie_ai' | 'heygen' | 'arcads' | 'creatify';
+// Polish-4: + kling (cinematic video via Replicate), replicate (generic
+// Replicate calls), elevenlabs (TTS voiceover paired with Kling).
+export type ProviderName =
+  | 'gemini'
+  | 'claude'
+  | 'kie_ai'
+  | 'heygen'
+  | 'arcads'
+  | 'creatify'
+  | 'kling'
+  | 'replicate'
+  | 'elevenlabs';
 
 export interface CallProviderInput {
   userId: string;

@@ -1,0 +1,155 @@
+/**
+ * Polish-4: Kling 2.5 via Replicate — submit + poll + error classification.
+ *
+ * Mocks: global fetch + @mbb/db audit logger. Same pattern as
+ * heygen-client.test.ts (fetch returns a Response-shaped object with a
+ * text() method, since chokepoint reads text() then JSON.parses).
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@mbb/db', () => ({
+  logAiProviderApiCall: vi.fn().mockResolvedValue(undefined),
+}));
+
+import {
+  checkKlingPrediction,
+  classifyKlingError,
+  estimateKlingClipCostUsd,
+  getKlingModelId,
+  submitKlingVideo,
+} from '../src/kling';
+
+const realFetch = globalThis.fetch;
+const realEnv = process.env;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  process.env = realEnv;
+  vi.clearAllMocks();
+});
+
+function mockFetchOnce(response: { status: number; body: unknown }) {
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    status: response.status,
+    text: async () => JSON.stringify(response.body),
+  } as Response) as typeof globalThis.fetch;
+}
+
+function captureFetch(response: { status: number; body: unknown }) {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    return {
+      status: response.status,
+      text: async () => JSON.stringify(response.body),
+    } as Response;
+  }) as typeof globalThis.fetch;
+  return calls;
+}
+
+describe('Polish-4: submitKlingVideo', () => {
+  it('POSTs to /v1/models/{model}/predictions with prompt + duration + aspect_ratio', async () => {
+    const calls = captureFetch({ status: 201, body: { id: 'pred_abc', status: 'starting' } });
+    const r = await submitKlingVideo({
+      userId: 'u',
+      apiKey: 'token_xyz',
+      prompt: 'A cinematic 5-second clip of morning light through a kitchen window',
+      durationSeconds: 5,
+      aspectRatio: '9:16',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.predictionId).toBe('pred_abc');
+    expect(r.modelId).toBe(getKlingModelId());
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url).toContain('/v1/models/');
+    expect(calls[0]!.url).toContain('/predictions');
+    const init = calls[0]!.init!;
+    expect((init.headers as Record<string, string>).Authorization).toBe('Token token_xyz');
+    const body = JSON.parse(init.body as string);
+    expect(body.input.prompt).toMatch(/cinematic/);
+    expect(body.input.duration).toBe(5);
+    expect(body.input.aspect_ratio).toBe('9:16');
+  });
+
+  it('honors KLING_MODEL_ID env override', async () => {
+    process.env = { ...realEnv, KLING_MODEL_ID: 'kwaivgi/kling-v3-experimental' };
+    const calls = captureFetch({ status: 201, body: { id: 'pred_x' } });
+    await submitKlingVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+    });
+    expect(calls[0]!.url).toContain('kwaivgi/kling-v3-experimental');
+  });
+
+  it('returns ok=false on 401 with httpStatus', async () => {
+    mockFetchOnce({ status: 401, body: { detail: 'invalid token' } });
+    const r = await submitKlingVideo({ userId: 'u', apiKey: 'bad', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    expect(r.httpStatus).toBe(401);
+    expect(classifyKlingError(r.httpStatus, r.errorMessage)).toBe('auth');
+  });
+
+  it('returns ok=false when Replicate response lacks an id', async () => {
+    mockFetchOnce({ status: 201, body: { status: 'starting' } });
+    const r = await submitKlingVideo({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/prediction id/i);
+  });
+});
+
+describe('Polish-4: checkKlingPrediction', () => {
+  it('normalizes status=succeeded into completed + extracts first output URL', async () => {
+    mockFetchOnce({
+      status: 200,
+      body: {
+        id: 'pred_a',
+        status: 'succeeded',
+        output: ['https://replicate.delivery/clip.mp4', 'https://replicate.delivery/extra.mp4'],
+      },
+    });
+    const r = await checkKlingPrediction({ userId: 'u', apiKey: 'k', predictionId: 'pred_a' });
+    expect(r.status).toBe('completed');
+    expect(r.videoUrl).toBe('https://replicate.delivery/clip.mp4');
+    expect(r.costUsd).toBe(estimateKlingClipCostUsd());
+  });
+
+  it('handles output as a single string (some Replicate models)', async () => {
+    mockFetchOnce({
+      status: 200,
+      body: { id: 'p', status: 'succeeded', output: 'https://r.delivery/v.mp4' },
+    });
+    const r = await checkKlingPrediction({ userId: 'u', apiKey: 'k', predictionId: 'p' });
+    expect(r.status).toBe('completed');
+    expect(r.videoUrl).toBe('https://r.delivery/v.mp4');
+  });
+
+  it('treats starting + processing as processing', async () => {
+    mockFetchOnce({ status: 200, body: { id: 'p', status: 'processing' } });
+    const r = await checkKlingPrediction({ userId: 'u', apiKey: 'k', predictionId: 'p' });
+    expect(r.status).toBe('processing');
+    expect(r.costUsd).toBe(0);
+  });
+
+  it('maps failed + canceled to failed and surfaces error', async () => {
+    mockFetchOnce({
+      status: 200,
+      body: { id: 'p', status: 'failed', error: 'model crashed' },
+    });
+    const r = await checkKlingPrediction({ userId: 'u', apiKey: 'k', predictionId: 'p' });
+    expect(r.status).toBe('failed');
+    expect(r.errorMessage).toBe('model crashed');
+  });
+});
+
+describe('Polish-4: classifyKlingError', () => {
+  it('maps the buckets', () => {
+    expect(classifyKlingError(401, 'x')).toBe('auth');
+    expect(classifyKlingError(403, 'x')).toBe('auth');
+    expect(classifyKlingError(402, 'x')).toBe('credits');
+    expect(classifyKlingError(429, 'x')).toBe('credits');
+    expect(classifyKlingError(404, 'no such model')).toBe('model_missing');
+    expect(classifyKlingError(500, 'x')).toBe('server');
+    expect(classifyKlingError(0, 'timeout exceeded')).toBe('timeout');
+    expect(classifyKlingError(400, 'bad input')).toBe('unknown');
+  });
+});

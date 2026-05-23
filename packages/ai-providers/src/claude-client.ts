@@ -265,3 +265,88 @@ export async function claudeRankAvatars(input: {
     latencyMs: claude.latencyMs,
   };
 }
+
+// =========================================================================
+// Polish-4 — cinematic prompt builder (script → Kling prompt).
+// =========================================================================
+
+const CINEMATIC_PROMPT_SYSTEM = `You are a cinematic director writing video prompts for Kling 2.5, a text-to-video model. Your job: translate a short UGC ad script into a vivid 60-120 word cinematic prompt that Kling can render as a 5-second 9:16 vertical clip with NO on-screen actor (the voiceover audio carries the script — visuals should illustrate, not narrate).
+
+REQUIREMENTS:
+  1. 3-5 concrete scene cuts that visualize the script's emotional beats. NEVER describe a person reading text or "an actor saying X" — the script is voiceover.
+  2. Specify camera angles (close-up, wide, low-angle, tracking), lighting mood (warm afternoon, neon dusk, hospital fluorescent, etc.), and locations.
+  3. Vertical 9:16 framing language ("vertical composition", "portrait orientation").
+  4. Match the script's emotional pacing — frantic script → fast cuts + handheld; calm script → slow push-ins + soft focus.
+  5. NO captions, NO text overlays, NO logos, NO people lip-syncing.
+  6. 60-120 words total. Concrete and visual; no abstract phrases like "creative" or "engaging".
+
+Output ONLY the prompt as a single block of prose. No commentary, no markdown, no quotes around it.`;
+
+export interface BuildCinematicPromptInput {
+  userId: string;
+  apiKey: string;
+  /** The UGC ad script (will be voiceover). 1-3 sentences typical. */
+  script: string;
+  generationJobId?: string;
+}
+
+export interface BuildCinematicPromptResult {
+  ok: boolean;
+  /** The cinematic prompt to feed Kling. */
+  prompt?: string;
+  costUsd: number;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+/**
+ * Polish-4: turn an ad script into a Kling-ready cinematic prompt via
+ * Claude. Saved alongside the generated variant on generationMetadata.
+ * Worth saving for debug + regeneration; the script ↔ prompt mapping
+ * is the most interpretable artifact of the cinematic pipeline.
+ *
+ * Caller writes both `script` and `cinematicPrompt` into
+ * generated_creatives.generationMetadata for forensics.
+ */
+export async function buildCinematicPromptFromScript(
+  input: BuildCinematicPromptInput,
+): Promise<BuildCinematicPromptResult> {
+  if (!input.script.trim()) {
+    return {
+      ok: false,
+      costUsd: 0,
+      latencyMs: 0,
+      errorMessage: 'Empty script — cannot build cinematic prompt.',
+    };
+  }
+
+  const claude = await callClaude({
+    userId: input.userId,
+    apiKey: input.apiKey,
+    systemPrompt: CINEMATIC_PROMPT_SYSTEM,
+    userMessage: `Script:\n${input.script}`,
+    // 120-word output ≈ 200 tokens; cap modestly so a runaway response
+    // doesn't blow the cost budget.
+    maxTokens: 512,
+    generationJobId: input.generationJobId,
+  });
+
+  if (!claude.ok || !claude.text) {
+    return {
+      ok: false,
+      costUsd: claude.costUsd,
+      latencyMs: claude.latencyMs,
+      errorMessage: claude.errorMessage ?? 'Claude returned no cinematic prompt.',
+    };
+  }
+
+  // Defense-in-depth — the system prompt asks for raw prose, but if Claude
+  // wrapped it in quotes/markdown we strip the common shapes.
+  const cleaned = claude.text.trim().replace(/^["']|["']$/g, '');
+  return {
+    ok: true,
+    prompt: cleaned,
+    costUsd: claude.costUsd,
+    latencyMs: claude.latencyMs,
+  };
+}
