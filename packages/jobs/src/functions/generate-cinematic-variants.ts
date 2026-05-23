@@ -11,7 +11,18 @@ import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { SORA_PROMPT_OPTIMIZER_SYSTEM_PROMPT } from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
-import { markJobCompleted, markJobFailed } from '../lib/job-markers';
+import {
+  jobAlreadyFailedOver,
+  loadFailoverReadyState,
+  markJobCompleted,
+  markJobFailed,
+  recordFailoverAttempt,
+} from '../lib/job-markers';
+import {
+  buildAllProvidersFailedMessage,
+  failoverEventName,
+  pickFailoverFormat,
+} from '../lib/failover';
 
 /**
  * Polish-4: cinematic_voiceover variant generator. Pairs Kling 2.5
@@ -250,6 +261,49 @@ export const generateCinematicVariants = inngest.createFunction(
     const totalCost = refineResult.costUsd + outcomes.reduce((s, r) => s + r.costUsd, 0);
     const successCount = outcomes.filter((r) => r.ok).length;
 
+    // Polish-4: failover. If 0 variants succeeded and we haven't already
+    // failed over once, route the same job to the other format's worker
+    // (avatar_talking_head ↔ cinematic_voiceover). One hop max; the
+    // second worker reads metadata.failover_attempted and terminates
+    // normally on its own zero-success case.
+    if (mode === 'live' && successCount === 0) {
+      const alreadyFailedOver = await step.run('check-failover', async () =>
+        jobAlreadyFailedOver(jobId),
+      );
+      if (!alreadyFailedOver) {
+        const ready = await step.run('load-failover-state', async () =>
+          loadFailoverReadyState(userId),
+        );
+        const decision = pickFailoverFormat('cinematic_voiceover', ready);
+        if (decision.fallback) {
+          await step.run('record-failover', async () =>
+            recordFailoverAttempt({
+              jobId,
+              fromFormat: 'cinematic_voiceover',
+              toFormat: decision.fallback!,
+              reason: decision.reason,
+            }),
+          );
+          await step.sendEvent('failover-dispatch', {
+            name: failoverEventName(decision.fallback),
+            data: { jobId, userId, mode },
+          });
+          return { jobId, mode, generated: 0, failedOverTo: decision.fallback };
+        }
+        // No fallback available — notify the user.
+        await step.sendEvent('all-providers-failed-tg', {
+          name: 'telegram/notify.requested',
+          data: { userId, message: buildAllProvidersFailedMessage(jobId) },
+        });
+      } else {
+        // Already failed over once. Surface the final failure now.
+        await step.sendEvent('all-providers-failed-tg', {
+          name: 'telegram/notify.requested',
+          data: { userId, message: buildAllProvidersFailedMessage(jobId) },
+        });
+      }
+    }
+
     await markJobCompleted({
       jobId,
       userId,
@@ -356,11 +410,7 @@ async function setupCinematicVariant(input: {
   };
 }
 
-async function pollKling(input: {
-  userId: string;
-  jobId: string;
-  predictionId: string;
-}): Promise<{
+async function pollKling(input: { userId: string; jobId: string; predictionId: string }): Promise<{
   status: 'completed' | 'failed' | 'processing';
   videoUrl?: string;
   costUsd: number;

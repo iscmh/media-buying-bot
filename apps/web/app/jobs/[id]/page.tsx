@@ -124,6 +124,16 @@ export default async function JobReviewPage({ params }: Props) {
             <span className="text-fg-subtle">Provider </span>
             <span className="font-mono">{job.providerChoice ?? 'gemini+claude'}</span>
           </div>
+          {conceptType === 'ugc' && (
+            <div>
+              <span className="text-fg-subtle">Format </span>
+              <span className="font-mono">
+                {job.format === 'cinematic_voiceover'
+                  ? 'cinematic voiceover'
+                  : 'avatar talking head'}
+              </span>
+            </div>
+          )}
           {job.estimatedCostUsd != null && (
             <div>
               <span className="text-fg-subtle">Est cost </span>

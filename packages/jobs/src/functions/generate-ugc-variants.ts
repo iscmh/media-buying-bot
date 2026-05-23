@@ -17,6 +17,18 @@ import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { SORA_PROMPT_OPTIMIZER_SYSTEM_PROMPT } from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys, type ProviderKey } from '../lib/load-keys';
+// Polish-4: failover. The UGC worker calls into these on a 0-success
+// run to potentially route to the cinematic worker.
+import {
+  jobAlreadyFailedOver,
+  loadFailoverReadyState,
+  recordFailoverAttempt,
+} from '../lib/job-markers';
+import {
+  buildAllProvidersFailedMessage,
+  failoverEventName,
+  pickFailoverFormat,
+} from '../lib/failover';
 
 // Avatar pool capped before sending to Claude — keeps the ranking call
 // under ~$0.02 even when a HeyGen account has hundreds of stock avatars.
@@ -332,6 +344,46 @@ export const generateUgcVariants = inngest.createFunction(
       (avatarPickResult.costUsd ?? 0) +
       videoOutcomes.reduce((s, r) => s + r.costUsd, 0);
     const successCount = videoOutcomes.filter((r) => r.ok).length;
+
+    // Polish-4: failover. Mirror of the cinematic worker — if zero
+    // variants succeeded and we haven't already failed over, route the
+    // same job to the cinematic worker (if user has the keys), else
+    // notify via Telegram.
+    if (mode === 'live' && successCount === 0) {
+      const alreadyFailedOver = await step.run('check-failover', async () =>
+        jobAlreadyFailedOver(jobId),
+      );
+      if (!alreadyFailedOver) {
+        const ready = await step.run('load-failover-state', async () =>
+          loadFailoverReadyState(userId),
+        );
+        const decision = pickFailoverFormat('avatar_talking_head', ready);
+        if (decision.fallback) {
+          await step.run('record-failover', async () =>
+            recordFailoverAttempt({
+              jobId,
+              fromFormat: 'avatar_talking_head',
+              toFormat: decision.fallback!,
+              reason: decision.reason,
+            }),
+          );
+          await step.sendEvent('failover-dispatch', {
+            name: failoverEventName(decision.fallback),
+            data: { jobId, userId, mode },
+          });
+          return { jobId, mode, generated: 0, failedOverTo: decision.fallback };
+        }
+        await step.sendEvent('all-providers-failed-tg', {
+          name: 'telegram/notify.requested',
+          data: { userId, message: buildAllProvidersFailedMessage(jobId) },
+        });
+      } else {
+        await step.sendEvent('all-providers-failed-tg', {
+          name: 'telegram/notify.requested',
+          data: { userId, message: buildAllProvidersFailedMessage(jobId) },
+        });
+      }
+    }
 
     await markJobCompleted({
       jobId,
