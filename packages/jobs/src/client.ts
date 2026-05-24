@@ -66,6 +66,18 @@ export type Events = {
   'generation/cinematic.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-6: Kling 3.0 multi-clip native lipsync pipeline.
+  'generation/kling-multi-clip.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
+  // Polish-6: Sora 2 single-shot pipeline.
+  'generation/sora.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
+  // Polish-6: Nano Banana static image pipeline.
+  'generation/nano-banana.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   'summary/daily.requested': {
     data: { userId: string; date: string };
   };

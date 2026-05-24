@@ -130,6 +130,34 @@ describe('Polish-4: cinematic_voiceover cost path', () => {
     expect(r.estimateUsd).toBeCloseTo(3.8, 4);
   });
 
+  it('kling_3_multi_clip: 1 variant = manual $0.10 + 16 clips × $0.30 = $4.90', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kling_3_multi_clip_native_lipsync',
+    });
+    expect(r.estimateUsd).toBeCloseTo(4.9, 4);
+    expect(r.breakdown.some((b) => b.item.includes('Kling'))).toBe(true);
+  });
+
+  it('sora_2_single_shot: 3 variants = prompts $0.15 + videos $4.50 = $4.65', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 3,
+      pipeline: 'sora_2_single_shot',
+    });
+    expect(r.estimateUsd).toBeCloseTo(4.65, 4);
+  });
+
+  it('nano_banana_static_image: 10 variants = claude $0.20 + images $0.40 = $0.60', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'static',
+      variantCount: 10,
+      pipeline: 'nano_banana_static_image',
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.6, 4);
+  });
+
   it('defaults to avatar_talking_head pricing when format omitted', () => {
     const heygen = estimateGenerationCost({
       conceptType: 'ugc',

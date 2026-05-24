@@ -49,6 +49,17 @@ const PRICING = {
   cinematicKlingPerVariantUsd: 0.3,
   cinematicTtsPerVariantUsd: 0.06, // 200 chars × $0.30/1k chars
   cinematicPromptBuildPerVariantUsd: 0.01,
+
+  // Polish-6: Kling 3.0 multi-clip (16 clips per variant)
+  klingMultiClipClipsPerVariant: 16,
+  klingMultiClipPerClipUsd: 0.3,
+  klingMultiClipManualPromptUsd: 0.1,
+  // Polish-6: Sora 2 single-shot via Kie.ai
+  soraPerVariantUsd: 1.5,
+  soraPromptUsd: 0.05,
+  // Polish-6: Nano Banana static image
+  nanoBananaPerVariantUsd: 0.04,
+  nanoBananaClaudeUsd: 0.02,
 } as const;
 
 export interface CostBreakdownItem {
@@ -61,6 +72,15 @@ export interface CostEstimate {
   breakdown: CostBreakdownItem[];
 }
 
+// Polish-6: pipeline-level cost estimation. These map to the routed
+// pipelines from pipeline-router.ts. When pipeline is set, it takes
+// precedence over format + provider.
+export type PipelineType =
+  | 'heygen_avatar_talking_head'
+  | 'sora_2_single_shot'
+  | 'kling_3_multi_clip_native_lipsync'
+  | 'nano_banana_static_image';
+
 export interface EstimateInput {
   conceptType: ConceptType;
   variantCount: number;
@@ -72,11 +92,18 @@ export interface EstimateInput {
    * costs. Defaults to 'avatar_talking_head' if omitted.
    */
   format?: CreativeFormat;
+  /** Polish-6: pipeline-level cost. Overrides format + provider when set. */
+  pipeline?: PipelineType;
 }
 
 export function estimateGenerationCost(input: EstimateInput): CostEstimate {
   const { conceptType, variantCount } = input;
   const breakdown: CostBreakdownItem[] = [];
+
+  // Polish-6: pipeline-level estimation takes precedence when set.
+  if (input.pipeline) {
+    return estimateByPipeline(input.pipeline, variantCount);
+  }
 
   if (conceptType === 'static') {
     breakdown.push({
@@ -143,6 +170,60 @@ export function labelForProvider(provider: UgcVideoProvider): string {
     case 'arcads':
       return 'Arcads';
   }
+}
+
+function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostEstimate {
+  const breakdown: CostBreakdownItem[] = [];
+  switch (pipeline) {
+    case 'heygen_avatar_talking_head': {
+      const videoUnit = PRICING.ugcVideoPerVariantUsd.heygen;
+      breakdown.push({ item: 'Vision analysis', cost: PRICING.ugcVisionAnalysisUsd });
+      breakdown.push({
+        item: `Prompt refinement (${variantCount} × $${PRICING.ugcPromptRefinementPerVariantUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.ugcPromptRefinementPerVariantUsd),
+      });
+      breakdown.push({
+        item: `HeyGen video (${variantCount} × $${videoUnit.toFixed(2)})`,
+        cost: round4(variantCount * videoUnit),
+      });
+      break;
+    }
+    case 'sora_2_single_shot':
+      breakdown.push({
+        item: `Sora prompt (${variantCount} × $${PRICING.soraPromptUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.soraPromptUsd),
+      });
+      breakdown.push({
+        item: `Sora 2 video (${variantCount} × $${PRICING.soraPerVariantUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.soraPerVariantUsd),
+      });
+      break;
+    case 'kling_3_multi_clip_native_lipsync': {
+      const clips = PRICING.klingMultiClipClipsPerVariant;
+      const totalClips = variantCount * clips;
+      breakdown.push({
+        item: 'Production manual (Claude)',
+        cost: PRICING.klingMultiClipManualPromptUsd,
+      });
+      breakdown.push({
+        item: `Kling 3.0 clips (${totalClips} clips × $${PRICING.klingMultiClipPerClipUsd.toFixed(2)})`,
+        cost: round4(totalClips * PRICING.klingMultiClipPerClipUsd),
+      });
+      break;
+    }
+    case 'nano_banana_static_image':
+      breakdown.push({
+        item: `Claude descriptions (${variantCount} × $${PRICING.nanoBananaClaudeUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.nanoBananaClaudeUsd),
+      });
+      breakdown.push({
+        item: `Gemini images (${variantCount} × $${PRICING.nanoBananaPerVariantUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.nanoBananaPerVariantUsd),
+      });
+      break;
+  }
+  const estimateUsd = round4(breakdown.reduce((sum, b) => sum + b.cost, 0));
+  return { estimateUsd, breakdown };
 }
 
 function round4(n: number): number {
