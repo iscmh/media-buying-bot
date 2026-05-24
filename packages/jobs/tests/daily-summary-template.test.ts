@@ -128,4 +128,68 @@ describe('Phase 6: formatDailyRecap', () => {
     expect(out).toMatch(/Daily Recap/);
     expect(out).toMatch(/\/dashboard/);
   });
+
+  it('Polish-7: renders correctly with production-like data (3 ads, mixed spend, 0 conv)', () => {
+    const out = formatDailyRecap({
+      summaryDate: '2026-05-23',
+      totalSpendUsd: 68.42,
+      totalConversions: 0,
+      impliedRoas: 0,
+      adsActiveCount: 0,
+      adsKilledToday: 3,
+      adsScaledToday: 0,
+      bestHeadline: null,
+      bestSpendUsd: 24.15,
+      bestConv: 0,
+      bestRoas: 0,
+      worstHeadline: null,
+      worstSpendUsd: 22.01,
+      worstConv: 0,
+    });
+    expect(out).toMatch(/\$68\.42/);
+    expect(out).toMatch(/Conversions: 0/);
+    expect(out).toMatch(/ROAS: 0\.00x/);
+    expect(out).toMatch(/Killed yesterday: 3/);
+    expect(out).not.toMatch(/Best performer/);
+    expect(out).toMatch(/\/dashboard/);
+    expect(out.length).toBeGreaterThan(50);
+    expect(out.length).toBeLessThan(2000);
+  });
+
+  it('Polish-7: renders with best/worst headlines without crashing', () => {
+    const out = formatDailyRecap({
+      summaryDate: '2026-05-23',
+      totalSpendUsd: 68.42,
+      totalConversions: 2,
+      impliedRoas: 1.46,
+      adsActiveCount: 2,
+      adsKilledToday: 1,
+      adsScaledToday: 0,
+      bestHeadline: 'Try This Natural Balm',
+      bestSpendUsd: 24.15,
+      bestConv: 2,
+      bestRoas: 4.14,
+      worstHeadline: 'Dermatologist Approved',
+      worstSpendUsd: 22.01,
+      worstConv: 0,
+    });
+    expect(out).toMatch(/Best performer: "Try This Natural Balm"/);
+    expect(out).toMatch(/Worst performer: "Dermatologist Approved"/);
+    expect(out).toMatch(/\$24\.15/);
+    expect(out).toMatch(/4\.14x/);
+  });
+
+  it('Polish-7: output is always a valid non-empty string (never NaN or undefined interpolated)', () => {
+    const cases = [
+      { totalSpendUsd: NaN, totalConversions: NaN, impliedRoas: NaN },
+      { totalSpendUsd: Infinity, totalConversions: -1 },
+      { totalSpendUsd: 0, totalConversions: 0, impliedRoas: null },
+    ];
+    for (const overrides of cases) {
+      const out = formatDailyRecap({ ...base, ...overrides });
+      expect(out).not.toMatch(/undefined/);
+      expect(out.length).toBeGreaterThan(0);
+      expect(out).toMatch(/\/dashboard/);
+    }
+  });
 });

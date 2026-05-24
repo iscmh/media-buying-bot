@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { ASSUMED_CONVERSION_VALUE_USD } from '@mbb/shared';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { inngest } from '../client';
@@ -225,11 +225,17 @@ async function computeAndUpsertSummary(input: {
   const best = scored[0] ?? null;
   const worst = scored[scored.length - 1] ?? null;
 
-  // Look up headlines for best/worst.
+  // Look up headlines for best/worst. Polish-7: replaced raw
+  // sql`= any(${ids})` with Drizzle inArray — the raw sql passed a JS
+  // array as a single bind parameter which Postgres can't coerce to an
+  // ARRAY type, crashing computeAndUpsertSummary every day for users
+  // with ads that have spend.
   let bestHeadline: string | null = null;
   let worstHeadline: string | null = null;
   if (best || worst) {
-    const ids = [best?.creativeId, worst?.creativeId].filter(Boolean) as string[];
+    const ids = [best?.creativeId, worst?.creativeId].filter(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
     if (ids.length > 0) {
       const creatives = await db
         .select({
@@ -237,7 +243,7 @@ async function computeAndUpsertSummary(input: {
           headline: schema.generatedCreatives.headline,
         })
         .from(schema.generatedCreatives)
-        .where(sql`${schema.generatedCreatives.id} = any(${ids})`);
+        .where(inArray(schema.generatedCreatives.id, ids));
       const byId = new Map(creatives.map((c) => [c.id, c.headline]));
       bestHeadline = best ? (byId.get(best.creativeId) ?? null) : null;
       worstHeadline = worst ? (byId.get(worst.creativeId) ?? null) : null;
@@ -342,11 +348,11 @@ export function formatDailyRecap(input: {
   // produced a null sum that hit Buffer.byteLength via the Telegram
   // dispatch step. Fail soft + still ship a message.
   try {
-    const roas = input.impliedRoas ?? null;
+    const roas = safeNum(input.impliedRoas);
     const roasEmoji = roasIndicator(roas);
     const roasText = roas != null ? `${roas.toFixed(2)}x` : 'n/a';
-    const spend = input.totalSpendUsd ?? 0;
-    const conv = input.totalConversions ?? 0;
+    const spend = safeNum(input.totalSpendUsd) ?? 0;
+    const conv = safeNum(input.totalConversions) ?? 0;
     const active = input.adsActiveCount ?? 0;
     const killed = input.adsKilledToday ?? 0;
     const scaled = input.adsScaledToday ?? 0;
@@ -363,17 +369,17 @@ export function formatDailyRecap(input: {
     if (scaled > 0) lines.push(`📈 Scaled yesterday: ${scaled}`);
 
     if (input.bestHeadline) {
-      const bestSpend = input.bestSpendUsd ?? 0;
-      const bestConv = input.bestConv ?? 0;
-      const bestRoas = input.bestRoas ?? 0;
+      const bestSpend = safeNum(input.bestSpendUsd) ?? 0;
+      const bestConv = safeNum(input.bestConv) ?? 0;
+      const bestRoas = safeNum(input.bestRoas) ?? 0;
       lines.push('');
       lines.push(
         `🏆 Best performer: "${input.bestHeadline}" — $${bestSpend.toFixed(2)} → ${bestConv} conv (${bestRoas.toFixed(2)}x)`,
       );
     }
     if (input.worstHeadline && input.worstHeadline !== input.bestHeadline) {
-      const worstSpend = input.worstSpendUsd ?? 0;
-      const worstConv = input.worstConv ?? 0;
+      const worstSpend = safeNum(input.worstSpendUsd) ?? 0;
+      const worstConv = safeNum(input.worstConv) ?? 0;
       lines.push(
         `💀 Worst performer: "${input.worstHeadline}" — $${worstSpend.toFixed(2)} → ${worstConv} conv`,
       );
@@ -385,6 +391,12 @@ export function formatDailyRecap(input: {
   } catch {
     return 'Daily summary unavailable — see /dashboard';
   }
+}
+
+function safeNum(v: number | null | undefined): number | null {
+  if (v == null) return null;
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return v;
 }
 
 function roasIndicator(roas: number | null): string {
