@@ -124,3 +124,18 @@ export {
   type UserConnections as PipelineUserConnections,
   type UserPreferences as PipelineUserPreferences,
 } from './pipeline-router';
+
+// Polish-6: prompt loader — lazy-reads .md files from src/prompts/.
+export {
+  getUniversalUgcMasterPrompt,
+  getForgeExample,
+  getKling3DeconstructorSystem,
+  getKling3OfficialGuide,
+  getSora2DeconstructorSystem,
+  getSora2OptimizerInstructions,
+  getSora2Examples,
+  getUgcIphoneRealismSkill,
+  getNanoBananaJsonTemplate,
+  getCharacterReplacePrompt,
+  getPromptsBaseDir,
+} from './prompt-loader';
