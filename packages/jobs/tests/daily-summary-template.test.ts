@@ -192,4 +192,34 @@ describe('Phase 6: formatDailyRecap', () => {
       expect(out).toMatch(/\/dashboard/);
     }
   });
+
+  it('Polish-7.2: summaryDate as a Date object does not crash (coerced to string)', () => {
+    const out = formatDailyRecap({
+      ...base,
+      summaryDate: new Date('2026-05-23').toISOString().slice(0, 10),
+    });
+    expect(out).toMatch(/2026-05-23/);
+    expect(typeof out).toBe('string');
+  });
+
+  it('Polish-7.2: every field value in output is a valid UTF-8 string (no raw Date objects)', () => {
+    const out = formatDailyRecap({
+      summaryDate: '2026-05-23',
+      totalSpendUsd: 68.42,
+      totalConversions: 0,
+      impliedRoas: 0,
+      adsActiveCount: 0,
+      adsKilledToday: 3,
+      adsScaledToday: 0,
+      bestHeadline: null,
+      bestSpendUsd: 0,
+      bestConv: 0,
+      bestRoas: 0,
+      worstHeadline: null,
+      worstSpendUsd: 0,
+      worstConv: 0,
+    });
+    expect(typeof out).toBe('string');
+    expect(() => Buffer.byteLength(out)).not.toThrow();
+  });
 });

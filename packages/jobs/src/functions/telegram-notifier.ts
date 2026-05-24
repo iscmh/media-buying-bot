@@ -19,7 +19,17 @@ export const telegramNotifier = inngest.createFunction(
   { id: 'telegram-notifier', name: 'Telegram notifier', retries: 2 },
   { event: 'telegram/notify.requested' },
   async ({ event, step }) => {
-    const { userId, message } = event.data;
+    const { userId, message: rawMessage } = event.data;
+
+    // Polish-7.2: guard against non-string message payloads. A raw Date
+    // or object passed here crashes Buffer.byteLength downstream with a
+    // cryptic TypeError. Coerce + surface a clear error instead.
+    const message =
+      typeof rawMessage === 'string'
+        ? rawMessage
+        : rawMessage instanceof Date
+          ? rawMessage.toISOString()
+          : String(rawMessage ?? '');
 
     const chatId = await step.run('lookup-chat-id', async () => {
       const db = getDb();

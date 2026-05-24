@@ -177,13 +177,21 @@ export async function computeAndUpsertSummary(input: {
   // Lifecycle counters scoped to "events that landed yesterday in
   // user-local time". For BOT_DRY_RUN dev, this can be empty; that's
   // fine — the summary still posts.
+  //
+  // Polish-7.2: raw Date objects passed to sql`` bind parameters crash
+  // some Postgres drivers (neon/supabase) because the driver calls
+  // Buffer.byteLength BEFORE its Date→string serializer runs. Convert
+  // to ISO strings so the parameter is always a plain string.
+  const yesterdayIso = yesterdayLocal.toISOString();
+  const todayIso = todayLocal.toISOString();
+
   const launchedRows = await db
     .select({ id: schema.launchedAds.id })
     .from(schema.launchedAds)
     .where(
       and(
         eq(schema.launchedAds.userId, userId),
-        sql`${schema.launchedAds.launchedAt} >= ${yesterdayLocal} and ${schema.launchedAds.launchedAt} < ${todayLocal}`,
+        sql`${schema.launchedAds.launchedAt} >= ${yesterdayIso} and ${schema.launchedAds.launchedAt} < ${todayIso}`,
       ),
     );
   const killedRows = await db
@@ -192,7 +200,7 @@ export async function computeAndUpsertSummary(input: {
     .where(
       and(
         eq(schema.launchedAds.userId, userId),
-        sql`${schema.launchedAds.killedAt} >= ${yesterdayLocal} and ${schema.launchedAds.killedAt} < ${todayLocal}`,
+        sql`${schema.launchedAds.killedAt} >= ${yesterdayIso} and ${schema.launchedAds.killedAt} < ${todayIso}`,
       ),
     );
   const scaledRows = await db
@@ -201,7 +209,7 @@ export async function computeAndUpsertSummary(input: {
     .where(
       and(
         eq(schema.launchedAds.userId, userId),
-        sql`${schema.launchedAds.lastScaledAt} >= ${yesterdayLocal} and ${schema.launchedAds.lastScaledAt} < ${todayLocal}`,
+        sql`${schema.launchedAds.lastScaledAt} >= ${yesterdayIso} and ${schema.launchedAds.lastScaledAt} < ${todayIso}`,
       ),
     );
   const activeRows = await db
