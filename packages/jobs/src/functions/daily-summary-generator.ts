@@ -72,6 +72,7 @@ export const dailySummaryGenerator = inngest.createFunction(
       // crash the cron mid-loop and starve the remaining users. Wrap
       // per-user so one failure logs to audit + falls back to a
       // generic "see /dashboard" message instead of blowing up.
+      console.log(`[summary] building for user=${u.userId} timezone=${u.timezone}`);
       let result: SummaryResult;
       try {
         result = await step.run(`build-summary-${u.userId}`, async () =>
@@ -95,6 +96,10 @@ export const dailySummaryGenerator = inngest.createFunction(
         }
         continue;
       }
+      console.log(
+        `[summary] user=${u.userId} inserted=${result.inserted} alreadySent=${result.alreadySentToday} ` +
+          `msgLen=${result.message.length}`,
+      );
       if (result.alreadySentToday) continue;
       if (!result.inserted) continue;
       if (dryRun) {
@@ -108,6 +113,7 @@ export const dailySummaryGenerator = inngest.createFunction(
         });
         continue;
       }
+      console.log(`[summary] dispatching telegram for user=${u.userId}`);
       await step.sendEvent('daily-summary-telegram', {
         name: 'telegram/notify.requested',
         data: { userId: u.userId, message: result.message },
@@ -126,7 +132,7 @@ export const dailySummaryGenerator = inngest.createFunction(
   },
 );
 
-interface SummaryResult {
+export interface SummaryResult {
   inserted: boolean;
   alreadySentToday: boolean;
   summaryId: string;
@@ -134,7 +140,7 @@ interface SummaryResult {
   message: string;
 }
 
-async function computeAndUpsertSummary(input: {
+export async function computeAndUpsertSummary(input: {
   userId: string;
   timezone: string;
   dryRun: boolean;

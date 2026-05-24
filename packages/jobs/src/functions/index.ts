@@ -1,5 +1,6 @@
 import { analyzeConcept } from './analyze-concept';
 import { dailySummaryGenerator } from './daily-summary-generator';
+import { manualDailySummary } from './manual-daily-summary';
 import { generateCinematicVariants } from './generate-cinematic-variants';
 import { generateKlingMultiClipVariants } from './generate-kling-multi-clip-variants';
 import { generateSoraVariants } from './generate-sora-variants';
@@ -37,6 +38,8 @@ export const functions = [
   killScaleEvaluator,
   generationJobProcessor,
   dailySummaryGenerator,
+  // Polish-7.1: manual trigger for /admin/test-actions.
+  manualDailySummary,
   telegramNotifier,
   tokenExpiryChecker,
   suspiciousActivityMonitor,
