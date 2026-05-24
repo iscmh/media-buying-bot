@@ -134,6 +134,12 @@ export default async function JobReviewPage({ params }: Props) {
               </span>
             </div>
           )}
+          {job.pickedPipeline && (
+            <div>
+              <span className="text-fg-subtle">Pipeline </span>
+              <span className="font-mono">{job.pickedPipeline.replace(/_/g, ' ')}</span>
+            </div>
+          )}
           {job.estimatedCostUsd != null && (
             <div>
               <span className="text-fg-subtle">Est cost </span>

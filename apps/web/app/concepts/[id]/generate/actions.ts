@@ -9,7 +9,15 @@ import {
   type ConceptType,
   type UgcVideoProvider,
 } from '@mbb/shared';
-import { assertDailyCostCap, getDb, logAuditEvent, schema } from '@mbb/db';
+import { assertDailyCostCap, decryptSecret, getDb, logAuditEvent, schema } from '@mbb/db';
+import {
+  detectCreativeFormat,
+  pickPipeline,
+  pipelineLabel,
+  type DetectedFormat,
+  type Pipeline,
+  type PipelineUserConnections,
+} from '@mbb/ai-providers';
 import { auditMetaFromHeaders } from '@/lib/audit/request-meta';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { sendGenerationJobEvent } from '@/lib/inngest/send';
@@ -214,27 +222,130 @@ export interface ConnectedProviders {
   heygen: { connected: boolean; tier: 'free' | 'pro' | 'premium' | null };
   kling: { connected: boolean };
   elevenlabs: { connected: boolean };
+  openai: { connected: boolean };
+  gemini: { connected: boolean };
 }
 
 export async function loadConnectedProviders(userId: string): Promise<ConnectedProviders> {
   const db = getDb();
-  const rows = await db.query.aiProviderConnections.findMany({
+  const aiRows = await db.query.aiProviderConnections.findMany({
     where: and(
       eq(schema.aiProviderConnections.userId, userId),
       eq(schema.aiProviderConnections.status, 'active'),
       isNull(schema.aiProviderConnections.deletedAt),
-      inArray(schema.aiProviderConnections.provider, ['heygen', 'kling', 'elevenlabs']),
+      inArray(schema.aiProviderConnections.provider, ['heygen', 'kling', 'elevenlabs', 'openai']),
     ),
     columns: { provider: true, tier: true },
   });
-  const byProvider = new Map(rows.map((r) => [r.provider, r]));
+  const byAi = new Map(aiRows.map((r) => [r.provider, r]));
+
+  const toolRows = await db.query.toolConnections.findMany({
+    where: and(
+      eq(schema.toolConnections.userId, userId),
+      eq(schema.toolConnections.status, 'active'),
+      isNull(schema.toolConnections.deletedAt),
+    ),
+    columns: { provider: true },
+  });
+  const toolSet = new Set(toolRows.map((r) => r.provider));
+
   return {
     heygen: {
-      connected: byProvider.has('heygen'),
-      tier:
-        (byProvider.get('heygen')?.tier as 'free' | 'pro' | 'premium' | null | undefined) ?? null,
+      connected: byAi.has('heygen'),
+      tier: (byAi.get('heygen')?.tier as 'free' | 'pro' | 'premium' | null | undefined) ?? null,
     },
-    kling: { connected: byProvider.has('kling') },
-    elevenlabs: { connected: byProvider.has('elevenlabs') },
+    kling: { connected: byAi.has('kling') },
+    elevenlabs: { connected: byAi.has('elevenlabs') },
+    openai: { connected: byAi.has('openai') },
+    gemini: { connected: toolSet.has('gemini') },
+  };
+}
+
+// =========================================================================
+// Polish-6: auto-detect + route
+// =========================================================================
+
+export interface DetectAndRouteResult {
+  ok: boolean;
+  detection?: DetectedFormat;
+  pipeline?: Pipeline;
+  pipelineLabel?: string;
+  errorMessage?: string;
+}
+
+export async function detectAndRouteAction(
+  imageBase64: string,
+  imageMediaType: string,
+): Promise<DetectAndRouteResult> {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, errorMessage: 'Not logged in.' };
+
+  const db = getDb();
+  const claudeConn = await db.query.toolConnections.findFirst({
+    where: and(
+      eq(schema.toolConnections.userId, user.id),
+      eq(schema.toolConnections.provider, 'claude'),
+      eq(schema.toolConnections.status, 'active'),
+      isNull(schema.toolConnections.deletedAt),
+    ),
+    columns: { apiKeyEncrypted: true },
+  });
+  if (!claudeConn) {
+    return {
+      ok: false,
+      errorMessage: 'Connect Claude on /connections/tools to enable auto-detection.',
+    };
+  }
+
+  let claudeKey: string;
+  try {
+    claudeKey = await decryptSecret(claudeConn.apiKeyEncrypted);
+  } catch {
+    return { ok: false, errorMessage: 'Could not decrypt Claude key.' };
+  }
+
+  const detectionResult = await detectCreativeFormat({
+    userId: user.id,
+    claudeApiKey: claudeKey,
+    frames: [{ base64: imageBase64, mediaType: imageMediaType }],
+  });
+
+  if (!detectionResult.ok || !detectionResult.detection) {
+    return {
+      ok: false,
+      errorMessage: detectionResult.errorMessage ?? 'Vision detection failed.',
+    };
+  }
+
+  const providers = await loadConnectedProviders(user.id);
+  const pipelineConnections: PipelineUserConnections = {
+    heygen: { connected: providers.heygen.connected, tier: providers.heygen.tier },
+    openai: { connected: providers.openai.connected },
+    kling: { connected: providers.kling.connected },
+    elevenlabs: { connected: providers.elevenlabs.connected },
+    gemini: { connected: providers.gemini.connected },
+  };
+
+  const routeResult = pickPipeline(
+    { format: detectionResult.detection.format },
+    pipelineConnections,
+  );
+
+  if (!routeResult.ok) {
+    return {
+      ok: true,
+      detection: detectionResult.detection,
+      errorMessage: routeResult.errorMessage,
+    };
+  }
+
+  return {
+    ok: true,
+    detection: detectionResult.detection,
+    pipeline: routeResult.pipeline,
+    pipelineLabel: pipelineLabel(routeResult.pipeline),
   };
 }

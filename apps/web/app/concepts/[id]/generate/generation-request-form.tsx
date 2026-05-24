@@ -7,8 +7,8 @@ import {
   estimateGenerationCost,
   type ConceptType,
   type CreativeFormat,
+  type PipelineType,
 } from '@mbb/shared';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +21,12 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { acknowledgeLiveGenerationAction } from './ack-action';
-import { type ConnectedProviders, createGenerationJobAction } from './actions';
+import {
+  type ConnectedProviders,
+  type DetectAndRouteResult,
+  createGenerationJobAction,
+  detectAndRouteAction,
+} from './actions';
 
 interface Props {
   conceptId: string;
@@ -78,16 +83,13 @@ export function GenerationRequestForm({
   const [error, setError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
 
-  // Polish-4: format picker. cinematic_voiceover requires kling + elevenlabs.
-  const cinematicReady =
-    connectedProviders.kling.connected && connectedProviders.elevenlabs.connected;
+  // Polish-6: auto-detect creative format + pipeline.
+  const [detection, setDetection] = React.useState<DetectAndRouteResult | null>(null);
+  const [detecting, setDetecting] = React.useState(false);
+  const detectedPipeline = detection?.pipeline as PipelineType | undefined;
+
   const heygenReady = connectedProviders.heygen.connected;
-  const defaultFormat: CreativeFormat = heygenReady
-    ? 'avatar_talking_head'
-    : cinematicReady
-      ? 'cinematic_voiceover'
-      : 'avatar_talking_head';
-  const [format, setFormat] = React.useState<CreativeFormat>(defaultFormat);
+  const format: CreativeFormat = 'avatar_talking_head';
 
   const estimate = React.useMemo(
     () =>
@@ -96,9 +98,29 @@ export function GenerationRequestForm({
         variantCount: Math.max(1, Math.min(MAX_VARIANTS_PER_JOB, variantCount || 1)),
         provider: conceptType === 'ugc' ? 'heygen' : undefined,
         format: conceptType === 'ugc' ? format : undefined,
+        pipeline: detectedPipeline,
       }),
-    [conceptType, variantCount, format],
+    [conceptType, variantCount, format, detectedPipeline],
   );
+
+  async function handleReferenceUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setDetecting(true);
+    setDetection(null);
+    setError(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const base64 = btoa(new Uint8Array(buffer).reduce((s, b) => s + String.fromCharCode(b), ''));
+      const result = await detectAndRouteAction(base64, file.type);
+      setDetection(result);
+      if (!result.ok && result.errorMessage) setError(result.errorMessage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Detection failed.');
+    } finally {
+      setDetecting(false);
+    }
+  }
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate.estimateUsd > remaining;
@@ -114,6 +136,7 @@ export function GenerationRequestForm({
     // mode defaults to 'live' server-side; explicit for log clarity.
     formData.set('mode', 'live');
     formData.set('format', format);
+    if (detectedPipeline) formData.set('pipeline', detectedPipeline);
 
     startTransition(async () => {
       setError(null);
@@ -200,41 +223,62 @@ export function GenerationRequestForm({
         )}
       </div>
 
-      {/* Polish-4: Format picker (UGC only). Two creative formats:
-          avatar_talking_head (HeyGen) and cinematic_voiceover (Kling +
-          ElevenLabs). Options that the user doesn't have keys for are
-          disabled with an inline CTA to /connections/ai-provider. */}
+      {/* Polish-6: Reference creative upload + auto-detection. */}
       {conceptType === 'ugc' && (
-        <fieldset className="space-y-2">
-          <legend className="text-fg text-sm font-medium">Format</legend>
-          <FormatRadio
-            value="avatar_talking_head"
-            checked={format === 'avatar_talking_head'}
-            onSelect={() => setFormat('avatar_talking_head')}
-            disabled={!heygenReady}
-            label="Avatar talking head"
-            description="HeyGen Avatar Mode — Claude casts a different avatar per variant from your HeyGen pool."
-            badge={
-              connectedProviders.heygen.tier ? (
-                <Badge variant="outline">{connectedProviders.heygen.tier}</Badge>
-              ) : null
-            }
-            disabledHint="Connect HeyGen on /connections/ai-provider."
-          />
-          <FormatRadio
-            value="cinematic_voiceover"
-            checked={format === 'cinematic_voiceover'}
-            onSelect={() => setFormat('cinematic_voiceover')}
-            disabled={!cinematicReady}
-            label="Cinematic voiceover"
-            description="Kling 2.5 generates a cinematic 5s clip; ElevenLabs reads your script as voiceover. No on-screen actor."
-            disabledHint={
-              connectedProviders.kling.connected
-                ? 'Connect ElevenLabs on /connections/ai-provider for the voiceover.'
-                : 'Connect Kling (Replicate) + ElevenLabs on /connections/ai-provider.'
-            }
-          />
-        </fieldset>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="referenceCreative">Reference creative (optional)</Label>
+            <Input
+              id="referenceCreative"
+              type="file"
+              accept="video/*,image/*"
+              onChange={handleReferenceUpload}
+              disabled={detecting}
+            />
+            <p className="text-fg-muted text-xs">
+              Upload a winning ad. The bot auto-detects format and picks the best pipeline.
+            </p>
+          </div>
+          {detecting && (
+            <div className="bg-bg-elevated text-fg-muted rounded-md border p-3 text-sm">
+              Analyzing creative...
+            </div>
+          )}
+          {detection?.ok && detection.detection && (
+            <div className="bg-bg-elevated space-y-1.5 rounded-md border p-3 text-sm">
+              <p>
+                <span className="text-fg-muted">Detected: </span>
+                <span className="text-fg font-mono font-medium">
+                  {detection.detection.format.replace(/_/g, ' ')}
+                </span>
+              </p>
+              {detection.pipeline && (
+                <p>
+                  <span className="text-fg-muted">Pipeline: </span>
+                  <span className="text-fg font-mono font-medium">{detection.pipelineLabel}</span>
+                </p>
+              )}
+              {detection.detection.demographics?.gender && (
+                <p className="text-fg-muted text-xs">
+                  {detection.detection.demographics.gender}
+                  {detection.detection.demographics.ageRange
+                    ? `, ${detection.detection.demographics.ageRange}`
+                    : ''}
+                </p>
+              )}
+              {detection.errorMessage && !detection.pipeline && (
+                <p className="text-xs text-[color:var(--destructive-color)]">
+                  {detection.errorMessage}
+                </p>
+              )}
+            </div>
+          )}
+          {!detection && !detecting && (
+            <p className="text-fg-muted text-xs">
+              No reference? Default: {heygenReady ? 'HeyGen Avatar Mode' : 'auto-pick on submit'}.
+            </p>
+          )}
+        </div>
       )}
 
       {/* Cost estimator */}
@@ -278,9 +322,7 @@ export function GenerationRequestForm({
         </Button>
       </div>
 
-      {/* Polish-4: provider-availability hint if user has connected
-          neither HeyGen nor Kling. Without keys the submit always fails. */}
-      {conceptType === 'ugc' && !heygenReady && !cinematicReady && (
+      {conceptType === 'ugc' && !heygenReady && !connectedProviders.kling.connected && (
         <p className="text-xs text-[color:var(--destructive-color)]">
           Connect at least one provider on{' '}
           <a className="underline" href="/connections/ai-provider">
@@ -326,60 +368,5 @@ export function GenerationRequestForm({
         </DialogContent>
       </Dialog>
     </form>
-  );
-}
-
-interface FormatRadioProps {
-  value: CreativeFormat;
-  checked: boolean;
-  onSelect: () => void;
-  disabled?: boolean;
-  label: string;
-  description: string;
-  badge?: React.ReactNode;
-  disabledHint?: string;
-}
-
-function FormatRadio({
-  value,
-  checked,
-  onSelect,
-  disabled,
-  label,
-  description,
-  badge,
-  disabledHint,
-}: FormatRadioProps) {
-  return (
-    <label
-      className={
-        'flex cursor-pointer items-start gap-3 rounded-md border p-4 transition-colors ' +
-        (disabled
-          ? 'bg-bg-elevated text-fg-muted cursor-not-allowed opacity-60'
-          : checked
-            ? 'border-fg-muted bg-bg-hover'
-            : 'bg-bg-elevated hover:bg-bg-hover')
-      }
-    >
-      <input
-        type="radio"
-        name="format"
-        value={value}
-        checked={checked}
-        disabled={disabled}
-        onChange={onSelect}
-        className="mt-1 h-4 w-4"
-      />
-      <span className="flex-1">
-        <span className="text-fg flex items-center gap-2 font-medium">
-          {label}
-          {badge}
-        </span>
-        <span className="text-fg-muted mt-0.5 block text-sm">{description}</span>
-        {disabled && disabledHint && (
-          <span className="text-fg-muted mt-1 block text-xs italic">{disabledHint}</span>
-        )}
-      </span>
-    </label>
   );
 }
