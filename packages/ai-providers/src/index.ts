@@ -112,3 +112,15 @@ export {
   type TranscribeAudioInput,
   type TranscribeAudioResult,
 } from './vision-detection';
+
+// Polish-6: auto-routing logic.
+export {
+  pickPipeline,
+  pipelineLabel,
+  type Pipeline,
+  type PostProcess,
+  type PickPipelineResult,
+  type PickPipelineError,
+  type UserConnections as PipelineUserConnections,
+  type UserPreferences as PipelineUserPreferences,
+} from './pipeline-router';
