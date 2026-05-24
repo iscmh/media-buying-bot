@@ -7,6 +7,17 @@ import { inngest } from '../client';
  *   * After expiry → auto-pause user, send refresh notification.
  *
  * Phase 2 wires this on once token storage is real.
+ *
+ * TODO (Phase 2 scope): implement the actual token-refresh loop.
+ *   1. SELECT meta_connections WHERE token_expires_at < now() + '7 days'
+ *   2. For connections expiring within 24h: attempt refresh via
+ *      POST /oauth/access_token?grant_type=fb_exchange_token
+ *      (extends a short-lived token to long-lived)
+ *   3. On success: UPDATE meta_connections SET access_token_encrypted,
+ *      token_expires_at, last_verified_at
+ *   4. On failure: send Telegram alert "Meta token expiring — reconnect
+ *      at /connections/meta", then if past expiry: cascadePauseUser
+ *   5. Log every refresh attempt to meta_api_call_logs
  */
 export const tokenExpiryChecker = inngest.createFunction(
   { id: 'token-expiry-checker', name: 'Token expiry checker' },

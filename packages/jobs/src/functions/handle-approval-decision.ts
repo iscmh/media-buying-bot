@@ -75,6 +75,13 @@ export const handleApprovalDecision = inngest.createFunction(
     const { approval, ad } = loaded;
     const userId = approval.userId;
 
+    // Polish-7: structured diagnostic logging so every state transition
+    // is visible in the Inngest dashboard.
+    console.log(
+      `[approval-decision] loaded approval=${approvalId} action=${approval.actionType} ` +
+        `decision=${decision} ad=${ad.id} meta_ad_id=${ad.metaAdId} status=${ad.mode}`,
+    );
+
     // 2. Skip path.
     if (decision === 'skip') {
       await step.run('mark-skipped', async () => {
@@ -154,14 +161,23 @@ export const handleApprovalDecision = inngest.createFunction(
         });
         return { ok: false, reason: 'no meta_ad_id to pause' };
       }
-      const result = await step.run('pause-ad', async () =>
-        pauseAd({
+      console.log(
+        `[kill-action] dispatching meta pause for ad=${ad.id} meta_ad_id=${ad.metaAdId} mode=${mode}`,
+      );
+      const result = await step.run('pause-ad', async () => {
+        const r = pauseAd({
           userId,
           accessToken: conn.accessToken,
           adId: ad.metaAdId!,
           mode,
-        }),
+        });
+        return r;
+      });
+      console.log(
+        `[kill-action] meta pause response ok=${result.ok} ad=${ad.id}` +
+          (result.ok ? '' : ` error=${result.errorMessage}`),
       );
+      console.log(`[kill-action] updating launched_ads.status to killed for ad=${ad.id}`);
       await step.run('persist-kill', async () => {
         const db = getDb();
         await db
@@ -190,6 +206,7 @@ export const handleApprovalDecision = inngest.createFunction(
           mode,
         },
       });
+      console.log(`[kill-action] dispatching telegram notification for kill of ad=${ad.id}`);
       await step.sendEvent('kill-summary', {
         name: 'telegram/notify.requested',
         data: {
@@ -208,6 +225,10 @@ export const handleApprovalDecision = inngest.createFunction(
     if (!ad.metaAdSetId || proposedBudgetUsd == null) {
       return { ok: false, reason: 'missing meta_ad_set_id or proposed budget' };
     }
+    console.log(
+      `[scale-action] dispatching meta budget update for ad=${ad.id} ` +
+        `adset=${ad.metaAdSetId} from=$${Number(ad.dailyBudgetUsd).toFixed(2)} to=$${proposedBudgetUsd.toFixed(2)} mode=${mode}`,
+    );
     const result = await step.run('scale-ad-budget', async () =>
       scaleAdBudget({
         userId,
@@ -256,6 +277,11 @@ export const handleApprovalDecision = inngest.createFunction(
         mode,
       },
     });
+    console.log(
+      `[scale-action] meta budget response ok=${result.ok} ad=${ad.id}` +
+        (result.ok ? '' : ` error=${result.errorMessage}`),
+    );
+    console.log(`[scale-action] dispatching telegram notification for scale of ad=${ad.id}`);
     await step.sendEvent('scale-summary', {
       name: 'telegram/notify.requested',
       data: {

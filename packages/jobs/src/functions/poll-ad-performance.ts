@@ -226,6 +226,12 @@ export const pollAdPerformance = inngest.createFunction(
                 },
               });
 
+              // Polish-7: structured diagnostic logging for every evaluator decision.
+              console.log(
+                `[evaluator] ad=${ad.id} decision=${decision.action} reason=${decision.reason ?? 'n/a'} ` +
+                  `spend=$${m.spendUsd.toFixed(2)} cpc=$${m.cpcUsd.toFixed(2)} ctr=${m.ctrPct.toFixed(2)}% conv=${m.conversions}`,
+              );
+
               if (decision.action === 'no_action') {
                 return { ok: true, decision: 'no_action' };
               }
