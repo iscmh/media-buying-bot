@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Stake IDR → USD Display
 // @namespace    https://oclus.io
-// @version      4.0.0
+// @version      4.1.0
 // @description  Swaps IDR label to $ for content creation
 // @match        *://stake.c/*
 // @match        *://*.stake.c/*
@@ -24,10 +24,11 @@
 (function () {
   "use strict";
 
-  // ── CSS: hide Indonesia flag instantly to prevent flash ──
+  // ── CSS: hide Indonesia flag + hide USDT conversion line ──
   const hideCSS = document.createElement("style");
   hideCSS.textContent = `
     svg[data-ds-icon="Indonesia"] { opacity: 0 !important; transition: none !important; }
+    .currency-conversion { display: none !important; }
   `;
   document.head.appendChild(hideCSS);
 
@@ -71,11 +72,22 @@
     });
   }
 
+  // ── Fix comma decimals in inputs (IDR locale uses , instead of .) ──
+  function fixCommaInputs() {
+    document.querySelectorAll('input[data-testid="input-game-amount"], input[data-testid="profit-input"]').forEach(inp => {
+      // Setting lang="en-US" forces the browser to render type="number" with dots
+      if (inp.getAttribute("lang") !== "en-US") {
+        inp.setAttribute("lang", "en-US");
+      }
+    });
+  }
+
   // ── FULL SWEEP ──
   function sweep() {
     swapFlags();
     swapIDR();
     swapPrefixes();
+    fixCommaInputs();
   }
 
   // Initial sweeps
@@ -100,5 +112,8 @@
   // Fallback periodic scan
   setInterval(sweep, 2000);
 
-  console.log("[Stake IDR→$] v4 active");
+  // Force document lang to en-US so number inputs render with dots
+  document.documentElement.setAttribute("lang", "en-US");
+
+  console.log("[Stake IDR→$] v4.1 active");
 })();
