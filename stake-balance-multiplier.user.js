@@ -75,14 +75,17 @@
     });
   }
 
-  // ── 4. FIX COMMA DECIMALS → DOT (IDR locale uses , instead of .) ──
+  // ── 4. FIX COMMA DECIMALS ──
+  // type="number" always renders with locale formatting (comma in IDR locale).
+  // Changing to type="text" stops the browser from applying locale display.
   function fixCommas() {
-    document.querySelectorAll('input[data-testid="input-game-amount"], input[data-testid="profit-input"]').forEach(inp => {
-      if (inp.value && inp.value.includes(",")) {
-        const fixed = inp.value.replace(/,/g, ".");
-        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        nativeSetter.call(inp, fixed);
-        inp.dispatchEvent(new Event("input", { bubbles: true }));
+    document.querySelectorAll('input[data-testid="input-game-amount"]').forEach(inp => {
+      if (inp.type === "number") {
+        const currentVal = inp.value;
+        inp.setAttribute("type", "text");
+        inp.setAttribute("inputmode", "decimal");
+        inp.setAttribute("pattern", "[0-9.]*");
+        if (currentVal) inp.value = currentVal;
       }
     });
     document.querySelectorAll('[data-testid="conversion-amount"] span, [slot="label"] span').forEach(el => {
