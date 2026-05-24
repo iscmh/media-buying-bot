@@ -23,6 +23,8 @@ export const aiProviderEnum = pgEnum('ai_provider', [
   'replicate',
   'tavus',
   'elevenlabs',
+  // Polish-6: OpenAI key for Whisper transcription + Sora 2 generation.
+  'openai',
 ]);
 
 // Polish-4: tier label per provider. nullable on the connection row —

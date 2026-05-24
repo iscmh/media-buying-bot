@@ -30,7 +30,8 @@ export async function logAiProviderApiCall(input: {
     | 'creatify'
     | 'kling'
     | 'replicate'
-    | 'elevenlabs';
+    | 'elevenlabs'
+    | 'openai';
   endpoint: string;
   method: string;
   requestBody?: Record<string, unknown>;

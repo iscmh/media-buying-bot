@@ -21,6 +21,8 @@ export interface DecryptedKeys {
   // the cinematic_voiceover creative format.
   kling?: string;
   elevenlabs?: string;
+  // Polish-6: OpenAI key (Whisper transcription + Sora 2 generation).
+  openai?: string;
 }
 
 export type ProviderKey = keyof DecryptedKeys;

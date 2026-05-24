@@ -34,7 +34,8 @@ export type ProviderName =
   | 'creatify'
   | 'kling'
   | 'replicate'
-  | 'elevenlabs';
+  | 'elevenlabs'
+  | 'openai';
 
 export interface CallProviderInput {
   userId: string;

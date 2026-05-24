@@ -1,5 +1,14 @@
 import { sql } from 'drizzle-orm';
-import { integer, jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  integer,
+  jsonb,
+  numeric,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import {
   aiProviderEnum,
   aspectRatioEnum,
@@ -51,6 +60,19 @@ export const generationJobs = pgTable('generation_jobs', {
   // formats don't need an ALTER TYPE round-trip.
   format: text('format').notNull().default('avatar_talking_head'),
 
+  // Polish-6: vision detection output. Full structured JSON from
+  // detectCreativeFormat — format class, demographics, setting,
+  // tone, pacing, visual elements, extracted dialogue.
+  detectedFormat: jsonb('detected_format'),
+  // Polish-6: the pipeline the router picked (e.g.
+  // 'heygen_avatar_talking_head', 'kling_3_multi_clip_native_lipsync',
+  // 'sora_2_single_shot', 'nano_banana_static_image').
+  pickedPipeline: text('picked_pipeline'),
+  // Polish-6: Supabase Storage path for the user's uploaded reference
+  // creative (video or image). The vision detection step reads from
+  // this path; downstream pipelines may re-read it for frame extraction.
+  referenceCreativeStoragePath: text('reference_creative_storage_path'),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -94,6 +116,13 @@ export const generatedCreatives = pgTable('generated_creatives', {
   // Polish-4: creative format (mirrors generationJobs.format on the
   // variant row — needed for per-variant rendering / cost rollups).
   format: text('format').notNull().default('avatar_talking_head'),
+
+  // Polish-6: multi-clip pipeline. Kling 3.0 produces 16 sub-clips
+  // per variant; each sub-clip gets its own generated_creatives row
+  // with clip_index (0-15) + is_clip_part=true. The final muxed
+  // output (if muxing succeeded) gets is_clip_part=false.
+  clipIndex: integer('clip_index'),
+  isClipPart: boolean('is_clip_part').notNull().default(false),
 
   // Soft delete.
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
