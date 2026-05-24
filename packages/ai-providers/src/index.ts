@@ -100,3 +100,15 @@ export {
   type ElevenLabsTtsInput,
   type ElevenLabsTtsResult,
 } from './elevenlabs';
+
+// Polish-6: vision detection + Whisper transcription for auto-format.
+export {
+  detectCreativeFormat,
+  transcribeAudio,
+  type DetectedFormat,
+  type DetectedFormatClass,
+  type DetectCreativeFormatInput,
+  type DetectCreativeFormatResult,
+  type TranscribeAudioInput,
+  type TranscribeAudioResult,
+} from './vision-detection';
