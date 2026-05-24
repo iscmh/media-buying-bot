@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Stake IDR → USD Display
 // @namespace    https://oclus.io
-// @version      4.1.0
-// @description  Swaps IDR label to $ for content creation
+// @version      5.0.0
+// @description  Cosmetic USD overlay for content creation (IDR mode)
 // @match        *://stake.c/*
 // @match        *://*.stake.c/*
 // @match        *://stake.com/*
@@ -24,17 +24,16 @@
 (function () {
   "use strict";
 
-  // ── CSS: hide Indonesia flag + hide USDT conversion line ──
+  // ── INSTANT CSS HIDE — prevents any flash of Indonesia flag ──
   const hideCSS = document.createElement("style");
   hideCSS.textContent = `
     svg[data-ds-icon="Indonesia"] { opacity: 0 !important; transition: none !important; }
-    .currency-conversion { display: none !important; }
   `;
   document.head.appendChild(hideCSS);
 
-  const US_FLAG_SVG = `<svg data-ds-icon="UnitedStatesOfAmerica" width="20" height="20" viewBox="0 0 24 19" xmlns="http://www.w3.org/2000/svg" fill="none"><rect width="24" height="18.333" fill="#F7FAFC" rx=".2"/><path fill="#B31942" d="M1 1h22v16.5H1"/><path fill="#000" d="M1 2.904h22zm22 2.538H1zM1 7.981h22zm22 2.538H1zM1 13.058h22zm22 2.538H1z"/><path fill="#fff" d="M23 14.962v1.269H1v-1.27zm0-2.539v1.27H1v-1.27zm0-2.538v1.269H1v-1.27zm0-2.539v1.27H1v-1.27zm0-2.538v1.269H1v-1.27zm0-2.539v1.27H1v-1.27z"/><path fill="#0A3161" d="M1 1h12.54v8.885H1"/><path fill="#fff" d="m2.045 1.38.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM3.09 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM5.18 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM7.27 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM9.36 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM11.45 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568z"/></svg>`;
+  const US_FLAG_SVG = `<svg data-ds-icon="UnitedStatesOfAmerica" width="20" height="20" viewBox="0 0 24 19" xmlns="http://www.w3.org/2000/svg" fill="none"><metadata data-ds-license="true">Derived from flag-icons by Panayiotis Lipiridis (MIT). See https://github.com/lipis/flag-icons</metadata><rect width="24" height="18.333" fill="#F7FAFC" rx=".2"/><path fill="#B31942" d="M1 1h22v16.5H1"/><path fill="#000" d="M1 2.904h22zm22 2.538H1zM1 7.981h22zm22 2.538H1zM1 13.058h22zm22 2.538H1z"/><path fill="#fff" d="M23 14.962v1.269H1v-1.27zm0-2.539v1.27H1v-1.27zm0-2.538v1.269H1v-1.27zm0-2.539v1.27H1v-1.27zm0-2.538v1.269H1v-1.27zm0-2.539v1.27H1v-1.27z"/><path fill="#0A3161" d="M1 1h12.54v8.885H1"/><path fill="#fff" d="m2.045 1.38.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM3.09 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM5.18 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM7.27 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM9.36 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zM11.45 2.27l.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.567h.965l-.781.567zm1.045-6.22.298.92-.78-.568h.965l-.781.567zm0 1.778.298.918-.78-.567h.965l-.781.567zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.777.298.918-.78-.568h.965l-.781.568zm0 1.776.298.919-.78-.568h.965l-.781.568z"/></svg>`;
 
-  // ── Swap Indonesia flags → US flag ──
+  // ── 1. SWAP INDONESIA FLAG SVGs → US FLAG ──
   function swapFlags() {
     document.querySelectorAll('svg[data-ds-icon="Indonesia"]').forEach(svg => {
       const parent = svg.parentElement;
@@ -49,35 +48,71 @@
     });
   }
 
-  // ── Replace "IDR" with "$" in text nodes ──
-  function swapIDR(root) {
+  // ── 2. SWAP IDR → $ IN TEXT NODES ──
+  function swapCurrency(root) {
     const walker = document.createTreeWalker(root || document.body, NodeFilter.SHOW_TEXT, null);
     let node;
     while ((node = walker.nextNode())) {
       const t = node.textContent;
-      if (!t || !t.includes("IDR")) continue;
+      if (!t) continue;
       const pn = node.parentElement?.nodeName;
       if (pn === "SCRIPT" || pn === "STYLE" || pn === "TEXTAREA") continue;
-      // "IDR 410.77" → "$410.77" and "IDR 410.77" → "$410.77"
-      node.textContent = t.replace(/IDR[\s ]*/g, "$");
+
+      let n = t;
+      // "IDR 410.77" or "IDR 410.77" → "$410.77"
+      n = n.replace(/IDR[\s ]*/g, "$");
+      n = n.replace(/\bIDR\b/g, "USD");
+      if (n !== t) node.textContent = n;
     }
   }
 
-  // ── Also swap "IDR" prefix in before-icon divs (the $ prefix next to inputs) ──
+  // ── 3. SWAP IDR PREFIXES (positioned divs/spans next to inputs) ──
   function swapPrefixes() {
-    document.querySelectorAll(".before-icon").forEach(el => {
+    document.querySelectorAll("div, span").forEach(el => {
       if (el.children.length === 0 && el.textContent.trim() === "IDR") {
         el.textContent = "$";
       }
     });
   }
 
-  // ── Fix comma decimals in inputs (IDR locale uses , instead of .) ──
-  function fixCommaInputs() {
+  // ── 4. FIX COMMA DECIMALS → DOT (IDR locale uses , instead of .) ──
+  function fixCommas() {
     document.querySelectorAll('input[data-testid="input-game-amount"], input[data-testid="profit-input"]').forEach(inp => {
-      // Setting lang="en-US" forces the browser to render type="number" with dots
-      if (inp.getAttribute("lang") !== "en-US") {
-        inp.setAttribute("lang", "en-US");
+      if (inp.value && inp.value.includes(",")) {
+        const fixed = inp.value.replace(/,/g, ".");
+        const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeSetter.call(inp, fixed);
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    document.querySelectorAll('[data-testid="conversion-amount"] span, [slot="label"] span').forEach(el => {
+      if (el.children.length === 0 && /\d,\d/.test(el.textContent)) {
+        el.textContent = el.textContent.replace(/(\d),(\d)/g, "$1.$2");
+      }
+    });
+  }
+
+  // ── 5. FIX USDT CONVERSION AMOUNTS ──
+  // The small text shows real crypto value — replace with the displayed $ amount as USDT (1 USDT ≈ $1)
+  function fixConversions() {
+    document.querySelectorAll('[data-testid="conversion-amount"]').forEach(el => {
+      const text = el.textContent.trim();
+      if (/[\d.,]+\s*USDT/i.test(text)) {
+        const label = el.closest("label") || el.closest("span")?.closest("label");
+        if (!label) return;
+        const inp = label.querySelector('input[data-testid="input-game-amount"]') ||
+                    label.querySelector('input[data-testid="profit-input"]');
+        if (inp && inp.value) {
+          let val = inp.value.replace(/,/g, ".");
+          let num = parseFloat(val);
+          if (!isNaN(num)) {
+            const formatted = num.toFixed(8) + " USDT";
+            const span = el.querySelector("span") || el;
+            if (span.textContent.trim() !== formatted) {
+              span.textContent = formatted;
+            }
+          }
+        }
       }
     });
   }
@@ -85,19 +120,20 @@
   // ── FULL SWEEP ──
   function sweep() {
     swapFlags();
-    swapIDR();
+    swapCurrency();
     swapPrefixes();
-    fixCommaInputs();
+    fixCommas();
+    fixConversions();
   }
 
-  // Initial sweeps
+  // Initial sweeps — aggressive timing
   sweep();
   setTimeout(sweep, 100);
   setTimeout(sweep, 300);
   setTimeout(sweep, 600);
   setTimeout(sweep, 1200);
 
-  // ── MUTATION OBSERVER — catches Svelte re-renders ──
+  // ── MUTATION OBSERVER — catches every Svelte re-render instantly ──
   let rafPending = false;
   const observer = new MutationObserver(() => {
     if (rafPending) return;
@@ -109,11 +145,8 @@
   });
   observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-  // Fallback periodic scan
+  // Fallback for anything missed
   setInterval(sweep, 2000);
 
-  // Force document lang to en-US so number inputs render with dots
-  document.documentElement.setAttribute("lang", "en-US");
-
-  console.log("[Stake IDR→$] v4.1 active");
+  console.log("[Stake IDR→USD] v5 active");
 })();
