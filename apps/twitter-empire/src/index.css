@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html {
+    overscroll-behavior: none;
+  }
+
+  body {
+    @apply bg-empire-bg min-h-screen overflow-x-hidden;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  input,
+  textarea {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-white/10 rounded-full;
+  }
+}
+
+@layer components {
+  .game-card {
+    @apply bg-empire-card border border-white/10 rounded-2xl p-4;
+    box-shadow:
+      0 4px 6px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .game-button {
+    @apply font-display text-sm uppercase tracking-wider px-6 py-3 rounded-xl
+           bg-gradient-to-b from-empire-accent to-red-700
+           border-2 border-red-400/30
+           shadow-lg active:scale-95 transition-transform;
+  }
+
+  .game-button-gold {
+    @apply font-display text-sm uppercase tracking-wider px-6 py-3 rounded-xl
+           bg-gradient-to-b from-yellow-500 to-yellow-700 text-black
+           border-2 border-yellow-300/50
+           shadow-glow-gold active:scale-95 transition-transform;
+  }
+
+  .stat-value {
+    @apply font-display text-2xl text-white;
+  }
+
+  .stat-label {
+    @apply text-xs text-empire-silver uppercase tracking-wider;
+  }
+}
