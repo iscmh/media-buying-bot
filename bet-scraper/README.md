@@ -1,38 +1,46 @@
 # bet-scraper
 
-Interactive command-line tool that scrapes match **predictions / bets** from
-[todaymatchprediction.com](https://www.todaymatchprediction.com) so you can use
-them as a reference when betting on stake.bet.
+Interactive command-line tool that pulls **real betting data from APIs** so you
+can use it as a reference when betting on stake.bet:
 
-You run one command, pick a sport, pick the games you care about, and it prints
-every prediction/market it can find for those matches (and optionally saves them
-to JSON).
+- **Market odds** from [The Odds API](https://the-odds-api.com) → de-vigged
+  **consensus probabilities** across many bookmakers (the most reliable signal
+  there is — efficient markets beat tipster sites).
+- **Model predictions** from [API-Football](https://www.api-football.com) →
+  win/draw/away % + advice (soccer only).
 
-> ⚠️ Predictions on that site are **tips, not guarantees**. This tool just
-> collects public info faster — it does not place bets and it can't tell the
-> future. Bet responsibly.
+You run one command, pick a sport → league → the games you want, and it prints
+the market's true probability for each outcome, the **best price** available
+(line-shopping), a **+EV flag** when a price beats fair value, and the model's
+prediction.
+
+> ⚠️ These are probabilities and tips, not guarantees. The tool doesn't place
+> bets and can't see the future. Bet responsibly.
 
 ---
 
-## Requirements
+## Why APIs instead of scraping todaymatchprediction.com?
 
-- macOS (or Linux/Windows) with **Node.js ≥ 20** (you have Node via the repo
-  already).
-- About 150 MB free for the headless browser Playwright downloads on first
-  install.
+Tipster prediction sites are low-signal and fight you with anti-bot. De-vigged
+odds from real bookmakers are a far better forecast, come as clean JSON, and
+don't break when a site changes its HTML. (The old Playwright scraper was
+removed — check git history if you ever want it back.)
 
-## Install
+## Setup
+
+Requires **Node.js ≥ 20** (you have it via the repo).
 
 ```bash
 cd bet-scraper
-npm install          # installs deps AND downloads the headless Chromium browser
+npm install
+cp .env.example .env       # then paste your API keys into .env
 ```
 
-If the browser download is skipped or fails, run it manually:
+Get keys (both have free tiers):
 
-```bash
-npx playwright install chromium
-```
+- **ODDS_API_KEY** (required) — sign up at https://the-odds-api.com (~500 req/mo free).
+- **API_FOOTBALL_KEY** (optional, soccer model %) — https://www.api-football.com
+  (~100 req/day free). Use the **direct api-sports.io** key, not a RapidAPI key.
 
 ## Usage
 
@@ -40,13 +48,15 @@ npx playwright install chromium
 npm start
 ```
 
-That's it — it will:
+It will:
 
-1. Launch a headless browser and open the site.
-2. Ask **which sport** (the list is discovered from the site's own menu).
-3. Show the matches it found; **pick the games** you want (space to toggle,
-   enter to confirm — enter with nothing selected scrapes the first ones shown).
-4. Print all the predictions/markets it can extract for each match.
+1. List sports/leagues from The Odds API → you pick **sport**, then **league**.
+2. Show upcoming games → you **pick the ones you want** (space toggles, enter
+   confirms; enter with none selected uses all shown).
+3. Print, per game:
+   - **Market consensus**: de-vigged probability per outcome + best odds & book.
+   - **+EV flag** when the best price implies value vs the consensus.
+   - **Model** (soccer, if `API_FOOTBALL_KEY` set): winner, home/draw/away %, advice.
 
 ### Options
 
@@ -54,51 +64,42 @@ That's it — it will:
 npm start -- --help
 ```
 
-| Option              | What it does                                                       |
-| ------------------- | ------------------------------------------------------------------ |
-| `-s, --sport <name>`| Skip the sport prompt, e.g. `--sport football` (scrapes top games) |
-| `-n, --limit <n>`   | Max matches to scrape when not picking manually (default 15)       |
-| `--json [file]`     | Also write results to a JSON file (default `bets.json`)            |
-| `--headed`          | Show the actual browser window (watch it work / debug)             |
-| `--debug`           | Save rendered HTML + screenshots into `./debug` for tuning         |
+| Option              | What it does                                                  |
+| ------------------- | ------------------------------------------------------------- |
+| `-s, --sport <text>`| Pre-filter the league list, e.g. `--sport epl`                |
+| `--regions <r>`     | Bookmaker regions for odds (default `eu,uk`; also `us`, `au`) |
+| `-n, --limit <n>`   | Max events listed per league (default 25)                     |
+| `--json [file]`     | Also write results to JSON (default `bets.json`)              |
+| `--no-model`        | Odds only; skip API-Football                                  |
 
 Examples:
 
 ```bash
-npm start -- --sport football --limit 10 --json today.json
-npm start -- --headed --debug
+npm start -- --sport epl --regions uk,eu --json today.json
+npm start -- --no-model
 ```
 
----
+## How it reads the numbers
 
-## If it finds no sports or no bets
+- **Consensus probability** = for each bookmaker, implied probs (`1/odds`) are
+  normalised to remove the margin ("de-vig"), then averaged across books. Summing
+  across outcomes gives ~100%. This is the market's honest estimate.
+- **+EV** = the best available decimal odds are higher than "fair" odds
+  (`1/consensus prob`) by >3% → the line may be worth a bet. Use as a pointer,
+  not gospel.
+- **Model** = API-Football's statistical model (form, H2H, etc.). Cross-check it
+  against the market rather than trusting it alone.
 
-This scraper was written **without** being able to load the live site (it was
-built in a sandbox whose network blocks the host), so the CSS selectors are
-best-effort. The fix is quick:
+## Quotas
 
-1. Re-run with `--debug` (and `--headed` to watch). It saves the rendered page
-   to `./debug/*.html` and a screenshot to `./debug/*.png`.
-2. Open the HTML, find the real class names / structure for the nav, the match
-   list, and the prediction tables.
-3. Edit `config.json` → `selectors` accordingly. Each selector accepts a
-   comma-separated list of CSS selectors; the code also falls back to generic
-   heuristics (tables, `label: value` text, bold-label blocks).
+The tool surfaces your remaining Odds API requests after fetching. Model
+predictions cost one API-Football call per *selected* game (plus one per
+distinct day to list fixtures), so pick the games you care about rather than
+scraping everything.
 
-If you send me one of those `debug/*.html` files, I can harden the selectors so
-it works without any tuning.
+## Notes
 
-## How it works
-
-- `src/browser.ts` — launches Playwright Chromium with a realistic user agent /
-  viewport to get past basic anti-bot checks.
-- `src/scrape.ts` — `discoverSports` (reads the nav), `listMatches` (finds
-  fixture links), `scrapeMatch` (pulls teams, league, kickoff, and bet markets).
-- `src/index.ts` — the interactive CLI flow and output.
-- `config.json` — base URL, known sport keywords, and tunable selectors.
-
-## Notes on responsible use
-
-This is for personal reference. It runs a single browser, visits pages
-sequentially with small delays, and doesn't hammer the site. Don't crank the
-limit to scrape the whole site, and check the site's terms.
+These APIs were not reachable from the sandbox this was built in, so the
+endpoint calls were written from their documented shapes and the math/matching
+were unit-tested in isolation. If a response shape has drifted, it'll surface as
+a clear error — send it my way and I'll adjust.

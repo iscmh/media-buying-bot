@@ -1,4 +1,4 @@
 node_modules/
-debug/
+.env
 bets.json
 *.log

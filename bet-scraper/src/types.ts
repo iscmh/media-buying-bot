@@ -1,46 +1,82 @@
-export interface Config {
-  baseUrl: string;
-  knownSports: string[];
-  selectors: {
-    navLinks: string;
-    matchLinks: string;
-    matchContainer: string;
-    teams: string;
-    league: string;
-    kickoff: string;
-    predictionBlocks: string;
-  };
+// ---- The Odds API ----------------------------------------------------------
+
+export interface OddsApiSport {
+  key: string; // e.g. "soccer_epl"
+  group: string; // e.g. "Soccer"
+  title: string; // e.g. "EPL"
+  description: string;
+  active: boolean;
+  has_outrights: boolean;
 }
 
-export interface Sport {
+export interface OddsOutcome {
   name: string;
-  url: string;
+  price: number; // decimal odds
+  point?: number;
 }
 
-export interface MatchLink {
+export interface OddsMarket {
+  key: string; // "h2h", "spreads", "totals"
+  outcomes: OddsOutcome[];
+}
+
+export interface OddsBookmaker {
+  key: string;
   title: string;
-  url: string;
+  markets: OddsMarket[];
 }
 
-/** A single named bet / prediction market extracted from a match page. */
-export interface Bet {
-  market: string;
-  value: string;
+export interface OddsEvent {
+  id: string;
+  sport_key: string;
+  sport_title: string;
+  commence_time: string; // ISO
+  home_team: string;
+  away_team: string;
+  bookmakers: OddsBookmaker[];
 }
 
-export interface MatchPrediction {
-  title: string;
-  url: string;
-  teams?: string;
-  league?: string;
-  kickoff?: string;
-  bets: Bet[];
+// ---- API-Football -----------------------------------------------------------
+
+export interface FootballFixture {
+  fixtureId: number;
+  date: string;
+  home: string;
+  away: string;
+  league: string;
+}
+
+export interface FootballPrediction {
+  winner?: string;
+  advice?: string;
+  percent: { home?: string; draw?: string; away?: string };
+}
+
+// ---- Internal model ---------------------------------------------------------
+
+/** A de-vigged consensus probability + the best available price for one outcome. */
+export interface ConsensusOutcome {
+  name: string;
+  consensusProb: number; // 0..1, averaged & de-vigged across books
+  bestPrice: number; // highest decimal odds found
+  bestBook: string;
+  books: number; // how many bookmakers contributed
+}
+
+export interface MatchReport {
+  eventId: string;
+  league: string;
+  commenceTime: string;
+  home: string;
+  away: string;
+  market: ConsensusOutcome[];
+  model?: FootballPrediction;
 }
 
 export interface CliOptions {
-  sport?: string;
+  sport?: string; // pre-filter group/league text
+  regions: string;
   limit: number;
-  debug: boolean;
-  headed: boolean;
   json?: string;
+  noModel: boolean;
 }
