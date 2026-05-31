@@ -1,0 +1,24 @@
+{
+  "name": "bet-scraper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Interactive CLI that scrapes match predictions / bets from todaymatchprediction.com to help inform bets on stake.bet.",
+  "bin": {
+    "bet-scraper": "src/index.ts"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "postinstall": "playwright install chromium",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.2.1",
+    "playwright": "^1.49.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,4 @@
+node_modules/
+debug/
+bets.json
+*.log
