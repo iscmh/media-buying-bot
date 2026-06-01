@@ -7,7 +7,18 @@ export type UUID = string;
 
 export type ConnectionMethod = 'byok' | 'oauth';
 
-export type AIProviderName = 'arcads' | 'heygen' | 'creatify';
+// Polish-8: kling/replicate/tavus/elevenlabs/openai added to the
+// underlying ai_provider enum across Polish-4/6. The UI cards expose
+// the ones we actually integrate with; arcads/creatify remain in the
+// type so the legacy DB rows still type-check. Gemini lives in
+// tool_provider (see /connections/tools), not ai_provider.
+export type AIProviderName =
+  | 'arcads'
+  | 'heygen'
+  | 'creatify'
+  | 'replicate'
+  | 'openai'
+  | 'elevenlabs';
 
 export type CampaignObjective = 'CBO' | 'ABO';
 

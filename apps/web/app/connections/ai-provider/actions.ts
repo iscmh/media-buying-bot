@@ -70,15 +70,18 @@ export async function verifyAndSaveProviderKey(
 
   const db = getDb();
   const encrypted = await encryptSecret(parsed.data.apiKey);
+  const providerName = parsed.data.provider as AIProviderName;
 
-  // Soft-delete any existing non-deleted row (one active connection per
-  // user; provider switch supersedes the old one).
+  // Polish-8: per-provider soft-delete (was: kill ALL other providers).
+  // Multi-provider model — only the SAME provider's prior row gets
+  // superseded; other providers' connections stay live.
   await db
     .update(schema.aiProviderConnections)
     .set({ deletedAt: new Date(), status: 'revoked' })
     .where(
       and(
         eq(schema.aiProviderConnections.userId, user.id),
+        eq(schema.aiProviderConnections.provider, providerName),
         isNull(schema.aiProviderConnections.deletedAt),
       ),
     );
@@ -87,21 +90,28 @@ export async function verifyAndSaveProviderKey(
   // 'premium' if any premium avatars are visible to this account.
   // Best-effort: failure to detect doesn't block the connect, tier
   // stays null and can be refreshed via "Verify connection".
-  const tier = await detectTierFor(
-    user.id,
-    parsed.data.provider as AIProviderName,
-    parsed.data.apiKey,
-  );
+  const tier = await detectTierFor(user.id, providerName, parsed.data.apiKey);
+
+  // Polish-8: first connection becomes isPrimary; later ones don't
+  // override an existing primary.
+  const existingPrimary = await db.query.aiProviderConnections.findFirst({
+    where: and(
+      eq(schema.aiProviderConnections.userId, user.id),
+      eq(schema.aiProviderConnections.isPrimary, true),
+      isNull(schema.aiProviderConnections.deletedAt),
+    ),
+    columns: { id: true },
+  });
 
   await db.insert(schema.aiProviderConnections).values({
     userId: user.id,
-    provider: parsed.data.provider as AIProviderName,
+    provider: providerName,
     apiKeyEncrypted: encrypted,
     apiKeyVerifiedAt: new Date(),
     lastVerifiedAt: new Date(),
     tier,
     status: 'active',
-    isPrimary: true,
+    isPrimary: !existingPrimary,
     lastUsedAt: null,
   });
 
@@ -121,15 +131,23 @@ export interface ReverifyResult {
   errorMessage?: string;
 }
 
-export async function reverifyAiProviderAction(): Promise<ReverifyResult> {
+export async function reverifyAiProviderAction(provider?: AIProviderName): Promise<ReverifyResult> {
   const user = await requireUser();
   const db = getDb();
 
+  // Polish-8: caller can target a specific provider. Defaults to the
+  // user's single active connection for back-compat with old callers.
   const conn = await db.query.aiProviderConnections.findFirst({
-    where: and(
-      eq(schema.aiProviderConnections.userId, user.id),
-      isNull(schema.aiProviderConnections.deletedAt),
-    ),
+    where: provider
+      ? and(
+          eq(schema.aiProviderConnections.userId, user.id),
+          eq(schema.aiProviderConnections.provider, provider),
+          isNull(schema.aiProviderConnections.deletedAt),
+        )
+      : and(
+          eq(schema.aiProviderConnections.userId, user.id),
+          isNull(schema.aiProviderConnections.deletedAt),
+        ),
     columns: { id: true, provider: true, apiKeyEncrypted: true },
   });
   if (!conn) {
@@ -180,21 +198,29 @@ async function detectTierFor(
 }
 
 /**
- * Disconnect the user's AI provider. Soft-delete + cascade-pause + redirect
- * to /connections/ai-provider so the page re-renders into the paste-form
- * sub-state. No "re-onboard from ToS" — the gate already handles this:
- * onboarding is complete, the user is just reconfiguring a connection.
+ * Disconnect a specific AI provider. Soft-delete + audit.
+ *
+ * Polish-8: scoped to one provider — disconnecting (say) Replicate
+ * doesn't kill the user's HeyGen connection. cascadePauseUser only
+ * fires when the disconnected provider was the user's primary AND no
+ * other active provider remains (otherwise generation can still run).
  */
-export async function disconnectAiProviderAction(): Promise<void> {
+export async function disconnectAiProviderAction(provider?: AIProviderName): Promise<void> {
   const user = await requireUser();
   const db = getDb();
 
   const existing = await db.query.aiProviderConnections.findFirst({
-    where: and(
-      eq(schema.aiProviderConnections.userId, user.id),
-      isNull(schema.aiProviderConnections.deletedAt),
-    ),
-    columns: { id: true, provider: true },
+    where: provider
+      ? and(
+          eq(schema.aiProviderConnections.userId, user.id),
+          eq(schema.aiProviderConnections.provider, provider),
+          isNull(schema.aiProviderConnections.deletedAt),
+        )
+      : and(
+          eq(schema.aiProviderConnections.userId, user.id),
+          isNull(schema.aiProviderConnections.deletedAt),
+        ),
+    columns: { id: true, provider: true, isPrimary: true },
   });
   if (!existing) {
     redirect('/connections/ai-provider');
@@ -205,16 +231,28 @@ export async function disconnectAiProviderAction(): Promise<void> {
     .set({ deletedAt: new Date(), status: 'revoked' })
     .where(eq(schema.aiProviderConnections.id, existing.id));
 
-  await cascadePauseUser({
-    userId: user.id,
-    reason: 'ai_provider_disconnected',
-    pausedBy: 'auto',
+  // Polish-8: only pause the user if NO active provider remains. With
+  // multi-provider, dropping one is normal; full pause is reserved for
+  // "you have nothing connected anymore."
+  const remaining = await db.query.aiProviderConnections.findFirst({
+    where: and(
+      eq(schema.aiProviderConnections.userId, user.id),
+      isNull(schema.aiProviderConnections.deletedAt),
+    ),
+    columns: { id: true },
   });
+  if (!remaining) {
+    await cascadePauseUser({
+      userId: user.id,
+      reason: 'ai_provider_disconnected',
+      pausedBy: 'auto',
+    });
+  }
 
   await logAuditEvent({
     userId: user.id,
     eventType: 'ai_provider_disconnected',
-    eventData: { provider: existing.provider },
+    eventData: { provider: existing.provider, was_primary: existing.isPrimary },
   });
 
   revalidatePath('/connections/ai-provider');

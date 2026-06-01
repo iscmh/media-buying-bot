@@ -3,6 +3,10 @@ export { getProvider, registerProvider } from './registry';
 export { ArcadsProvider } from './arcads';
 export { HeyGenProvider } from './heygen';
 export { CreatifyProvider } from './creatify';
+// Polish-8: verify-only providers for the BYOK connect cards.
+export { ReplicateProvider } from './replicate';
+export { OpenAIProvider } from './openai-provider';
+export { ElevenLabsProvider } from './elevenlabs-provider';
 
 // Phase 3b: real provider clients used by the Inngest generation jobs.
 // These bypass the Phase 1 `AIProvider` interface (which was scoped to
