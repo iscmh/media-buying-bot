@@ -16,7 +16,8 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
-import { createConceptAction } from './actions';
+import { confirmConceptUpload, createConceptUploadUrl } from './actions';
+import { isAllowedConceptMime, maxConceptBytes } from './concept-upload-helpers';
 
 export function ConceptUploadTabs() {
   return (
@@ -71,20 +72,103 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
       setError(`Pick ${contentType === 'static' ? 'an image' : 'a video'} first.`);
       return;
     }
-    const formData = new FormData(formRef.current);
-    formData.set('contentType', contentType);
-    formData.set('file', file);
-    if (name.trim().length > 0) formData.set('name', name.trim());
-    if (niche) formData.set('nicheTag', niche);
-    if (platform) formData.set('sourcePlatform', platform);
+    // Polish-9.1: client-side pre-validation matches the bucket caps
+    // so we don't pay for a server round-trip on a bad file.
+    const cap = maxConceptBytes(contentType);
+    if (file.size > cap) {
+      setError(
+        `File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max ${
+          contentType === 'static' ? '10 MB' : '100 MB'
+        }.`,
+      );
+      return;
+    }
+    if (!isAllowedConceptMime(file.type, contentType)) {
+      const want = contentType === 'static' ? 'PNG / JPEG / WEBP' : 'MP4 / MOV / WEBM';
+      setError(`Unsupported file type: ${file.type || 'unknown'}. Use ${want}.`);
+      return;
+    }
+
+    // Snapshot the form fields BEFORE the async upload — DOM might rerender.
+    const fd = new FormData(formRef.current);
+    const metadata = {
+      staticHeadline: stringFromForm(fd, 'staticHeadline'),
+      staticPrimaryText: stringFromForm(fd, 'staticPrimaryText'),
+      staticDescription: stringFromForm(fd, 'staticDescription'),
+      ugcOriginalScript: stringFromForm(fd, 'ugcOriginalScript'),
+      offerUrl: stringFromForm(fd, 'offerUrl'),
+      originalCpaUsd: stringFromForm(fd, 'originalCpaUsd'),
+      originalRoas: stringFromForm(fd, 'originalRoas'),
+      description: stringFromForm(fd, 'description'),
+    };
+    const finalName = name.trim().length > 0 ? name.trim() : undefined;
+    const nicheTag = niche || undefined;
+    const sourcePlatform = platform || undefined;
+
     startTransition(async () => {
       setError(null);
-      const result = await createConceptAction(formData);
-      if (!result.ok || !result.conceptId) {
-        setError(result.errorMessage ?? 'Upload failed.');
-        return;
+      try {
+        // 1. Get a signed upload URL.
+        const signed = await createConceptUploadUrl({
+          filename: file.name,
+          contentType,
+          fileContentType: file.type,
+        });
+        if (
+          !signed ||
+          !signed.ok ||
+          !signed.uploadUrl ||
+          !signed.storagePath ||
+          !signed.conceptId
+        ) {
+          setError(signed?.errorMessage ?? 'Could not create upload URL.');
+          return;
+        }
+
+        // 2. Direct PUT to Supabase Storage. Bypasses Vercel's 4.5 MB cap.
+        let uploadResponse: Response | undefined;
+        try {
+          uploadResponse = await fetch(signed.uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            body: file,
+          });
+        } catch (netErr) {
+          setError(
+            `Upload network error: ${netErr instanceof Error ? netErr.message : String(netErr)}`,
+          );
+          return;
+        }
+        if (!uploadResponse || !uploadResponse.ok) {
+          const status = uploadResponse?.status;
+          if (status === 413) {
+            setError(`File too large (max ${contentType === 'static' ? '10 MB' : '100 MB'}).`);
+          } else {
+            setError(`Upload failed${status ? ` (HTTP ${status})` : ''}.`);
+          }
+          return;
+        }
+
+        // 3. Confirm: server verifies the file landed + inserts the row.
+        const confirmed = await confirmConceptUpload({
+          conceptId: signed.conceptId,
+          storagePath: signed.storagePath,
+          contentType,
+          fileContentType: file.type,
+          filename: file.name,
+          name: finalName,
+          nicheTag,
+          sourcePlatform,
+          ...metadata,
+        });
+        if (!confirmed || !confirmed.ok || !confirmed.conceptId) {
+          setError(confirmed?.errorMessage ?? 'Could not save concept.');
+          return;
+        }
+        router.push(`/concepts/${confirmed.conceptId}`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Upload failed.');
       }
-      router.push(`/concepts/${result.conceptId}`);
     });
   }
 
@@ -355,6 +439,13 @@ interface SelectFieldProps {
   value: string;
   onChange: (next: string) => void;
   placeholder: string;
+}
+
+function stringFromForm(fd: FormData, key: string): string | undefined {
+  const v = fd.get(key);
+  if (typeof v !== 'string') return undefined;
+  const trimmed = v.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function stripExtension(filename: string): string {

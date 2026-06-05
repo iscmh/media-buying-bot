@@ -8,6 +8,13 @@ import { ConceptInputSchema, StaticConceptInputSchema, UgcConceptInputSchema } f
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { auditMetaFromHeaders } from '@/lib/audit/request-meta';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import {
+  conceptStoragePathBelongsToUser,
+  isAllowedConceptMime,
+  sanitizeConceptExt,
+  stripConceptExtension,
+  type ConceptUploadContentType,
+} from './concept-upload-helpers';
 
 const STATIC_MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 const UGC_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
@@ -238,4 +245,211 @@ function stripExtension(filename: string): string {
 
 function formatMB(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// =========================================================================
+// Polish-9.1: signed-URL direct upload for concept files
+// =========================================================================
+
+export interface CreateConceptUploadUrlResult {
+  ok: boolean;
+  uploadUrl?: string;
+  storagePath?: string;
+  conceptId?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Polish-9.1: server action that returns a Supabase Storage signed
+ * upload URL for a new concept file. Replaces the previous
+ * "stream a 100 MB video through a Next server action" flow that
+ * hit Vercel's 4.5 MB body cap and crashed the client on 413.
+ *
+ * The conceptId is generated here so the storage path is stable
+ * before the DB row exists. confirmConceptUpload (below) inserts
+ * the row using the same id.
+ */
+export async function createConceptUploadUrl(input: {
+  filename: string;
+  contentType: ConceptUploadContentType;
+  fileContentType: string;
+}): Promise<CreateConceptUploadUrlResult> {
+  if (input.contentType !== 'static' && input.contentType !== 'ugc') {
+    return { ok: false, errorMessage: 'Invalid concept type.' };
+  }
+  if (!isAllowedConceptMime(input.fileContentType, input.contentType)) {
+    const want = input.contentType === 'static' ? 'PNG / JPEG / WEBP' : 'MP4 / MOV / WEBM';
+    return {
+      ok: false,
+      errorMessage: `Unsupported file type: ${input.fileContentType || 'unknown'}. Use ${want}.`,
+    };
+  }
+
+  const user = await requireUser();
+  const conceptId = randomUUID();
+  const ext = sanitizeConceptExt(input.filename);
+  const storagePath = `${user.id}/concepts/${conceptId}/source${ext}`;
+
+  const supabase = await getSupabaseServerClient();
+  const { data, error } = await supabase.storage
+    .from('concepts')
+    .createSignedUploadUrl(storagePath);
+  if (error || !data) {
+    return {
+      ok: false,
+      errorMessage: error?.message ?? 'Could not create upload URL.',
+    };
+  }
+  return {
+    ok: true,
+    uploadUrl: data.signedUrl,
+    storagePath,
+    conceptId,
+  };
+}
+
+export interface ConfirmConceptUploadInput {
+  conceptId: string;
+  storagePath: string;
+  contentType: ConceptUploadContentType;
+  fileContentType: string;
+  filename: string;
+  name?: string;
+  nicheTag?: string;
+  sourcePlatform?: string;
+  // Static-only metadata
+  staticHeadline?: string;
+  staticPrimaryText?: string;
+  staticDescription?: string;
+  // UGC-only metadata
+  ugcOriginalScript?: string;
+  // Shared
+  offerUrl?: string;
+  originalCpaUsd?: string;
+  originalRoas?: string;
+  description?: string;
+}
+
+export interface ConfirmConceptUploadResult {
+  ok: boolean;
+  conceptId?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Polish-9.1: after the client PUTs the file to Supabase via the
+ * signed URL, it calls this action to (1) verify the file is actually
+ * present at the expected path, (2) insert the concept row.
+ *
+ * The storagePath MUST start with <userId>/concepts/ — checked here
+ * defense-in-depth even though the bucket RLS enforces it too.
+ */
+export async function confirmConceptUpload(
+  input: ConfirmConceptUploadInput,
+): Promise<ConfirmConceptUploadResult> {
+  const user = await requireUser();
+
+  if (!conceptStoragePathBelongsToUser(input.storagePath, user.id)) {
+    return { ok: false, errorMessage: 'Invalid storage path.' };
+  }
+  if (input.contentType !== 'static' && input.contentType !== 'ugc') {
+    return { ok: false, errorMessage: 'Invalid concept type.' };
+  }
+
+  // Validate metadata via the same schemas the legacy FormData path uses.
+  const raw = {
+    contentType: input.contentType,
+    staticHeadline: input.staticHeadline,
+    staticPrimaryText: input.staticPrimaryText,
+    staticDescription: input.staticDescription,
+    ugcOriginalScript: input.ugcOriginalScript,
+    nicheTag: input.nicheTag,
+    sourcePlatform: input.sourcePlatform,
+    offerUrl: input.offerUrl,
+    originalCpaUsd: input.originalCpaUsd,
+    originalRoas: input.originalRoas,
+    description: input.description,
+  };
+  const schemaForType =
+    input.contentType === 'static' ? StaticConceptInputSchema : UgcConceptInputSchema;
+  const parsed = schemaForType.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      errorMessage: parsed.error.issues[0]?.message ?? 'Invalid concept input.',
+    };
+  }
+  const finalParse = ConceptInputSchema.safeParse(parsed.data);
+  if (!finalParse.success) {
+    return { ok: false, errorMessage: 'Invalid concept input (post-parse).' };
+  }
+  const data = finalParse.data;
+
+  // Verify the file made it to storage. Supabase Storage doesn't have a
+  // cheap HEAD endpoint, so we use list() on the parent prefix and look
+  // for the leaf — small payload, no download.
+  const supabase = await getSupabaseServerClient();
+  const dir = input.storagePath.slice(0, input.storagePath.lastIndexOf('/'));
+  const leaf = input.storagePath.slice(input.storagePath.lastIndexOf('/') + 1);
+  const { data: listed, error: listErr } = await supabase.storage
+    .from('concepts')
+    .list(dir, { limit: 100 });
+  if (listErr) {
+    return { ok: false, errorMessage: `Could not verify upload: ${listErr.message}` };
+  }
+  const found = (listed ?? []).find((o) => o.name === leaf);
+  if (!found) {
+    return {
+      ok: false,
+      errorMessage: 'Upload did not land in storage. Try again.',
+    };
+  }
+
+  const name = input.name?.trim().length
+    ? input.name.trim()
+    : stripConceptExtension(input.filename);
+
+  const db = getDb();
+  try {
+    await db.insert(schema.concepts).values({
+      id: input.conceptId,
+      userId: user.id,
+      contentType: data.contentType,
+      name,
+      fileUrl: input.storagePath,
+      description: data.description ?? null,
+      nicheTag: data.nicheTag ?? null,
+      sourcePlatform: data.sourcePlatform ?? null,
+      offerUrl: data.offerUrl ? data.offerUrl : null,
+      originalCpaUsd: data.originalCpaUsd != null ? data.originalCpaUsd.toFixed(2) : null,
+      originalRoas: data.originalRoas != null ? data.originalRoas.toFixed(2) : null,
+      staticHeadline: data.contentType === 'static' ? data.staticHeadline : null,
+      staticPrimaryText: data.contentType === 'static' ? data.staticPrimaryText : null,
+      staticDescription: data.contentType === 'static' ? (data.staticDescription ?? null) : null,
+      ugcOriginalScript: data.contentType === 'ugc' ? (data.ugcOriginalScript ?? null) : null,
+      status: 'approved',
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      errorMessage: `Could not save concept: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  await logAuditEvent({
+    userId: user.id,
+    eventType: 'concept_created',
+    eventData: {
+      concept_id: input.conceptId,
+      content_type: data.contentType,
+      niche_tag: data.nicheTag ?? null,
+      source_platform: data.sourcePlatform ?? null,
+      file_content_type: input.fileContentType,
+      via: 'signed_url',
+      _meta: await auditMetaFromHeaders(),
+    },
+  });
+
+  revalidatePath('/concepts');
+  return { ok: true, conceptId: input.conceptId };
 }
