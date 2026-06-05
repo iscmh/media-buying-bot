@@ -5,7 +5,9 @@ import { redirect } from 'next/navigation';
 import { and, eq, isNull, inArray } from 'drizzle-orm';
 import {
   MAX_VARIANTS_PER_JOB,
+  describePipeline,
   estimateGenerationCost,
+  pipelineFromString,
   type ConceptType,
   type UgcVideoProvider,
 } from '@mbb/shared';
@@ -36,7 +38,9 @@ export interface CreateGenerationJobResult {
 const VALID_INTENSITY = new Set(['small', 'medium', 'big']);
 const VALID_UGC_PROVIDERS: ReadonlySet<UgcVideoProvider> = new Set(['kie_ai', 'heygen', 'arcads']);
 // Polish-4: creative format. avatar_talking_head=HeyGen; cinematic_voiceover=Kling+ElevenLabs.
-const VALID_FORMATS = new Set(['avatar_talking_head', 'cinematic_voiceover']);
+// Polish-9.2: format is no longer accepted as a free-form input — it
+// derives from the pipeline descriptor. The legacy VALID_FORMATS set
+// was removed; pipelineFromString() handles validation.
 
 /**
  * Create a generation job. Pre-flight gates BEFORE any Inngest send:
@@ -60,9 +64,11 @@ export async function createGenerationJobAction(
   const intensity = String(formData.get('intensity') ?? '');
   const variantCount = Number(formData.get('variantCount') ?? 0);
   const provider = String(formData.get('provider') ?? '') as UgcVideoProvider | '';
-  // Polish-4: creative format. Defaults to avatar_talking_head so a
-  // client that doesn't send the field gets the legacy HeyGen path.
-  const format = String(formData.get('format') ?? 'avatar_talking_head');
+  // Polish-9.2: pipeline is the canonical Polish-6 enum value (detected
+  // OR overridden client-side). format + provider derive from the pipeline
+  // descriptor — no more hardcoded 'avatar_talking_head'.
+  const rawPipeline = formData.get('pipeline');
+  const detectedPipeline = pipelineFromString(typeof rawPipeline === 'string' ? rawPipeline : null);
   // Polish-9: storage path for the reference creative uploaded via
   // signed URL. Optional — jobs without a reference still run.
   const rawReferencePath = formData.get('referenceStoragePath');
@@ -82,9 +88,14 @@ export async function createGenerationJobAction(
       errorMessage: `Variant count cannot exceed ${MAX_VARIANTS_PER_JOB} per job.`,
     };
   }
-  if (!VALID_FORMATS.has(format)) {
-    return { ok: false, errorMessage: 'Unknown creative format.' };
-  }
+
+  // Polish-9.2: format + providerChoice derive from the pipeline
+  // descriptor. Falls back to HeyGen avatar talking head when no
+  // pipeline was sent (legacy concepts without auto-detect run).
+  const pipelineDesc = detectedPipeline
+    ? describePipeline(detectedPipeline)
+    : describePipeline('heygen_avatar_talking_head');
+  const format = pipelineDesc.format;
 
   const supabase = await getSupabaseServerClient();
   const {
@@ -106,16 +117,21 @@ export async function createGenerationJobAction(
   }
   const contentType = concept.contentType as ConceptType;
 
-  // UGC: provider is force-picked to 'heygen' (Phase 3f — Avatar Mode is
-  // the only supported path; Kie.ai/Arcads code retained but unused).
-  // If a stale client still POSTs `provider`, honor it only when valid;
-  // otherwise default to heygen so the call doesn't error out.
+  // Polish-9.2: pickedProvider follows the pipeline descriptor for UGC.
+  // For static concepts the pipeline drives provider too (nano_banana →
+  // gemini). VALID_UGC_PROVIDERS legacy check preserved for stale callers
+  // that still POST a literal `provider` value.
   let pickedProvider: UgcVideoProvider | undefined;
   if (contentType === 'ugc') {
-    if (provider && VALID_UGC_PROVIDERS.has(provider as UgcVideoProvider)) {
+    if (pipelineDesc.providerChoice === 'heygen') {
+      pickedProvider = 'heygen';
+    } else if (provider && VALID_UGC_PROVIDERS.has(provider as UgcVideoProvider)) {
       pickedProvider = provider as UgcVideoProvider;
     } else {
-      pickedProvider = 'heygen';
+      // sora / kling / gemini paths aren't in VALID_UGC_PROVIDERS
+      // (they're newer than that enum); leave provider undefined and let
+      // the descriptor's providerChoice drive the job row.
+      pickedProvider = undefined;
     }
   }
 
@@ -171,7 +187,10 @@ export async function createGenerationJobAction(
       conceptIds: [conceptId],
       intensity,
       variantCount,
-      providerChoice: pickedProvider ?? (contentType === 'static' ? 'gemini+claude' : null),
+      providerChoice:
+        pickedProvider ??
+        pipelineDesc.providerChoice ??
+        (contentType === 'static' ? 'gemini+claude' : null),
       estimatedCostUsd: estimate.estimateUsd.toFixed(4),
       mode,
       status: 'queued',
@@ -179,6 +198,9 @@ export async function createGenerationJobAction(
       // analyze-concept worker reads this to fan out to either the
       // ugc.requested (HeyGen) or cinematic.requested (Kling) worker.
       format,
+      // Polish-9.2: persist the canonical Polish-6 pipeline value. Drives
+      // analyze-concept's fan-out routing.
+      pickedPipeline: pipelineDesc.pipeline,
       // Polish-9: reference creative storage path (auto-detect upload).
       ...(referenceStoragePath ? { referenceCreativeStoragePath: referenceStoragePath } : {}),
       // Phase 1's enum aiProviderUsed: only populate when UGC + provider is
@@ -203,7 +225,8 @@ export async function createGenerationJobAction(
       content_type: contentType,
       intensity,
       variant_count: variantCount,
-      provider_choice: pickedProvider ?? 'gemini+claude',
+      provider_choice: pickedProvider ?? pipelineDesc.providerChoice,
+      pipeline: pipelineDesc.pipeline,
       estimated_cost_usd: estimate.estimateUsd,
       mode,
       format,

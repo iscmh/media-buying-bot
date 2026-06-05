@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { callGeminiVision } from '@mbb/ai-providers';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
-import { UGC_DECONSTRUCTOR_SYSTEM_PROMPT } from '@mbb/shared';
+import { UGC_DECONSTRUCTOR_SYSTEM_PROMPT, describePipeline, pipelineFromString } from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { downloadAsBase64 } from '../lib/storage';
@@ -84,17 +84,11 @@ export const analyzeConcept = inngest.createFunction(
       // (Kling + ElevenLabs) gets its own worker; avatar talking head
       // (HeyGen) keeps the legacy event. Format is set at job creation
       // time on the form; defaults to avatar_talking_head.
-      const mockFormat = await loadJobFormat(jobId);
-      await step.sendEvent(
-        `fan-out-${mockFormat === 'cinematic_voiceover' ? 'cinematic' : 'ugc'}-mock`,
-        {
-          name:
-            mockFormat === 'cinematic_voiceover'
-              ? 'generation/cinematic.requested'
-              : 'generation/ugc.requested',
-          data: { jobId, userId, mode },
-        },
-      );
+      const mockEvent = await loadJobRoutingEvent(jobId);
+      await step.sendEvent(`fan-out-mock-${mockEvent.replace(/\W/g, '_')}`, {
+        name: mockEvent,
+        data: { jobId, userId, mode },
+      });
       return { jobId, mode, path: 'mock' };
     }
 
@@ -243,37 +237,46 @@ export const analyzeConcept = inngest.createFunction(
 
     // Polish-4: split fan-out by creative format. See mock-path comment
     // above for the routing rationale.
-    const liveFormat = await loadJobFormat(jobId);
-    await step.sendEvent(
-      `fan-out-${liveFormat === 'cinematic_voiceover' ? 'cinematic' : 'ugc'}-live`,
-      {
-        name:
-          liveFormat === 'cinematic_voiceover'
-            ? 'generation/cinematic.requested'
-            : 'generation/ugc.requested',
-        data: { jobId, userId, mode },
-      },
-    );
+    const liveEvent = await loadJobRoutingEvent(jobId);
+    await step.sendEvent(`fan-out-live-${liveEvent.replace(/\W/g, '_')}`, {
+      name: liveEvent,
+      data: { jobId, userId, mode },
+    });
 
     return { jobId, mode, path: 'live', ok: true, costUsd: visionResult.costUsd };
   },
 );
 
 /**
- * Polish-4: look up which creative format the job picked. Used to fan
- * out to the right downstream worker. Returns the default
- * 'avatar_talking_head' on any error so the job doesn't stall — the
- * default worker exists for every user.
+ * Polish-9.2: read the Polish-6 picked_pipeline + Polish-4 format columns
+ * and return the canonical worker event name to dispatch. Precedence:
+ *   1. picked_pipeline set → use the descriptor's workerEvent.
+ *   2. format = 'cinematic_voiceover' → legacy Polish-4 cinematic worker.
+ *   3. otherwise → default UGC (HeyGen) worker.
+ *
+ * Returns 'generation/ugc.requested' on any error so the job doesn't
+ * stall — the default worker exists for every user.
  */
-async function loadJobFormat(jobId: string): Promise<string> {
+async function loadJobRoutingEvent(
+  jobId: string,
+): Promise<
+  | 'generation/ugc.requested'
+  | 'generation/cinematic.requested'
+  | 'generation/kling-multi-clip.requested'
+  | 'generation/sora.requested'
+  | 'generation/nano-banana.requested'
+> {
   try {
     const db = getDb();
     const row = await db.query.generationJobs.findFirst({
       where: eq(schema.generationJobs.id, jobId),
-      columns: { format: true },
+      columns: { format: true, pickedPipeline: true },
     });
-    return row?.format ?? 'avatar_talking_head';
+    const pipeline = pipelineFromString(row?.pickedPipeline);
+    if (pipeline) return describePipeline(pipeline).workerEvent;
+    if (row?.format === 'cinematic_voiceover') return 'generation/cinematic.requested';
+    return 'generation/ugc.requested';
   } catch {
-    return 'avatar_talking_head';
+    return 'generation/ugc.requested';
   }
 }

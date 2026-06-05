@@ -1,7 +1,12 @@
 import { notFound } from 'next/navigation';
 import { and, asc, eq } from 'drizzle-orm';
 import { assertDailyLaunchBudgetCap, getDb, schema } from '@mbb/db';
-import { FIRST_LIVE_LAUNCH_HARD_CAP_USD, PLATFORM_HARD_AD_DAILY_BUDGET_USD } from '@mbb/shared';
+import {
+  FIRST_LIVE_LAUNCH_HARD_CAP_USD,
+  PLATFORM_HARD_AD_DAILY_BUDGET_USD,
+  describePipeline,
+  pipelineFromString,
+} from '@mbb/shared';
 import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AppShell } from '@/components/shell/app-shell';
@@ -105,6 +110,12 @@ export default async function JobReviewPage({ params }: Props) {
   const isProcessing = job.status === 'queued' || job.status === 'processing';
   const isFailed = job.status === 'failed';
 
+  // Polish-9.2: render the actual picked pipeline (label + canonical
+  // providerChoice) instead of the legacy format-derived "avatar talking
+  // head" placeholder. Falls back to the format column for legacy rows.
+  const jobPipelineEnum = pipelineFromString(job.pickedPipeline);
+  const jobPipelineDesc = jobPipelineEnum ? describePipeline(jobPipelineEnum) : null;
+
   return (
     <AppShell
       crumbs={[{ label: 'Jobs', href: '/concepts' }, { label: job.id.slice(0, 8) }]}
@@ -122,23 +133,26 @@ export default async function JobReviewPage({ params }: Props) {
           </div>
           <div>
             <span className="text-fg-subtle">Provider </span>
-            <span className="font-mono">{job.providerChoice ?? 'gemini+claude'}</span>
+            <span className="font-mono">
+              {jobPipelineDesc?.providerChoice ?? job.providerChoice ?? 'gemini+claude'}
+            </span>
           </div>
-          {conceptType === 'ugc' && (
-            <div>
-              <span className="text-fg-subtle">Format </span>
-              <span className="font-mono">
-                {job.format === 'cinematic_voiceover'
-                  ? 'cinematic voiceover'
-                  : 'avatar talking head'}
-              </span>
-            </div>
-          )}
-          {job.pickedPipeline && (
+          {jobPipelineDesc ? (
             <div>
               <span className="text-fg-subtle">Pipeline </span>
-              <span className="font-mono">{job.pickedPipeline.replace(/_/g, ' ')}</span>
+              <span className="font-mono">{jobPipelineDesc.label}</span>
             </div>
+          ) : (
+            conceptType === 'ugc' && (
+              <div>
+                <span className="text-fg-subtle">Format </span>
+                <span className="font-mono">
+                  {job.format === 'cinematic_voiceover'
+                    ? 'cinematic voiceover'
+                    : 'avatar talking head'}
+                </span>
+              </div>
+            )
           )}
           {job.estimatedCostUsd != null && (
             <div>

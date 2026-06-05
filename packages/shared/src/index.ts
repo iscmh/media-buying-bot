@@ -8,6 +8,7 @@ export * from './ai-provider-form';
 export * from './tool-provider-form';
 export * from './timezone';
 export * from './cost-estimation';
+export * from './pipeline-descriptors';
 export * from './actual-cost';
 export * from './prompts';
 export * from './decision-engine';

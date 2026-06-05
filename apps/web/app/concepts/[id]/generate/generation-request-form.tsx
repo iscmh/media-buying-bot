@@ -3,7 +3,9 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  ALL_PIPELINES,
   MAX_VARIANTS_PER_JOB,
+  describePipeline,
   estimateGenerationCost,
   type ConceptType,
   type CreativeFormat,
@@ -85,16 +87,23 @@ export function GenerationRequestForm({
   const [variantCount, setVariantCount] = React.useState<number>(10);
   const [liveAck, setLiveAck] = React.useState(initialLiveAck);
   const [showLiveDialog, setShowLiveDialog] = React.useState(false);
+  const [showOverrideDialog, setShowOverrideDialog] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [pending, startTransition] = React.useTransition();
 
-  // Polish-6: auto-detect creative format + pipeline.
+  // Polish-6 + Polish-9.2: auto-detect creative format + pipeline.
+  // overridePipeline (when set) takes precedence over the detection.
+  // effectivePipeline is what actually drives submission + cost estimate.
   const [detection, setDetection] = React.useState<DetectAndRouteResult | null>(null);
   const [detecting, setDetecting] = React.useState(false);
-  const detectedPipeline = detection?.pipeline as PipelineType | undefined;
+  const [overridePipeline, setOverridePipeline] = React.useState<PipelineType | null>(null);
+  const detectedPipeline = (detection?.pipeline as PipelineType | undefined) ?? null;
+  const effectivePipeline: PipelineType | null = overridePipeline ?? detectedPipeline;
 
   const heygenReady = connectedProviders.heygen.connected;
-  const format: CreativeFormat = 'avatar_talking_head';
+  // Pipeline is the source of truth — format derives from it.
+  const effectiveDescriptor = effectivePipeline ? describePipeline(effectivePipeline) : null;
+  const effectiveFormat = (effectiveDescriptor?.format ?? 'avatar_talking_head') as CreativeFormat;
 
   const estimate = React.useMemo(
     () =>
@@ -102,10 +111,10 @@ export function GenerationRequestForm({
         conceptType,
         variantCount: Math.max(1, Math.min(MAX_VARIANTS_PER_JOB, variantCount || 1)),
         provider: conceptType === 'ugc' ? 'heygen' : undefined,
-        format: conceptType === 'ugc' ? format : undefined,
-        pipeline: detectedPipeline,
+        format: conceptType === 'ugc' ? effectiveFormat : undefined,
+        pipeline: effectivePipeline ?? undefined,
       }),
-    [conceptType, variantCount, format, detectedPipeline],
+    [conceptType, variantCount, effectiveFormat, effectivePipeline],
   );
 
   const [referenceStoragePath, setReferenceStoragePath] = React.useState<string | null>(null);
@@ -188,8 +197,12 @@ export function GenerationRequestForm({
     formData.set('variantCount', String(variantCount));
     // mode defaults to 'live' server-side; explicit for log clarity.
     formData.set('mode', 'live');
-    formData.set('format', format);
-    if (detectedPipeline) formData.set('pipeline', detectedPipeline);
+    // Polish-9.2: pipeline is the canonical routing input. format +
+    // providerChoice derive from the descriptor on the server. We send
+    // the effective pipeline (override OR detected); when neither is set
+    // the server falls back to heygen_avatar_talking_head for legacy
+    // concepts without a reference upload.
+    if (effectivePipeline) formData.set('pipeline', effectivePipeline);
     // Polish-9: pass the uploaded reference's storage path so the job
     // row can re-load it later for re-detection or downstream pipelines.
     if (referenceStoragePath) formData.set('referenceStoragePath', referenceStoragePath);
@@ -300,21 +313,46 @@ export function GenerationRequestForm({
               Analyzing creative...
             </div>
           )}
-          {detection?.ok && detection.detection && (
+          {(detection?.ok && detection.detection) || effectivePipeline ? (
             <div className="bg-bg-elevated space-y-1.5 rounded-md border p-3 text-sm">
-              <p>
-                <span className="text-fg-muted">Detected: </span>
-                <span className="text-fg font-mono font-medium">
-                  {detection.detection.format.replace(/_/g, ' ')}
-                </span>
-              </p>
-              {detection.pipeline && (
+              {detection?.ok && detection.detection && (
                 <p>
-                  <span className="text-fg-muted">Pipeline: </span>
-                  <span className="text-fg font-mono font-medium">{detection.pipelineLabel}</span>
+                  <span className="text-fg-muted">Detected: </span>
+                  <span className="text-fg font-mono font-medium">
+                    {detection.detection.format.replace(/_/g, ' ')}
+                  </span>
                 </p>
               )}
-              {detection.detection.demographics?.gender && (
+              {effectiveDescriptor && (
+                <p>
+                  <span className="text-fg-muted">Pipeline: </span>
+                  <span className="text-fg font-mono font-medium">
+                    {effectiveDescriptor.label}
+                  </span>{' '}
+                  {overridePipeline ? (
+                    <span className="text-fg-muted text-xs">
+                      (manual override —{' '}
+                      <button
+                        type="button"
+                        className="hover:text-fg underline"
+                        onClick={() => setOverridePipeline(null)}
+                      >
+                        reset to auto
+                      </button>
+                      )
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="text-fg-muted hover:text-fg ml-1 text-xs underline"
+                      onClick={() => setShowOverrideDialog(true)}
+                    >
+                      Override
+                    </button>
+                  )}
+                </p>
+              )}
+              {detection?.detection?.demographics?.gender && (
                 <p className="text-fg-muted text-xs">
                   {detection.detection.demographics.gender}
                   {detection.detection.demographics.ageRange
@@ -322,17 +360,26 @@ export function GenerationRequestForm({
                     : ''}
                 </p>
               )}
-              {detection.errorMessage && !detection.pipeline && (
+              {detection?.errorMessage && !detection.pipeline && !overridePipeline && (
                 <p className="text-xs text-[color:var(--destructive-color)]">
                   {detection.errorMessage}
                 </p>
               )}
             </div>
-          )}
-          {!detection && !detecting && (
-            <p className="text-fg-muted text-xs">
-              No reference? Default: {heygenReady ? 'HeyGen Avatar Mode' : 'auto-pick on submit'}.
-            </p>
+          ) : null}
+          {!detection && !detecting && !overridePipeline && (
+            <div className="space-y-1">
+              <p className="text-fg-muted text-xs">
+                No reference? Default: {heygenReady ? 'HeyGen Avatar Mode' : 'pick one manually'}.
+              </p>
+              <button
+                type="button"
+                className="text-fg-muted hover:text-fg text-xs underline"
+                onClick={() => setShowOverrideDialog(true)}
+              >
+                Pick a pipeline manually
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -423,6 +470,83 @@ export function GenerationRequestForm({
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Polish-9.2: pipeline override picker. */}
+      <Dialog open={showOverrideDialog} onOpenChange={setShowOverrideDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pick a generation pipeline</DialogTitle>
+            <DialogDescription>
+              Override what the bot auto-detected. Greyed-out options need a provider you
+              haven&rsquo;t connected yet.
+            </DialogDescription>
+          </DialogHeader>
+          <fieldset className="space-y-2">
+            {ALL_PIPELINES.map((p) => {
+              const desc = describePipeline(p);
+              const ready = providerReadyForPipeline(p, connectedProviders);
+              const selected = (overridePipeline ?? detectedPipeline) === p;
+              return (
+                <label
+                  key={p}
+                  className={
+                    'flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors ' +
+                    (!ready
+                      ? 'bg-bg-elevated cursor-not-allowed opacity-50'
+                      : selected
+                        ? 'border-fg-muted bg-bg-hover'
+                        : 'bg-bg-elevated hover:bg-bg-hover')
+                  }
+                >
+                  <input
+                    type="radio"
+                    name="overridePipeline"
+                    value={p}
+                    checked={selected}
+                    disabled={!ready}
+                    onChange={() => setOverridePipeline(p)}
+                    className="mt-1 h-4 w-4"
+                  />
+                  <span className="flex-1">
+                    <span className="text-fg block text-sm font-medium">{desc.label}</span>
+                    {!ready && (
+                      <span className="text-fg-muted block text-xs">
+                        Connect {desc.requiredProviders.join(' + ')} on /connections to enable.
+                      </span>
+                    )}
+                  </span>
+                </label>
+              );
+            })}
+          </fieldset>
+          <div className="flex justify-end gap-2">
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              onClick={() => setShowOverrideDialog(false)}
+              disabled={!overridePipeline && !detectedPipeline}
+            >
+              Use this pipeline
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </form>
   );
+}
+
+function providerReadyForPipeline(pipeline: PipelineType, conns: ConnectedProviders): boolean {
+  const required = describePipeline(pipeline).requiredProviders;
+  for (const r of required) {
+    if (r === 'heygen' && !conns.heygen.connected) return false;
+    if (r === 'kling' && !conns.kling.connected) return false;
+    if (r === 'openai' && !conns.openai.connected) return false;
+    if (r === 'gemini' && !conns.gemini.connected) return false;
+    if (r === 'elevenlabs' && !conns.elevenlabs.connected) return false;
+  }
+  return true;
 }
