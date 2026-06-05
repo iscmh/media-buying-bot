@@ -25,8 +25,13 @@ import {
   type ConnectedProviders,
   type DetectAndRouteResult,
   createGenerationJobAction,
-  detectAndRouteAction,
+  createReferenceUploadUrl,
+  detectAndRouteFromStoragePath,
 } from './actions';
+
+// Polish-9: client-side cap matches the bucket file_size_limit set in
+// migration 0028. Reject larger files BEFORE we hit Supabase Storage.
+const MAX_REFERENCE_BYTES = 100 * 1024 * 1024;
 
 interface Props {
   conceptId: string;
@@ -103,20 +108,68 @@ export function GenerationRequestForm({
     [conceptType, variantCount, format, detectedPipeline],
   );
 
+  const [referenceStoragePath, setReferenceStoragePath] = React.useState<string | null>(null);
+
   async function handleReferenceUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Polish-9: validate before anything else.
+    if (file.size > MAX_REFERENCE_BYTES) {
+      setError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Max 100 MB.`);
+      return;
+    }
+
     setDetecting(true);
     setDetection(null);
     setError(null);
+    setReferenceStoragePath(null);
+
     try {
-      const buffer = await file.arrayBuffer();
-      const base64 = btoa(new Uint8Array(buffer).reduce((s, b) => s + String.fromCharCode(b), ''));
-      const result = await detectAndRouteAction(base64, file.type);
+      // 1. Get a signed upload URL (server action; tiny payload, no 4.5 MB risk).
+      const signed = await createReferenceUploadUrl(file.name, file.type);
+      if (!signed || !signed.ok || !signed.uploadUrl || !signed.storagePath) {
+        setError(signed?.errorMessage ?? 'Could not create upload URL.');
+        return;
+      }
+
+      // 2. PUT the file directly to Supabase Storage. Bypasses Vercel's
+      //    4.5 MB request limit entirely.
+      let uploadResponse: Response | undefined;
+      try {
+        uploadResponse = await fetch(signed.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': file.type || 'application/octet-stream' },
+          body: file,
+        });
+      } catch (netErr) {
+        setError(
+          `Upload network error: ${netErr instanceof Error ? netErr.message : String(netErr)}`,
+        );
+        return;
+      }
+      if (!uploadResponse || !uploadResponse.ok) {
+        const status = uploadResponse?.status;
+        if (status === 413) {
+          setError('File too large (max 100 MB).');
+        } else {
+          setError(`Upload failed${status ? ` (HTTP ${status})` : ''}.`);
+        }
+        return;
+      }
+
+      setReferenceStoragePath(signed.storagePath);
+
+      // 3. Run vision detection server-side on the uploaded file.
+      const result = await detectAndRouteFromStoragePath(signed.storagePath, file.type);
+      if (!result) {
+        setError('Detection returned no result.');
+        return;
+      }
       setDetection(result);
       if (!result.ok && result.errorMessage) setError(result.errorMessage);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Detection failed.');
+      setError(err instanceof Error ? err.message : 'Upload failed.');
     } finally {
       setDetecting(false);
     }
@@ -137,6 +190,9 @@ export function GenerationRequestForm({
     formData.set('mode', 'live');
     formData.set('format', format);
     if (detectedPipeline) formData.set('pipeline', detectedPipeline);
+    // Polish-9: pass the uploaded reference's storage path so the job
+    // row can re-load it later for re-detection or downstream pipelines.
+    if (referenceStoragePath) formData.set('referenceStoragePath', referenceStoragePath);
 
     startTransition(async () => {
       setError(null);

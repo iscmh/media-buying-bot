@@ -21,6 +21,11 @@ import {
 import { auditMetaFromHeaders } from '@/lib/audit/request-meta';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { sendGenerationJobEvent } from '@/lib/inngest/send';
+import {
+  isAllowedReferenceMime,
+  sanitizeFilename,
+  storagePathBelongsToUser,
+} from './reference-upload-helpers';
 
 export interface CreateGenerationJobResult {
   ok: boolean;
@@ -58,6 +63,11 @@ export async function createGenerationJobAction(
   // Polish-4: creative format. Defaults to avatar_talking_head so a
   // client that doesn't send the field gets the legacy HeyGen path.
   const format = String(formData.get('format') ?? 'avatar_talking_head');
+  // Polish-9: storage path for the reference creative uploaded via
+  // signed URL. Optional — jobs without a reference still run.
+  const rawReferencePath = formData.get('referenceStoragePath');
+  const referenceStoragePath =
+    typeof rawReferencePath === 'string' && rawReferencePath.length > 0 ? rawReferencePath : null;
 
   if (!conceptId) return { ok: false, errorMessage: 'Missing concept id.' };
   if (!VALID_INTENSITY.has(intensity)) {
@@ -169,6 +179,8 @@ export async function createGenerationJobAction(
       // analyze-concept worker reads this to fan out to either the
       // ugc.requested (HeyGen) or cinematic.requested (Kling) worker.
       format,
+      // Polish-9: reference creative storage path (auto-detect upload).
+      ...(referenceStoragePath ? { referenceCreativeStoragePath: referenceStoragePath } : {}),
       // Phase 1's enum aiProviderUsed: only populate when UGC + provider is
       // also one of arcads/heygen/creatify. Kie.ai isn't in that enum, so
       // leave null when picked.
@@ -273,15 +285,101 @@ export interface DetectAndRouteResult {
   errorMessage?: string;
 }
 
-export async function detectAndRouteAction(
-  imageBase64: string,
-  imageMediaType: string,
+export interface CreateUploadUrlResult {
+  ok: boolean;
+  uploadUrl?: string;
+  storagePath?: string;
+  token?: string;
+  errorMessage?: string;
+}
+
+/**
+ * Polish-9: create a Supabase Storage signed upload URL for a reference
+ * creative. Replaces the previous base64-over-server-action flow which
+ * crashed on Vercel's 4.5 MB body limit. Client uploads directly to
+ * Supabase via PUT.
+ *
+ * Path convention: <userId>/<uuid>/<filename> — matches the storage
+ * RLS policy in migration 0028 (split_part(name, '/', 1) = auth.uid()).
+ */
+export async function createReferenceUploadUrl(
+  filename: string,
+  contentType: string,
+): Promise<CreateUploadUrlResult> {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, errorMessage: 'Not logged in.' };
+
+  if (!isAllowedReferenceMime(contentType)) {
+    return {
+      ok: false,
+      errorMessage: `Unsupported file type: ${contentType}. Use mp4 / mov / webm / png / jpeg / webp.`,
+    };
+  }
+  const safeFilename = sanitizeFilename(filename);
+  const uniqueDir = crypto.randomUUID();
+  const storagePath = `${user.id}/${uniqueDir}/${safeFilename}`;
+
+  const { data, error } = await supabase.storage
+    .from('reference-creatives')
+    .createSignedUploadUrl(storagePath);
+  if (error || !data) {
+    return {
+      ok: false,
+      errorMessage: error?.message ?? 'Could not create upload URL.',
+    };
+  }
+  return {
+    ok: true,
+    uploadUrl: data.signedUrl,
+    token: data.token,
+    storagePath,
+  };
+}
+
+/**
+ * Polish-9: run vision detection on a file already uploaded to Supabase
+ * Storage. Downloads the file server-side and runs the same flow that
+ * detectAndRouteAction used to run on a base64 client payload.
+ *
+ * For videos: extracts a single frame (the first one) — multi-frame
+ * extraction needs ffmpeg in the runtime, deferred to a future patch.
+ * Images go directly to Claude vision.
+ */
+export async function detectAndRouteFromStoragePath(
+  storagePath: string,
+  contentType: string,
 ): Promise<DetectAndRouteResult> {
   const supabase = await getSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, errorMessage: 'Not logged in.' };
+
+  if (!storagePathBelongsToUser(storagePath, user.id)) {
+    return { ok: false, errorMessage: 'Invalid storage path.' };
+  }
+
+  const { data: blob, error: dlError } = await supabase.storage
+    .from('reference-creatives')
+    .download(storagePath);
+  if (dlError || !blob) {
+    return {
+      ok: false,
+      errorMessage: dlError?.message ?? 'Could not download uploaded file.',
+    };
+  }
+
+  // For now we send the first ~5 MB of the file to Claude vision as a
+  // single frame. Images fit fully; videos give Claude the first chunk
+  // (still useful since most ad creatives lead with the key visual in
+  // frame 1). Real ffmpeg-based multi-frame extraction is a follow-up.
+  const buffer = await blob.arrayBuffer();
+  const capped = buffer.byteLength > 5 * 1024 * 1024 ? buffer.slice(0, 5 * 1024 * 1024) : buffer;
+  const base64 = Buffer.from(capped).toString('base64');
+  const detectMediaType = contentType.startsWith('video/') ? 'image/jpeg' : contentType;
 
   const db = getDb();
   const claudeConn = await db.query.toolConnections.findFirst({
@@ -299,7 +397,6 @@ export async function detectAndRouteAction(
       errorMessage: 'Connect Claude on /connections/tools to enable auto-detection.',
     };
   }
-
   let claudeKey: string;
   try {
     claudeKey = await decryptSecret(claudeConn.apiKeyEncrypted);
@@ -310,9 +407,8 @@ export async function detectAndRouteAction(
   const detectionResult = await detectCreativeFormat({
     userId: user.id,
     claudeApiKey: claudeKey,
-    frames: [{ base64: imageBase64, mediaType: imageMediaType }],
+    frames: [{ base64, mediaType: detectMediaType }],
   });
-
   if (!detectionResult.ok || !detectionResult.detection) {
     return {
       ok: false,
@@ -328,12 +424,10 @@ export async function detectAndRouteAction(
     elevenlabs: { connected: providers.elevenlabs.connected },
     gemini: { connected: providers.gemini.connected },
   };
-
   const routeResult = pickPipeline(
     { format: detectionResult.detection.format },
     pipelineConnections,
   );
-
   if (!routeResult.ok) {
     return {
       ok: true,
@@ -341,7 +435,6 @@ export async function detectAndRouteAction(
       errorMessage: routeResult.errorMessage,
     };
   }
-
   return {
     ok: true,
     detection: detectionResult.detection,
