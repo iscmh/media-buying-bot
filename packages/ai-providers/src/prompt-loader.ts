@@ -1,69 +1,38 @@
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { PROMPTS } from './generated/prompts-bundle';
 
 /**
- * Polish-6 item 3: typed prompt loader. Lazy-reads .md files from
- * src/prompts/ at first access via fs.readFileSync. Content is cached
- * in module-level closures — subsequent calls return the cached string
- * with zero I/O.
+ * Polish-6 + Polish-9.5: typed prompt loader.
  *
- * WHY fs.readFileSync instead of inlining the text as a TS string:
- *   - The user's prompt files are field-tested at scale. Inlining them
- *     invites accidental reformatting by linters, editors, or difftools.
- *   - The .md files are the source of truth; code READS them, never
- *     owns them.
+ * Polish-6 originally read .md files via fs.readFileSync at runtime and
+ * relied on Vercel's outputFileTracingIncludes to bundle them with the
+ * serverless function. In practice the tracing config never resolved
+ * inside the deployed function — every Kling/Sora/Nano-Banana run
+ * crashed on cold start with "Could not locate prompts directory".
  *
- * Vercel compatibility: the prompts dir must be bundled into the
- * serverless function output. next.config needs:
- *   experimental: { outputFileTracingIncludes: {
- *     '/api/inngest': ['./node_modules/@mbb/ai-providers/src/prompts/**']
- *   }}
- * The resolvePromptsDir() helper tries multiple base paths so the
- * loader works in dev (workspace source), production (bundled), and
- * vitest (cwd-relative).
+ * Polish-9.5 switches to build-time bundling. scripts/build-prompts.mjs
+ * walks src/prompts/**\/*.md at install time, escapes each file's
+ * content into a template literal, and writes src/generated/prompts-
+ * bundle.ts exporting a Readonly<Record<string,string>>. The text ships
+ * inside the JS bundle, no file-tracing required.
+ *
+ * The .md sources stay the source of truth. The build script writes
+ * them verbatim — byte-for-byte fidelity is enforced by the prompt
+ * fidelity rule from Polish-6.
  */
 
-let _promptsDir: string | null = null;
-
-function resolvePromptsDir(): string {
-  if (_promptsDir) return _promptsDir;
-
-  // ESM: __dirname equivalent
-  const thisDir =
-    typeof __dirname !== 'undefined' ? __dirname : dirname(fileURLToPath(import.meta.url));
-
-  const candidates = [
-    join(thisDir, '..', 'prompts'),
-    join(thisDir, 'prompts'),
-    join(process.cwd(), 'packages', 'ai-providers', 'src', 'prompts'),
-    join(process.cwd(), 'node_modules', '@mbb', 'ai-providers', 'src', 'prompts'),
-  ];
-
-  for (const dir of candidates) {
-    try {
-      readFileSync(join(dir, 'master', 'universal-ugc-master-prompt.md'), 'utf-8');
-      _promptsDir = dir;
-      return dir;
-    } catch {
-      // try next
-    }
-  }
-
-  throw new Error(
-    `Could not locate prompts directory. Tried:\n${candidates.join('\n')}\n` +
-      'Ensure the prompts/ folder is included in the Vercel function bundle ' +
-      'via outputFileTracingIncludes.',
-  );
-}
-
-function lazyLoad(relativePath: string): () => string {
+function loadPrompt(relativePath: string): () => string {
   let cached: string | null = null;
   return () => {
     if (cached !== null) return cached;
-    const dir = resolvePromptsDir();
-    cached = readFileSync(join(dir, relativePath), 'utf-8');
-    return cached;
+    const text = PROMPTS[relativePath];
+    if (typeof text !== 'string' || text.length === 0) {
+      throw new Error(
+        `Prompt missing from bundle: ${relativePath}. ` +
+          `Run "pnpm --filter @mbb/ai-providers build:prompts" to regenerate.`,
+      );
+    }
+    cached = text;
+    return text;
   };
 }
 
@@ -71,42 +40,43 @@ function lazyLoad(relativePath: string): () => string {
 // Exported prompt getters
 // =========================================================================
 
-export const getUniversalUgcMasterPrompt = lazyLoad('master/universal-ugc-master-prompt.md');
+export const getUniversalUgcMasterPrompt = loadPrompt('master/universal-ugc-master-prompt');
 
-export const getForgeExample = lazyLoad('examples/forge-tallow-balm-dr-marcus.md');
+export const getForgeExample = loadPrompt('examples/forge-tallow-balm-dr-marcus');
 
-export const getKling3DeconstructorSystem = lazyLoad(
-  'kling/kling-3.0-omni-deconstructor-system-prompt.md',
+export const getKling3DeconstructorSystem = loadPrompt(
+  'kling/kling-3.0-omni-deconstructor-system-prompt',
 );
 
-export const getKling3OfficialGuide = lazyLoad('kling/kling-3.0-omni-official-user-guide.md');
+export const getKling3OfficialGuide = loadPrompt('kling/kling-3.0-omni-official-user-guide');
 
-export const getSora2DeconstructorSystem = lazyLoad(
-  'sora/gemini-ugc-deconstructor-gem-system-prompt.md',
+export const getSora2DeconstructorSystem = loadPrompt(
+  'sora/gemini-ugc-deconstructor-gem-system-prompt',
 );
 
-export const getSora2OptimizerInstructions = lazyLoad(
-  'sora/claude-sora-optimizer-project-instructions.md',
+export const getSora2OptimizerInstructions = loadPrompt(
+  'sora/claude-sora-optimizer-project-instructions',
 );
 
-export const getSora2Examples = lazyLoad('sora/sora-2-output-examples-video-1-and-2.md');
+export const getSora2Examples = loadPrompt('sora/sora-2-output-examples-video-1-and-2');
 
-export const getUgcIphoneRealismSkill = lazyLoad(
-  'image-generation/ugc-photorealistic-iphone-skill.md',
+export const getUgcIphoneRealismSkill = loadPrompt(
+  'image-generation/ugc-photorealistic-iphone-skill',
 );
 
-export const getNanoBananaJsonTemplate = lazyLoad(
-  'image-generation/nano-banana-character-cloning-json-template.md',
+export const getNanoBananaJsonTemplate = loadPrompt(
+  'image-generation/nano-banana-character-cloning-json-template',
 );
 
-export const getCharacterReplacePrompt = lazyLoad(
-  'image-generation/short-prompts-character-replace-and-action-change.md',
+export const getCharacterReplacePrompt = loadPrompt(
+  'image-generation/short-prompts-character-replace-and-action-change',
 );
 
 /**
- * For diagnostics: returns the resolved base directory the loader
- * found. Useful in health-check endpoints.
+ * Polish-9.5: returns the count of prompts in the bundle. Diagnostic
+ * helper that replaces the old getPromptsBaseDir() — the bundle has
+ * no on-disk base dir anymore.
  */
-export function getPromptsBaseDir(): string {
-  return resolvePromptsDir();
+export function getPromptsBundleSize(): number {
+  return Object.keys(PROMPTS).length;
 }

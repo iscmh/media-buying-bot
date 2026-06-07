@@ -9,10 +9,12 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit",
+    "build:prompts": "node scripts/build-prompts.mjs",
+    "build": "node scripts/build-prompts.mjs && tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "node scripts/build-prompts.mjs && vitest run",
+    "postinstall": "node scripts/build-prompts.mjs"
   },
   "dependencies": {
     "@mbb/db": "workspace:*",

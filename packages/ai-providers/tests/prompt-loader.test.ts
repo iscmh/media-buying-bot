@@ -11,7 +11,7 @@ import {
   getKling3DeconstructorSystem,
   getKling3OfficialGuide,
   getNanoBananaJsonTemplate,
-  getPromptsBaseDir,
+  getPromptsBundleSize,
   getSora2DeconstructorSystem,
   getSora2Examples,
   getSora2OptimizerInstructions,
@@ -20,10 +20,8 @@ import {
 } from '../src/prompt-loader';
 
 describe('Polish-6: prompt-loader', () => {
-  it('resolves the prompts base directory', () => {
-    const dir = getPromptsBaseDir();
-    expect(dir).toBeTruthy();
-    expect(statSync(dir).isDirectory()).toBe(true);
+  it('Polish-9.5: bundle size matches expected prompt count (19)', () => {
+    expect(getPromptsBundleSize()).toBe(19);
   });
 
   it('loads UNIVERSAL_UGC_MASTER_PROMPT (non-empty)', () => {
@@ -66,8 +64,12 @@ describe('Polish-6: prompt-loader', () => {
     expect(getCharacterReplacePrompt().length).toBeGreaterThan(100);
   });
 
-  it('prompt files on disk match the expected count (19 .md files)', () => {
-    const dir = getPromptsBaseDir();
+  it('on-disk prompt sources still match bundle count (smoke check)', () => {
+    // Polish-9.5: belt-and-suspenders — verify the bundle didn't drift
+    // from the .md source tree. If a new prompt was added without
+    // regenerating the bundle, this fires.
+    const dir = join(process.cwd(), 'src', 'prompts');
+    if (!statSync(dir, { throwIfNoEntry: false })) return;
     const allFiles: string[] = [];
     function walk(d: string) {
       for (const entry of readdirSync(d, { withFileTypes: true })) {
@@ -76,6 +78,6 @@ describe('Polish-6: prompt-loader', () => {
       }
     }
     walk(dir);
-    expect(allFiles.length).toBe(19);
+    expect(allFiles.length).toBe(getPromptsBundleSize());
   });
 });

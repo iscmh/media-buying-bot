@@ -141,5 +141,5 @@ export {
   getUgcIphoneRealismSkill,
   getNanoBananaJsonTemplate,
   getCharacterReplacePrompt,
-  getPromptsBaseDir,
+  getPromptsBundleSize,
 } from './prompt-loader';
