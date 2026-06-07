@@ -786,45 +786,127 @@ function deriveDurationFromBody(body: string): number | undefined {
 }
 
 /**
- * Build the per-clip Nano Banana prompt. If the parser populated a
- * clip-specific image prompt (legacy path), use that directly.
- * Otherwise: character + set + Section B imageGuidance + clip's
- * videoPrompt — the master-prompt-defined image context plus this
- * clip's directive body, so the first frame matches the scene and
- * action Kling will animate.
+ * Polish-9.15: the master prompt's Section A is human context for
+ * downstream workflows ("Photorealistic three-view character sheet,
+ * front view, side view, back view of ..."). When that phrasing
+ * lands directly in Nano Banana's prompt the model dutifully
+ * produces a character reference sheet — three poses tiled in one
+ * image — and Kling animates the sheet. Strip the offending tokens
+ * here so the description survives but the format directive doesn't.
+ */
+export function stripCharacterSheetPattern(text: string): string {
+  return text
+    .replace(/photorealistic\s+three[\s-]view\s+character\s+sheet[^.]*\./gi, '')
+    .replace(/three[\s-]view\s+character\s+sheet[^.]*\./gi, '')
+    .replace(/front\s+view\s*,?\s*side\s+view\s*,?\s*(?:and\s+)?back\s+view[^.]*\./gi, '')
+    .replace(/character\s+sheet/gi, 'character description')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Polish-9.15: defense-in-depth framing block. Forces Nano Banana
+ * into single-subject single-view UGC selfie mode. Prepended to both
+ * clip 0 and continuation prompts so any residual character-sheet
+ * language in the source manual gets overridden.
+ */
+const UGC_FRAMING = [
+  'Single character, single view, NOT a character sheet, NOT a reference sheet, NOT multiple angles, NOT front/back/side views.',
+  'Generate a single photorealistic UGC selfie-style frame.',
+  'Camera: smartphone (iPhone) eye-level shot, vertical 9:16 portrait.',
+  'Authentic UGC selfie aesthetic. NOT AI-generated looking. Ultra-realistic skin texture, natural pores.',
+  'ONLY the single character described, in the single scene described.',
+].join(' ');
+
+/**
+ * Polish-9.15: extract wardrobe / clothing phrasing from the
+ * character description so continuation prompts can repeat it
+ * verbatim. Without this, Nano Banana drifts on clothing color +
+ * type between clips (the blue→green t-shirt drift the user
+ * reported). Best-effort — returns empty string if no clear cue.
+ */
+export function extractWardrobeFromCharacter(text: string): string {
+  if (!text) return '';
+  const segments: string[] = [];
+  // "wearing X" up to next comma/period.
+  const wearing = text.match(/wearing\s+([^.]+?)(?:[.,]|$)/i);
+  if (wearing && wearing[1]) segments.push(wearing[1].trim());
+  // "in a Y shirt/dress/outfit/scrubs"
+  const inA = text.match(
+    /in\s+(?:a|an)\s+([^.]*?(?:shirt|dress|scrubs|outfit|jacket|hoodie|sweater|coat|uniform)[^.]*?)(?:[.,]|$)/i,
+  );
+  if (inA && inA[1]) segments.push(inA[1].trim());
+  return segments.join('; ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Build clip 0's Nano Banana prompt — the "Master First Frame" per
+ * the master prompt's design. Strips the three-view character sheet
+ * directive from Section A, drops Section B's imageGuidance (which
+ * frequently contains "IMAGE 1, IMAGE 2..." that confuses the model
+ * into producing multiple frames), prepends explicit UGC framing,
+ * and lands the result as a single ONE-frame selfie. Clip 0's output
+ * is what the reference chain anchors on, so any drift here
+ * propagates to every subsequent clip.
+ *
+ * The legacy clip.imagePrompt path is preserved for callers that
+ * pre-bake a per-clip image prompt; the UGC framing still wraps it.
  */
 export function buildImagePromptForClip(
   manual: { characterPrompt: string; setPrompt: string; imageGuidance?: string },
   clip: ClipSpec,
 ): string {
   if (clip.imagePrompt && clip.imagePrompt.trim()) {
-    return clip.imagePrompt;
+    return [UGC_FRAMING, clip.imagePrompt].join('\n\n');
   }
-  return [manual.characterPrompt, manual.setPrompt, manual.imageGuidance, clip.videoPrompt]
-    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
+  const character = stripCharacterSheetPattern(manual.characterPrompt);
+  return [
+    UGC_FRAMING,
+    `Character: ${character}`,
+    `Scene/Set: ${manual.setPrompt}`,
+    `Action this frame: ${clip.videoPrompt}`,
+    'CRITICAL: Generate ONE single frame from ONE camera angle. NOT a reference sheet. NOT multiple poses.',
+  ]
+    .filter((s) => s && s.trim().length > 0)
     .join('\n\n');
 }
 
 /**
- * Polish-9.12: prompt used for clips 1+ in the character-reference
- * chain. Frames the call as an EDIT operation against clip 0's image
- * (passed in as referenceImageBase64) using the master prompt's
- * documented "Same-Scene Continuations" pattern, so Gemini varies
- * gesture/prop/expression while preserving character identity,
- * lighting, framing, and set.
+ * Prompt used for clips 1+ in the character-reference chain. Frames
+ * the call as an EDIT operation against clip 0's image (passed in as
+ * referenceImageBase64) using the master prompt's documented "Same-
+ * Scene Continuations" pattern, so Gemini varies gesture/prop/
+ * expression while preserving character identity, lighting, framing,
+ * set, and (Polish-9.15) wardrobe. UGC framing repeated as defense
+ * in depth — Nano Banana drifts on later clips otherwise.
  */
 export function continuationImagePrompt(
   manual: { characterPrompt: string; setPrompt: string },
   clip: ClipSpec,
 ): string {
-  return [
+  const character = stripCharacterSheetPattern(manual.characterPrompt);
+  const wardrobe = extractWardrobeFromCharacter(manual.characterPrompt);
+  const lines = [
+    UGC_FRAMING,
     'Exact same framing as Image 1 — same character, same scene, same lighting.',
     `Now: ${clip.videoPrompt}`,
-    `Character reference: ${manual.characterPrompt}`,
+    `Character reference: ${character}`,
     `Set: ${manual.setPrompt}`,
     'Camera: same as Image 1. Deep focus on everything. No blur. Lighting: same as Image 1.',
+  ];
+  if (wardrobe) {
+    lines.push(
+      `Wardrobe: EXACTLY as in Image 1 — ${wardrobe}. Do NOT change clothing or accessories.`,
+    );
+  } else {
+    lines.push(
+      'Wardrobe: EXACTLY as in Image 1 — same clothing, same colors, same accessories. Do NOT change anything the character is wearing.',
+    );
+  }
+  lines.push(
     'ABSOLUTELY NO phones, cameras, screens, social media UI, floating text, or digital overlays.',
-  ].join('\n\n');
+  );
+  return lines.join('\n\n');
 }
 
 void logAuditEvent;

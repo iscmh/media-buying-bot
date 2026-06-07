@@ -13,7 +13,9 @@ import {
   buildImagePromptForClip,
   continuationImagePrompt,
   decideKlingJobOutcome,
+  extractWardrobeFromCharacter,
   parseProductionManual,
+  stripCharacterSheetPattern,
 } from '../src/functions/generate-kling-multi-clip-variants';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -273,7 +275,7 @@ describe('Polish-9.12: continuationImagePrompt (character-reference chain)', () 
 });
 
 describe('Polish-9.12: buildImagePromptForClip — clip 0 path', () => {
-  it('returns character + set + imageGuidance + videoPrompt joined', () => {
+  it('returns character + set + videoPrompt joined (imageGuidance intentionally excluded by Polish-9.15)', () => {
     const manual = {
       characterPrompt: 'A 30yo woman.',
       setPrompt: 'A sunny kitchen.',
@@ -287,8 +289,10 @@ describe('Polish-9.12: buildImagePromptForClip — clip 0 path', () => {
     const out = buildImagePromptForClip(manual, clip);
     expect(out).toContain('A 30yo woman.');
     expect(out).toContain('A sunny kitchen.');
-    expect(out).toContain('Photorealistic, no filters.');
     expect(out).toContain('Hold mug.');
+    // imageGuidance is NOT included to keep Nano Banana from generating
+    // multiple frames when Section B mentions "IMAGE 1, IMAGE 2, …".
+    expect(out).not.toContain('Photorealistic, no filters.');
   });
 
   it('uses clip.imagePrompt directly when populated', () => {
@@ -300,6 +304,159 @@ describe('Polish-9.12: buildImagePromptForClip — clip 0 path', () => {
       imagePrompt: 'Pre-baked image prompt for this clip.',
     };
     const out = buildImagePromptForClip(manual, clip);
-    expect(out).toBe('Pre-baked image prompt for this clip.');
+    expect(out).toBe(
+      'Single character, single view, NOT a character sheet, NOT a reference sheet, NOT multiple angles, NOT front/back/side views. Generate a single photorealistic UGC selfie-style frame. Camera: smartphone (iPhone) eye-level shot, vertical 9:16 portrait. Authentic UGC selfie aesthetic. NOT AI-generated looking. Ultra-realistic skin texture, natural pores. ONLY the single character described, in the single scene described.\n\nPre-baked image prompt for this clip.',
+    );
+  });
+});
+
+describe('Polish-9.15: stripCharacterSheetPattern', () => {
+  it('removes the "photorealistic three-view character sheet" directive', () => {
+    const input =
+      'Photorealistic three-view character sheet, front view, side view, back view. Man, mid-30s, olive complexion, dark curly hair.';
+    const out = stripCharacterSheetPattern(input);
+    expect(out).not.toMatch(/three[\s-]view character sheet/i);
+    expect(out).not.toMatch(/front view, side view, back view/i);
+    expect(out).toMatch(/Man, mid-30s, olive complexion/);
+  });
+
+  it('handles the dashed "three-view" spelling', () => {
+    const input =
+      'Photorealistic three-view character sheet of John, a 67-year-old grandfather. Dark hair, beard.';
+    const out = stripCharacterSheetPattern(input);
+    expect(out).not.toMatch(/three-view character sheet/i);
+    expect(out).toMatch(/Dark hair, beard\./);
+  });
+
+  it('rewrites bare "character sheet" → "character description"', () => {
+    const input = 'A character sheet showing the actor in scrubs.';
+    const out = stripCharacterSheetPattern(input);
+    expect(out).toMatch(/character description/i);
+    expect(out).not.toMatch(/character sheet/i);
+  });
+
+  it('preserves rest of character description and collapses whitespace', () => {
+    const input =
+      'Photorealistic three-view character sheet, front view, side view, back view. Mid-30s woman wearing blue scrubs. Warm brown eyes.';
+    const out = stripCharacterSheetPattern(input);
+    expect(out).toBe('Mid-30s woman wearing blue scrubs. Warm brown eyes.');
+  });
+});
+
+describe('Polish-9.15: buildImagePromptForClip — clip 0 (UGC framing)', () => {
+  const manual = {
+    characterPrompt:
+      'Photorealistic three-view character sheet, front view, side view, back view. Man, mid-30s, olive complexion, wearing olive army-green V-neck medical scrubs.',
+    setPrompt: 'Indoor medical office. Off-white walls, drop ceiling tiles visible at top.',
+    imageGuidance: 'IMAGE 1, IMAGE 2, IMAGE 3 ... continuations table follows.',
+  };
+  const clip = {
+    clipNumber: 1,
+    startingFrameImage: 1,
+    videoPrompt: 'Static iPhone shot. Dr. Marcus holds microphone, eyebrows raised urgent.',
+  };
+
+  it('includes the UGC framing prefix', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).toMatch(/Single character, single view, NOT a character sheet/);
+    expect(out).toMatch(/UGC selfie-style/);
+    expect(out).toMatch(/9:16 portrait/);
+  });
+
+  it('strips the three-view character sheet phrasing from clip 0 prompt', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).not.toMatch(/three[\s-]view character sheet/i);
+    expect(out).not.toMatch(/front view, side view, back view/i);
+  });
+
+  it('does NOT include Section B imageGuidance (would confuse model into multi-image output)', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).not.toMatch(/IMAGE 1, IMAGE 2/);
+    expect(out).not.toMatch(/continuations table/);
+  });
+
+  it('still preserves character description, set, and clip action', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).toMatch(/Man, mid-30s, olive complexion/);
+    expect(out).toMatch(/olive army-green V-neck medical scrubs/);
+    expect(out).toMatch(/medical office/);
+    expect(out).toMatch(/Static iPhone shot. Dr\. Marcus holds microphone/);
+  });
+
+  it('appends explicit single-frame guard at the end', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).toMatch(/Generate ONE single frame from ONE camera angle/);
+  });
+});
+
+describe('Polish-9.15: continuationImagePrompt — clips 1+ (wardrobe lock)', () => {
+  const manual = {
+    characterPrompt:
+      'Photorealistic three-view character sheet, front view, side view, back view. Woman in her 30s, dark hair, wearing a blue cotton t-shirt.',
+    setPrompt: 'Sunny morning kitchen with messy counter.',
+  };
+  const clip = {
+    clipNumber: 2,
+    startingFrameImage: 2,
+    videoPrompt: 'Right hand raises mug, smile widens.',
+  };
+
+  it('includes UGC framing as defense in depth', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).toMatch(/Single character, single view, NOT a character sheet/);
+  });
+
+  it('strips the three-view character sheet phrasing', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).not.toMatch(/three[\s-]view character sheet/i);
+  });
+
+  it('locks wardrobe by repeating clothing description verbatim', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).toMatch(/Wardrobe: EXACTLY as in Image 1/);
+    expect(out).toMatch(/blue cotton t-shirt/i);
+    expect(out).toMatch(/Do NOT change clothing/);
+  });
+
+  it('keeps the same-framing / same-lighting anchor language', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).toMatch(/Exact same framing as Image 1/);
+    expect(out).toMatch(/Camera: same as Image 1/);
+    expect(out).toMatch(/Lighting: same as Image 1/);
+  });
+
+  it('falls back to a generic wardrobe lock when no clothing cue is extractable', () => {
+    const out = continuationImagePrompt(
+      {
+        characterPrompt: 'Person with brown eyes.',
+        setPrompt: 'A room.',
+      },
+      clip,
+    );
+    expect(out).toMatch(/Wardrobe: EXACTLY as in Image 1/);
+    expect(out).toMatch(/same clothing, same colors, same accessories/);
+  });
+});
+
+describe('Polish-9.15: extractWardrobeFromCharacter', () => {
+  it('extracts "wearing X" phrases', () => {
+    expect(extractWardrobeFromCharacter('Mid-30s woman wearing blue scrubs.')).toBe('blue scrubs');
+  });
+
+  it('extracts "in a Y shirt" phrases', () => {
+    expect(extractWardrobeFromCharacter('A 30yo woman in a red wool sweater.')).toBe(
+      'red wool sweater',
+    );
+  });
+
+  it('returns empty string when no clothing cue is present', () => {
+    expect(extractWardrobeFromCharacter('Person with brown eyes.')).toBe('');
+  });
+
+  it('combines multiple cues with semicolons', () => {
+    const out = extractWardrobeFromCharacter(
+      'Man wearing olive army-green V-neck medical scrubs with white embroidery.',
+    );
+    expect(out).toMatch(/olive army-green V-neck medical scrubs/);
   });
 });
