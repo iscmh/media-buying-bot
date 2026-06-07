@@ -54,7 +54,7 @@ describe('Polish-9.12: submitReplicateConcat', () => {
     expect(r.errorMessage).toMatch(/REPLICATE_VIDEO_CONCAT_MODEL_ID/);
   });
 
-  it('POSTs to Replicate with videos + video_urls + clips fields', async () => {
+  it('POSTs to Replicate with videos + video_urls + clips + video_files fields', async () => {
     process.env.REPLICATE_VIDEO_CONCAT_MODEL_ID = 'owner/concat';
     let observedBody: unknown;
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
@@ -75,6 +75,7 @@ describe('Polish-9.12: submitReplicateConcat', () => {
         videos: ['https://x/a.mp4', 'https://x/b.mp4', 'https://x/c.mp4'],
         video_urls: ['https://x/a.mp4', 'https://x/b.mp4', 'https://x/c.mp4'],
         clips: ['https://x/a.mp4', 'https://x/b.mp4', 'https://x/c.mp4'],
+        video_files: ['https://x/a.mp4', 'https://x/b.mp4', 'https://x/c.mp4'],
       },
     });
   });

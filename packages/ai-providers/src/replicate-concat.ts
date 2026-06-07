@@ -73,6 +73,8 @@ export async function submitReplicateConcat(input: SubmitConcatInput): Promise<S
       videos: input.videoUrls,
       video_urls: input.videoUrls,
       clips: input.videoUrls,
+      // idan054/better-video-merge uses this field name.
+      video_files: input.videoUrls,
     },
   };
   const result = await callProvider<{ id?: string; error?: string }>({
