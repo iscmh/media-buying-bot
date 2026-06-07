@@ -13,7 +13,11 @@ import { callProvider } from './chokepoint';
 
 const CLAUDE_BASE = 'https://api.anthropic.com/v1';
 const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
-const CLAUDE_TIMEOUT_MS = 30_000;
+// Polish-9.6: bumped from 30s to 180s. The Kling pipeline's production-
+// manual call asks Claude to write 16 clip prompts at maxTokens=16384,
+// which routinely runs 30-90s — the old 30s ceiling fired before the
+// response landed. Env override lets ops dial it without a redeploy.
+const CLAUDE_TIMEOUT_MS = Number(process.env.CLAUDE_API_TIMEOUT_MS) || 180_000;
 
 interface ClaudeResponse {
   content?: Array<{ type: 'text'; text: string }>;

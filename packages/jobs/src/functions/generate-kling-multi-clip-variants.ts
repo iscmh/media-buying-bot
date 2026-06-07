@@ -29,8 +29,13 @@ import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 const CLIPS_PER_VARIANT = 16;
 const CLIP_DURATION_SECONDS = 6;
 const CONCURRENCY = 3;
+// Polish-9.6: poll ceiling = POLL_INTERVAL × POLL_MAX_ATTEMPTS. Default
+// 15s × 40 = 600s = 10 min per clip (matches REPLICATE_POLL_TIMEOUT_MS
+// spec ceiling). REPLICATE_POLL_TIMEOUT_MS env overrides the ceiling
+// without touching the interval — useful when Replicate gets slow.
+const REPLICATE_POLL_TIMEOUT_MS = Number(process.env.REPLICATE_POLL_TIMEOUT_MS) || 600_000;
 const POLL_INTERVAL_SECONDS = 15;
-const POLL_MAX_ATTEMPTS = 40;
+const POLL_MAX_ATTEMPTS = Math.ceil(REPLICATE_POLL_TIMEOUT_MS / 1000 / POLL_INTERVAL_SECONDS);
 const MOCK_VIDEO_URL = 'https://samplelib.com/lib/preview/mp4/sample-5s.mp4';
 
 export const generateKlingMultiClipVariants = inngest.createFunction(

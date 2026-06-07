@@ -28,8 +28,13 @@ import { callProvider } from './chokepoint';
 
 const REPLICATE_BASE = 'https://api.replicate.com';
 const KLING_MODEL_DEFAULT = 'kwaivgi/kling-v2.5-turbo-pro';
-const SUBMIT_TIMEOUT_MS = 30_000;
-const CHECK_TIMEOUT_MS = 15_000;
+// Polish-9.6: submit just queues the prediction so 30s stays fine;
+// check is a single GET so 15s stays fine. The worker bounds the
+// poll-loop total time via POLL_INTERVAL × POLL_MAX_ATTEMPTS — see
+// generate-kling-multi-clip-variants.ts for that ceiling (now 10 min
+// per clip via REPLICATE_POLL_TIMEOUT_MS env override).
+const SUBMIT_TIMEOUT_MS = Number(process.env.REPLICATE_SUBMIT_TIMEOUT_MS) || 30_000;
+const CHECK_TIMEOUT_MS = Number(process.env.REPLICATE_CHECK_TIMEOUT_MS) || 15_000;
 
 /** Cost per 5-second 9:16 cinematic clip (USD). Tuneable; reflects May 2026 list price. */
 const KLING_COST_USD_PER_CLIP = 0.3;

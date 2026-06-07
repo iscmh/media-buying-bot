@@ -25,8 +25,12 @@ const GEMINI_UPLOAD_BASE = 'https://generativelanguage.googleapis.com/upload/v1b
 const VISION_MODEL = 'gemini-2.5-flash';
 const IMAGE_MODEL = 'gemini-2.5-flash-image';
 
-const VISION_TIMEOUT_MS = 60_000;
-const IMAGE_TIMEOUT_MS = 30_000;
+// Polish-9.6: env-overridable. IMAGE_TIMEOUT_MS bumped 30→90s — Nano
+// Banana image gen for the Kling pipeline routinely runs 30-60s; 30s
+// fired before the response landed. VISION_TIMEOUT_MS stays at 60s
+// (one-shot analysis call, not on the multi-clip hot path).
+const VISION_TIMEOUT_MS = Number(process.env.GEMINI_API_TIMEOUT_MS) || 60_000;
+const IMAGE_TIMEOUT_MS = Number(process.env.GEMINI_IMAGE_TIMEOUT_MS) || 90_000;
 const UPLOAD_TIMEOUT_MS = 180_000; // big videos can take a while
 
 /** 20 MB — Google's documented inline cap for generateContent. */
