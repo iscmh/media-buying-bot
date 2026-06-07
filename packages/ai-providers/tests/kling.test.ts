@@ -1,5 +1,7 @@
 /**
- * Polish-4: Kling 2.5 via Replicate — submit + poll + error classification.
+ * Polish-4: Kling via Replicate — submit + poll + error classification.
+ * Polish-9.17: defaults to kling-v2.6 with native-audio params in
+ * the submit body.
  *
  * Mocks: global fetch + @mbb/db audit logger. Same pattern as
  * heygen-client.test.ts (fetch returns a Response-shaped object with a
@@ -138,6 +140,39 @@ describe('Polish-4: checkKlingPrediction', () => {
     const r = await checkKlingPrediction({ userId: 'u', apiKey: 'k', predictionId: 'p' });
     expect(r.status).toBe('failed');
     expect(r.errorMessage).toBe('model crashed');
+  });
+});
+
+describe('Polish-9.17: defaults to kling-v2.6 + sends native-audio params', () => {
+  it('default model id when KLING_MODEL_ID unset', () => {
+    process.env = { ...realEnv };
+    delete process.env.KLING_MODEL_ID;
+    expect(getKlingModelId()).toBe('kwaivgi/kling-v2.6');
+  });
+
+  it('submit body carries enable_audio / with_audio / generate_audio / audio aliases', async () => {
+    const calls = captureFetch({ status: 201, body: { id: 'pred_audio' } });
+    const r = await submitKlingVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'A 30yo woman speaks to camera',
+      durationSeconds: 5,
+      aspectRatio: '9:16',
+      startImageUrl: 'https://x/frame.png',
+    });
+    expect(r.ok).toBe(true);
+    const init = calls[0]!.init!;
+    const body = JSON.parse(init.body as string);
+    expect(body.input.enable_audio).toBe(true);
+    expect(body.input.with_audio).toBe(true);
+    expect(body.input.generate_audio).toBe(true);
+    expect(body.input.audio).toBe(true);
+    expect(body.input.start_image).toBe('https://x/frame.png');
+    expect(body.input.prompt).toMatch(/30yo woman/);
+  });
+
+  it('per-clip cost bumped from $0.30 → $0.35 on v2.6', () => {
+    expect(estimateKlingClipCostUsd()).toBe(0.35);
   });
 });
 

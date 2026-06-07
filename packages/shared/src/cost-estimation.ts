@@ -42,17 +42,19 @@ const PRICING = {
     arcads: 0.5,
   } satisfies Record<UgcVideoProvider, number>,
 
-  // Polish-4: cinematic_voiceover format costs. Kling 5s clip via
-  // Replicate ≈ $0.30; ElevenLabs TTS ≈ $0.005-0.02 per ad-length
-  // script (we estimate 200 chars/variant by default). Cinematic prompt
-  // builder adds a small Claude call (~$0.01).
-  cinematicKlingPerVariantUsd: 0.3,
+  // Polish-4: cinematic_voiceover format costs. Polish-9.17: bumped
+  // Kling per-clip from $0.30 (kling-v2.5-turbo-pro) to $0.35
+  // (kling-v2.6, the audio-capable model). ElevenLabs TTS ≈
+  // $0.005-0.02 per ad-length script (~200 chars/variant by default).
+  // Cinematic prompt builder adds a small Claude call (~$0.01).
+  cinematicKlingPerVariantUsd: 0.35,
   cinematicTtsPerVariantUsd: 0.06, // 200 chars × $0.30/1k chars
   cinematicPromptBuildPerVariantUsd: 0.01,
 
-  // Polish-6: Kling 3.0 multi-clip (16 clips per variant)
+  // Polish-6 / Polish-9.17: Kling 2.6 multi-clip (16 clips per
+  // variant, $0.35/clip on kwaivgi/kling-v2.6).
   klingMultiClipClipsPerVariant: 16,
-  klingMultiClipPerClipUsd: 0.3,
+  klingMultiClipPerClipUsd: 0.35,
   klingMultiClipManualPromptUsd: 0.1,
   // Polish-6: Sora 2 single-shot via Kie.ai
   soraPerVariantUsd: 1.5,
@@ -138,7 +140,7 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
       cost: round4(variantCount * PRICING.cinematicPromptBuildPerVariantUsd),
     });
     breakdown.push({
-      item: `Kling 2.5 video (${variantCount} × $${PRICING.cinematicKlingPerVariantUsd.toFixed(2)})`,
+      item: `Kling 2.6 video (${variantCount} × $${PRICING.cinematicKlingPerVariantUsd.toFixed(2)})`,
       cost: round4(variantCount * PRICING.cinematicKlingPerVariantUsd),
     });
     breakdown.push({
@@ -234,7 +236,7 @@ function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostE
         cost: PRICING.klingMultiClipManualPromptUsd,
       });
       breakdown.push({
-        item: `Kling 3.0 clips (${totalClips} clips × $${PRICING.klingMultiClipPerClipUsd.toFixed(2)})`,
+        item: `Kling 2.6 clips (${totalClips} clips × $${PRICING.klingMultiClipPerClipUsd.toFixed(2)})`,
         cost: round4(totalClips * PRICING.klingMultiClipPerClipUsd),
       });
       break;

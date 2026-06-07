@@ -49,7 +49,7 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   },
   kling_3_multi_clip_native_lipsync: {
     pipeline: 'kling_3_multi_clip_native_lipsync',
-    label: '16-clip lip-sync (Kling 3.0)',
+    label: '16-clip lip-sync (Kling 2.6, native audio)',
     providerChoice: 'kling',
     format: 'kling_3_multi_clip',
     workerEvent: 'generation/kling-multi-clip.requested',

@@ -111,8 +111,9 @@ describe('Polish-4: cinematic_voiceover cost path', () => {
       provider: 'heygen',
       format: 'cinematic_voiceover',
     });
-    // vision $0.10 + prompt-build $0.01 + Kling $0.30 + TTS $0.06 = $0.47
-    expect(r.estimateUsd).toBeCloseTo(0.47, 4);
+    // vision $0.10 + prompt-build $0.01 + Kling $0.35 + TTS $0.06 = $0.52
+    // (Polish-9.17: Kling per-clip bumped $0.30 → $0.35 on kling-v2.6.)
+    expect(r.estimateUsd).toBeCloseTo(0.52, 4);
     const items = r.breakdown.map((b) => b.item);
     expect(items.some((i) => i.includes('Kling'))).toBe(true);
     expect(items.some((i) => i.includes('ElevenLabs'))).toBe(true);
@@ -120,23 +121,23 @@ describe('Polish-4: cinematic_voiceover cost path', () => {
     expect(items.some((i) => i.includes('Sora') || i.includes('HeyGen'))).toBe(false);
   });
 
-  it('10 cinematic variants ≈ vision $0.10 + prompts $0.10 + kling $3 + tts $0.60 = $3.80', () => {
+  it('10 cinematic variants ≈ vision $0.10 + prompts $0.10 + kling $3.50 + tts $0.60 = $4.30', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 10,
       provider: 'heygen',
       format: 'cinematic_voiceover',
     });
-    expect(r.estimateUsd).toBeCloseTo(3.8, 4);
+    expect(r.estimateUsd).toBeCloseTo(4.3, 4);
   });
 
-  it('kling_3_multi_clip: 1 variant = manual $0.10 + 16 clips × $0.30 = $4.90', () => {
+  it('kling_3_multi_clip: 1 variant = manual $0.10 + 16 clips × $0.35 = $5.70', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'kling_3_multi_clip_native_lipsync',
     });
-    expect(r.estimateUsd).toBeCloseTo(4.9, 4);
+    expect(r.estimateUsd).toBeCloseTo(5.7, 4);
     expect(r.breakdown.some((b) => b.item.includes('Kling'))).toBe(true);
   });
 
@@ -175,13 +176,13 @@ describe('Polish-4: cinematic_voiceover cost path', () => {
 });
 
 describe('Polish-9.4: pipeline-only call sites (no provider)', () => {
-  it('ugc + pipeline=kling_3 + no provider → kling-multi-clip price (~$4.90)', () => {
+  it('ugc + pipeline=kling_3 + no provider → kling-multi-clip price (~$5.70)', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'kling_3_multi_clip_native_lipsync',
     });
-    expect(r.estimateUsd).toBeCloseTo(4.9, 4);
+    expect(r.estimateUsd).toBeCloseTo(5.7, 4);
   });
 
   it('ugc + pipeline=sora_2 + no provider → Sora price ($1.55)', () => {

@@ -1,12 +1,14 @@
 import { callProvider } from './chokepoint';
 
 /**
- * Polish-4: Kling 2.5 cinematic video generation via Replicate.
+ * Polish-4: Kling cinematic video generation via Replicate.
  *
- * We treat Replicate as the abstraction (one API key, many models). The
- * specific model slug is overridable via env so we can bump versions
- * without redeploying. Pricing approximately $0.30 per 5-second 9:16
- * clip on kling-v2.5-turbo-pro (May 2026).
+ * Polish-9.17: bumped default model from kling-v2.5-turbo-pro to
+ * kling-v2.6 — the master prompt's [GENERATE NATIVE AUDIO AND LIP-
+ * SYNC TO EXACT DIALOGUE] directive was designed for the audio-
+ * capable Kling, but 2.5 turbo pro generated silent video. 2.6
+ * supports synchronized native audio (speech + ambient + SFX) on
+ * the same image-to-video workflow.
  *
  * Pipeline:
  *   1. submitKlingVideo({ prompt, durationSeconds, aspectRatio })
@@ -27,7 +29,7 @@ import { callProvider } from './chokepoint';
  */
 
 const REPLICATE_BASE = 'https://api.replicate.com';
-const KLING_MODEL_DEFAULT = 'kwaivgi/kling-v2.5-turbo-pro';
+const KLING_MODEL_DEFAULT = 'kwaivgi/kling-v2.6';
 // Polish-9.6: submit just queues the prediction so 30s stays fine;
 // check is a single GET so 15s stays fine. The worker bounds the
 // poll-loop total time via POLL_INTERVAL × POLL_MAX_ATTEMPTS — see
@@ -36,8 +38,12 @@ const KLING_MODEL_DEFAULT = 'kwaivgi/kling-v2.5-turbo-pro';
 const SUBMIT_TIMEOUT_MS = Number(process.env.REPLICATE_SUBMIT_TIMEOUT_MS) || 30_000;
 const CHECK_TIMEOUT_MS = Number(process.env.REPLICATE_CHECK_TIMEOUT_MS) || 15_000;
 
-/** Cost per 5-second 9:16 cinematic clip (USD). Tuneable; reflects May 2026 list price. */
-const KLING_COST_USD_PER_CLIP = 0.3;
+/**
+ * Cost per 5-second 9:16 clip on Replicate's kwaivgi/kling-v2.6
+ * (Nov 2026 list price). Bumped from $0.30 (2.5 turbo pro) per
+ * Polish-9.17.
+ */
+const KLING_COST_USD_PER_CLIP = 0.35;
 
 export function getKlingModelId(): string {
   return process.env.KLING_MODEL_ID?.trim() || KLING_MODEL_DEFAULT;
@@ -97,6 +103,14 @@ export async function submitKlingVideo(input: KlingSubmitInput): Promise<KlingSu
     prompt: input.prompt,
     duration: input.durationSeconds ?? 5,
     aspect_ratio: input.aspectRatio ?? '9:16',
+    // Polish-9.17: kling-v2.6 supports synchronized native audio
+    // (speech + ambient + SFX). The exact param name varies across
+    // Kling deployments — send all four common aliases. Replicate
+    // silently ignores unknown input fields.
+    enable_audio: true,
+    with_audio: true,
+    generate_audio: true,
+    audio: true,
   };
   if (input.startImageUrl) {
     klingInput.start_image = input.startImageUrl;

@@ -121,7 +121,8 @@ export const AI_PROVIDER_META: Record<
   },
   replicate: {
     label: 'Replicate',
-    description: 'Kling 3.0 multi-clip video generation (required for cinematic pipeline).',
+    description:
+      'Kling 2.6 multi-clip video generation with native audio (required for the cinematic pipeline).',
     pricingUrl: 'https://replicate.com/pricing',
     apiDocsUrl: 'https://replicate.com/docs/reference/http',
     verificationMethod: 'api',
