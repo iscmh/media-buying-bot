@@ -2,15 +2,18 @@ import { eq } from 'drizzle-orm';
 import {
   callClaude,
   callGeminiImage,
+  checkReplicateConcat,
   getUniversalUgcMasterPrompt,
+  isVideoConcatEnabled,
   submitKlingVideo,
+  submitReplicateConcat,
   checkKlingPrediction,
 } from '@mbb/ai-providers';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
-import { uploadGeneratedImage } from '../lib/storage';
+import { downloadGeneratedImageAsBase64, uploadGeneratedImage } from '../lib/storage';
 
 /**
  * Polish-6 item 4: Kling 3.0 multi-clip native lipsync pipeline.
@@ -170,180 +173,242 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
     const { manual } = manualResult;
     let totalCost = manualResult.costUsd;
     let successCount = 0;
+    const clipVideoUrls: { clipIndex: number; videoUrl: string }[] = [];
 
-    // For each clip, generate via Kling
-    for (let batchStart = 0; batchStart < manual.clips.length; batchStart += CONCURRENCY) {
+    /**
+     * Polish-9.12: process one clip end-to-end (nano-banana → kling
+     * submit → poll → persist). When `useReferenceFromClip0` is true,
+     * the nano-banana step pulls clip 0's frame from storage and
+     * passes it to Gemini as a reference image so the character +
+     * scene anchor stays consistent across all clips.
+     */
+    const processClip = async (
+      clipIndex: number,
+      clip: (typeof manual.clips)[number],
+      useReferenceFromClip0: boolean,
+    ): Promise<{
+      clipIndex: number;
+      ok: boolean;
+      costUsd: number;
+      error?: string;
+      videoUrl?: string;
+    }> => {
+      const frameResult = await step.run(`nano-banana-frame-${clipIndex}`, async () => {
+        let keys;
+        try {
+          keys = await loadDecryptedKeys(userId, ['gemini']);
+        } catch (err) {
+          if (err instanceof MissingProviderKeyError)
+            return { ok: false as const, error: err.message, costUsd: 0 };
+          throw err;
+        }
+
+        // For clips 1+: pull clip 0's frame as a reference so Gemini
+        // anchors the character + lighting + scene to it. Falls back
+        // gracefully if the reference download fails — we still get
+        // an image, just without the chain.
+        let referenceImageBase64: string | undefined;
+        let referenceImageMimeType: string | undefined;
+        if (useReferenceFromClip0) {
+          try {
+            const ref = await downloadGeneratedImageAsBase64({
+              userId,
+              jobId,
+              variantIndex: 0,
+              filenamePrefix: 'kling-frame-',
+            });
+            referenceImageBase64 = ref.base64;
+            referenceImageMimeType = ref.mimeType;
+          } catch (err) {
+            console.log(
+              `[kling-clip-${clipIndex}] reference download failed; proceeding without anchor: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+
+        const prompt = useReferenceFromClip0
+          ? continuationImagePrompt(manual, clip)
+          : buildImagePromptForClip(manual, clip);
+
+        const image = await callGeminiImage({
+          userId,
+          apiKey: keys.gemini!,
+          prompt,
+          referenceImageBase64,
+          referenceImageMimeType,
+          generationJobId: jobId,
+        });
+        if (!image.ok || !image.imageBase64 || !image.imageMimeType) {
+          return {
+            ok: false as const,
+            error: image.errorMessage ?? 'Nano Banana returned no image',
+            costUsd: image.costUsd,
+          };
+        }
+        try {
+          const upload = await uploadGeneratedImage({
+            userId,
+            jobId,
+            variantIndex: clipIndex,
+            imageBase64: image.imageBase64,
+            mimeType: image.imageMimeType,
+            filenamePrefix: 'kling-frame-',
+          });
+          return { ok: true as const, publicUrl: upload.publicUrl, costUsd: image.costUsd };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return {
+            ok: false as const,
+            error: `First-frame upload failed: ${msg}`,
+            costUsd: image.costUsd,
+          };
+        }
+      });
+
+      if (!frameResult.ok) {
+        console.log(`[kling-clip-${clipIndex}] nano-banana frame failed: ${frameResult.error}`);
+        return { clipIndex, ok: false, costUsd: frameResult.costUsd, error: frameResult.error };
+      }
+
+      const submitResult = await step.run(`kling-submit-${clipIndex}`, async () => {
+        let keys;
+        try {
+          keys = await loadDecryptedKeys(userId, ['kling']);
+        } catch (err) {
+          if (err instanceof MissingProviderKeyError)
+            return { ok: false as const, error: err.message };
+          throw err;
+        }
+        const prompt = [
+          clip.videoPrompt,
+          clip.dialogue && !/GENERATE NATIVE AUDIO AND LIP-SYNC/i.test(clip.videoPrompt)
+            ? `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "${clip.dialogue}"`
+            : '',
+        ]
+          .filter(Boolean)
+          .join('\n\n');
+
+        return submitKlingVideo({
+          userId,
+          apiKey: keys.kling!,
+          prompt,
+          durationSeconds: (clip.duration ?? CLIP_DURATION_SECONDS) <= 5 ? 5 : 10,
+          aspectRatio: '9:16',
+          startImageUrl: frameResult.publicUrl,
+          generationJobId: jobId,
+        });
+      });
+
+      if (!submitResult.ok || !('predictionId' in submitResult) || !submitResult.predictionId) {
+        const err =
+          'errorMessage' in submitResult
+            ? submitResult.errorMessage
+            : 'error' in submitResult
+              ? submitResult.error
+              : 'submit failed';
+        console.log(`[kling-clip-${clipIndex}] submit failed: ${err}`);
+        return { clipIndex, ok: false, costUsd: frameResult.costUsd, error: err };
+      }
+
+      let videoUrl: string | undefined;
+      let pollCostUsd = 0;
+      let pollError: string | undefined;
+      for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+        await step.sleep(`kling-poll-${clipIndex}-${attempt}`, `${POLL_INTERVAL_SECONDS}s`);
+        const tick = await step.run(`kling-check-${clipIndex}-${attempt}`, async () => {
+          const keys = await loadDecryptedKeys(userId, ['kling']);
+          return checkKlingPrediction({
+            userId,
+            apiKey: keys.kling!,
+            predictionId: submitResult.predictionId!,
+            generationJobId: jobId,
+          });
+        });
+        if (tick.status === 'completed') {
+          videoUrl = tick.videoUrl;
+          pollCostUsd = tick.costUsd;
+          break;
+        }
+        if (tick.status === 'failed') {
+          pollError = tick.errorMessage ?? 'Kling clip failed';
+          break;
+        }
+      }
+
+      if (!videoUrl) {
+        const err =
+          pollError ??
+          `Kling clip timed out after ${POLL_MAX_ATTEMPTS} polls ` +
+            `(${POLL_INTERVAL_SECONDS}s interval = ${(POLL_MAX_ATTEMPTS * POLL_INTERVAL_SECONDS) / 60} min ceiling)`;
+        console.log(`[kling-clip-${clipIndex}] ${err}`);
+        return {
+          clipIndex,
+          ok: false,
+          costUsd: pollCostUsd + frameResult.costUsd,
+          error: err,
+        };
+      }
+
+      await step.run(`write-clip-${clipIndex}`, async () => {
+        const db = getDb();
+        await db.insert(schema.generatedCreatives).values({
+          userId,
+          generationJobId: jobId,
+          fileUrl: videoUrl!,
+          aspectRatio: '9:16',
+          status: 'ready_for_review',
+          format: 'kling_3_multi_clip',
+          clipIndex,
+          isClipPart: true,
+          generationMetadata: {
+            character_prompt: manual.characterPrompt,
+            set_prompt: manual.setPrompt,
+            video_prompt: clip.videoPrompt,
+            image_prompt: clip.imagePrompt,
+            dialogue: clip.dialogue,
+            motion_type: clip.motionType,
+            first_frame_url: frameResult.publicUrl,
+            clip_index: clipIndex,
+            reference_chain: useReferenceFromClip0,
+          },
+        });
+      });
+
+      return {
+        clipIndex,
+        ok: true,
+        costUsd: pollCostUsd + frameResult.costUsd,
+        videoUrl,
+      };
+    };
+
+    // Polish-9.12: clip 0 serialized first (the "Master First Frame"
+    // per the universal-ugc-master-prompt). Its Nano Banana output is
+    // pulled by clips 1+ as a reference image so every subsequent
+    // frame anchors to the same character + scene. Without this chain
+    // each clip drew a fresh face and the variant looked like 16
+    // different actors stitched together.
+    if (manual.clips.length > 0) {
+      const r0 = await processClip(0, manual.clips[0]!, false);
+      totalCost += r0.costUsd;
+      if (r0.ok) {
+        successCount++;
+        if (r0.videoUrl) clipVideoUrls.push({ clipIndex: 0, videoUrl: r0.videoUrl });
+      }
+    }
+
+    // Clips 1+ run in parallel batches, all using clip 0's frame as
+    // the reference image (downloaded inside each step.run).
+    for (let batchStart = 1; batchStart < manual.clips.length; batchStart += CONCURRENCY) {
       const batch = manual.clips.slice(batchStart, batchStart + CONCURRENCY);
       const results = await Promise.all(
-        batch.map(async (clip, idxInBatch) => {
-          const clipIndex = batchStart + idxInBatch;
-
-          // Polish-9.8: generate first-frame via Nano Banana so Kling has
-          // an image to anchor the character + scene. Without this, Kling
-          // invents a fresh face for every clip and the 16-clip variant
-          // looks like 16 different actors. The master prompt's [USE
-          // IMAGE X AS STARTING FRAME] directive expects this image.
-          const frameResult = await step.run(`nano-banana-frame-${clipIndex}`, async () => {
-            let keys;
-            try {
-              keys = await loadDecryptedKeys(userId, ['gemini']);
-            } catch (err) {
-              if (err instanceof MissingProviderKeyError)
-                return { ok: false as const, error: err.message, costUsd: 0 };
-              throw err;
-            }
-            const imagePrompt = buildImagePromptForClip(manual, clip);
-            const image = await callGeminiImage({
-              userId,
-              apiKey: keys.gemini!,
-              prompt: imagePrompt,
-              generationJobId: jobId,
-            });
-            if (!image.ok || !image.imageBase64 || !image.imageMimeType) {
-              return {
-                ok: false as const,
-                error: image.errorMessage ?? 'Nano Banana returned no image',
-                costUsd: image.costUsd,
-              };
-            }
-            try {
-              const upload = await uploadGeneratedImage({
-                userId,
-                jobId,
-                variantIndex: clipIndex,
-                imageBase64: image.imageBase64,
-                mimeType: image.imageMimeType,
-                filenamePrefix: 'kling-frame-',
-              });
-              return { ok: true as const, publicUrl: upload.publicUrl, costUsd: image.costUsd };
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              return {
-                ok: false as const,
-                error: `First-frame upload failed: ${msg}`,
-                costUsd: image.costUsd,
-              };
-            }
-          });
-
-          if (!frameResult.ok) {
-            console.log(`[kling-clip-${clipIndex}] nano-banana frame failed: ${frameResult.error}`);
-            return { clipIndex, ok: false, costUsd: frameResult.costUsd, error: frameResult.error };
-          }
-
-          // Submit Kling with the clip's video prompt + first-frame URL
-          const submitResult = await step.run(`kling-submit-${clipIndex}`, async () => {
-            let keys;
-            try {
-              keys = await loadDecryptedKeys(userId, ['kling']);
-            } catch (err) {
-              if (err instanceof MissingProviderKeyError)
-                return { ok: false as const, error: err.message };
-              throw err;
-            }
-            const prompt = [
-              clip.videoPrompt,
-              clip.dialogue && !/GENERATE NATIVE AUDIO AND LIP-SYNC/i.test(clip.videoPrompt)
-                ? `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "${clip.dialogue}"`
-                : '',
-            ]
-              .filter(Boolean)
-              .join('\n\n');
-
-            return submitKlingVideo({
-              userId,
-              apiKey: keys.kling!,
-              prompt,
-              durationSeconds: (clip.duration ?? CLIP_DURATION_SECONDS) <= 5 ? 5 : 10,
-              aspectRatio: '9:16',
-              startImageUrl: frameResult.publicUrl,
-              generationJobId: jobId,
-            });
-          });
-
-          if (!submitResult.ok || !('predictionId' in submitResult) || !submitResult.predictionId) {
-            const err =
-              'errorMessage' in submitResult
-                ? submitResult.errorMessage
-                : 'error' in submitResult
-                  ? submitResult.error
-                  : 'submit failed';
-            console.log(`[kling-clip-${clipIndex}] submit failed: ${err}`);
-            return { clipIndex, ok: false, costUsd: frameResult.costUsd, error: err };
-          }
-
-          // Poll
-          let videoUrl: string | undefined;
-          let pollCostUsd = 0;
-          let pollError: string | undefined;
-          for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
-            await step.sleep(`kling-poll-${clipIndex}-${attempt}`, `${POLL_INTERVAL_SECONDS}s`);
-            const tick = await step.run(`kling-check-${clipIndex}-${attempt}`, async () => {
-              const keys = await loadDecryptedKeys(userId, ['kling']);
-              return checkKlingPrediction({
-                userId,
-                apiKey: keys.kling!,
-                predictionId: submitResult.predictionId!,
-                generationJobId: jobId,
-              });
-            });
-            if (tick.status === 'completed') {
-              videoUrl = tick.videoUrl;
-              pollCostUsd = tick.costUsd;
-              break;
-            }
-            if (tick.status === 'failed') {
-              pollError = tick.errorMessage ?? 'Kling clip failed';
-              break;
-            }
-          }
-
-          if (!videoUrl) {
-            const err =
-              pollError ??
-              `Kling clip timed out after ${POLL_MAX_ATTEMPTS} polls ` +
-                `(${POLL_INTERVAL_SECONDS}s interval = ${(POLL_MAX_ATTEMPTS * POLL_INTERVAL_SECONDS) / 60} min ceiling)`;
-            console.log(`[kling-clip-${clipIndex}] ${err}`);
-            return {
-              clipIndex,
-              ok: false,
-              costUsd: pollCostUsd + frameResult.costUsd,
-              error: err,
-            };
-          }
-
-          // Persist the clip row
-          await step.run(`write-clip-${clipIndex}`, async () => {
-            const db = getDb();
-            await db.insert(schema.generatedCreatives).values({
-              userId,
-              generationJobId: jobId,
-              fileUrl: videoUrl!,
-              aspectRatio: '9:16',
-              status: 'ready_for_review',
-              format: 'kling_3_multi_clip',
-              clipIndex,
-              isClipPart: true,
-              generationMetadata: {
-                character_prompt: manual.characterPrompt,
-                set_prompt: manual.setPrompt,
-                video_prompt: clip.videoPrompt,
-                image_prompt: clip.imagePrompt,
-                dialogue: clip.dialogue,
-                motion_type: clip.motionType,
-                first_frame_url: frameResult.publicUrl,
-                clip_index: clipIndex,
-              },
-            });
-          });
-
-          return { clipIndex, ok: true, costUsd: pollCostUsd + frameResult.costUsd };
-        }),
+        batch.map((clip, idxInBatch) => processClip(batchStart + idxInBatch, clip, true)),
       );
-
       for (const r of results) {
         totalCost += r.costUsd;
         if (r.ok) successCount++;
+        if (r.ok && r.videoUrl)
+          clipVideoUrls.push({ clipIndex: r.clipIndex, videoUrl: r.videoUrl });
       }
     }
 
@@ -359,6 +424,99 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
       console.log(`[kling-job] 0 of ${manual.clips.length} clips succeeded — marking job failed`);
       await markJobFailed(jobId, userId, outcome.error, totalCost);
       return { jobId, mode, generated: 0, totalCost };
+    }
+
+    // Polish-9.12: stitch clips into one final composite via Replicate
+    // ffmpeg-concat. Skipped when REPLICATE_VIDEO_CONCAT_MODEL_ID is
+    // unset; per-clip rows remain so the user can still download
+    // individually. Stitching failure is non-fatal — clips stay.
+    if (isVideoConcatEnabled() && clipVideoUrls.length >= 2) {
+      const orderedUrls = clipVideoUrls
+        .sort((a, b) => a.clipIndex - b.clipIndex)
+        .map((c) => c.videoUrl);
+
+      const stitchSubmit = await step.run('stitch-submit', async () => {
+        let keys;
+        try {
+          keys = await loadDecryptedKeys(userId, ['kling']);
+        } catch (err) {
+          if (err instanceof MissingProviderKeyError)
+            return { ok: false as const, error: err.message };
+          throw err;
+        }
+        return submitReplicateConcat({
+          userId,
+          apiKey: keys.kling!,
+          videoUrls: orderedUrls,
+          generationJobId: jobId,
+        });
+      });
+
+      let stitchedUrl: string | undefined;
+      let stitchCost = 0;
+      if (stitchSubmit.ok && 'predictionId' in stitchSubmit && stitchSubmit.predictionId) {
+        const predictionId = stitchSubmit.predictionId;
+        for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+          await step.sleep(`stitch-poll-${attempt}`, `${POLL_INTERVAL_SECONDS}s`);
+          const tick = await step.run(`stitch-check-${attempt}`, async () => {
+            const keys = await loadDecryptedKeys(userId, ['kling']);
+            return checkReplicateConcat({
+              userId,
+              apiKey: keys.kling!,
+              predictionId,
+              generationJobId: jobId,
+            });
+          });
+          if (tick.status === 'completed') {
+            stitchedUrl = tick.videoUrl;
+            stitchCost = tick.costUsd;
+            break;
+          }
+          if (tick.status === 'failed') {
+            console.log(`[kling-stitch] failed: ${tick.errorMessage ?? 'unknown'}`);
+            break;
+          }
+        }
+      } else {
+        const err =
+          'errorMessage' in stitchSubmit
+            ? stitchSubmit.errorMessage
+            : 'error' in stitchSubmit
+              ? stitchSubmit.error
+              : 'submit failed';
+        console.log(`[kling-stitch] submit failed: ${err}; per-clip rows remain`);
+      }
+
+      if (stitchedUrl) {
+        totalCost += stitchCost;
+        await step.run('write-composite', async () => {
+          const db = getDb();
+          await db.insert(schema.generatedCreatives).values({
+            userId,
+            generationJobId: jobId,
+            fileUrl: stitchedUrl!,
+            aspectRatio: '9:16',
+            status: 'ready_for_review',
+            format: 'kling_3_final_composite',
+            isClipPart: false,
+            generationMetadata: {
+              source_clip_count: orderedUrls.length,
+              source_clip_urls: orderedUrls,
+              character_prompt: manual.characterPrompt,
+              set_prompt: manual.setPrompt,
+            },
+          });
+        });
+        console.log(`[kling-stitch] composite written: ${stitchedUrl}`);
+      } else {
+        console.log(
+          `[kling-stitch] no composite produced; ${clipVideoUrls.length} per-clip rows kept`,
+        );
+      }
+    } else if (!isVideoConcatEnabled()) {
+      console.log(
+        '[kling-stitch] REPLICATE_VIDEO_CONCAT_MODEL_ID not set; skipping stitching. Per-clip rows kept.',
+      );
     }
 
     await markJobCompleted({
@@ -645,6 +803,28 @@ export function buildImagePromptForClip(
   return [manual.characterPrompt, manual.setPrompt, manual.imageGuidance, clip.videoPrompt]
     .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
     .join('\n\n');
+}
+
+/**
+ * Polish-9.12: prompt used for clips 1+ in the character-reference
+ * chain. Frames the call as an EDIT operation against clip 0's image
+ * (passed in as referenceImageBase64) using the master prompt's
+ * documented "Same-Scene Continuations" pattern, so Gemini varies
+ * gesture/prop/expression while preserving character identity,
+ * lighting, framing, and set.
+ */
+export function continuationImagePrompt(
+  manual: { characterPrompt: string; setPrompt: string },
+  clip: ClipSpec,
+): string {
+  return [
+    'Exact same framing as Image 1 — same character, same scene, same lighting.',
+    `Now: ${clip.videoPrompt}`,
+    `Character reference: ${manual.characterPrompt}`,
+    `Set: ${manual.setPrompt}`,
+    'Camera: same as Image 1. Deep focus on everything. No blur. Lighting: same as Image 1.',
+    'ABSOLUTELY NO phones, cameras, screens, social media UI, floating text, or digital overlays.',
+  ].join('\n\n');
 }
 
 void logAuditEvent;

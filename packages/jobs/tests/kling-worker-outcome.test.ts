@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  buildImagePromptForClip,
+  continuationImagePrompt,
   decideKlingJobOutcome,
   parseProductionManual,
 } from '../src/functions/generate-kling-multi-clip-variants';
@@ -246,3 +248,58 @@ function buildClips16(headerStyle: string): string {
 function pad(n: number): string {
   return String(n % 60).padStart(2, '0');
 }
+
+describe('Polish-9.12: continuationImagePrompt (character-reference chain)', () => {
+  it('frames the call as a same-scene continuation of Image 1', () => {
+    const manual = {
+      characterPrompt: 'A 30yo woman, dark hair, casual t-shirt.',
+      setPrompt: 'Sunny morning kitchen with messy counter.',
+    };
+    const clip = {
+      clipNumber: 2,
+      startingFrameImage: 2,
+      videoPrompt: 'Right hand raises mug, smile widens.',
+      dialogue: 'Mmm!',
+    };
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).toMatch(/Exact same framing as Image 1/);
+    expect(out).toMatch(/same character, same scene, same lighting/);
+    expect(out).toMatch(/Now: Right hand raises mug/);
+    expect(out).toMatch(/30yo woman/);
+    expect(out).toMatch(/messy counter/);
+    expect(out).toMatch(/Camera: same as Image 1/);
+    expect(out).toMatch(/ABSOLUTELY NO phones/);
+  });
+});
+
+describe('Polish-9.12: buildImagePromptForClip — clip 0 path', () => {
+  it('returns character + set + imageGuidance + videoPrompt joined', () => {
+    const manual = {
+      characterPrompt: 'A 30yo woman.',
+      setPrompt: 'A sunny kitchen.',
+      imageGuidance: 'Photorealistic, no filters.',
+    };
+    const clip = {
+      clipNumber: 1,
+      startingFrameImage: 1,
+      videoPrompt: '[USE IMAGE 1 AS STARTING FRAME] Hold mug.',
+    };
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).toContain('A 30yo woman.');
+    expect(out).toContain('A sunny kitchen.');
+    expect(out).toContain('Photorealistic, no filters.');
+    expect(out).toContain('Hold mug.');
+  });
+
+  it('uses clip.imagePrompt directly when populated', () => {
+    const manual = { characterPrompt: 'C', setPrompt: 'S' };
+    const clip = {
+      clipNumber: 1,
+      startingFrameImage: 1,
+      videoPrompt: 'V',
+      imagePrompt: 'Pre-baked image prompt for this clip.',
+    };
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).toBe('Pre-baked image prompt for this clip.');
+  });
+});

@@ -88,3 +88,27 @@ export async function uploadGeneratedImage(input: {
   const { data } = supabase.storage.from('generated-creatives').getPublicUrl(path);
   return { path, publicUrl: data.publicUrl };
 }
+
+/**
+ * Polish-9.12: download a previously-uploaded image from the
+ * generated-creatives bucket back to base64 so subsequent Nano Banana
+ * calls can pass it as a reference image (character anchor chain).
+ *
+ * Path convention matches uploadGeneratedImage: `<userId>/generated/
+ * <jobId>/<stem>.<ext>` — we accept the same shape and rebuild the
+ * path so the caller doesn't need to remember the layout.
+ */
+export async function downloadGeneratedImageAsBase64(input: {
+  userId: string;
+  jobId: string;
+  variantIndex: number;
+  filenamePrefix?: string;
+  mimeType?: string;
+}): Promise<{ base64: string; mimeType: string }> {
+  const ext = input.mimeType === 'image/jpeg' ? '.jpg' : '.png';
+  const stem = input.filenamePrefix
+    ? `${input.filenamePrefix}${input.variantIndex}`
+    : `${input.variantIndex}`;
+  const path = `${input.userId}/generated/${input.jobId}/${stem}${ext}`;
+  return downloadAsBase64({ bucket: 'generated-creatives', path });
+}

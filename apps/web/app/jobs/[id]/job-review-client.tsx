@@ -33,6 +33,16 @@ interface Variant {
   headline: string | null;
   primaryText: string | null;
   description: string | null;
+  /**
+   * Polish-9.12: Kling multi-clip jobs emit one composite row
+   * (isClipPart=false, format ending in '_final_composite') plus N
+   * source-clip rows (isClipPart=true). The UI surfaces the composite
+   * as the primary deliverable and collapses source clips. Optional
+   * for backwards compat with non-Kling jobs.
+   */
+  isClipPart?: boolean;
+  clipIndex?: number | null;
+  format?: string;
 }
 
 export interface LaunchSnapshot {
@@ -276,18 +286,45 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
         </div>
       )}
 
+      {/* Polish-9.12: primary deliverables (composite + non-clip
+          variants) render first. Source clips from Kling multi-clip
+          jobs are tucked into a collapsible section below. */}
       <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
-        {variants.map((v) => (
-          <VariantCard
-            key={v.id}
-            variant={v}
-            isPending={pendingId === v.id}
-            conceptType={conceptType}
-            onApprove={() => decide(v.id, 'approved')}
-            onReject={() => decide(v.id, 'rejected')}
-          />
-        ))}
+        {variants
+          .filter((v) => !v.isClipPart)
+          .map((v) => (
+            <VariantCard
+              key={v.id}
+              variant={v}
+              isPending={pendingId === v.id}
+              conceptType={conceptType}
+              onApprove={() => decide(v.id, 'approved')}
+              onReject={() => decide(v.id, 'rejected')}
+            />
+          ))}
       </div>
+      {variants.some((v) => v.isClipPart) && (
+        <details className="border-border bg-bg-elevated mt-6 rounded-lg border p-4">
+          <summary className="cursor-pointer text-sm font-medium">
+            Source clips ({variants.filter((v) => v.isClipPart).length}) — transparency / individual
+            download
+          </summary>
+          <div className="mt-4 grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
+            {variants
+              .filter((v) => v.isClipPart)
+              .map((v) => (
+                <VariantCard
+                  key={v.id}
+                  variant={v}
+                  isPending={pendingId === v.id}
+                  conceptType={conceptType}
+                  onApprove={() => decide(v.id, 'approved')}
+                  onReject={() => decide(v.id, 'rejected')}
+                />
+              ))}
+          </div>
+        </details>
+      )}
       {conceptType === 'static' && variants.length > 0 && (
         <p className="text-muted-foreground mt-4 text-center text-xs">
           Click any image to view full size and download.

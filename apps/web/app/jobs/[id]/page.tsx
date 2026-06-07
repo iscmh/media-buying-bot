@@ -37,6 +37,21 @@ export default async function JobReviewPage({ params }: Props) {
     orderBy: asc(schema.generatedCreatives.createdAt),
   });
 
+  // Polish-9.12: a Kling multi-clip job emits two row types — one
+  // composite (the final stitched MP4, is_clip_part=false, format
+  // 'kling_3_final_composite') and N per-clip rows (is_clip_part=
+  // true). Show the composite as the primary deliverable; collapse
+  // the source clips. Non-Kling jobs are unaffected — they have no
+  // clip parts so the partition is a no-op.
+  const sortedVariants = [...variants].sort((a, b) => {
+    const aIsComposite = !a.isClipPart && a.format.endsWith('_final_composite');
+    const bIsComposite = !b.isClipPart && b.format.endsWith('_final_composite');
+    if (aIsComposite !== bIsComposite) return aIsComposite ? -1 : 1;
+    if (a.isClipPart !== b.isClipPart) return a.isClipPart ? 1 : -1;
+    if (a.clipIndex != null && b.clipIndex != null) return a.clipIndex - b.clipIndex;
+    return a.createdAt.getTime() - b.createdAt.getTime();
+  });
+
   const conceptIds = job.conceptIds ?? [];
   const concept =
     conceptIds.length > 0
@@ -180,7 +195,7 @@ export default async function JobReviewPage({ params }: Props) {
             errorMessage: job.errorMessage,
             metadata: job.metadata,
           }}
-          variants={variants.map((v) => ({
+          variants={sortedVariants.map((v) => ({
             id: v.id,
             status: v.status,
             fileUrl: v.fileUrl,
@@ -218,7 +233,7 @@ export default async function JobReviewPage({ params }: Props) {
         <JobReviewClient
           jobId={job.id}
           conceptType={conceptType as 'static' | 'ugc'}
-          variants={variants.map((v) => ({
+          variants={sortedVariants.map((v) => ({
             id: v.id,
             fileUrl: v.fileUrl,
             aspectRatio: v.aspectRatio,
@@ -227,6 +242,9 @@ export default async function JobReviewPage({ params }: Props) {
             headline: v.headline,
             primaryText: v.primaryText,
             description: v.description,
+            isClipPart: v.isClipPart,
+            clipIndex: v.clipIndex,
+            format: v.format,
           }))}
           launchSnapshot={launchSnapshot}
         />

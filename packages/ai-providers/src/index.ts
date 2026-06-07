@@ -97,6 +97,16 @@ export {
   type KlingPredictionStatus,
 } from './kling';
 export {
+  submitReplicateConcat,
+  checkReplicateConcat,
+  getVideoConcatModelId,
+  isVideoConcatEnabled,
+  type SubmitConcatInput,
+  type SubmitConcatResult,
+  type CheckConcatInput,
+  type CheckConcatResult,
+} from './replicate-concat';
+export {
   submitElevenLabsTts,
   getDefaultElevenLabsVoiceId,
   estimateElevenLabsCostUsd,
