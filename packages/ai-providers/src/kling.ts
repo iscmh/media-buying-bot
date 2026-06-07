@@ -128,16 +128,15 @@ export async function submitKlingVideo(input: KlingSubmitInput): Promise<KlingSu
     prompt: input.prompt,
     duration: input.durationSeconds ?? 5,
     aspect_ratio: input.aspectRatio ?? '9:16',
-    // Polish-9.17: kling-v2.6 supports synchronized native audio
-    // (speech + ambient + SFX). The exact param name varies across
-    // Kling deployments — send all four common aliases. Replicate
-    // silently ignores unknown input fields.
-    enable_audio: true,
-    with_audio: true,
-    generate_audio: true,
-    audio: true,
     // Polish-9.18: suppress burned-in captions + plastic-skin look.
     negative_prompt: input.negativePrompt ?? DEFAULT_KLING_NEGATIVE_PROMPT,
+    // Polish-10.4: removed the Polish-9.17 audio shotgun
+    // (enable_audio / with_audio / generate_audio / audio). Kling 2.5
+    // turbo pro rejects these with strict input validation. Path 1
+    // architecture handles audio out-of-band via ElevenLabs + a
+    // lip-sync pass (Polish-11), not via Kling's own model. The
+    // Omni client (kling-omni.ts) keeps its own audio handling for
+    // the Experimental pipeline.
   };
   if (input.startImageUrl) {
     klingInput.start_image = input.startImageUrl;
