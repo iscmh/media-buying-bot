@@ -131,14 +131,24 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
         generationJobId: jobId,
       });
       if (!claude.ok) {
+        console.log(`[kling-manual] Claude call failed: ${claude.errorMessage ?? 'unknown'}`);
         return {
           ok: false as const,
           error: claude.errorMessage ?? 'Claude manual generation failed',
           costUsd: claude.costUsd,
         };
       }
+      // Polish-9.7: capture raw output for diagnostics. The parser used
+      // to silently fall back to a single bad clip on non-JSON; now it
+      // hard-fails with a clear error and we log the first 1000 chars
+      // so the Inngest dashboard shows what Claude actually returned.
+      console.log(
+        `[kling-manual] Claude returned ${(claude.text ?? '').length} chars; ` +
+          `first 1000: ${(claude.text ?? '').slice(0, 1000)}`,
+      );
       const parsed = parseProductionManual(claude.json ?? claude.text);
       if (!parsed.ok) {
+        console.log(`[kling-manual] parse failed: ${parsed.error}`);
         return { ok: false as const, error: parsed.error, costUsd: claude.costUsd };
       }
       return { ok: true as const, manual: parsed.manual, costUsd: claude.costUsd };
@@ -198,6 +208,7 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
                 : 'error' in submitResult
                   ? submitResult.error
                   : 'submit failed';
+            console.log(`[kling-clip-${clipIndex}] submit failed: ${err}`);
             return { clipIndex, ok: false, costUsd: 0, error: err };
           }
 
@@ -228,11 +239,16 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
           }
 
           if (!videoUrl) {
+            const err =
+              pollError ??
+              `Kling clip timed out after ${POLL_MAX_ATTEMPTS} polls ` +
+                `(${POLL_INTERVAL_SECONDS}s interval = ${(POLL_MAX_ATTEMPTS * POLL_INTERVAL_SECONDS) / 60} min ceiling)`;
+            console.log(`[kling-clip-${clipIndex}] ${err}`);
             return {
               clipIndex,
               ok: false,
               costUsd: pollCostUsd,
-              error: pollError ?? 'Kling clip timed out',
+              error: err,
             };
           }
 
@@ -268,12 +284,26 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
       }
     }
 
+    // Polish-9.7: fail-fast when zero clips succeed. The previous code
+    // marked the job 'completed' with 0 generated_creatives rows, which
+    // looked like a successful run in the UI but produced nothing.
+    const outcome = decideKlingJobOutcome({
+      successCount,
+      totalClips: manual.clips.length,
+      clipsPerVariant: CLIPS_PER_VARIANT,
+    });
+    if (outcome.kind === 'fail') {
+      console.log(`[kling-job] 0 of ${manual.clips.length} clips succeeded — marking job failed`);
+      await markJobFailed(jobId, userId, outcome.error, totalCost);
+      return { jobId, mode, generated: 0, totalCost };
+    }
+
     await markJobCompleted({
       jobId,
       userId,
       mode,
       startedAt,
-      variantCount: successCount > 0 ? Math.ceil(successCount / CLIPS_PER_VARIANT) : 0,
+      variantCount: outcome.variantCount,
       actualCostUsd: totalCost,
       provider: 'kling',
       path: 'kling-multi-clip',
@@ -299,7 +329,31 @@ interface ProductionManual {
   clips: ClipSpec[];
 }
 
-function parseProductionManual(
+/**
+ * Polish-9.7: pure decision for whether a finished clip loop should
+ * mark the job 'failed' (zero successes) or 'completed' (at least one).
+ * Exported for unit tests. Mirrored inline in the Inngest function so
+ * step boundaries don't need re-mapping.
+ */
+export function decideKlingJobOutcome(input: {
+  successCount: number;
+  totalClips: number;
+  clipsPerVariant: number;
+}): { kind: 'fail'; error: string } | { kind: 'complete'; variantCount: number } {
+  if (input.successCount === 0) {
+    return {
+      kind: 'fail',
+      error: `All ${input.totalClips} clips failed. Check per-clip errors in the Inngest run.`,
+    };
+  }
+  return {
+    kind: 'complete',
+    variantCount: Math.ceil(input.successCount / input.clipsPerVariant),
+  };
+}
+
+// Polish-9.7: exported for unit tests covering the no-fallback path.
+export function parseProductionManual(
   raw: unknown,
 ): { ok: true; manual: ProductionManual } | { ok: false; error: string } {
   if (!raw || typeof raw !== 'object') {
@@ -332,14 +386,16 @@ function parseManualFromText(
     const json = JSON.parse(stripped);
     return parseProductionManual(json);
   } catch {
-    // Not JSON — try to extract structure from prose
+    // Polish-9.7: hard-fail with the raw output so the Inngest dashboard
+    // shows EXACTLY what Claude returned. The previous silent fallback
+    // built one bad clip with prose as the prompt, then submitted it to
+    // Kling where it crashed without diagnostic.
     return {
-      ok: true,
-      manual: {
-        characterPrompt: '',
-        setPrompt: '',
-        clips: [{ videoPrompt: text.slice(0, 5000) }],
-      },
+      ok: false,
+      error:
+        'Claude returned non-JSON manual. Expected structured JSON with ' +
+        '{ character_prompt, set_prompt, clips: [...] }. First 500 chars: ' +
+        text.slice(0, 500),
     };
   }
 }
