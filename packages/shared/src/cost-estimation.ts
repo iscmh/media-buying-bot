@@ -55,6 +55,17 @@ const PRICING = {
   // variant, $0.35/clip on kwaivgi/kling-v2.6).
   klingMultiClipClipsPerVariant: 16,
   klingMultiClipPerClipUsd: 0.35,
+
+  // Polish-10: Kling 3.0 Omni multi-segment pipeline. 2 segments ×
+  // 15s × $0.28/sec (pro mode + audio) = $8.40 of Kling +
+  // ~$0.05 Nano Banana reference frame + ~$0.05 stitch crossfade
+  // ≈ $8.50 per variant. Tuneable via env on the kling-omni client.
+  klingOmniSegmentsPerVariant: 2,
+  klingOmniSegmentDurationSec: 15,
+  klingOmniPerSegmentUsd: 4.2, // pro mode: 0.28 × 15
+  klingOmniReferenceFrameUsd: 0.05,
+  klingOmniStitchUsd: 0.05,
+  klingOmniManualPromptUsd: 0.1,
   klingMultiClipManualPromptUsd: 0.1,
   // Polish-6: Sora 2 single-shot via Kie.ai
   soraPerVariantUsd: 1.5,
@@ -81,6 +92,7 @@ export type PipelineType =
   | 'heygen_avatar_talking_head'
   | 'sora_2_single_shot'
   | 'kling_3_multi_clip_native_lipsync'
+  | 'kling_3_omni_multi_segment'
   | 'nano_banana_static_image';
 
 export interface EstimateInput {
@@ -238,6 +250,27 @@ function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostE
       breakdown.push({
         item: `Kling 2.6 clips (${totalClips} clips × $${PRICING.klingMultiClipPerClipUsd.toFixed(2)})`,
         cost: round4(totalClips * PRICING.klingMultiClipPerClipUsd),
+      });
+      break;
+    }
+    case 'kling_3_omni_multi_segment': {
+      const segmentsPerVariant = PRICING.klingOmniSegmentsPerVariant;
+      const totalSegments = variantCount * segmentsPerVariant;
+      breakdown.push({
+        item: 'Production manual (Claude)',
+        cost: round4(variantCount * PRICING.klingOmniManualPromptUsd),
+      });
+      breakdown.push({
+        item: `Reference frames (${variantCount} × $${PRICING.klingOmniReferenceFrameUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.klingOmniReferenceFrameUsd),
+      });
+      breakdown.push({
+        item: `Kling 3.0 Omni segments (${totalSegments} × $${PRICING.klingOmniPerSegmentUsd.toFixed(2)})`,
+        cost: round4(totalSegments * PRICING.klingOmniPerSegmentUsd),
+      });
+      breakdown.push({
+        item: `Crossfade stitch (${variantCount} × $${PRICING.klingOmniStitchUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.klingOmniStitchUsd),
       });
       break;
     }

@@ -70,6 +70,11 @@ export type Events = {
   'generation/kling-multi-clip.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-10: Kling 3.0 Omni multi-segment pipeline (replaces the
+  // legacy multi-clip pipeline as the default for Kling-routed jobs).
+  'generation/kling-3-omni-multi-segment.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   // Polish-6: Sora 2 single-shot pipeline.
   'generation/sora.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };

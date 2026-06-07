@@ -24,6 +24,7 @@ export interface PipelineDescriptor {
   workerEvent:
     | 'generation/ugc.requested'
     | 'generation/kling-multi-clip.requested'
+    | 'generation/kling-3-omni-multi-segment.requested'
     | 'generation/sora.requested'
     | 'generation/nano-banana.requested';
   /** providers the user MUST have connected for this pipeline to work. */
@@ -49,11 +50,19 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   },
   kling_3_multi_clip_native_lipsync: {
     pipeline: 'kling_3_multi_clip_native_lipsync',
-    label: '16-clip lip-sync (Kling 2.6, native audio)',
+    label: 'Legacy multi-clip (deprecated)',
     providerChoice: 'kling',
     format: 'kling_3_multi_clip',
     workerEvent: 'generation/kling-multi-clip.requested',
     requiredProviders: ['kling'],
+  },
+  kling_3_omni_multi_segment: {
+    pipeline: 'kling_3_omni_multi_segment',
+    label: 'UGC ad (Kling 3.0 Omni, 30s with character continuity)',
+    providerChoice: 'kling',
+    format: 'kling_3_omni_multi_segment',
+    workerEvent: 'generation/kling-3-omni-multi-segment.requested',
+    requiredProviders: ['kling', 'gemini'],
   },
   nano_banana_static_image: {
     pipeline: 'nano_banana_static_image',
@@ -77,6 +86,7 @@ export function pipelineFromString(value: string | null | undefined): PipelineTy
 export const ALL_PIPELINES: PipelineType[] = [
   'heygen_avatar_talking_head',
   'sora_2_single_shot',
+  'kling_3_omni_multi_segment',
   'kling_3_multi_clip_native_lipsync',
   'nano_banana_static_image',
 ];

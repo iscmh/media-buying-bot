@@ -107,6 +107,21 @@ export {
   type CheckConcatResult,
 } from './replicate-concat';
 export {
+  submitKlingOmni,
+  checkKlingOmni,
+  getKlingOmniRawModelId,
+  isKlingOmniEnabled,
+  estimateKlingOmniSegmentCostUsd,
+  KLING_OMNI_NEGATIVE_PROMPT,
+  type KlingOmniMode,
+  type KlingOmniShot,
+  type KlingOmniSubmitInput,
+  type KlingOmniSubmitResult,
+  type KlingOmniCheckInput,
+  type KlingOmniCheckResult,
+  type KlingOmniPredictionStatus,
+} from './kling-omni';
+export {
   submitAudioTrim,
   checkAudioTrim,
   getAudioTrimModelId,
