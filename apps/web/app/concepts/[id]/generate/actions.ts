@@ -28,6 +28,13 @@ import {
   sanitizeFilename,
   storagePathBelongsToUser,
 } from './reference-upload-helpers';
+import {
+  AI_PROVIDER_QUERY_LIST,
+  buildConnectedProviders,
+  type ConnectedProviders,
+} from './connected-providers-helper';
+
+export type { ConnectedProviders } from './connected-providers-helper';
 
 export interface CreateGenerationJobResult {
   ok: boolean;
@@ -248,19 +255,15 @@ export async function createGenerationJobAction(
 }
 
 /**
- * Polish-4: which providers does the user have active connections for?
- * Powers the form's provider + format pickers — we only offer formats
- * the user has the keys to actually generate. Returns a flat shape the
- * client can pass into the picker without further lookups.
+ * Polish-4 / Polish-9.3: which providers does the user have active
+ * connections for? Powers the form's pipeline picker — we only offer
+ * pipelines the user has the keys to actually run.
+ *
+ * Polish-9.3: kling capability fills from either a 'kling' DB row OR
+ * a 'replicate' DB row (the Polish-8 UI card stores under the
+ * 'replicate' enum value but Replicate is the host for Kling 3.0 in
+ * our architecture). See buildConnectedProviders for the mapping.
  */
-export interface ConnectedProviders {
-  heygen: { connected: boolean; tier: 'free' | 'pro' | 'premium' | null };
-  kling: { connected: boolean };
-  elevenlabs: { connected: boolean };
-  openai: { connected: boolean };
-  gemini: { connected: boolean };
-}
-
 export async function loadConnectedProviders(userId: string): Promise<ConnectedProviders> {
   const db = getDb();
   const aiRows = await db.query.aiProviderConnections.findMany({
@@ -268,12 +271,10 @@ export async function loadConnectedProviders(userId: string): Promise<ConnectedP
       eq(schema.aiProviderConnections.userId, userId),
       eq(schema.aiProviderConnections.status, 'active'),
       isNull(schema.aiProviderConnections.deletedAt),
-      inArray(schema.aiProviderConnections.provider, ['heygen', 'kling', 'elevenlabs', 'openai']),
+      inArray(schema.aiProviderConnections.provider, [...AI_PROVIDER_QUERY_LIST]),
     ),
     columns: { provider: true, tier: true },
   });
-  const byAi = new Map(aiRows.map((r) => [r.provider, r]));
-
   const toolRows = await db.query.toolConnections.findMany({
     where: and(
       eq(schema.toolConnections.userId, userId),
@@ -282,18 +283,7 @@ export async function loadConnectedProviders(userId: string): Promise<ConnectedP
     ),
     columns: { provider: true },
   });
-  const toolSet = new Set(toolRows.map((r) => r.provider));
-
-  return {
-    heygen: {
-      connected: byAi.has('heygen'),
-      tier: (byAi.get('heygen')?.tier as 'free' | 'pro' | 'premium' | null | undefined) ?? null,
-    },
-    kling: { connected: byAi.has('kling') },
-    elevenlabs: { connected: byAi.has('elevenlabs') },
-    openai: { connected: byAi.has('openai') },
-    gemini: { connected: toolSet.has('gemini') },
-  };
+  return buildConnectedProviders(aiRows, new Set(toolRows.map((r) => r.provider)));
 }
 
 // =========================================================================

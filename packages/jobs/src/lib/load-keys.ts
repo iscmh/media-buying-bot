@@ -75,17 +75,33 @@ async function fetchCiphertext(userId: string, provider: ProviderKey): Promise<s
     return row?.apiKeyEncrypted ?? null;
   }
 
-  // heygen / arcads / creatify / kling / elevenlabs all live in
-  // ai_provider_connections (Polish-4 added kling + elevenlabs to the
-  // ai_provider enum).
-  const row = await db.query.aiProviderConnections.findFirst({
-    where: and(
-      eq(schema.aiProviderConnections.userId, userId),
-      eq(schema.aiProviderConnections.provider, provider),
-      eq(schema.aiProviderConnections.status, 'active'),
-      isNull(schema.aiProviderConnections.deletedAt),
-    ),
-    columns: { apiKeyEncrypted: true },
-  });
-  return row?.apiKeyEncrypted ?? null;
+  // heygen / arcads / creatify / kling / elevenlabs / openai all live
+  // in ai_provider_connections.
+  //
+  // Polish-9.3: when the worker asks for 'kling' the user might have
+  // connected the key under the Polish-8 'Replicate' UI card, which
+  // writes provider='replicate' on the DB row (Replicate is the API
+  // host for Kling 3.0). Fall back to that row so the worker actually
+  // finds the key instead of throwing MissingProviderKeyError.
+  type AiProviderEnum = typeof schema.aiProviderConnections.provider extends {
+    _: { data: infer D };
+  }
+    ? D
+    : string;
+  const lookups = (
+    provider === 'kling' ? (['kling', 'replicate'] as const) : ([provider] as const)
+  ) as readonly AiProviderEnum[];
+  for (const p of lookups) {
+    const row = await db.query.aiProviderConnections.findFirst({
+      where: and(
+        eq(schema.aiProviderConnections.userId, userId),
+        eq(schema.aiProviderConnections.provider, p),
+        eq(schema.aiProviderConnections.status, 'active'),
+        isNull(schema.aiProviderConnections.deletedAt),
+      ),
+      columns: { apiKeyEncrypted: true },
+    });
+    if (row?.apiKeyEncrypted) return row.apiKeyEncrypted;
+  }
+  return null;
 }
