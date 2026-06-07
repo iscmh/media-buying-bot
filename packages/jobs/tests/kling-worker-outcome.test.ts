@@ -1,7 +1,11 @@
 /**
- * Polish-9.7: Kling worker fail-fast outcome + parser hard-fail tests.
- * Polish-9.8: parser tests updated for markdown format (master prompt
- * spec) + JSON backwards-compat path.
+ * Polish-9.7 / 9.8 / 9.9: Kling worker fail-fast outcome + production-
+ * manual parser tests. The parser handles the Universal UGC Master
+ * Prompt's actual output format — Section C blocks delimited by `─────`
+ * separators with `CLIP N — TIME — TITLE` or `SCENE N — ...` headers
+ * containing `[USE IMAGE X AS STARTING FRAME]`, `Subject:`, and
+ * `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "..."`
+ * directives that Kling 3.0 consumes natively.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +18,11 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+const FORGE_FIXTURE = readFileSync(
+  resolve(__dirname, '../../ai-providers/src/prompts/examples/forge-tallow-balm-dr-marcus.md'),
+  'utf8',
+);
 
 describe('Polish-9.7: decideKlingJobOutcome', () => {
   it('0 successes → fail with clear error', () => {
@@ -60,173 +69,183 @@ describe('Polish-9.7: decideKlingJobOutcome', () => {
   });
 });
 
-describe('Polish-9.8: parseProductionManual — JSON backwards-compat path', () => {
-  it('valid JSON object → ok=true with all fields', () => {
-    const r = parseProductionManual({
-      character_prompt: 'A 30yo woman in a kitchen',
-      set_prompt: 'Sunny morning kitchen',
-      clips: [
-        { video_prompt: 'Hold mug, smile.', dialogue: 'Morning!', duration: 6 },
-        { video_prompt: 'Pour coffee, sip.', dialogue: 'Mmm.' },
-      ],
-    });
+describe('Polish-9.9: parseProductionManual — Forge fixture (gold standard)', () => {
+  it('parses 16 clips with Section A/B/C fields populated', () => {
+    const r = parseProductionManual(FORGE_FIXTURE);
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.manual.clips).toHaveLength(2);
-      expect(r.manual.characterPrompt).toMatch(/30yo woman/);
-      expect(r.manual.clips[0]!.duration).toBe(6);
+    if (!r.ok) return;
+
+    expect(r.manual.characterPrompt).toMatch(/three-view character sheet/i);
+    expect(r.manual.characterPrompt).toMatch(/olive army-green V-neck medical scrubs/i);
+    expect(r.manual.setPrompt).toMatch(/medical office\/exam room/i);
+    expect(r.manual.clips).toHaveLength(16);
+  });
+
+  it('clip 0 has exact Forge dialogue + [USE IMAGE 1] anchor + 6s duration + lip-sync motion', () => {
+    const r = parseProductionManual(FORGE_FIXTURE);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const clip0 = r.manual.clips[0]!;
+    expect(clip0.clipNumber).toBe(1);
+    expect(clip0.dialogue).toBe(
+      "Your skin care routine might be the reason you're aging faster, and here's why.",
+    );
+    expect(clip0.videoPrompt).toMatch(/\[USE IMAGE 1 AS STARTING FRAME\]/);
+    expect(clip0.videoPrompt).toMatch(/Subject: DR\. MARCUS, ref: 284/);
+    expect(clip0.videoPrompt).toMatch(/GENERATE NATIVE AUDIO AND LIP-SYNC/);
+    expect(clip0.videoPrompt).toMatch(/Static iPhone shot\./);
+    expect(clip0.duration).toBe(6);
+    expect(clip0.motionType).toBe('lip-sync');
+    expect(clip0.startingFrameImage).toBe(1);
+  });
+
+  it('clip 1 has the "75% of anti-aging products" dialogue', () => {
+    const r = parseProductionManual(FORGE_FIXTURE);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const clip1 = r.manual.clips[1]!;
+    expect(clip1.clipNumber).toBe(2);
+    expect(clip1.dialogue).toMatch(/Over 75% of anti-aging products/);
+    expect(clip1.videoPrompt).toMatch(/\[USE IMAGE 2 AS STARTING FRAME\]/);
+    expect(clip1.startingFrameImage).toBe(2);
+  });
+
+  it('clip 15 (final CTA) preserves the "Click below" dialogue + 5s duration', () => {
+    const r = parseProductionManual(FORGE_FIXTURE);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    const last = r.manual.clips[15]!;
+    expect(last.clipNumber).toBe(16);
+    expect(last.dialogue).toMatch(/Click below before we sell out/);
+    expect(last.duration).toBe(5);
+  });
+
+  it('every clip has a non-empty videoPrompt populated with directive text', () => {
+    const r = parseProductionManual(FORGE_FIXTURE);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+
+    for (const clip of r.manual.clips) {
+      expect(clip.videoPrompt.length).toBeGreaterThan(50);
+      expect(clip.videoPrompt).toMatch(/\[USE IMAGE \d+ AS STARTING FRAME\]/);
     }
   });
 
-  it('JSON wrapped in ```json fences → ok=true', () => {
-    const manual = {
-      character_prompt: 'C',
-      set_prompt: 'S',
-      clips: [{ video_prompt: 'one clip' }],
-    };
-    const text = '```json\n' + JSON.stringify(manual) + '\n```';
-    const r = parseProductionManual(text);
+  it('imagePrompt is populated for every clip (master prompt fallback at minimum)', () => {
+    const r = parseProductionManual(FORGE_FIXTURE);
     expect(r.ok).toBe(true);
-  });
+    if (!r.ok) return;
 
-  it('JSON object with empty clips array → ok=false', () => {
-    const r = parseProductionManual({
-      character_prompt: 'C',
-      set_prompt: 'S',
-      clips: [],
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/0 clips/i);
-  });
-
-  it('null/undefined → ok=false', () => {
-    const r = parseProductionManual(undefined);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/neither JSON nor text/);
+    // Clip 1 should pull the IMAGE 1 master first frame; clips 2-16 either
+    // get the per-image continuation snippet or the master fallback.
+    expect(r.manual.clips[0]!.imagePrompt).toBeTruthy();
+    expect(r.manual.clips[0]!.imagePrompt).toMatch(/photorealistic/i);
   });
 });
 
-describe('Polish-9.8: parseProductionManual — markdown (master prompt) path', () => {
-  it('normalized "## SECTION / **Field:**" format → 16 clips parsed cleanly', () => {
-    const md = buildMarkdownFixture(16);
-    const r = parseProductionManual(md, { expectedClips: 16 });
+describe('Polish-9.9: parseProductionManual — also accepts SCENE keyword (master prompt spec)', () => {
+  it('CLIP and SCENE headers are both parsed', () => {
+    const md = `# COMPLETE VIDEO PRODUCTION MANUAL
+
+SECTION A — CHARACTER & SET GENERATION
+Global Character Prompt: A 30yo woman in a sunny kitchen.
+Global Set Prompt: Sunny morning kitchen with messy counter.
+
+SECTION B — FIRST FRAMES (IMAGE PROMPTS)
+IMAGE 1 — Master First Frame:
+Generate a photorealistic image of a 30yo woman in a kitchen.
+
+SECTION C — ANIMATION & NATIVE AUDIO PROMPTS
+
+─────────────────────────────────────────
+SCENE 1 — 00:00–00:06 — HOOK
+Starting Frame: Image 1
+Last Frame needed: YES
+─────────────────────────────────────────
+[USE IMAGE 1 AS STARTING FRAME]
+Subject: SARAH, ref: 123, a 30yo woman, warm American accent.
+[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Morning!"
+Static iPhone shot. Sarah holds mug, smiles.
+─────────────────────────────────────────
+motionType: lip-sync
+`;
+    const r = parseProductionManual(md);
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.manual.clips).toHaveLength(16);
-      expect(r.manual.characterPrompt).toMatch(/Dr\. Marcus/);
-      expect(r.manual.setPrompt).toMatch(/medical office/);
-      const first = r.manual.clips[0]!;
-      expect(first.videoPrompt).toMatch(/hook delivery/i);
-      expect(first.dialogue).toMatch(/skin care routine/);
-      expect(first.duration).toBe(6);
-      expect(first.imagePrompt).toMatch(/photorealistic/i);
-      expect(first.motionType).toBe('lip-sync');
-    }
+    if (!r.ok) return;
+    expect(r.manual.clips).toHaveLength(1);
+    expect(r.manual.clips[0]!.dialogue).toBe('Morning!');
+    expect(r.manual.clips[0]!.videoPrompt).toMatch(/\[USE IMAGE 1 AS STARTING FRAME\]/);
+  });
+});
+
+describe('Polish-9.9: parseProductionManual — error paths', () => {
+  it('null/undefined input → ok=false', () => {
+    const r = parseProductionManual(undefined);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/no text/i);
   });
 
-  it('missing Global Character Prompt → ok=false with specific error', () => {
-    const md = `# MANUAL
+  it('missing Section A character prompt → ok=false with characterPrompt error', () => {
+    const md = `SECTION A — CHARACTER & SET GENERATION
+Global Set Prompt: A sunny kitchen.
 
-## SECTION A — CHARACTER & SET GENERATION
+SECTION C — ANIMATION & NATIVE AUDIO PROMPTS
 
-**Global Set Prompt:** A sunny kitchen.
-
-## SECTION C — POST-PRODUCTION
-
-### Clip 1
-**Video Prompt:** Hold mug.
+─────────────────────────────────────────
+CLIP 1 — 00:00–00:06 — HOOK
+Starting Frame: Image 1
+─────────────────────────────────────────
+[USE IMAGE 1 AS STARTING FRAME]
+Static iPhone shot.
+─────────────────────────────────────────
+motionType: lip-sync
 `;
     const r = parseProductionManual(md);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/missing characterPrompt/i);
   });
 
-  it('missing Global Set Prompt → ok=false', () => {
-    const md = `## SECTION A
+  it('missing Section C entirely → ok=false', () => {
+    const md = `SECTION A — CHARACTER & SET GENERATION
+Global Character Prompt: A 30yo woman.
+Global Set Prompt: Sunny kitchen.
 
-**Global Character Prompt:** A woman.
-
-## SECTION C
-
-### Clip 1
-**Video Prompt:** Hold mug.
+SECTION B — FIRST FRAMES
+IMAGE 1 — Master First Frame:
+A photorealistic image.
 `;
     const r = parseProductionManual(md);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/missing setPrompt/i);
+    if (!r.ok) {
+      expect(r.error).toMatch(/0 parseable clip blocks/i);
+      expect(r.error).toMatch(/First 500 chars/);
+    }
   });
 
-  it('only 8 clips when 16 expected → ok=false with "8 clips, expected 16"', () => {
-    const md = buildMarkdownFixture(8);
-    const r = parseProductionManual(md, { expectedClips: 16 });
+  it('Section C present but no separators / CLIP headers → ok=false', () => {
+    const md = `SECTION A — CHARACTER & SET GENERATION
+Global Character Prompt: A 30yo woman.
+Global Set Prompt: Sunny kitchen.
+
+SECTION C — ANIMATION
+Sure! I'll write the production manual for you. Lots of prose here. ${'a'.repeat(200)}
+`;
+    const r = parseProductionManual(md);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/8 clips, expected 16/);
+    if (!r.ok) {
+      expect(r.error).toMatch(/0 parseable clip blocks/i);
+      expect(r.error).toMatch(/First 500 chars/);
+    }
   });
 
-  it('prose with no section structure → ok=false with first-500-chars excerpt', () => {
+  it('prose with no section structure at all → ok=false', () => {
     const prose =
       "Sure! I'll write the production manual for you. Here are the 16 clips: " + 'a'.repeat(2000);
     const r = parseProductionManual(prose);
     expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.error).toMatch(/First 500 chars/);
-      expect(r.error).toContain("I'll write the production manual");
-    }
-  });
-
-  it('Forge fixture (real master-prompt example) → 16 clips with character + dialogues', () => {
-    const fixturePath = resolve(
-      __dirname,
-      '../../ai-providers/src/prompts/examples/forge-tallow-balm-dr-marcus.md',
-    );
-    const md = readFileSync(fixturePath, 'utf8');
-    const r = parseProductionManual(md, { expectedClips: 16 });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.manual.clips).toHaveLength(16);
-      expect(r.manual.characterPrompt).toMatch(/three-view character sheet/i);
-      expect(r.manual.setPrompt).toMatch(/medical office/i);
-      // Clip 1 from Forge has the "skin care routine" dialogue.
-      expect(r.manual.clips[0]!.dialogue).toMatch(/skin care routine/i);
-      // Clip 1's video prompt should contain the [USE IMAGE 1] anchor.
-      expect(r.manual.clips[0]!.videoPrompt).toMatch(/USE IMAGE 1 AS STARTING FRAME/);
-      // Forge uses 6s clips for #1-15 (derived from timestamps).
-      expect(r.manual.clips[0]!.duration).toBe(6);
-      // motionType is on its own line in Forge.
-      expect(r.manual.clips[0]!.motionType).toBe('lip-sync');
-      // Clip 16 is the final CTA.
-      expect(r.manual.clips[15]!.dialogue).toMatch(/sell out/i);
-    }
+    if (!r.ok) expect(r.error).toMatch(/missing characterPrompt/i);
   });
 });
-
-/** Build a synthetic 16-clip markdown manual in the "## / **Field:**" normalized format. */
-function buildMarkdownFixture(clipCount: number): string {
-  const head = `# COMPLETE VIDEO PRODUCTION MANUAL: FORGE TALLOW BALM — Dr. Marcus
-
-## SECTION A — CHARACTER & SET GENERATION
-
-**Global Character Prompt:** Photorealistic three-view character sheet of Dr. Marcus, a man in his mid-30s, medium-dark olive complexion, short tight dark curly hair, clean-shaven, warm brown eyes, wearing olive army-green V-neck medical scrubs with white cursive embroidery.
-
-**Global Set Prompt:** Indoor medical office/exam room environment. Off-white clinical walls, drop ceiling tiles visible at top of frame. Behind subject: chrome otoscope, doctor bobblehead figurine, dermatology skin sample display board.
-
-## SECTION B — FIRST FRAMES
-
-`;
-  let body = '## SECTION C — CLIP-BY-CLIP BREAKDOWN\n\n';
-  for (let i = 1; i <= clipCount; i++) {
-    const start = `00:${String(((i - 1) * 6) % 60).padStart(2, '0')}`;
-    const end = `00:${String((i * 6) % 60).padStart(2, '0')}`;
-    body += `### Clip ${i}\n`;
-    body += `**Image Prompt:** Generate a photorealistic image of Dr. Marcus, clip ${i}, holding microphone, eye-level shot, clinical office background.\n`;
-    body += `**Video Prompt:** Static iPhone shot. Hook delivery for clip ${i}. Timestamp ${start}-${end}. Authentic UGC, no filter.\n`;
-    if (i === 1) {
-      body += `**Dialogue:** "Your skin care routine might be the reason you're aging faster, and here's why."\n`;
-    } else {
-      body += `**Dialogue:** "Clip ${i} dialogue line."\n`;
-    }
-    body += `**Duration:** 6s\n`;
-    body += `**Motion Type:** lip-sync\n\n`;
-  }
-  return head + body;
-}
