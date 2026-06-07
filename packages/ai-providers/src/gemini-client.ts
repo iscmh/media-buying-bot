@@ -269,20 +269,85 @@ function interpretVisionResponse(result: CallProviderResult<GeminiResponse>): Ge
     };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
+  const parseResult = tryParseGeminiJson(text);
+  if (!parseResult.ok) {
     return {
       ok: false,
       costUsd,
       latencyMs: result.latencyMs,
       rawText: text,
-      errorMessage: 'Gemini response was not valid JSON',
+      errorMessage: parseResult.error,
     };
   }
 
-  return { ok: true, json: parsed, rawText: text, costUsd, latencyMs: result.latencyMs };
+  return {
+    ok: true,
+    json: parseResult.value,
+    rawText: text,
+    costUsd,
+    latencyMs: result.latencyMs,
+  };
+}
+
+/**
+ * Polish-9.11: Gemini ignores `response_mime_type: 'application/json'`
+ * roughly 1 in 10 calls and returns the JSON wrapped in markdown
+ * fences, prefixed with a preamble ("Here is the analysis: ..."), or
+ * followed by a trailing politeness ("hope this helps"). The previous
+ * naive JSON.parse() crashed analyze-concept with a generic "not
+ * valid JSON" error and no diagnostic.
+ *
+ * Try strategies in order:
+ *   1. strip ``` / ```json fences if present, then JSON.parse
+ *   2. direct JSON.parse on the stripped text
+ *   3. slice from first `{` to last `}` and parse
+ *   4. slice from first `[` to last `]` (array root) and parse
+ *
+ * On all-fail, return the first 500 chars so the Inngest log shows
+ * EXACTLY what Gemini emitted.
+ */
+export function tryParseGeminiJson(
+  text: string,
+): { ok: true; value: unknown } | { ok: false; error: string } {
+  let candidate = text.trim();
+
+  const fenceMatch = candidate.match(/^```(?:json|JSON)?\s*\n?([\s\S]*?)\n?```\s*$/);
+  if (fenceMatch && fenceMatch[1]) {
+    candidate = fenceMatch[1].trim();
+  }
+
+  try {
+    return { ok: true, value: JSON.parse(candidate) };
+  } catch {
+    // fall through
+  }
+
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return { ok: true, value: JSON.parse(candidate.slice(firstBrace, lastBrace + 1)) };
+    } catch {
+      // fall through
+    }
+  }
+
+  const firstBracket = candidate.indexOf('[');
+  const lastBracket = candidate.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    try {
+      return { ok: true, value: JSON.parse(candidate.slice(firstBracket, lastBracket + 1)) };
+    } catch {
+      // fall through
+    }
+  }
+
+  return {
+    ok: false,
+    error:
+      `Gemini response was not parseable as JSON (tried direct, fenced, brace-bounded, ` +
+      `bracket-bounded). First 500 chars: ${text.slice(0, 500)}`,
+  };
 }
 
 // =========================================================================
