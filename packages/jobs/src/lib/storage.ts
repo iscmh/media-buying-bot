@@ -65,10 +65,19 @@ export async function uploadGeneratedImage(input: {
   variantIndex: number;
   imageBase64: string;
   mimeType: string;
+  /**
+   * Polish-9.8: optional prefix so the Kling pipeline's per-clip first-
+   * frame uploads (`kling-frame-0`, `kling-frame-1`, …) don't collide
+   * with the static-image pipeline's `0`, `1`, … variant filenames.
+   */
+  filenamePrefix?: string;
 }): Promise<{ path: string; publicUrl: string }> {
   const supabase = getServiceRoleSupabase();
   const ext = input.mimeType === 'image/jpeg' ? '.jpg' : '.png';
-  const path = `${input.userId}/generated/${input.jobId}/${input.variantIndex}${ext}`;
+  const stem = input.filenamePrefix
+    ? `${input.filenamePrefix}${input.variantIndex}`
+    : `${input.variantIndex}`;
+  const path = `${input.userId}/generated/${input.jobId}/${stem}${ext}`;
   const buffer = Buffer.from(input.imageBase64, 'base64');
   const { error } = await supabase.storage
     .from('generated-creatives')

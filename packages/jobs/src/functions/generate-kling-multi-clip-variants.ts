@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import {
   callClaude,
+  callGeminiImage,
   getUniversalUgcMasterPrompt,
   submitKlingVideo,
   checkKlingPrediction,
@@ -9,6 +10,7 @@ import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
+import { uploadGeneratedImage } from '../lib/storage';
 
 /**
  * Polish-6 item 4: Kling 3.0 multi-clip native lipsync pipeline.
@@ -146,7 +148,9 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
         `[kling-manual] Claude returned ${(claude.text ?? '').length} chars; ` +
           `first 1000: ${(claude.text ?? '').slice(0, 1000)}`,
       );
-      const parsed = parseProductionManual(claude.json ?? claude.text);
+      const parsed = parseProductionManual(claude.json ?? claude.text, {
+        expectedClips: CLIPS_PER_VARIANT,
+      });
       if (!parsed.ok) {
         console.log(`[kling-manual] parse failed: ${parsed.error}`);
         return { ok: false as const, error: parsed.error, costUsd: claude.costUsd };
@@ -170,7 +174,60 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
         batch.map(async (clip, idxInBatch) => {
           const clipIndex = batchStart + idxInBatch;
 
-          // Submit Kling with the clip's video prompt
+          // Polish-9.8: generate first-frame via Nano Banana so Kling has
+          // an image to anchor the character + scene. Without this, Kling
+          // invents a fresh face for every clip and the 16-clip variant
+          // looks like 16 different actors. The master prompt's [USE
+          // IMAGE X AS STARTING FRAME] directive expects this image.
+          const frameResult = await step.run(`nano-banana-frame-${clipIndex}`, async () => {
+            let keys;
+            try {
+              keys = await loadDecryptedKeys(userId, ['gemini']);
+            } catch (err) {
+              if (err instanceof MissingProviderKeyError)
+                return { ok: false as const, error: err.message, costUsd: 0 };
+              throw err;
+            }
+            const imagePrompt = buildImagePromptForClip(manual, clip);
+            const image = await callGeminiImage({
+              userId,
+              apiKey: keys.gemini!,
+              prompt: imagePrompt,
+              generationJobId: jobId,
+            });
+            if (!image.ok || !image.imageBase64 || !image.imageMimeType) {
+              return {
+                ok: false as const,
+                error: image.errorMessage ?? 'Nano Banana returned no image',
+                costUsd: image.costUsd,
+              };
+            }
+            try {
+              const upload = await uploadGeneratedImage({
+                userId,
+                jobId,
+                variantIndex: clipIndex,
+                imageBase64: image.imageBase64,
+                mimeType: image.imageMimeType,
+                filenamePrefix: 'kling-frame-',
+              });
+              return { ok: true as const, publicUrl: upload.publicUrl, costUsd: image.costUsd };
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              return {
+                ok: false as const,
+                error: `First-frame upload failed: ${msg}`,
+                costUsd: image.costUsd,
+              };
+            }
+          });
+
+          if (!frameResult.ok) {
+            console.log(`[kling-clip-${clipIndex}] nano-banana frame failed: ${frameResult.error}`);
+            return { clipIndex, ok: false, costUsd: frameResult.costUsd, error: frameResult.error };
+          }
+
+          // Submit Kling with the clip's video prompt + first-frame URL
           const submitResult = await step.run(`kling-submit-${clipIndex}`, async () => {
             let keys;
             try {
@@ -181,10 +238,8 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
               throw err;
             }
             const prompt = [
-              manual.characterPrompt,
-              manual.setPrompt,
               clip.videoPrompt,
-              clip.dialogue
+              clip.dialogue && !/GENERATE NATIVE AUDIO AND LIP-SYNC/i.test(clip.videoPrompt)
                 ? `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "${clip.dialogue}"`
                 : '',
             ]
@@ -197,6 +252,7 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
               prompt,
               durationSeconds: (clip.duration ?? CLIP_DURATION_SECONDS) <= 5 ? 5 : 10,
               aspectRatio: '9:16',
+              startImageUrl: frameResult.publicUrl,
               generationJobId: jobId,
             });
           });
@@ -209,7 +265,7 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
                   ? submitResult.error
                   : 'submit failed';
             console.log(`[kling-clip-${clipIndex}] submit failed: ${err}`);
-            return { clipIndex, ok: false, costUsd: 0, error: err };
+            return { clipIndex, ok: false, costUsd: frameResult.costUsd, error: err };
           }
 
           // Poll
@@ -247,7 +303,7 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
             return {
               clipIndex,
               ok: false,
-              costUsd: pollCostUsd,
+              costUsd: pollCostUsd + frameResult.costUsd,
               error: err,
             };
           }
@@ -268,13 +324,16 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
                 character_prompt: manual.characterPrompt,
                 set_prompt: manual.setPrompt,
                 video_prompt: clip.videoPrompt,
+                image_prompt: clip.imagePrompt,
                 dialogue: clip.dialogue,
+                motion_type: clip.motionType,
+                first_frame_url: frameResult.publicUrl,
                 clip_index: clipIndex,
               },
             });
           });
 
-          return { clipIndex, ok: true, costUsd: pollCostUsd };
+          return { clipIndex, ok: true, costUsd: pollCostUsd + frameResult.costUsd };
         }),
       );
 
@@ -321,12 +380,23 @@ interface ClipSpec {
   videoPrompt: string;
   dialogue?: string;
   duration?: number;
+  imagePrompt?: string;
+  motionType?: string;
 }
 
 interface ProductionManual {
   characterPrompt: string;
   setPrompt: string;
   clips: ClipSpec[];
+}
+
+interface ParseOptions {
+  /**
+   * Strict count check. The worker passes CLIPS_PER_VARIANT (16) so a
+   * truncated Claude response surfaces as a clear "got N, expected 16"
+   * error instead of a silently-short job.
+   */
+  expectedClips?: number;
 }
 
 /**
@@ -352,74 +422,325 @@ export function decideKlingJobOutcome(input: {
   };
 }
 
-// Polish-9.7: exported for unit tests covering the no-fallback path.
+/**
+ * Polish-9.8: parse the Universal UGC Master Prompt's output. The
+ * master prompt specifies a structured markdown format (SECTION A / B
+ * / C, Global Character Prompt, per-clip blocks) — NOT JSON. Polish-9.7
+ * was wrong to hard-fail on non-JSON: Claude was correctly emitting
+ * markdown per spec and the parser was looking at the wrong format.
+ *
+ * Order: try JSON first (backwards compat + cheap), fall back to the
+ * markdown parser. Both must work — someone may later add an explicit
+ * "respond as JSON" instruction without breaking existing runs.
+ */
 export function parseProductionManual(
   raw: unknown,
+  options: ParseOptions = {},
 ): { ok: true; manual: ProductionManual } | { ok: false; error: string } {
-  if (!raw || typeof raw !== 'object') {
-    if (typeof raw === 'string') {
-      return parseManualFromText(raw);
-    }
+  if (raw == null) {
     return { ok: false, error: 'Claude returned neither JSON nor text for the manual.' };
   }
-  const obj = raw as Record<string, unknown>;
-  const charPrompt = typeof obj.character_prompt === 'string' ? obj.character_prompt : '';
-  const setPrompt = typeof obj.set_prompt === 'string' ? obj.set_prompt : '';
-  const clips = parseClipsArray(obj.clips);
-  if (clips.length === 0) {
-    return { ok: false, error: 'No clips found in production manual.' };
+  if (typeof raw === 'object') {
+    return validateManual(parseFromJsonObject(raw as Record<string, unknown>), raw, options);
   }
+  if (typeof raw !== 'string') {
+    return { ok: false, error: 'Claude returned neither JSON nor text for the manual.' };
+  }
+
+  const text = raw;
+  const stripped = stripCodeFences(text);
+  if (stripped.startsWith('{') || stripped.startsWith('[')) {
+    try {
+      const json = JSON.parse(stripped) as Record<string, unknown>;
+      return validateManual(parseFromJsonObject(json), json, options);
+    } catch {
+      // fall through to markdown
+    }
+  }
+  return validateManual(parseFromMarkdown(text), text, options);
+}
+
+function validateManual(
+  manual: ProductionManual,
+  source: unknown,
+  options: ParseOptions,
+): { ok: true; manual: ProductionManual } | { ok: false; error: string } {
+  if (!manual.characterPrompt.trim()) {
+    return { ok: false, error: errorWithExcerpt('Manual is missing characterPrompt', source) };
+  }
+  if (!manual.setPrompt.trim()) {
+    return { ok: false, error: errorWithExcerpt('Manual is missing setPrompt', source) };
+  }
+  if (manual.clips.length === 0) {
+    return { ok: false, error: errorWithExcerpt('Manual has 0 clips', source) };
+  }
+  if (options.expectedClips != null && manual.clips.length !== options.expectedClips) {
+    return {
+      ok: false,
+      error: `Manual has ${manual.clips.length} clips, expected ${options.expectedClips}`,
+    };
+  }
+  const blankClip = manual.clips.findIndex((c) => !c.videoPrompt.trim());
+  if (blankClip >= 0) {
+    return { ok: false, error: `Clip ${blankClip + 1} has an empty video prompt` };
+  }
+  return { ok: true, manual };
+}
+
+function errorWithExcerpt(prefix: string, source: unknown): string {
+  if (typeof source === 'string') {
+    return `${prefix}. First 500 chars: ${source.slice(0, 500)}`;
+  }
+  return prefix;
+}
+
+function parseFromJsonObject(obj: Record<string, unknown>): ProductionManual {
+  const characterPrompt = pickString(obj, ['character_prompt', 'characterPrompt']) ?? '';
+  const setPrompt = pickString(obj, ['set_prompt', 'setPrompt']) ?? '';
+  const rawClips = Array.isArray(obj.clips) ? obj.clips : [];
+  const clips: ClipSpec[] = [];
+  for (const item of rawClips) {
+    if (!item || typeof item !== 'object') continue;
+    const c = item as Record<string, unknown>;
+    const videoPrompt = pickString(c, ['video_prompt', 'videoPrompt', 'prompt']) ?? '';
+    clips.push({
+      videoPrompt,
+      dialogue: pickString(c, ['dialogue']),
+      duration: typeof c.duration === 'number' ? c.duration : undefined,
+      imagePrompt: pickString(c, ['image_prompt', 'imagePrompt']),
+      motionType: pickString(c, ['motion_type', 'motionType']),
+    });
+  }
+  return { characterPrompt, setPrompt, clips };
+}
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return undefined;
+}
+
+function stripCodeFences(text: string): string {
+  return text
+    .trim()
+    .replace(/^```(?:json|markdown|md)?\s*\n?/i, '')
+    .replace(/\n?```\s*$/i, '')
+    .trim();
+}
+
+/**
+ * Markdown parser for the master-prompt format. Tolerant of:
+ *   - Plain `SECTION A` headers vs `## SECTION A`
+ *   - Plain `Global Character Prompt:` vs `**Global Character Prompt:**`
+ *   - `### Clip 1` / `**Video Prompt:**` (normalized) format
+ *   - Forge-style `─────` separators + `CLIP 1 — 00:00–00:06 — TITLE`
+ *     headers, with `[USE IMAGE X AS STARTING FRAME]` + `[GENERATE
+ *     NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "..."` brackets
+ */
+function parseFromMarkdown(text: string): ProductionManual {
+  const cleaned = stripCodeFences(text);
+  const sectionA = sliceSection(cleaned, 'A');
+  const sectionB = sliceSection(cleaned, 'B');
+  const sectionC = sliceSection(cleaned, 'C');
+
+  const characterPrompt = extractFieldValue(sectionA, 'Global Character Prompt');
+  const setPrompt = extractFieldValue(sectionA, 'Global Set Prompt');
+
+  const clipSource = sectionC || cleaned;
+  const clipBlocks = splitClipBlocks(clipSource);
+  const clips: ClipSpec[] = clipBlocks.map((block) =>
+    parseClipBlock(block, sectionB, characterPrompt, setPrompt),
+  );
+
+  return { characterPrompt, setPrompt, clips };
+}
+
+/**
+ * Slice the section starting at `SECTION X` (with or without leading
+ * `#` markers) up to but not including the next `SECTION Y` or EOF.
+ * Returns '' when the section is absent so callers can safely string-op.
+ */
+function sliceSection(text: string, letter: 'A' | 'B' | 'C'): string {
+  const re = new RegExp(
+    `(?:^|\\n)\\s*(?:#+\\s*)?SECTION\\s+${letter}\\b[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*(?:#+\\s*)?SECTION\\s+[A-Z]\\b|$)`,
+    'i',
+  );
+  const m = text.match(re);
+  return m && m[1] ? m[1].trim() : '';
+}
+
+/**
+ * Extract a `Field Name: value` block, value running until the next
+ * recognized field/section marker. Handles `**Field:** value`,
+ * `Field: value`, and `### Field` (followed by value on next line).
+ */
+function extractFieldValue(scope: string, field: string): string {
+  if (!scope) return '';
+  const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(
+    `(?:^|\\n)\\s*(?:\\*\\*|#{1,6}\\s*)?${escaped}(?:\\*\\*)?\\s*:?\\s*\\*{0,2}\\s*\\n?` +
+      `([\\s\\S]+?)(?=\\n\\s*(?:\\*\\*|#{1,6}\\s*)?` +
+      `(?:Global \\w+ Prompt|Image Prompt|Video Prompt|Dialogue|Duration|Motion ?Type|motionType|Starting Frame|Last Frame|SECTION\\s+[A-Z]|CLIP\\s+\\d|Clip\\s+\\d)` +
+      `|\\n\\s*[─=\\-]{4,}` +
+      `|$)`,
+    'i',
+  );
+  const m = scope.match(re);
+  if (!m || !m[1]) return '';
+  return m[1]
+    .replace(/^\s*[-*]\s+/gm, '')
+    .replace(/\*\*/g, '')
+    .replace(/[─=-]{4,}\s*$/g, '')
+    .trim();
+}
+
+/**
+ * Split Section C (or whole doc) into clip blocks. A clip header is any
+ * of: `### Clip N`, `## CLIP N`, or `CLIP N — timestamp — title`.
+ */
+function splitClipBlocks(text: string): string[] {
+  if (!text) return [];
+  const headerRe = /(?:^|\n)\s*(?:#{1,6}\s*)?(?:CLIP|Clip)\s+(\d+)\b/g;
+  const matches: { index: number; clipNum: number }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = headerRe.exec(text)) !== null) {
+    matches.push({ index: m.index, clipNum: Number(m[1]) });
+  }
+  if (matches.length === 0) return [];
+  const blocks: string[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const cur = matches[i]!;
+    const next = matches[i + 1];
+    const start = cur.index;
+    const end = next ? next.index : text.length;
+    blocks.push(text.slice(start, end));
+  }
+  return blocks;
+}
+
+function parseClipBlock(
+  block: string,
+  sectionB: string,
+  characterPrompt: string,
+  setPrompt: string,
+): ClipSpec {
+  const headerMatch = block.match(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:CLIP|Clip)\s+(\d+)/);
+  const clipNum = headerMatch ? Number(headerMatch[1]) : 0;
+
+  const explicitVideoPrompt = extractFieldValue(block, 'Video Prompt');
+  const explicitImagePrompt = extractFieldValue(block, 'Image Prompt');
+  const explicitDialogue = extractFieldValue(block, 'Dialogue');
+  const explicitDuration = extractFieldValue(block, 'Duration');
+  const explicitMotion =
+    extractFieldValue(block, 'Motion Type') || extractFieldValue(block, 'motionType');
+
+  const dialogue = explicitDialogue || extractBracketedDialogue(block);
+  const duration = parseDurationNumber(explicitDuration) ?? deriveDurationFromHeader(block);
+  const videoPrompt =
+    explicitVideoPrompt || extractClipBodyAsPrompt(block, characterPrompt, setPrompt);
+  const imagePrompt =
+    explicitImagePrompt || (clipNum > 0 ? sliceImagePromptFromSectionB(sectionB, clipNum) : '');
+
   return {
-    ok: true,
-    manual: { characterPrompt: charPrompt, setPrompt: setPrompt, clips },
+    videoPrompt: stripQuotes(videoPrompt),
+    dialogue: dialogue ? stripQuotes(dialogue) : undefined,
+    duration,
+    imagePrompt: imagePrompt || undefined,
+    motionType: explicitMotion || undefined,
   };
 }
 
-function parseManualFromText(
-  text: string,
-): { ok: true; manual: ProductionManual } | { ok: false; error: string } {
-  const stripped = text
-    .trim()
-    .replace(/^```(?:json)?\s*\n?/, '')
-    .replace(/\n?```\s*$/, '');
-  try {
-    const json = JSON.parse(stripped);
-    return parseProductionManual(json);
-  } catch {
-    // Polish-9.7: hard-fail with the raw output so the Inngest dashboard
-    // shows EXACTLY what Claude returned. The previous silent fallback
-    // built one bad clip with prose as the prompt, then submitted it to
-    // Kling where it crashed without diagnostic.
-    return {
-      ok: false,
-      error:
-        'Claude returned non-JSON manual. Expected structured JSON with ' +
-        '{ character_prompt, set_prompt, clips: [...] }. First 500 chars: ' +
-        text.slice(0, 500),
-    };
-  }
+function extractBracketedDialogue(block: string): string {
+  const m = block.match(/\[GENERATE NATIVE AUDIO AND LIP-?SYNC TO EXACT DIALOGUE\]:\s*"([^"]+)"/i);
+  return m && m[1] ? m[1] : '';
 }
 
-function parseClipsArray(raw: unknown): ClipSpec[] {
-  if (!Array.isArray(raw)) return [];
-  const out: ClipSpec[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const c = item as Record<string, unknown>;
-    const videoPrompt =
-      typeof c.video_prompt === 'string'
-        ? c.video_prompt
-        : typeof c.prompt === 'string'
-          ? c.prompt
-          : '';
-    if (!videoPrompt) continue;
-    out.push({
-      videoPrompt,
-      dialogue: typeof c.dialogue === 'string' ? c.dialogue : undefined,
-      duration: typeof c.duration === 'number' ? c.duration : undefined,
-    });
-  }
-  return out;
+function parseDurationNumber(raw: string): number | undefined {
+  if (!raw) return undefined;
+  const m = raw.match(/(\d+(?:\.\d+)?)\s*s?/);
+  return m && m[1] ? Number(m[1]) : undefined;
+}
+
+function deriveDurationFromHeader(block: string): number | undefined {
+  // CLIP 1 — 00:00–00:06 — HOOK  →  6 seconds
+  const m = block.match(/(\d+):(\d+)[–\-—](\d+):(\d+)/);
+  if (!m || !m[1] || !m[2] || !m[3] || !m[4]) return undefined;
+  const startSec = Number(m[1]) * 60 + Number(m[2]);
+  const endSec = Number(m[3]) * 60 + Number(m[4]);
+  const diff = endSec - startSec;
+  return diff > 0 && diff <= 30 ? diff : undefined;
+}
+
+/**
+ * When the clip has no explicit `**Video Prompt:**` marker (Forge-style
+ * output), use the block body itself as the Kling prompt. Strips the
+ * header, separator lines, `motionType:` trailer, and `**Field:**`
+ * scaffolding so Kling gets clean instruction text.
+ */
+function extractClipBodyAsPrompt(
+  block: string,
+  characterPrompt: string,
+  setPrompt: string,
+): string {
+  const body = block
+    .replace(/^[^\n]*\n/, '') // drop the header line
+    .replace(/^[─=-]{4,}\s*$/gm, '') // separator rules
+    .replace(/^Starting Frame:[^\n]*$/gim, '')
+    .replace(/^Last Frame needed:[^\n]*$/gim, '')
+    .replace(/^motionType:[^\n]*$/gim, '')
+    .replace(/^\*\*Motion Type:\*\*[^\n]*$/gim, '')
+    .replace(/^\*\*Duration:\*\*[^\n]*$/gim, '')
+    .trim();
+  if (body) return body;
+  // Last-resort fallback so Kling still gets a coherent prompt.
+  return [characterPrompt, setPrompt].filter((s) => s.trim()).join('\n\n');
+}
+
+/**
+ * Try to pull `IMAGE N` (or `Image N`) prompt text out of Section B.
+ * Forge uses `IMAGE 1 — Master First Frame:` followed by the full
+ * paragraph, then a same-scene continuation table for 2-16. We return
+ * the IMAGE 1 prompt for clip 1; for clips 2+ we return '' so the
+ * worker falls back to character+set+videoPrompt — which is fine
+ * because Nano Banana anchors on whatever scene description it gets.
+ */
+function sliceImagePromptFromSectionB(sectionB: string, clipNum: number): string {
+  if (!sectionB || clipNum < 1) return '';
+  const re = new RegExp(
+    `(?:^|\\n)\\s*(?:#{1,6}\\s*)?(?:IMAGE|Image)\\s+${clipNum}\\b[^\\n]*\\n([\\s\\S]+?)` +
+      `(?=\\n\\s*(?:#{1,6}\\s*)?(?:IMAGE|Image)\\s+\\d|\\n\\s*(?:#{1,6}\\s*)?SECTION|$)`,
+    'i',
+  );
+  const m = sectionB.match(re);
+  return m && m[1] ? m[1].trim() : '';
+}
+
+function stripQuotes(s: string): string {
+  return s
+    .trim()
+    .replace(/^["'`]+/, '')
+    .replace(/["'`]+$/, '')
+    .trim();
+}
+
+/**
+ * Build the per-clip Nano Banana prompt. Combines character + set +
+ * clip-specific image prompt (if extracted) + dialogue context so the
+ * first frame matches the scene + action that Kling will animate.
+ */
+export function buildImagePromptForClip(
+  manual: { characterPrompt: string; setPrompt: string },
+  clip: ClipSpec,
+): string {
+  const parts = [
+    manual.characterPrompt,
+    manual.setPrompt,
+    clip.imagePrompt,
+    clip.videoPrompt,
+  ].filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+  return parts.join('\n\n');
 }
 
 void logAuditEvent;

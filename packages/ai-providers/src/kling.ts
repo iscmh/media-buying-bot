@@ -61,6 +61,13 @@ export interface KlingSubmitInput {
   prompt: string;
   durationSeconds?: 5 | 10;
   aspectRatio?: '9:16' | '1:1' | '16:9';
+  /**
+   * Polish-9.8: image-to-video anchor. Public URL to a first-frame PNG
+   * (typically Nano Banana output) that Kling uses to lock character
+   * identity across clips. The master prompt's `[USE IMAGE X AS
+   * STARTING FRAME]` directive depends on this being wired.
+   */
+  startImageUrl?: string;
   generationJobId?: string;
   generatedCreativeId?: string;
 }
@@ -86,13 +93,15 @@ export async function submitKlingVideo(input: KlingSubmitInput): Promise<KlingSu
   //   POST /v1/models/{owner}/{name}/predictions
   // It defaults to the latest published version of the model.
   const url = `${REPLICATE_BASE}/v1/models/${modelId}/predictions`;
-  const body = {
-    input: {
-      prompt: input.prompt,
-      duration: input.durationSeconds ?? 5,
-      aspect_ratio: input.aspectRatio ?? '9:16',
-    },
+  const klingInput: Record<string, unknown> = {
+    prompt: input.prompt,
+    duration: input.durationSeconds ?? 5,
+    aspect_ratio: input.aspectRatio ?? '9:16',
   };
+  if (input.startImageUrl) {
+    klingInput.start_image = input.startImageUrl;
+  }
+  const body = { input: klingInput };
 
   const result = await callProvider<{
     id?: string;
@@ -112,8 +121,9 @@ export async function submitKlingVideo(input: KlingSubmitInput): Promise<KlingSu
     requestBodyForLog: {
       model_id: modelId,
       prompt_chars: input.prompt.length,
-      duration: body.input.duration,
-      aspect_ratio: body.input.aspect_ratio,
+      duration: klingInput.duration,
+      aspect_ratio: klingInput.aspect_ratio,
+      has_start_image: !!input.startImageUrl,
     },
     generationJobId: input.generationJobId,
     generatedCreativeId: input.generatedCreativeId,
