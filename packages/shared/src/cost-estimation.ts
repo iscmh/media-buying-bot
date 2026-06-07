@@ -56,13 +56,18 @@ const PRICING = {
   klingMultiClipClipsPerVariant: 16,
   klingMultiClipPerClipUsd: 0.35,
 
-  // Polish-10: Kling 3.0 Omni multi-segment pipeline. 2 segments ×
-  // 15s × $0.28/sec (pro mode + audio) = $8.40 of Kling +
-  // ~$0.05 Nano Banana reference frame + ~$0.05 stitch crossfade
-  // ≈ $8.50 per variant. Tuneable via env on the kling-omni client.
+  // Polish-10 / Polish-10.1: Kling 3.0 Omni multi-segment pipeline.
+  // Default mode dropped pro→standard for cheaper iteration (720p is
+  // indistinguishable from 1080p on phone viewers for 9:16 UGC).
+  //   2 segments × 15s × $0.224/sec (standard + audio) = $6.72 of Kling
+  //   + ~$0.05 Nano Banana reference frame
+  //   + ~$0.05 stitch crossfade
+  //   + ~$0.10 production manual (Claude)
+  //   ≈ $6.92 per variant (was ~$8.50 in pro). Pro pricing still
+  // available on the kling-omni client for explicit overrides.
   klingOmniSegmentsPerVariant: 2,
   klingOmniSegmentDurationSec: 15,
-  klingOmniPerSegmentUsd: 4.2, // pro mode: 0.28 × 15
+  klingOmniPerSegmentUsd: 3.36, // standard mode: 0.224 × 15
   klingOmniReferenceFrameUsd: 0.05,
   klingOmniStitchUsd: 0.05,
   klingOmniManualPromptUsd: 0.1,
@@ -265,7 +270,7 @@ function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostE
         cost: round4(variantCount * PRICING.klingOmniReferenceFrameUsd),
       });
       breakdown.push({
-        item: `Kling 3.0 Omni segments (${totalSegments} × $${PRICING.klingOmniPerSegmentUsd.toFixed(2)})`,
+        item: `Kling 3.0 Omni segments (standard, ${totalSegments} × $${PRICING.klingOmniPerSegmentUsd.toFixed(2)})`,
         cost: round4(totalSegments * PRICING.klingOmniPerSegmentUsd),
       });
       breakdown.push({

@@ -51,9 +51,14 @@ const KLING_OMNI_STANDARD_USD_PER_SECOND =
 
 export type KlingOmniMode = 'standard' | 'pro' | '4k';
 
+/**
+ * Polish-10.1: default mode dropped to 'standard' to match the
+ * Polish-10.1 submit default. Iteration cost is what we estimate;
+ * pro/4k callers pass `mode` explicitly.
+ */
 export function estimateKlingOmniSegmentCostUsd(
   durationSeconds: number,
-  mode: KlingOmniMode = 'pro',
+  mode: KlingOmniMode = 'standard',
 ): number {
   const perSec =
     mode === 'standard' ? KLING_OMNI_STANDARD_USD_PER_SECOND : KLING_OMNI_PRO_USD_PER_SECOND;
@@ -123,7 +128,12 @@ export interface KlingOmniSubmitInput {
   /** 3-15 (default 15). */
   durationSeconds?: number;
   aspectRatio?: '9:16' | '1:1' | '16:9';
-  /** 'pro' default (1080p, $0.28/sec). */
+  /**
+   * Polish-10.1: default mode is now 'standard' (720p, $0.224/sec) —
+   * indistinguishable from 'pro' (1080p, $0.28/sec) on phone viewers
+   * for 9:16 UGC ads, and meaningfully cheaper. Set explicitly for
+   * higher quality.
+   */
   mode?: KlingOmniMode;
   negativePrompt?: string;
   generationJobId?: string;
@@ -157,7 +167,13 @@ export async function submitKlingOmni(input: KlingOmniSubmitInput): Promise<Klin
     prompt: input.prompt,
     duration: durationSeconds,
     aspect_ratio: input.aspectRatio ?? '9:16',
-    mode: input.mode ?? 'pro',
+    // Polish-10.1: default mode dropped pro→standard. 720p is
+    // indistinguishable from 1080p in 9:16 portrait on phone viewers
+    // (Meta UGC's only consumption surface), and standard's
+    // $0.224/sec is cheap enough that a $20 Replicate balance covers
+    // multiple 2-segment generations. Pro/4k remain available via
+    // explicit override.
+    mode: input.mode ?? 'standard',
     // Schema default for generate_audio is FALSE — set explicitly.
     generate_audio: true,
     negative_prompt: input.negativePrompt ?? KLING_OMNI_NEGATIVE_PROMPT,

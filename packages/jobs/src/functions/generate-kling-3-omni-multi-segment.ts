@@ -50,8 +50,10 @@ const MAX_SHOTS_PER_SEGMENT = 6;
 const POLL_INTERVAL_SECONDS = 15;
 const REPLICATE_POLL_TIMEOUT_MS = Number(process.env.REPLICATE_POLL_TIMEOUT_MS) || 600_000;
 const POLL_MAX_ATTEMPTS = Math.ceil(REPLICATE_POLL_TIMEOUT_MS / 1000 / POLL_INTERVAL_SECONDS);
+// Polish-10.1: default mode dropped pro→standard for cheaper iteration.
+// REPLICATE_KLING_OMNI_MODE=pro (or 4k) still overrides at deploy time.
 const KLING_OMNI_MODE: KlingOmniMode =
-  (process.env.REPLICATE_KLING_OMNI_MODE as KlingOmniMode | undefined) ?? 'pro';
+  (process.env.REPLICATE_KLING_OMNI_MODE as KlingOmniMode | undefined) ?? 'standard';
 
 export const generateKling3OmniMultiSegment = inngest.createFunction(
   {

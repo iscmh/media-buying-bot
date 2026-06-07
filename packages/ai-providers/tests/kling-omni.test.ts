@@ -64,10 +64,10 @@ describe('Polish-10: submitKlingOmni body shape (verified schema)', () => {
     const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body).not.toHaveProperty('version');
     expect(body.input.prompt).toMatch(/30yo woman/);
-    // Defaults per schema.
+    // Defaults: Polish-10.1 dropped pro→standard for cheaper iteration.
     expect(body.input.duration).toBe(15);
     expect(body.input.aspect_ratio).toBe('9:16');
-    expect(body.input.mode).toBe('pro');
+    expect(body.input.mode).toBe('standard');
     // generate_audio default is FALSE in the schema — we set explicitly.
     expect(body.input.generate_audio).toBe(true);
     // Negative prompt set unless overridden.
@@ -136,13 +136,13 @@ describe('Polish-10: submitKlingOmni body shape (verified schema)', () => {
     expect(parsed[0]).toEqual({ prompt: '<<<image_1>>> shot A', duration: 5 });
   });
 
-  it('honors mode override (standard for cheap iteration)', async () => {
+  it('honors mode override (pro for higher quality)', async () => {
     process.env.REPLICATE_KLING_OMNI_MODEL_ID = 'kwaivgi/kling-v3-omni-video';
     const calls = captureFetch({ status: 201, body: { id: 'pred_f' } });
     const { submitKlingOmni } = await import('../src/kling-omni');
-    await submitKlingOmni({ userId: 'u', apiKey: 'k', prompt: 'p', mode: 'standard' });
+    await submitKlingOmni({ userId: 'u', apiKey: 'k', prompt: 'p', mode: 'pro' });
     const body = JSON.parse(calls[0]!.init!.body as string);
-    expect(body.input.mode).toBe('standard');
+    expect(body.input.mode).toBe('pro');
   });
 
   it('honors per-call negativePrompt override', async () => {
@@ -176,13 +176,18 @@ describe('Polish-10: KLING_OMNI_NEGATIVE_PROMPT', () => {
   });
 });
 
-describe('Polish-10: estimateKlingOmniSegmentCostUsd', () => {
-  it('pro mode: $0.28/sec × 15s = $4.20', async () => {
+describe('Polish-10 / Polish-10.1: estimateKlingOmniSegmentCostUsd', () => {
+  it('default mode (Polish-10.1: standard): $0.224/sec × 15s = $3.36', async () => {
+    const { estimateKlingOmniSegmentCostUsd } = await import('../src/kling-omni');
+    expect(estimateKlingOmniSegmentCostUsd(15)).toBeCloseTo(3.36, 4);
+  });
+
+  it('pro mode (explicit override): $0.28/sec × 15s = $4.20', async () => {
     const { estimateKlingOmniSegmentCostUsd } = await import('../src/kling-omni');
     expect(estimateKlingOmniSegmentCostUsd(15, 'pro')).toBeCloseTo(4.2, 4);
   });
 
-  it('standard mode: $0.224/sec × 15s = $3.36', async () => {
+  it('standard mode (explicit): matches the new default', async () => {
     const { estimateKlingOmniSegmentCostUsd } = await import('../src/kling-omni');
     expect(estimateKlingOmniSegmentCostUsd(15, 'standard')).toBeCloseTo(3.36, 4);
   });
