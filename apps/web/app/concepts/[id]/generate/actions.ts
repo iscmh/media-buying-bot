@@ -143,10 +143,15 @@ export async function createGenerationJobAction(
   }
 
   // Estimate cost server-side (don't trust the client's display).
+  // Polish-9.4: pass the canonical pipeline alongside provider so
+  // estimateGenerationCost takes the descriptor-driven branch when
+  // the pipeline isn't HeyGen (pickedProvider is undefined for kling/
+  // sora/gemini paths after Polish-9.2).
   const estimate = estimateGenerationCost({
     conceptType: contentType,
     variantCount,
     provider: pickedProvider,
+    pipeline: pipelineDesc.pipeline,
   });
 
   // Cost cap. Counts both mock + live jobs against the per-user daily cap

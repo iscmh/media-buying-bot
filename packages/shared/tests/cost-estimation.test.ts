@@ -173,3 +173,48 @@ describe('Polish-4: cinematic_voiceover cost path', () => {
     expect(explicit.estimateUsd).toBe(heygen.estimateUsd);
   });
 });
+
+describe('Polish-9.4: pipeline-only call sites (no provider)', () => {
+  it('ugc + pipeline=kling_3 + no provider → kling-multi-clip price (~$4.90)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kling_3_multi_clip_native_lipsync',
+    });
+    expect(r.estimateUsd).toBeCloseTo(4.9, 4);
+  });
+
+  it('ugc + pipeline=sora_2 + no provider → Sora price ($1.55)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'sora_2_single_shot',
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.55, 4);
+  });
+
+  it('ugc + pipeline=heygen + no provider → HeyGen price (does not throw)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'heygen_avatar_talking_head',
+    });
+    // vision $0.10 + refine $0.05 + heygen $0.30 = $0.45
+    expect(r.estimateUsd).toBeCloseTo(0.45, 4);
+  });
+
+  it('ugc + provider=heygen (no pipeline) STILL works (legacy)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      provider: 'heygen',
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.45, 4);
+  });
+
+  it('ugc + no provider + no pipeline STILL throws (no way to derive cost)', () => {
+    expect(() => estimateGenerationCost({ conceptType: 'ugc', variantCount: 1 })).toThrow(
+      /UGC cost estimate requires a provider/,
+    );
+  });
+});

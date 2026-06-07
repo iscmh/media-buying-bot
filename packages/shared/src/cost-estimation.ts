@@ -100,6 +100,13 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
   const { conceptType, variantCount } = input;
   const breakdown: CostBreakdownItem[] = [];
 
+  // Polish-9.4: pipeline drives provider. Server call sites (the create-
+  // job action) and clients that only know the picked pipeline can
+  // omit `provider` — we derive it from the descriptor. Legacy callers
+  // that pass only `provider` still work via the else-branch below.
+  const effectiveProvider: UgcVideoProvider | undefined =
+    input.provider ?? providerFromPipeline(input.pipeline);
+
   // Polish-6: pipeline-level estimation takes precedence when set.
   if (input.pipeline) {
     return estimateByPipeline(input.pipeline, variantCount);
@@ -139,10 +146,14 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
       cost: round4(variantCount * PRICING.cinematicTtsPerVariantUsd),
     });
   } else {
-    if (!input.provider) {
+    // Polish-9.4: throw only when BOTH provider AND pipeline are missing.
+    // The pipeline branch up top already returned, so reaching here with
+    // a pipeline value would mean a pipeline we don't have a UGC-video
+    // unit price for — defensive guard for that edge too.
+    if (!effectiveProvider) {
       throw new Error('UGC cost estimate requires a provider.');
     }
-    const videoUnit = PRICING.ugcVideoPerVariantUsd[input.provider];
+    const videoUnit = PRICING.ugcVideoPerVariantUsd[effectiveProvider];
     breakdown.push({
       item: 'Vision analysis (one-shot)',
       cost: PRICING.ugcVisionAnalysisUsd,
@@ -152,13 +163,30 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
       cost: round4(variantCount * PRICING.ugcPromptRefinementPerVariantUsd),
     });
     breakdown.push({
-      item: `${labelForProvider(input.provider)} video gen (${variantCount} × $${videoUnit.toFixed(2)})`,
+      item: `${labelForProvider(effectiveProvider)} video gen (${variantCount} × $${videoUnit.toFixed(2)})`,
       cost: round4(variantCount * videoUnit),
     });
   }
 
   const estimateUsd = round4(breakdown.reduce((sum, b) => sum + b.cost, 0));
   return { estimateUsd, breakdown };
+}
+
+/**
+ * Polish-9.4: map a PipelineType to its corresponding UgcVideoProvider
+ * when one exists. Used by estimateGenerationCost to derive provider
+ * when a caller passes only pipeline. Inlined here (rather than imported
+ * from pipeline-descriptors.ts) to avoid a circular module dependency
+ * — pipeline-descriptors imports PipelineType FROM this file.
+ *
+ * Note: only heygen_avatar_talking_head maps to a value that exists in
+ * the legacy UgcVideoProvider enum. kling/sora/gemini pipelines hit the
+ * estimateByPipeline branch first and never reach the UGC-provider
+ * fallback, so they're intentionally not mapped here.
+ */
+function providerFromPipeline(pipeline: PipelineType | undefined): UgcVideoProvider | undefined {
+  if (pipeline === 'heygen_avatar_talking_head') return 'heygen';
+  return undefined;
 }
 
 export function labelForProvider(provider: UgcVideoProvider): string {
