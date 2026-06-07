@@ -460,3 +460,87 @@ describe('Polish-9.15: extractWardrobeFromCharacter', () => {
     expect(out).toMatch(/olive army-green V-neck medical scrubs/);
   });
 });
+
+describe('Polish-9.16: Section A — Global Prompt extraction tolerates markdown heading prefixes', () => {
+  const sectionCBody =
+    'SECTION C — ANIMATION\n\n' +
+    '[USE IMAGE 1 AS STARTING FRAME]\n' +
+    'Subject: SARAH, ref: 123, a 30yo woman.\n' +
+    '[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Hi."\n' +
+    'Static iPhone shot.\n';
+
+  it('plain "Global Character Prompt:" (Forge style) still parses (regression)', () => {
+    const md =
+      `SECTION A — CHARACTER & SET GENERATION\n` +
+      `Global Character Prompt: A 30yo woman with dark hair.\n` +
+      `Global Set Prompt: Sunny morning kitchen.\n\n` +
+      sectionCBody;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manual.characterPrompt).toBe('A 30yo woman with dark hair.');
+      expect(r.manual.setPrompt).toBe('Sunny morning kitchen.');
+    }
+  });
+
+  it('### **Global Character Prompt:** heading-bold (Claude production style) parses', () => {
+    const md =
+      `## **SECTION A — CHARACTER & SET GENERATION**\n\n` +
+      `### **Global Character Prompt:**\n` +
+      `A 30yo woman with dark hair, wearing a blue cotton t-shirt.\n\n` +
+      `### **Global Set Prompt:**\n` +
+      `Sunny morning kitchen with messy counter, tangled charger cables.\n\n` +
+      sectionCBody;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manual.characterPrompt).toBe(
+        'A 30yo woman with dark hair, wearing a blue cotton t-shirt.',
+      );
+      expect(r.manual.setPrompt).toBe(
+        'Sunny morning kitchen with messy counter, tangled charger cables.',
+      );
+    }
+  });
+
+  it('## Global Character Prompt: heading (no bold) parses', () => {
+    const md =
+      `SECTION A — CHARACTER & SET GENERATION\n\n` +
+      `## Global Character Prompt:\n` +
+      `A 30yo woman.\n\n` +
+      `## Global Set Prompt:\n` +
+      `A sunny kitchen.\n\n` +
+      sectionCBody;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manual.characterPrompt).toBe('A 30yo woman.');
+      expect(r.manual.setPrompt).toBe('A sunny kitchen.');
+    }
+  });
+
+  it('mixed: ### Global Character then plain Global Set → both extract', () => {
+    const md =
+      `SECTION A — CHARACTER & SET GENERATION\n\n` +
+      `### **Global Character Prompt:**\n` +
+      `A 30yo woman with dark hair.\n\n` +
+      `Global Set Prompt: A sunny kitchen.\n\n` +
+      sectionCBody;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manual.characterPrompt).toBe('A 30yo woman with dark hair.');
+      expect(r.manual.setPrompt).toBe('A sunny kitchen.');
+    }
+  });
+
+  it('no "Global Character Prompt" anywhere → ok=false with missing characterPrompt error', () => {
+    const md =
+      `SECTION A — CHARACTER & SET GENERATION\n\n` +
+      `### **Global Set Prompt:** A sunny kitchen.\n\n` +
+      sectionCBody;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/missing characterPrompt/i);
+  });
+});

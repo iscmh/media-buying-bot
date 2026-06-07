@@ -679,10 +679,14 @@ function stripCodeFences(text: string): string {
     .trim();
 }
 
-/** Slice `SECTION X — title\n...` up to next `SECTION Y` or EOF. */
+/**
+ * Slice `SECTION X — title\n...` up to next `SECTION Y` or EOF.
+ * Polish-9.16: tolerates `**` bold wrapping around the heading
+ * (`## **SECTION A — ...**`) — the shape Claude emits in production.
+ */
 function sliceSection(text: string, letter: 'A' | 'B' | 'C'): string {
   const re = new RegExp(
-    `(?:^|\\n)\\s*(?:#{0,6}\\s*)?SECTION\\s+${letter}\\b[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*(?:#{0,6}\\s*)?SECTION\\s+[A-Z]\\b|$)`,
+    `(?:^|\\n)\\s*(?:#{0,6}\\s*)?\\**\\s*SECTION\\s+${letter}\\b[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*(?:#{0,6}\\s*)?\\**\\s*SECTION\\s+[A-Z]\\b|$)`,
     'i',
   );
   const m = text.match(re);
@@ -692,22 +696,34 @@ function sliceSection(text: string, letter: 'A' | 'B' | 'C'): string {
 /**
  * Like sliceSection('C') but distinguishes "absent" from "empty". The
  * worker needs to surface a specific "no SECTION C header" error when
- * Claude omits the section entirely.
+ * Claude omits the section entirely. Same bold-wrap tolerance as
+ * sliceSection (Polish-9.16).
  */
 function sliceSectionC(text: string): string | null {
   const re =
-    /(?:^|\n)\s*(?:#{0,6}\s*)?SECTION\s+C\b[^\n]*\n([\s\S]*?)(?=\n\s*(?:#{0,6}\s*)?SECTION\s+[D-Z]\b|$)/i;
+    /(?:^|\n)\s*(?:#{0,6}\s*)?\**\s*SECTION\s+C\b[^\n]*\n([\s\S]*?)(?=\n\s*(?:#{0,6}\s*)?\**\s*SECTION\s+[D-Z]\b|$)/i;
   const m = text.match(re);
   if (!m) return null;
   return (m[1] ?? '').trim();
 }
 
-/** Extract `Global <Kind> Prompt: <value>` (with or without **bold**). */
+/**
+ * Extract `Global <Kind> Prompt: <value>` from Section A. Tolerates:
+ *   - Plain `Global Character Prompt:` (Forge fixture style)
+ *   - `**Global Character Prompt:**` (bold)
+ *   - `### Global Character Prompt:` (markdown heading — Polish-9.16,
+ *      the shape Claude emits in production)
+ *   - `### **Global Character Prompt:**` (heading + bold)
+ *
+ * Boundary symmetry: the lookahead that terminates the value match
+ * also allows the heading prefix so a `### Global Set Prompt` after a
+ * `### Global Character Prompt` is recognized as the stop marker.
+ */
 function extractGlobalPrompt(sectionA: string, kind: 'Character' | 'Set'): string {
   if (!sectionA) return '';
   const re = new RegExp(
-    `(?:^|\\n)\\s*\\**\\s*Global\\s+${kind}\\s+Prompt\\s*\\**\\s*:\\s*\\**\\s*` +
-      `([\\s\\S]+?)(?=\\n\\s*\\**\\s*Global\\s+\\w+\\s+Prompt\\s*\\**\\s*:|\\n\\s*(?:#+\\s*)?SECTION\\s+[A-Z]\\b|$)`,
+    `(?:^|\\n)\\s*#{0,6}\\s*\\**\\s*Global\\s+${kind}\\s+Prompt\\s*\\**\\s*:\\s*\\**\\s*` +
+      `([\\s\\S]+?)(?=\\n\\s*#{0,6}\\s*\\**\\s*Global\\s+\\w+\\s+Prompt\\s*\\**\\s*:|\\n\\s*(?:#+\\s*)?SECTION\\s+[A-Z]\\b|$)`,
     'i',
   );
   const m = sectionA.match(re);
