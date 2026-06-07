@@ -50,7 +50,7 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   },
   kling_3_multi_clip_native_lipsync: {
     pipeline: 'kling_3_multi_clip_native_lipsync',
-    label: 'Legacy multi-clip (deprecated)',
+    label: 'UGC ad (Kling multi-clip with reference chain)',
     providerChoice: 'kling',
     format: 'kling_3_multi_clip',
     workerEvent: 'generation/kling-multi-clip.requested',
@@ -58,7 +58,7 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   },
   kling_3_omni_multi_segment: {
     pipeline: 'kling_3_omni_multi_segment',
-    label: 'UGC ad (Kling 3.0 Omni, 30s with character continuity)',
+    label: 'Experimental: Kling 3.0 Omni 30s (mixed quality)',
     providerChoice: 'kling',
     format: 'kling_3_omni_multi_segment',
     workerEvent: 'generation/kling-3-omni-multi-segment.requested',

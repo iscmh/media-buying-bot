@@ -97,16 +97,12 @@ export function GenerationRequestForm({
   const [detection, setDetection] = React.useState<DetectAndRouteResult | null>(null);
   const [detecting, setDetecting] = React.useState(false);
   const [overridePipeline, setOverridePipeline] = React.useState<PipelineType | null>(null);
-  const rawDetectedPipeline = (detection?.pipeline as PipelineType | undefined) ?? null;
-  // Polish-10: detection still returns 'kling_3_multi_clip_native_lipsync'
-  // (the legacy pipeline name) when the analyzer routes to Kling. Silently
-  // upgrade to the new 'kling_3_omni_multi_segment' so the default Kling
-  // pipeline is Omni without retraining the detector. Users who want the
-  // legacy multi-clip behavior can still pick it via the override dropdown.
-  const detectedPipeline: PipelineType | null =
-    rawDetectedPipeline === 'kling_3_multi_clip_native_lipsync'
-      ? 'kling_3_omni_multi_segment'
-      : rawDetectedPipeline;
+  // Polish-10.3: default to whatever the detector returns. The Polish-10
+  // silent upgrade to kling_3_omni_multi_segment is reverted — the
+  // legacy multi-clip pipeline produces better output today and is the
+  // default again. Omni stays available via the Override Dialog for
+  // users who want to experiment.
+  const detectedPipeline = (detection?.pipeline as PipelineType | undefined) ?? null;
   const effectivePipeline: PipelineType | null = overridePipeline ?? detectedPipeline;
 
   const heygenReady = connectedProviders.heygen.connected;
