@@ -54,12 +54,13 @@ describe('Polish-9.12: submitReplicateConcat', () => {
     expect(r.errorMessage).toMatch(/REPLICATE_VIDEO_CONCAT_MODEL_ID/);
   });
 
-  it('POSTs to Replicate with videos + video_urls + clips + video_files fields', async () => {
+  it('unversioned "owner/name" → POSTs to /v1/models/{owner}/{name}/predictions with input only', async () => {
     process.env.REPLICATE_VIDEO_CONCAT_MODEL_ID = 'owner/concat';
-    let observedBody: unknown;
+    let observedUrl = '';
+    let observedBody: Record<string, unknown> | null = null;
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
-      expect(url).toContain('/v1/models/owner/concat/predictions');
-      observedBody = init?.body ? JSON.parse(String(init.body)) : null;
+      observedUrl = url;
+      observedBody = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
       return new Response(JSON.stringify({ id: 'pred_abc' }), { status: 201 });
     }) as typeof globalThis.fetch;
     const { submitReplicateConcat } = await import('../src/replicate-concat');
@@ -70,12 +71,46 @@ describe('Polish-9.12: submitReplicateConcat', () => {
     });
     expect(r.ok).toBe(true);
     expect(r.predictionId).toBe('pred_abc');
+    expect(observedUrl).toContain('/v1/models/owner/concat/predictions');
+    expect(observedBody).not.toHaveProperty('version');
     expect(observedBody).toMatchObject({
       input: {
         videos: ['https://x/a.mp4', 'https://x/b.mp4', 'https://x/c.mp4'],
         video_urls: ['https://x/a.mp4', 'https://x/b.mp4', 'https://x/c.mp4'],
         clips: ['https://x/a.mp4', 'https://x/b.mp4', 'https://x/c.mp4'],
         video_files: ['https://x/a.mp4', 'https://x/b.mp4', 'https://x/c.mp4'],
+      },
+    });
+  });
+
+  it('versioned "owner/name:HASH" → POSTs to /v1/predictions with {version, input}', async () => {
+    process.env.REPLICATE_VIDEO_CONCAT_MODEL_ID =
+      'idan054/better-video-merge:6bda9eb61c16dedaa6804792a252cf7a7c260a5c2bf3ac479adab2d3a4e983ad';
+    let observedUrl = '';
+    let observedBody: Record<string, unknown> | null = null;
+    globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      observedUrl = url;
+      observedBody = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+      return new Response(JSON.stringify({ id: 'pred_xyz' }), { status: 201 });
+    }) as typeof globalThis.fetch;
+    const { submitReplicateConcat } = await import('../src/replicate-concat');
+    const r = await submitReplicateConcat({
+      userId: 'u',
+      apiKey: 'k',
+      videoUrls: ['https://x/a.mp4', 'https://x/b.mp4'],
+    });
+    expect(r.ok).toBe(true);
+    expect(r.predictionId).toBe('pred_xyz');
+    // Hit the versioned endpoint, NOT the model-named one.
+    expect(observedUrl).toMatch(/\/v1\/predictions$/);
+    expect(observedUrl).not.toContain('/v1/models/');
+    expect(observedBody).toMatchObject({
+      version: '6bda9eb61c16dedaa6804792a252cf7a7c260a5c2bf3ac479adab2d3a4e983ad',
+      input: {
+        videos: ['https://x/a.mp4', 'https://x/b.mp4'],
+        video_urls: ['https://x/a.mp4', 'https://x/b.mp4'],
+        clips: ['https://x/a.mp4', 'https://x/b.mp4'],
+        video_files: ['https://x/a.mp4', 'https://x/b.mp4'],
       },
     });
   });

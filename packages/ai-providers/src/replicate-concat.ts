@@ -54,12 +54,20 @@ export interface SubmitConcatResult {
 
 /**
  * Submit concat. The input field name varies across Replicate ffmpeg
- * models (`videos`, `video_urls`, `clips`). Sending all three covers
- * the common cases — extra fields are silently ignored by Replicate.
+ * models (`videos`, `video_urls`, `clips`, `video_files`). Sending all
+ * four covers the common cases — extra fields are silently ignored.
+ *
+ * Polish-9.14: support both Replicate prediction endpoints.
+ *   - "owner/name"           → POST /v1/models/{owner}/{name}/predictions
+ *                              (officially-exposed models like Kling)
+ *   - "owner/name:VERSION"   → POST /v1/predictions with { version, input }
+ *                              (community models like idan054/better-
+ *                              video-merge, which return 404 on the
+ *                              model-named endpoint)
  */
 export async function submitReplicateConcat(input: SubmitConcatInput): Promise<SubmitConcatResult> {
-  const modelId = getVideoConcatModelId();
-  if (!modelId) {
+  const raw = getVideoConcatModelId();
+  if (!raw) {
     return {
       ok: false,
       modelId: '',
@@ -67,16 +75,22 @@ export async function submitReplicateConcat(input: SubmitConcatInput): Promise<S
       errorMessage: 'REPLICATE_VIDEO_CONCAT_MODEL_ID is not set. Stitching disabled.',
     };
   }
-  const url = `${REPLICATE_BASE}/v1/models/${modelId}/predictions`;
-  const body = {
-    input: {
-      videos: input.videoUrls,
-      video_urls: input.videoUrls,
-      clips: input.videoUrls,
-      // idan054/better-video-merge uses this field name.
-      video_files: input.videoUrls,
-    },
+  const colonIdx = raw.indexOf(':');
+  const modelPath = colonIdx === -1 ? raw : raw.slice(0, colonIdx);
+  const version = colonIdx === -1 ? '' : raw.slice(colonIdx + 1).trim();
+
+  const inputFields = {
+    videos: input.videoUrls,
+    video_urls: input.videoUrls,
+    clips: input.videoUrls,
+    // idan054/better-video-merge uses this field name.
+    video_files: input.videoUrls,
   };
+
+  const url = version
+    ? `${REPLICATE_BASE}/v1/predictions`
+    : `${REPLICATE_BASE}/v1/models/${modelPath}/predictions`;
+  const body = version ? { version, input: inputFields } : { input: inputFields };
   const result = await callProvider<{ id?: string; error?: string }>({
     userId: input.userId,
     provider: 'kling',
@@ -89,7 +103,8 @@ export async function submitReplicateConcat(input: SubmitConcatInput): Promise<S
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
-      model_id: modelId,
+      model_id: modelPath,
+      version: version || undefined,
       clip_count: input.videoUrls.length,
     },
     generationJobId: input.generationJobId,
@@ -97,7 +112,7 @@ export async function submitReplicateConcat(input: SubmitConcatInput): Promise<S
   if (!result.ok) {
     return {
       ok: false,
-      modelId,
+      modelId: raw,
       latencyMs: result.latencyMs,
       httpStatus: result.status,
       errorMessage: result.errorMessage,
@@ -107,7 +122,7 @@ export async function submitReplicateConcat(input: SubmitConcatInput): Promise<S
   if (!predictionId) {
     return {
       ok: false,
-      modelId,
+      modelId: raw,
       latencyMs: result.latencyMs,
       errorMessage: 'Replicate concat response missing prediction id',
     };
@@ -115,7 +130,7 @@ export async function submitReplicateConcat(input: SubmitConcatInput): Promise<S
   return {
     ok: true,
     predictionId,
-    modelId,
+    modelId: raw,
     latencyMs: result.latencyMs,
     httpStatus: result.status,
   };
