@@ -381,25 +381,38 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
 // =========================================================================
 
 interface ClipSpec {
-  /** 1-indexed clip number from the `CLIP N — ...` header. */
+  /** 1-indexed clip number derived from the [USE IMAGE X] directive's X. */
   clipNumber: number;
+  /** The image index this clip animates from (same as clipNumber by construction). */
+  startingFrameImage: number;
+  /**
+   * Full Kling prompt body — everything from this clip's [USE IMAGE X]
+   * directive to the next clip's directive (or end of Section C). Sent
+   * to Kling verbatim because Kling 3.0's grammar consumes the bracket
+   * directives natively.
+   */
   videoPrompt: string;
   dialogue?: string;
   duration?: number;
+  motionType?: string;
   /**
-   * Nano Banana prompt for this clip's first frame — pulled from
-   * Section B's master image prompt or per-image continuation. Worker
-   * falls back to character+videoPrompt when undefined.
+   * Optional clip-specific image prompt. Polish-9.10 no longer extracts
+   * per-image entries from Section B (too format-variable); always
+   * undefined. The worker falls back to character + set + section-B
+   * imageGuidance + clip.videoPrompt via buildImagePromptForClip.
    */
   imagePrompt?: string;
-  /** Image index this clip animates from, e.g. 1 from "Starting Frame: Image 1". */
-  startingFrameImage?: number;
-  motionType?: string;
 }
 
 interface ProductionManual {
   characterPrompt: string;
   setPrompt: string;
+  /**
+   * Section B body captured as one string — passed to Nano Banana
+   * alongside character + set + clip context so the first frame can
+   * reference whatever Claude wrote about images.
+   */
+  imageGuidance: string;
   clips: ClipSpec[];
 }
 
@@ -427,28 +440,23 @@ export function decideKlingJobOutcome(input: {
 }
 
 /**
- * Polish-9.9: parse the Universal UGC Master Prompt's actual output
- * format. The spec at packages/ai-providers/src/prompts/master/
- * universal-ugc-master-prompt.md defines a separator-delimited block
- * structure in Section C — NOT a `### Clip N` + `**Field:**` form.
+ * Polish-9.10: anchor clip parsing on the [USE IMAGE X AS STARTING
+ * FRAME] directive — the only thing the master prompt forces Claude
+ * to emit verbatim ("Three Mandatory Elements — Always Include").
+ * Polish-9.7 / 9.8 / 9.9 each chased a different surrounding-markdown
+ * format (JSON, `### Clip N` + `**Field:**`, em-dash separators) and
+ * each failed in production on a slightly different rendering. The
+ * bracket directives don't vary, so we anchor on them instead.
  *
- *   ─────────────────────────────────────────
- *   CLIP 1 — 00:00–00:06 — TITLE        ← or SCENE 1 (master prompt uses SCENE)
- *   Starting Frame: Image 1
- *   Last Frame needed: YES
- *   ─────────────────────────────────────────
- *   [USE IMAGE 1 AS STARTING FRAME]
- *   Subject: NAME, ref: 000, ...
- *   [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "..."
- *   Static iPhone shot. ...
- *   ─────────────────────────────────────────
- *   motionType: lip-sync
- *
- * The prompt body (between separators 2 and 3) becomes videoPrompt
- * verbatim — Kling 3.0's prompting expects the [USE IMAGE X] anchor,
- * Subject ref, and [GENERATE NATIVE AUDIO...] directives intact.
- *
- * JSON fallback dropped: the master prompt never asks for JSON.
+ * Strategy:
+ *   1. Locate SECTION C header (markdown-decoration-tolerant).
+ *   2. Scan for every [USE IMAGE N AS STARTING FRAME] directive.
+ *   3. Each directive is a clip; body = text from this directive to
+ *      the next (or end of Section C). Sent to Kling verbatim because
+ *      Kling 3.0's grammar consumes [USE IMAGE X], Subject:, and
+ *      [GENERATE NATIVE AUDIO...] natively.
+ *   4. Section B body captured whole as `imageGuidance` and passed to
+ *      Nano Banana — no per-image extraction (too format-variable).
  */
 export function parseProductionManual(
   raw: unknown,
@@ -457,32 +465,52 @@ export function parseProductionManual(
     return { ok: false, error: 'Claude returned no text for the manual.' };
   }
 
-  const manual = parseFromMarkdown(raw);
+  const text = stripCodeFences(raw);
+  const sectionA = sliceSection(text, 'A');
+  const characterPrompt = extractGlobalPrompt(sectionA, 'Character');
+  const setPrompt = extractGlobalPrompt(sectionA, 'Set');
 
-  if (!manual.characterPrompt.trim()) {
-    return { ok: false, error: errorWithExcerpt('Manual is missing characterPrompt', raw) };
+  if (!characterPrompt.trim()) {
+    return { ok: false, error: errorWithExcerpt('Manual is missing characterPrompt', raw, 500) };
   }
-  if (!manual.setPrompt.trim()) {
-    return { ok: false, error: errorWithExcerpt('Manual is missing setPrompt', raw) };
+  if (!setPrompt.trim()) {
+    return { ok: false, error: errorWithExcerpt('Manual is missing setPrompt', raw, 500) };
   }
-  if (manual.clips.length === 0) {
+
+  const imageGuidance = sliceSection(text, 'B');
+
+  const sectionC = sliceSectionC(text);
+  if (sectionC === null) {
     return {
       ok: false,
-      error: errorWithExcerpt(
-        'Manual Section C contained 0 parseable clip blocks (expected ───── separator blocks with CLIP/SCENE N headers)',
-        raw,
-      ),
+      error: `No SECTION C header found in manual. First 1000 chars: ${raw.slice(0, 1000)}`,
     };
   }
-  const blankClip = manual.clips.findIndex((c) => !c.videoPrompt.trim());
-  if (blankClip >= 0) {
-    return { ok: false, error: `Clip ${blankClip + 1} has an empty video prompt` };
+
+  const clips = parseClipsFromDirectives(sectionC);
+  if (clips.length === 0) {
+    // Dump the body so the next failure shows EXACTLY what Claude emitted.
+    console.log('[kling-manual] Section C body (first 2000 chars):', sectionC.slice(0, 2000));
+    return {
+      ok: false,
+      error:
+        `Section C has no [USE IMAGE X AS STARTING FRAME] directives. ` +
+        `Claude likely formatted clips incorrectly. Section C first 2000 chars: ` +
+        sectionC.slice(0, 2000),
+    };
   }
-  return { ok: true, manual };
+
+  const blank = clips.findIndex((c) => !c.videoPrompt.trim());
+  if (blank >= 0) {
+    return { ok: false, error: `Clip ${blank + 1} has an empty video prompt` };
+  }
+
+  console.log(`[kling-manual] extracted ${clips.length} clips with directives.`);
+  return { ok: true, manual: { characterPrompt, setPrompt, imageGuidance, clips } };
 }
 
-function errorWithExcerpt(prefix: string, raw: string): string {
-  return `${prefix}. First 500 chars: ${raw.slice(0, 500)}`;
+function errorWithExcerpt(prefix: string, raw: string, n: number): string {
+  return `${prefix}. First ${n} chars: ${raw.slice(0, n)}`;
 }
 
 function stripCodeFences(text: string): string {
@@ -493,34 +521,27 @@ function stripCodeFences(text: string): string {
     .trim();
 }
 
-function parseFromMarkdown(text: string): ProductionManual {
-  const cleaned = stripCodeFences(text);
-  const sectionA = sliceSection(cleaned, 'A');
-  const sectionB = sliceSection(cleaned, 'B');
-  const sectionC = sliceSection(cleaned, 'C');
-
-  const characterPrompt = extractGlobalPrompt(sectionA, 'Character');
-  const setPrompt = extractGlobalPrompt(sectionA, 'Set');
-
-  const masterImagePrompt = extractMasterImagePrompt(sectionB);
-  const perImagePrompts = parsePerImageContinuations(sectionB);
-
-  const clips = sectionC
-    ? parseClipsFromSectionC(sectionC, { masterImagePrompt, perImagePrompts })
-    : [];
-  clips.sort((a, b) => (a.clipNumber ?? 0) - (b.clipNumber ?? 0));
-
-  return { characterPrompt, setPrompt, clips };
-}
-
 /** Slice `SECTION X — title\n...` up to next `SECTION Y` or EOF. */
 function sliceSection(text: string, letter: 'A' | 'B' | 'C'): string {
   const re = new RegExp(
-    `(?:^|\\n)\\s*(?:#+\\s*)?SECTION\\s+${letter}\\b[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*(?:#+\\s*)?SECTION\\s+[A-Z]\\b|$)`,
+    `(?:^|\\n)\\s*(?:#{0,6}\\s*)?SECTION\\s+${letter}\\b[^\\n]*\\n([\\s\\S]*?)(?=\\n\\s*(?:#{0,6}\\s*)?SECTION\\s+[A-Z]\\b|$)`,
     'i',
   );
   const m = text.match(re);
   return m && m[1] ? m[1].trim() : '';
+}
+
+/**
+ * Like sliceSection('C') but distinguishes "absent" from "empty". The
+ * worker needs to surface a specific "no SECTION C header" error when
+ * Claude omits the section entirely.
+ */
+function sliceSectionC(text: string): string | null {
+  const re =
+    /(?:^|\n)\s*(?:#{0,6}\s*)?SECTION\s+C\b[^\n]*\n([\s\S]*?)(?=\n\s*(?:#{0,6}\s*)?SECTION\s+[D-Z]\b|$)/i;
+  const m = text.match(re);
+  if (!m) return null;
+  return (m[1] ?? '').trim();
 }
 
 /** Extract `Global <Kind> Prompt: <value>` (with or without **bold**). */
@@ -536,79 +557,59 @@ function extractGlobalPrompt(sectionA: string, kind: 'Character' | 'Set'): strin
   return m[1].replace(/\*\*/g, '').trim();
 }
 
-const SEPARATOR_LINE = /^[─━–—=_-]{5,}\s*$/;
+const USE_IMAGE_DIRECTIVE = /\[USE\s+IMAGE\s+(\d+)\s+AS\s+STARTING\s+FRAME\]/gi;
 
 /**
- * Parse Section C clip blocks. Strategy:
- *   1. Find every line matching `(CLIP|SCENE) N — ...` — that's a clip
- *      header.
- *   2. For each header, take everything from this header to the next
- *      header (or EOF). That's the full clip block — header lines,
- *      separator rules, prompt body, and trailing motionType: line.
- *   3. The Kling video prompt body lives between the FIRST separator
- *      AFTER the header and the NEXT separator. Falls back to "every
- *      line not in the header zone or trailer" when separators are
- *      absent.
+ * Find every [USE IMAGE N AS STARTING FRAME] directive in Section C
+ * body. Each directive starts a clip; body runs to the next directive.
+ * Markdown decoration (### CLIP, **CLIP**, em-dashes, no header) is
+ * ignored — the bracket directive is the sole anchor.
+ *
+ * Dedupe by image number (keep first), then sort ascending.
  */
-function parseClipsFromSectionC(
-  sectionC: string,
-  imageContext: { masterImagePrompt: string; perImagePrompts: Record<number, string> },
-): ClipSpec[] {
-  const headerRe = /(?:^|\n)\s*(?:#+\s*)?(?:CLIP|SCENE|Clip|Scene)\s+(\d+)\s*[—\-–]/g;
-  const headers: { startInBlock: number; clipNum: number }[] = [];
+function parseClipsFromDirectives(sectionC: string): ClipSpec[] {
+  const re = new RegExp(USE_IMAGE_DIRECTIVE.source, 'gi');
+  const anchors: { index: number; imageNum: number }[] = [];
   let m: RegExpExecArray | null;
-  while ((m = headerRe.exec(sectionC)) !== null) {
-    headers.push({
-      startInBlock: m.index + (m[0].startsWith('\n') ? 1 : 0),
-      clipNum: Number(m[1]),
-    });
+  while ((m = re.exec(sectionC)) !== null) {
+    anchors.push({ index: m.index, imageNum: Number(m[1]) });
   }
-  if (headers.length === 0) return [];
+  if (anchors.length === 0) return [];
 
+  const seen = new Set<number>();
   const clips: ClipSpec[] = [];
-  for (let i = 0; i < headers.length; i++) {
-    const cur = headers[i]!;
-    const next = headers[i + 1];
-    const block = sectionC.slice(cur.startInBlock, next ? next.startInBlock : sectionC.length);
+  for (let i = 0; i < anchors.length; i++) {
+    const cur = anchors[i]!;
+    if (seen.has(cur.imageNum)) continue;
+    seen.add(cur.imageNum);
+    const next = anchors[i + 1];
+    const body = sectionC.slice(cur.index, next ? next.index : sectionC.length).trim();
 
-    const startingFrameImage = extractStartingFrame(block) ?? cur.clipNum;
-    const dialogue = extractBracketedDialogue(block);
-    const motionType = extractMotionTypeLine(block);
-    const duration = deriveDurationFromHeader(block);
-    const videoPrompt = extractClipBody(block);
-
-    const imagePrompt =
-      imageContext.perImagePrompts[startingFrameImage] ??
-      imageContext.masterImagePrompt ??
-      undefined;
+    const dialogue = extractDialogueDirective(body);
+    const motionType = extractMotionTypeLine(body) || 'lip-sync';
+    const duration = deriveDurationFromBody(body);
 
     clips.push({
-      clipNumber: cur.clipNum,
-      startingFrameImage,
-      videoPrompt: videoPrompt.trim(),
+      clipNumber: cur.imageNum,
+      startingFrameImage: cur.imageNum,
+      videoPrompt: body,
       dialogue: dialogue || undefined,
       duration,
-      imagePrompt: imagePrompt && imagePrompt.trim() ? imagePrompt.trim() : undefined,
-      motionType: motionType || undefined,
+      motionType,
+      imagePrompt: undefined,
     });
   }
+  clips.sort((a, b) => a.clipNumber - b.clipNumber);
   return clips;
 }
 
-function extractStartingFrame(block: string): number | undefined {
-  const m = block.match(/Starting\s+Frame:\s*Image\s*(\d+)/i);
-  return m && m[1] ? Number(m[1]) : undefined;
-}
-
-function extractBracketedDialogue(block: string): string {
-  const m = block.match(
-    /\[GENERATE\s+NATIVE\s+AUDIO\s+AND\s+LIP-?SYNC\s+TO\s+EXACT\s+DIALOGUE\]:\s*"([^"]+)"/i,
-  );
+function extractDialogueDirective(body: string): string {
+  const m = body.match(/\[GENERATE\s+NATIVE\s+AUDIO[^\]]*\]:\s*"([^"]*)"/i);
   return m && m[1] ? m[1] : '';
 }
 
-function extractMotionTypeLine(block: string): string {
-  const m = block.match(/(?:^|\n)\s*motion[\s_-]?type\s*:?\s*([^\n]+)/i);
+function extractMotionTypeLine(body: string): string {
+  const m = body.match(/(?:^|\n)\s*\**\s*motion[\s_-]?type\s*\**\s*:?\s*\**\s*([^\n]+)/i);
   if (!m || !m[1]) return '';
   return m[1]
     .replace(/\*\*/g, '')
@@ -616,9 +617,9 @@ function extractMotionTypeLine(block: string): string {
     .trim();
 }
 
-function deriveDurationFromHeader(block: string): number | undefined {
-  // CLIP 1 — 00:00–00:06 — HOOK  →  6 seconds
-  const m = block.match(/(\d+):(\d+)\s*[–\-—]\s*(\d+):(\d+)/);
+function deriveDurationFromBody(body: string): number | undefined {
+  // E.g. "00:00–00:06" or "00:00-00:06" in the header line within the body.
+  const m = body.match(/(\d+):(\d+)\s*[–\-—]\s*(\d+):(\d+)/);
   if (!m || !m[1] || !m[2] || !m[3] || !m[4]) return undefined;
   const startSec = Number(m[1]) * 60 + Number(m[2]);
   const endSec = Number(m[3]) * 60 + Number(m[4]);
@@ -627,121 +628,22 @@ function deriveDurationFromHeader(block: string): number | undefined {
 }
 
 /**
- * Extract the Kling prompt body — the [USE IMAGE X], Subject, [GENERATE
- * NATIVE AUDIO...], action-text region between separators 2 and 3 of
- * the master-prompt format. Sent to Kling verbatim because its prompt
- * grammar expects those bracket directives.
- *
- * Fallback when separators are absent: drop the header + Starting
- * Frame / Last Frame / motionType lines, keep the rest.
- */
-function extractClipBody(block: string): string {
-  const lines = block.split('\n');
-  const sepIndexes: number[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (SEPARATOR_LINE.test(lines[i]!)) sepIndexes.push(i);
-  }
-
-  if (sepIndexes.length >= 2) {
-    // The standard 3-separator layout: header zone between 0..sep[0],
-    // body between sep[0]+1..sep[1], trailer (motionType) after sep[1].
-    return lines
-      .slice(sepIndexes[0]! + 1, sepIndexes[1]!)
-      .join('\n')
-      .trim();
-  }
-  if (sepIndexes.length === 1) {
-    // Forge-truncated form with just one separator after the header.
-    return lines
-      .slice(sepIndexes[0]! + 1)
-      .filter((l) => !/^\s*motion[\s_-]?type\s*:/i.test(l))
-      .join('\n')
-      .trim();
-  }
-  // No separators — strip the header + frame metadata + motionType, keep rest.
-  return lines
-    .filter((l) => {
-      if (/^\s*(?:#+\s*)?(?:CLIP|SCENE|Clip|Scene)\s+\d+\s*[—\-–]/.test(l)) return false;
-      if (/^\s*Starting\s+Frame:/i.test(l)) return false;
-      if (/^\s*Last\s+Frame\s+needed:/i.test(l)) return false;
-      if (/^\s*motion[\s_-]?type\s*:/i.test(l)) return false;
-      if (SEPARATOR_LINE.test(l)) return false;
-      return true;
-    })
-    .join('\n')
-    .trim();
-}
-
-/**
- * Pull the IMAGE 1 — Master First Frame block from Section B. Used as
- * the fallback Nano Banana prompt when per-clip continuations aren't
- * parseable.
- */
-function extractMasterImagePrompt(sectionB: string): string {
-  if (!sectionB) return '';
-  const re =
-    /(?:^|\n)\s*(?:#+\s*)?(?:IMAGE|Image)\s+1\b[^\n]*\n([\s\S]+?)(?=\n\s*(?:#+\s*)?(?:IMAGE|Image)S?\b|$)/i;
-  const m = sectionB.match(re);
-  return m && m[1] ? m[1].trim() : '';
-}
-
-/**
- * Best-effort: pull per-image continuation snippets from a Forge-style
- * Section B "IMAGES 2–16 — Same-Scene Continuations" table where each
- * record is a numeric line followed by 1-2 description lines. Returns
- * a sparse map keyed by image number; absent keys fall back to the
- * master prompt at the caller.
- */
-function parsePerImageContinuations(sectionB: string): Record<number, string> {
-  const out: Record<number, string> = {};
-  if (!sectionB) return out;
-  const contMatch = sectionB.match(
-    /(?:IMAGES?|Images?)\s+[\d–\-—\s]+[—\-:][^\n]*(?:Continuations?|Same.?Scene)[^\n]*\n([\s\S]+)$/i,
-  );
-  if (!contMatch || !contMatch[1]) return out;
-  const lines = contMatch[1]
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-  let i = 0;
-  while (i < lines.length) {
-    const numMatch = lines[i]!.match(/^(\d{1,2})$/);
-    if (!numMatch) {
-      i += 1;
-      continue;
-    }
-    const num = Number(numMatch[1]);
-    const desc1 = lines[i + 1];
-    const desc2 = lines[i + 2];
-    const parts: string[] = [];
-    if (desc1 && !/^\d{1,2}$/.test(desc1)) parts.push(desc1);
-    if (desc2 && !/^\d{1,2}$/.test(desc2)) parts.push(desc2);
-    if (parts.length === 0 || num < 2 || num > 99) {
-      i += 1;
-      continue;
-    }
-    out[num] = parts.join('. ');
-    i += 1 + parts.length;
-  }
-  return out;
-}
-
-/**
- * Build the per-clip Nano Banana prompt. If the parser found a
- * clip-specific image prompt (master first-frame or per-image
- * continuation), use that directly. Otherwise use the Section A
- * character prompt + the clip's video prompt as scene context so
- * Nano Banana still has something coherent to render.
+ * Build the per-clip Nano Banana prompt. If the parser populated a
+ * clip-specific image prompt (legacy path), use that directly.
+ * Otherwise: character + set + Section B imageGuidance + clip's
+ * videoPrompt — the master-prompt-defined image context plus this
+ * clip's directive body, so the first frame matches the scene and
+ * action Kling will animate.
  */
 export function buildImagePromptForClip(
-  manual: { characterPrompt: string; setPrompt: string },
+  manual: { characterPrompt: string; setPrompt: string; imageGuidance?: string },
   clip: ClipSpec,
 ): string {
   if (clip.imagePrompt && clip.imagePrompt.trim()) {
     return clip.imagePrompt;
   }
-  return [manual.characterPrompt, clip.videoPrompt]
-    .filter((s) => typeof s === 'string' && s.trim().length > 0)
+  return [manual.characterPrompt, manual.setPrompt, manual.imageGuidance, clip.videoPrompt]
+    .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
     .join('\n\n');
 }
 
