@@ -7,7 +7,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSegmentPrompt,
+  compressShotPrompt,
   computeSegmentCount,
+  extractAudioDirectives,
   splitClipsIntoSegments,
 } from '../src/functions/generate-kling-3-omni-multi-segment';
 
@@ -135,13 +137,13 @@ describe('Polish-10: buildSegmentPrompt', () => {
     expect(r.multiPrompt[1]!.prompt.match(/<<<image_1>>>/g)).toHaveLength(1);
   });
 
-  it('appends [GENERATE NATIVE AUDIO AND LIP-SYNC ...] for each shot with dialogue', () => {
+  it('Polish-10.2: shot bodies do NOT carry [GENERATE NATIVE AUDIO ...] (consolidated into outer prompt)', () => {
     const r = buildSegmentPrompt(manual, [{ videoPrompt: 'Hold mug.', dialogue: 'Morning!' }], 15);
-    expect(r.multiPrompt[0]!.prompt).toMatch(/GENERATE NATIVE AUDIO AND LIP-SYNC/);
-    expect(r.multiPrompt[0]!.prompt).toMatch(/"Morning!"/);
+    expect(r.multiPrompt[0]!.prompt).not.toMatch(/GENERATE NATIVE AUDIO AND LIP-SYNC/);
+    expect(r.multiPrompt[0]!.prompt).not.toMatch(/"Morning!"/);
   });
 
-  it('outer prompt concatenates dialogues into one continuous-monologue line', () => {
+  it('Polish-10.2: outer prompt aggregates dialogue into a single Audio-across-the-segment line', () => {
     const r = buildSegmentPrompt(
       manual,
       [
@@ -150,8 +152,133 @@ describe('Polish-10: buildSegmentPrompt', () => {
       ],
       15,
     );
-    expect(r.outerPrompt).toMatch(/one continuous monologue/);
+    expect(r.outerPrompt).toMatch(/Audio across the segment/);
     expect(r.outerPrompt).toMatch(/"Hi there\."/);
     expect(r.outerPrompt).toMatch(/"Today I want to talk about coffee\."/);
+  });
+
+  it('Polish-10.2: outer prompt fits under the 2500-char Kling Omni limit', () => {
+    const longClip = {
+      videoPrompt: 'Hold mug, smile.'.repeat(50),
+      dialogue: 'This is a long dialogue line.'.repeat(20),
+    };
+    const r = buildSegmentPrompt(manual, [longClip, longClip], 15);
+    expect(r.outerPrompt.length).toBeLessThanOrEqual(2500);
+  });
+
+  it('Polish-10.2: every shot body stays under the 512-char Kling Omni limit', () => {
+    const longClip = {
+      videoPrompt:
+        '[USE IMAGE 1 AS STARTING FRAME] Subject: SARAH, ref: 123, 30yo woman, US accent. ' +
+        'Static iPhone shot. ' +
+        'Hold mug, smile widens, eyebrows raise, head tilts slightly to the right '.repeat(20) +
+        '[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "' +
+        'Hi I am drinking coffee in my kitchen.'.repeat(15) +
+        '"',
+      dialogue: 'Hi I am drinking coffee.',
+    };
+    const r = buildSegmentPrompt(manual, [longClip, longClip], 15);
+    for (const shot of r.multiPrompt) {
+      expect(shot.prompt.length).toBeLessThan(512);
+    }
+  });
+});
+
+describe('Polish-10.2: compressShotPrompt', () => {
+  it('strips [USE IMAGE X AS STARTING FRAME] directives', () => {
+    const out = compressShotPrompt({
+      videoPrompt: '[USE IMAGE 1 AS STARTING FRAME] Hold mug, smile.',
+    });
+    expect(out).not.toMatch(/USE IMAGE/i);
+    expect(out).toMatch(/^<<<image_1>>>/);
+    expect(out).toMatch(/Hold mug, smile\./);
+  });
+
+  it('strips [GENERATE NATIVE AUDIO ...]: "dialogue" bracket directives', () => {
+    const out = compressShotPrompt({
+      videoPrompt:
+        'Hold mug. [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Morning!" Smile.',
+    });
+    expect(out).not.toMatch(/GENERATE NATIVE AUDIO/i);
+    expect(out).not.toMatch(/"Morning!"/);
+    expect(out).toMatch(/Hold mug\..*Smile\./);
+  });
+
+  it('always prepends <<<image_1>>>', () => {
+    expect(compressShotPrompt({ videoPrompt: 'Body.' })).toMatch(/^<<<image_1>>>/);
+  });
+
+  it('does NOT double-prefix when <<<image_N>>> already present', () => {
+    const out = compressShotPrompt({ videoPrompt: '<<<image_2>>> Already tagged.' });
+    expect(out.match(/<<<image_\d+>>>/g)).toHaveLength(1);
+  });
+
+  it('collapses runs of whitespace into single spaces', () => {
+    const out = compressShotPrompt({
+      videoPrompt: 'Hold mug.\n\n\n   Smile widely.\n\n  Eyes raise.',
+    });
+    expect(out).not.toMatch(/ {2}/);
+    expect(out).not.toMatch(/\n/);
+  });
+
+  it('hard-truncates at maxChars with ellipsis (default 480)', () => {
+    const body = 'Hold mug and slowly raise eyebrows.'.repeat(50);
+    const out = compressShotPrompt({ videoPrompt: body });
+    expect(out.length).toBeLessThanOrEqual(480);
+    expect(out.endsWith('...')).toBe(true);
+  });
+
+  it('passes short input through unchanged after prefix', () => {
+    const out = compressShotPrompt({ videoPrompt: 'Quick smile.' });
+    expect(out).toBe('<<<image_1>>> Quick smile.');
+  });
+
+  it('honors custom maxChars', () => {
+    const out = compressShotPrompt({ videoPrompt: 'a'.repeat(100) }, 50);
+    expect(out.length).toBeLessThanOrEqual(50);
+  });
+});
+
+describe('Polish-10.2: extractAudioDirectives', () => {
+  it('pulls dialogue from the master-prompt bracket form', () => {
+    const out = extractAudioDirectives([
+      {
+        videoPrompt:
+          'Hold mug. [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Hello." Smile.',
+      },
+    ]);
+    expect(out).toMatch(/Audio across the segment/);
+    expect(out).toMatch(/"Hello\."/);
+  });
+
+  it('aggregates dialogue across multiple clips in order', () => {
+    const out = extractAudioDirectives([
+      {
+        videoPrompt: '[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "First line."',
+      },
+      {
+        videoPrompt: '[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Second line."',
+      },
+    ]);
+    expect(out.indexOf('"First line."')).toBeLessThan(out.indexOf('"Second line."'));
+  });
+
+  it('falls back to clip.dialogue when the bracket form is absent', () => {
+    const out = extractAudioDirectives([{ videoPrompt: 'No directive here.', dialogue: 'Hi.' }]);
+    expect(out).toMatch(/"Hi\."/);
+  });
+
+  it('dedupes when bracket + clip.dialogue carry the same line', () => {
+    const out = extractAudioDirectives([
+      {
+        videoPrompt: '[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Hi."',
+        dialogue: 'Hi.',
+      },
+    ]);
+    expect(out.match(/"Hi\."/g)).toHaveLength(1);
+  });
+
+  it('returns empty string when no clip has audio cues', () => {
+    expect(extractAudioDirectives([{ videoPrompt: 'B-roll only.' }])).toBe('');
   });
 });

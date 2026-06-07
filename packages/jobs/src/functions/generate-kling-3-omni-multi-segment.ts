@@ -478,14 +478,89 @@ interface ClipLike {
 }
 
 /**
+ * Polish-10.2: max chars per multi_prompt entry. Kling Omni enforces
+ * a HARD 512-char limit per shot (E006); we leave a 32-char buffer
+ * for the <<<image_1>>> prefix plus any minor edits. Outer prompt
+ * has a separate 2500-char ceiling.
+ */
+const MAX_SHOT_CHARS = 480;
+const MAX_OUTER_PROMPT_CHARS = 2500;
+
+const BRACKET_DIALOGUE_RE = /\[GENERATE\s+NATIVE\s+AUDIO[^\]]*\]\s*:\s*"([^"]+)"/gi;
+const BRACKET_AUDIO_INLINE_RE = /\[GENERATE\s+NATIVE\s+AUDIO[^\]]*\]/gi;
+const USE_IMAGE_RE = /\[USE\s+IMAGE\s+\d+\s+AS\s+STARTING\s+FRAME\]/gi;
+
+/**
+ * Polish-10.2: aggregate the dialogue / audio cues embedded in clip
+ * bodies so they can live in the outer prompt (2500 char budget)
+ * rather than each multi_prompt shot (512 char budget). Falls back
+ * to clip.dialogue when no bracket directive is present.
+ */
+export function extractAudioDirectives<C extends ClipLike>(clips: C[]): string {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const clip of clips) {
+    let foundBracketDialogue = false;
+    // Pattern A: `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT
+    //             DIALOGUE]: "Spoken line."`  (master prompt format)
+    BRACKET_DIALOGUE_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = BRACKET_DIALOGUE_RE.exec(clip.videoPrompt)) !== null) {
+      const cleaned = m[1]!.trim();
+      if (cleaned && !seen.has(cleaned)) {
+        seen.add(cleaned);
+        lines.push(`"${cleaned}"`);
+      }
+      foundBracketDialogue = true;
+    }
+    // Fallback: when the parser already extracted clip.dialogue and
+    // the bracket directive isn't in the body verbatim.
+    if (!foundBracketDialogue && clip.dialogue) {
+      const cleaned = clip.dialogue.trim();
+      if (cleaned && !seen.has(cleaned)) {
+        seen.add(cleaned);
+        lines.push(`"${cleaned}"`);
+      }
+    }
+  }
+  if (lines.length === 0) return '';
+  return `Audio across the segment (one continuous natural monologue, spoken at a normal conversational pace with no dramatic pauses): ${lines.join(' ')}`;
+}
+
+/**
+ * Polish-10.2: produce a multi_prompt shot string that fits under
+ * Kling Omni's 512-char per-shot limit. Strips the audio + frame
+ * directives (already represented in the outer prompt and at the
+ * segment level via reference_images), collapses whitespace, prepends
+ * `<<<image_1>>>` for character grounding, and hard-truncates if the
+ * result is still too long.
+ */
+export function compressShotPrompt<C extends ClipLike>(
+  clip: C,
+  maxChars: number = MAX_SHOT_CHARS,
+): string {
+  let body = clip.videoPrompt;
+  body = body.replace(BRACKET_DIALOGUE_RE, '');
+  body = body.replace(BRACKET_AUDIO_INLINE_RE, '');
+  body = body.replace(USE_IMAGE_RE, '');
+  // Collapse whitespace runs but keep a single space between tokens.
+  body = body.replace(/\s+/g, ' ').trim();
+  // Drop a stray "Subject: ..." line — that's character anchoring the
+  // reference image already covers; takes char budget for nothing.
+  body = body.replace(/^Subject:\s*[^.]+\.\s*/i, '');
+
+  const withRef = /<<<image_\d+>>>/.test(body) ? body : `<<<image_1>>> ${body}`;
+  if (withRef.length <= maxChars) return withRef;
+  return withRef.slice(0, maxChars - 3).trimEnd() + '...';
+}
+
+/**
  * Build the Omni segment prompt + multi_prompt array from a clip
- * group. The outer prompt is an overall scene description; per-shot
- * prompts in multi_prompt reference `<<<image_1>>>` so the model
- * grounds each shot's character on the shared reference frame.
- *
- * Per-shot duration is balanced so the sum equals SEGMENT_DURATION_
- * SECONDS — Replicate's schema requires this. Truncates to
- * MAX_SHOTS_PER_SEGMENT (6) per the model's documented limit.
+ * group. Polish-10.2 split: per-shot bodies are compressed under
+ * 512 chars (model limit); the audio / dialogue + UGC framing
+ * context lives in the outer prompt (2500 char limit). Reference
+ * image grounding via `<<<image_1>>>` in every shot + the outer
+ * prompt's explicit "Reference image <<<image_1>>>" note.
  */
 export function buildSegmentPrompt<C extends ClipLike>(
   manual: { characterPrompt: string; setPrompt: string },
@@ -496,55 +571,40 @@ export function buildSegmentPrompt<C extends ClipLike>(
   const trimmed = clipGroup.slice(0, shotCount);
   const character = stripCharacterSheetPattern(manual.characterPrompt);
 
-  // Balance per-shot durations; distribute remainder across the
-  // first `remainder` shots so the sum lands exactly.
-  const baseSecs = Math.floor(segmentDurationSeconds / shotCount);
+  // Balance per-shot durations; distribute the remainder across the
+  // first `remainder` shots so the total lands exactly on
+  // segmentDurationSeconds (schema requires sum === outer duration).
+  const baseSecs = Math.max(1, Math.floor(segmentDurationSeconds / shotCount));
   const remainder = segmentDurationSeconds - baseSecs * shotCount;
   const durations: number[] = Array.from({ length: shotCount }, (_, i) =>
     i < remainder ? baseSecs + 1 : baseSecs,
   );
 
   const multiPrompt: KlingOmniShot[] = trimmed.map((clip, i) => ({
-    prompt: buildShotPrompt(clip),
+    prompt: compressShotPrompt(clip),
     duration: durations[i]!,
   }));
 
-  const dialogueList = trimmed
-    .map((c) => c.dialogue?.trim())
-    .filter((d): d is string => Boolean(d && d.length > 0));
-  const dialogueLine =
-    dialogueList.length > 0
-      ? `Dialogue (one continuous monologue, spoken naturally and quickly): ${dialogueList
-          .map((d) => `"${d}"`)
-          .join(' ')}`
-      : '';
+  const audioContext = extractAudioDirectives(trimmed);
+  const sShot = shotCount === 1 ? '' : 's';
 
-  const outerPrompt = [
-    `<<<image_1>>> Single-character UGC selfie ad. Character: ${character}`,
-    `Scene/Set: ${manual.setPrompt}`,
-    `This is a single ${segmentDurationSeconds}-second video with ${shotCount} connected shot${
-      shotCount === 1 ? '' : 's'
-    }. Shot transitions are seamless — no hard cuts, continuous character identity, motion, lighting, and audio.`,
-    dialogueLine,
+  const outerPromptParts = [
     'AMATEUR SMARTPHONE SELFIE captured on an iPhone front camera in handheld vertical orientation. NOT cinematic, NOT studio. Natural ambient indoor or daylight. Hyper-realistic skin with pores and natural imperfections.',
+    `Reference image <<<image_1>>> shows the single character. Single-character UGC selfie ad.`,
+    `Character: ${character}`,
+    `Scene/Set: ${manual.setPrompt}`,
+    audioContext,
     'Speech delivery: NATURAL CONVERSATIONAL pace, like a real person talking to a friend. NO dramatic pauses, NO dead air at start or end.',
-  ]
-    .filter((s) => s && s.trim().length > 0)
-    .join('\n\n');
+    `This is a single ${segmentDurationSeconds}-second video with ${shotCount} connected shot${sShot}. Shot transitions are seamless — no hard cuts, continuous character identity, motion, lighting, and audio.`,
+  ].filter((s) => s && s.trim().length > 0);
+
+  const joined = outerPromptParts.join(' ');
+  const outerPrompt =
+    joined.length > MAX_OUTER_PROMPT_CHARS
+      ? joined.slice(0, MAX_OUTER_PROMPT_CHARS - 3).trimEnd() + '...'
+      : joined;
 
   return { outerPrompt, multiPrompt };
-}
-
-function buildShotPrompt<C extends ClipLike>(clip: C): string {
-  const body = clip.videoPrompt.trim();
-  const dialogueLine =
-    clip.dialogue && clip.dialogue.trim().length > 0
-      ? ` [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "${clip.dialogue.trim()}"`
-      : '';
-  // Always prefix with the reference image token so the shot
-  // grounds the character on the shared frame.
-  const withRef = /<<<image_\d+>>>/.test(body) ? body : `<<<image_1>>> ${body}`;
-  return `${withRef}${dialogueLine}`;
 }
 
 void estimateKlingOmniSegmentCostUsd;
