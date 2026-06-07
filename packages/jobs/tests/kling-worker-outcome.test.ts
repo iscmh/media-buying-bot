@@ -14,6 +14,7 @@ import {
   continuationImagePrompt,
   decideKlingJobOutcome,
   extractWardrobeFromCharacter,
+  hasQuotedDialogue,
   parseProductionManual,
   stripCharacterSheetPattern,
 } from '../src/functions/generate-kling-multi-clip-variants';
@@ -304,9 +305,12 @@ describe('Polish-9.12: buildImagePromptForClip — clip 0 path', () => {
       imagePrompt: 'Pre-baked image prompt for this clip.',
     };
     const out = buildImagePromptForClip(manual, clip);
-    expect(out).toBe(
-      'Single character, single view, NOT a character sheet, NOT a reference sheet, NOT multiple angles, NOT front/back/side views. Generate a single photorealistic UGC selfie-style frame. Camera: smartphone (iPhone) eye-level shot, vertical 9:16 portrait. Authentic UGC selfie aesthetic. NOT AI-generated looking. Ultra-realistic skin texture, natural pores. ONLY the single character described, in the single scene described.\n\nPre-baked image prompt for this clip.',
-    );
+    // UGC framing prefix (Polish-9.18 amateur-smartphone phrasing) +
+    // double-newline + the pre-baked imagePrompt.
+    expect(out).toMatch(/^Single character, single view, NOT a character sheet/);
+    expect(out).toMatch(/AMATEUR SMARTPHONE SELFIE/);
+    expect(out).toMatch(/Real human skin\./);
+    expect(out).toMatch(/\n\nPre-baked image prompt for this clip\.$/);
   });
 });
 
@@ -356,11 +360,12 @@ describe('Polish-9.15: buildImagePromptForClip — clip 0 (UGC framing)', () => 
     videoPrompt: 'Static iPhone shot. Dr. Marcus holds microphone, eyebrows raised urgent.',
   };
 
-  it('includes the UGC framing prefix', () => {
+  it('includes the UGC framing prefix (Polish-9.18 amateur smartphone phrasing)', () => {
     const out = buildImagePromptForClip(manual, clip);
     expect(out).toMatch(/Single character, single view, NOT a character sheet/);
-    expect(out).toMatch(/UGC selfie-style/);
+    expect(out).toMatch(/AMATEUR SMARTPHONE SELFIE/);
     expect(out).toMatch(/9:16 portrait/);
+    expect(out).toMatch(/Real human skin/);
   });
 
   it('strips the three-view character sheet phrasing from clip 0 prompt', () => {
@@ -542,5 +547,54 @@ describe('Polish-9.16: Section A — Global Prompt extraction tolerates markdown
     const r = parseProductionManual(md);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/missing characterPrompt/i);
+  });
+});
+
+describe('Polish-9.18: hasQuotedDialogue', () => {
+  it('detects quoted dialogue in clip body', () => {
+    expect(hasQuotedDialogue('Static iPhone shot. "Your skin care routine is wrong."')).toBe(true);
+  });
+
+  it('detects the master prompt bracket form too (which wraps a quoted line)', () => {
+    expect(
+      hasQuotedDialogue(
+        '[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Click below now."',
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores incidental short quotes (e.g. "ok")', () => {
+    expect(hasQuotedDialogue('She says "ok".')).toBe(false);
+  });
+
+  it('returns false on b-roll clip body with no quoted dialogue', () => {
+    expect(hasQuotedDialogue('Static iPhone shot. Hand pours coffee into mug.')).toBe(false);
+  });
+});
+
+describe('Polish-9.18: UGC_FRAMING covers amateur-smartphone realism cues', () => {
+  const manual = {
+    characterPrompt: 'A 30yo woman with dark hair, wearing blue scrubs.',
+    setPrompt: 'Sunny morning kitchen.',
+  };
+  const clip = {
+    clipNumber: 1,
+    startingFrameImage: 1,
+    videoPrompt: 'Hold mug.',
+  };
+
+  it('clip 0 framing has amateur + skin pores + handheld cues', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).toMatch(/AMATEUR SMARTPHONE SELFIE/);
+    expect(out).toMatch(/handheld/i);
+    expect(out).toMatch(/pores/i);
+    expect(out).toMatch(/NOT smooth, NOT airbrushed/);
+    expect(out).toMatch(/NOT cinematic, NOT studio/);
+  });
+
+  it('continuation framing carries the same amateur cues', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).toMatch(/AMATEUR SMARTPHONE SELFIE/);
+    expect(out).toMatch(/Real human skin/);
   });
 });

@@ -107,6 +107,16 @@ export {
   type CheckConcatResult,
 } from './replicate-concat';
 export {
+  submitAudioTrim,
+  checkAudioTrim,
+  getAudioTrimModelId,
+  isAudioTrimEnabled,
+  type SubmitAudioTrimInput,
+  type SubmitAudioTrimResult,
+  type CheckAudioTrimInput,
+  type CheckAudioTrimResult,
+} from './replicate-audio-trim';
+export {
   submitElevenLabsTts,
   getDefaultElevenLabsVoiceId,
   estimateElevenLabsCostUsd,

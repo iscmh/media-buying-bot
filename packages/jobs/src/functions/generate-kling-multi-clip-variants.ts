@@ -2,9 +2,12 @@ import { eq } from 'drizzle-orm';
 import {
   callClaude,
   callGeminiImage,
+  checkAudioTrim,
   checkReplicateConcat,
   getUniversalUgcMasterPrompt,
+  isAudioTrimEnabled,
   isVideoConcatEnabled,
+  submitAudioTrim,
   submitKlingVideo,
   submitReplicateConcat,
   checkKlingPrediction,
@@ -279,7 +282,12 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
             return { ok: false as const, error: err.message };
           throw err;
         }
+        // Polish-9.18: prepend SPEECH_PACING when the clip carries
+        // dialogue (in the body or via clip.dialogue). Kling defaults
+        // to a slow theatrical delivery otherwise.
+        const hasDialogue = hasQuotedDialogue(clip.videoPrompt) || Boolean(clip.dialogue);
         const prompt = [
+          hasDialogue ? SPEECH_PACING : '',
           clip.videoPrompt,
           clip.dialogue && !/GENERATE NATIVE AUDIO AND LIP-SYNC/i.test(clip.videoPrompt)
             ? `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "${clip.dialogue}"`
@@ -426,14 +434,96 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
       return { jobId, mode, generated: 0, totalCost };
     }
 
+    // Polish-9.18: trim leading/trailing silence on each clip before
+    // stitching, so the final composite has no dead-air at clip
+    // boundaries. Per-clip step.run, each one falls back to the raw
+    // URL on trim failure. Skipped entirely when REPLICATE_AUDIO_TRIM
+    // _MODEL_ID is unset (Polish-9.17 behavior).
+    const orderedRawClips = [...clipVideoUrls].sort((a, b) => a.clipIndex - b.clipIndex);
+    const finalClipUrls: string[] = orderedRawClips.map((c) => c.videoUrl);
+    let trimmedCount = 0;
+    if (isAudioTrimEnabled() && orderedRawClips.length > 0) {
+      for (let i = 0; i < orderedRawClips.length; i++) {
+        const raw = orderedRawClips[i]!;
+        const trimResult = await step.run(`trim-clip-${raw.clipIndex}`, async () => {
+          let keys;
+          try {
+            keys = await loadDecryptedKeys(userId, ['kling']);
+          } catch (err) {
+            if (err instanceof MissingProviderKeyError)
+              return { ok: false as const, error: err.message, costUsd: 0 };
+            throw err;
+          }
+          const submit = await submitAudioTrim({
+            userId,
+            apiKey: keys.kling!,
+            videoUrl: raw.videoUrl,
+            generationJobId: jobId,
+          });
+          if (!submit.ok || !submit.predictionId) {
+            return {
+              ok: false as const,
+              error: submit.errorMessage ?? 'trim submit failed',
+              costUsd: 0,
+            };
+          }
+          const predictionId = submit.predictionId;
+          let trimmedUrl: string | undefined;
+          let cost = 0;
+          let trimError: string | undefined;
+          for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+            await new Promise((res) => setTimeout(res, POLL_INTERVAL_SECONDS * 1000));
+            const tick = await checkAudioTrim({
+              userId,
+              apiKey: keys.kling!,
+              predictionId,
+              generationJobId: jobId,
+            });
+            if (tick.status === 'completed') {
+              trimmedUrl = tick.videoUrl;
+              cost = tick.costUsd;
+              break;
+            }
+            if (tick.status === 'failed') {
+              trimError = tick.errorMessage ?? 'trim failed';
+              break;
+            }
+          }
+          if (!trimmedUrl) {
+            return {
+              ok: false as const,
+              error: trimError ?? `trim timed out for clip ${raw.clipIndex}`,
+              costUsd: cost,
+            };
+          }
+          return { ok: true as const, trimmedUrl, costUsd: cost };
+        });
+
+        totalCost += trimResult.costUsd;
+        if (trimResult.ok) {
+          finalClipUrls[i] = trimResult.trimmedUrl;
+          trimmedCount++;
+        } else {
+          console.log(
+            `[kling-trim] clip ${raw.clipIndex} trim failed: ${trimResult.error}; using raw URL`,
+          );
+        }
+      }
+      if (trimmedCount === 0) {
+        console.log('[kling-trim] all clips using untrimmed URLs');
+      } else {
+        console.log(`[kling-trim] ${trimmedCount}/${orderedRawClips.length} clips trimmed`);
+      }
+    } else if (!isAudioTrimEnabled()) {
+      console.log('[kling-trim] audio trim disabled, using raw clip URLs');
+    }
+
     // Polish-9.12: stitch clips into one final composite via Replicate
     // ffmpeg-concat. Skipped when REPLICATE_VIDEO_CONCAT_MODEL_ID is
     // unset; per-clip rows remain so the user can still download
     // individually. Stitching failure is non-fatal — clips stay.
-    if (isVideoConcatEnabled() && clipVideoUrls.length >= 2) {
-      const orderedUrls = clipVideoUrls
-        .sort((a, b) => a.clipIndex - b.clipIndex)
-        .map((c) => c.videoUrl);
+    if (isVideoConcatEnabled() && finalClipUrls.length >= 2) {
+      const orderedUrls = finalClipUrls;
 
       const stitchSubmit = await step.run('stitch-submit', async () => {
         let keys;
@@ -827,12 +917,34 @@ export function stripCharacterSheetPattern(text: string): string {
  * language in the source manual gets overridden.
  */
 const UGC_FRAMING = [
-  'Single character, single view, NOT a character sheet, NOT a reference sheet, NOT multiple angles, NOT front/back/side views.',
-  'Generate a single photorealistic UGC selfie-style frame.',
-  'Camera: smartphone (iPhone) eye-level shot, vertical 9:16 portrait.',
-  'Authentic UGC selfie aesthetic. NOT AI-generated looking. Ultra-realistic skin texture, natural pores.',
+  'Single character, single view, NOT a character sheet, NOT multiple angles, NOT front/back/side views.',
+  'AMATEUR SMARTPHONE SELFIE captured on an iPhone front camera in handheld vertical orientation. NOT professional photography, NOT studio lighting, NOT a stock photo.',
+  'Camera: front-facing iPhone selfie at eye-level. Slight handheld micro-shake. Vertical 9:16 portrait.',
+  'Photographic style: AMATEUR. Lighting is natural ambient indoor or natural daylight — NOT cinematic, NOT studio.',
+  'SKIN: hyper-realistic pores, natural texture, subtle wrinkles, visible blemishes/freckles, NOT smooth, NOT airbrushed, NOT glossy, NOT plastic. Real human skin.',
+  'Hair: natural, slightly imperfect, individual strands visible.',
+  'Eyes: natural with subtle catchlights, NOT over-rendered, NOT symmetric AI eyes.',
+  'Background: slightly out of focus, authentic indoor home, NOT a soundstage.',
   'ONLY the single character described, in the single scene described.',
 ].join(' ');
+
+/**
+ * Polish-9.18: SPEECH_PACING is prepended to the Kling prompt for any
+ * clip whose body contains quoted dialogue. Kling-v2.6 defaults to a
+ * theatrical slow delivery with dramatic pauses if not told otherwise;
+ * UGC ads need conversational pace and zero dead-air.
+ */
+const SPEECH_PACING = [
+  'Speech delivery: NATURAL CONVERSATIONAL pace, like a real person talking to a friend on the phone or recording a quick selfie video.',
+  'Tempo: fast enough to fill the clip duration without dramatic pauses. NO filler silence at start. NO trailing silence at end. Dialogue begins immediately and continues to the end of the clip.',
+  'Tone: casual, authentic, slightly imperfect.',
+  'Performance: NOT theatrical, NOT slow-and-measured. Real-life speaking style.',
+].join(' ');
+
+/** Polish-9.18: true if the clip body contains a quoted dialogue string. */
+export function hasQuotedDialogue(text: string): boolean {
+  return /"[^"]{3,}"/.test(text);
+}
 
 /**
  * Polish-9.15: extract wardrobe / clothing phrasing from the

@@ -188,3 +188,35 @@ describe('Polish-4: classifyKlingError', () => {
     expect(classifyKlingError(400, 'bad input')).toBe('unknown');
   });
 });
+
+describe('Polish-9.18: Kling submit carries negative_prompt to suppress captions + plastic skin', () => {
+  it('default negative_prompt covers captions, plastic skin, studio lighting, AI symmetry', async () => {
+    const calls = captureFetch({ status: 201, body: { id: 'pred_neg' } });
+    const r = await submitKlingVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+    });
+    expect(r.ok).toBe(true);
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.input.negative_prompt).toMatch(/captions/i);
+    expect(body.input.negative_prompt).toMatch(/subtitles/i);
+    expect(body.input.negative_prompt).toMatch(/burned-in text/i);
+    expect(body.input.negative_prompt).toMatch(/plastic skin/i);
+    expect(body.input.negative_prompt).toMatch(/airbrushed/i);
+    expect(body.input.negative_prompt).toMatch(/studio lighting/i);
+    expect(body.input.negative_prompt).toMatch(/symmetric face/i);
+  });
+
+  it('honors per-call negativePrompt override', async () => {
+    const calls = captureFetch({ status: 201, body: { id: 'pred_neg2' } });
+    await submitKlingVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      negativePrompt: 'lo-fi, blurry, distorted',
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.input.negative_prompt).toBe('lo-fi, blurry, distorted');
+  });
+});

@@ -74,9 +74,34 @@ export interface KlingSubmitInput {
    * STARTING FRAME]` directive depends on this being wired.
    */
   startImageUrl?: string;
+  /**
+   * Polish-9.18: override the default negative prompt. Caller passes a
+   * full string; default DEFAULT_KLING_NEGATIVE_PROMPT is used when
+   * omitted. Used to suppress burned-in captions + plastic-skin
+   * aesthetic + studio look.
+   */
+  negativePrompt?: string;
   generationJobId?: string;
   generatedCreativeId?: string;
 }
+
+/**
+ * Polish-9.18: default negative prompt for every Kling submit. Suppresses:
+ *   - burned-in captions / subtitles / on-screen text (Kling auto-burns
+ *     these otherwise)
+ *   - plastic / airbrushed / over-rendered AI skin look
+ *   - cinematic / studio lighting (we want amateur smartphone UGC)
+ *   - perfect-symmetry uncanny faces
+ *
+ * Exported so callers (and tests) can reference / extend it.
+ */
+export const DEFAULT_KLING_NEGATIVE_PROMPT = [
+  'captions, subtitles, closed captions, on-screen text, burned-in text, text overlays, watermarks, logos',
+  'smooth skin, plastic skin, plastic look, perfect skin, glossy skin, airbrushed, retouched',
+  'over-rendered, hyperreal, glossy, over-saturated, uncanny valley',
+  'cinematic lighting, studio lighting, professional photography',
+  'symmetric face, perfect symmetry',
+].join(', ');
 
 export interface KlingSubmitResult {
   ok: boolean;
@@ -111,6 +136,8 @@ export async function submitKlingVideo(input: KlingSubmitInput): Promise<KlingSu
     with_audio: true,
     generate_audio: true,
     audio: true,
+    // Polish-9.18: suppress burned-in captions + plastic-skin look.
+    negative_prompt: input.negativePrompt ?? DEFAULT_KLING_NEGATIVE_PROMPT,
   };
   if (input.startImageUrl) {
     klingInput.start_image = input.startImageUrl;
