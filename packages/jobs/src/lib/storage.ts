@@ -112,3 +112,32 @@ export async function downloadGeneratedImageAsBase64(input: {
   const path = `${input.userId}/generated/${input.jobId}/${stem}${ext}`;
   return downloadAsBase64({ bucket: 'generated-creatives', path });
 }
+
+/**
+ * Polish-11: upload an ElevenLabs MP3 to the generated-creatives
+ * bucket so the Replicate lipsync model can fetch it via public URL.
+ * Path mirrors uploadGeneratedImage but with an audio-specific stem
+ * and configurable extension. Returns the public URL for direct
+ * use in the lipsync submit body.
+ */
+export async function uploadGeneratedAudio(input: {
+  userId: string;
+  jobId: string;
+  audioBase64: string;
+  mimeType: string;
+  filename?: string;
+}): Promise<{ path: string; publicUrl: string }> {
+  const supabase = getServiceRoleSupabase();
+  const ext = input.mimeType === 'audio/mpeg' || input.mimeType === 'audio/mp3' ? '.mp3' : '.wav';
+  const stem = input.filename ?? 'voiceover';
+  const path = `${input.userId}/generated/${input.jobId}/${stem}${ext}`;
+  const buffer = Buffer.from(input.audioBase64, 'base64');
+  const { error } = await supabase.storage
+    .from('generated-creatives')
+    .upload(path, buffer, { contentType: input.mimeType, upsert: true });
+  if (error) {
+    throw new Error(`Audio upload failed for ${path}: ${error.message}`);
+  }
+  const { data } = supabase.storage.from('generated-creatives').getPublicUrl(path);
+  return { path, publicUrl: data.publicUrl };
+}

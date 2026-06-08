@@ -150,7 +150,7 @@ describe('Polish-9.17: defaults to kling-v2.6 + sends native-audio params', () =
     expect(getKlingModelId()).toBe('kwaivgi/kling-v2.6');
   });
 
-  it('Polish-10.4: submit body OMITS audio shotgun (Kling 2.5 rejects them)', async () => {
+  it('Polish-10.4 / Polish-11: submit body OMITS audio shotgun + forces generate_audio: false', async () => {
     const calls = captureFetch({ status: 201, body: { id: 'pred_audio' } });
     const r = await submitKlingVideo({
       userId: 'u',
@@ -164,12 +164,14 @@ describe('Polish-9.17: defaults to kling-v2.6 + sends native-audio params', () =
     const init = calls[0]!.init!;
     const body = JSON.parse(init.body as string);
     // Audio shotgun (Polish-9.17) removed — Kling 2.5 turbo pro
-    // rejects these with strict input validation. Path 1 handles
-    // audio via ElevenLabs + lip-sync (Polish-11).
+    // rejects these with strict input validation.
     expect(body.input).not.toHaveProperty('enable_audio');
     expect(body.input).not.toHaveProperty('with_audio');
-    expect(body.input).not.toHaveProperty('generate_audio');
     expect(body.input).not.toHaveProperty('audio');
+    // Polish-11: generate_audio explicitly false. Kling 2.5 silently
+    // ignores; Kling 2.6 / Omni see it and skip native-audio so
+    // ElevenLabs + lipsync handles the soundtrack out-of-band.
+    expect(body.input.generate_audio).toBe(false);
     // Other fields still set as before.
     expect(body.input.start_image).toBe('https://x/frame.png');
     expect(body.input.prompt).toMatch(/30yo woman/);

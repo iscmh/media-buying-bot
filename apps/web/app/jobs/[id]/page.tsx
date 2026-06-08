@@ -37,17 +37,22 @@ export default async function JobReviewPage({ params }: Props) {
     orderBy: asc(schema.generatedCreatives.createdAt),
   });
 
-  // Polish-9.12: a Kling multi-clip job emits two row types — one
-  // composite (the final stitched MP4, is_clip_part=false, format
-  // 'kling_3_final_composite') and N per-clip rows (is_clip_part=
-  // true). Show the composite as the primary deliverable; collapse
-  // the source clips. Non-Kling jobs are unaffected — they have no
-  // clip parts so the partition is a no-op.
+  // Polish-9.12 + Polish-11: a Kling multi-clip job emits up to three
+  // row types — the lip-synced composite (Polish-11 primary
+  // deliverable, format ends with '_lipsynced'), the silent stitched
+  // composite (Polish-9.12), and N per-clip rows. Sort so the
+  // lip-synced row is first, then the silent composite, then clip
+  // parts ordered by clipIndex. Non-Kling jobs are unaffected.
+  const variantRank = (v: (typeof variants)[number]): number => {
+    if (!v.isClipPart && v.format.endsWith('_lipsynced')) return 0;
+    if (!v.isClipPart && v.format.endsWith('_final_composite')) return 1;
+    if (!v.isClipPart) return 2;
+    return 3;
+  };
   const sortedVariants = [...variants].sort((a, b) => {
-    const aIsComposite = !a.isClipPart && a.format.endsWith('_final_composite');
-    const bIsComposite = !b.isClipPart && b.format.endsWith('_final_composite');
-    if (aIsComposite !== bIsComposite) return aIsComposite ? -1 : 1;
-    if (a.isClipPart !== b.isClipPart) return a.isClipPart ? 1 : -1;
+    const ra = variantRank(a);
+    const rb = variantRank(b);
+    if (ra !== rb) return ra - rb;
     if (a.clipIndex != null && b.clipIndex != null) return a.clipIndex - b.clipIndex;
     return a.createdAt.getTime() - b.createdAt.getTime();
   });

@@ -131,14 +131,18 @@ describe('Polish-4: cinematic_voiceover cost path', () => {
     expect(r.estimateUsd).toBeCloseTo(4.3, 4);
   });
 
-  it('kling_3_multi_clip: 1 variant = manual $0.10 + 16 clips × $0.35 = $5.70', () => {
+  it('kling_3_multi_clip: 1 variant = manual $0.10 + 16 clips × $0.35 + TTS $0.06 + lipsync $1.00 = $6.76', () => {
+    // Polish-11: ElevenLabs voiceover + Replicate lipsync layers
+    // bumped per-variant from $5.70 to ≈$6.76.
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'kling_3_multi_clip_native_lipsync',
     });
-    expect(r.estimateUsd).toBeCloseTo(5.7, 4);
+    expect(r.estimateUsd).toBeCloseTo(6.76, 4);
     expect(r.breakdown.some((b) => b.item.includes('Kling'))).toBe(true);
+    expect(r.breakdown.some((b) => b.item.includes('ElevenLabs'))).toBe(true);
+    expect(r.breakdown.some((b) => b.item.includes('Lipsync'))).toBe(true);
   });
 
   it('sora_2_single_shot: 3 variants = prompts $0.15 + videos $4.50 = $4.65', () => {
@@ -176,13 +180,13 @@ describe('Polish-4: cinematic_voiceover cost path', () => {
 });
 
 describe('Polish-9.4: pipeline-only call sites (no provider)', () => {
-  it('ugc + pipeline=kling_3 + no provider → kling-multi-clip price (~$5.70)', () => {
+  it('ugc + pipeline=kling_3 + no provider → kling-multi-clip price (~$6.76 after Polish-11)', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'kling_3_multi_clip_native_lipsync',
     });
-    expect(r.estimateUsd).toBeCloseTo(5.7, 4);
+    expect(r.estimateUsd).toBeCloseTo(6.76, 4);
   });
 
   it('ugc + pipeline=sora_2 + no provider → Sora price ($1.55)', () => {

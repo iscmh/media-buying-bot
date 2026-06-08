@@ -132,6 +132,16 @@ export {
   type CheckAudioTrimResult,
 } from './replicate-audio-trim';
 export {
+  submitLipsync,
+  checkLipsync,
+  getLipsyncModelId,
+  isLipsyncEnabled,
+  type SubmitLipsyncInput,
+  type SubmitLipsyncResult,
+  type CheckLipsyncInput,
+  type CheckLipsyncResult,
+} from './replicate-lipsync';
+export {
   submitElevenLabsTts,
   getDefaultElevenLabsVoiceId,
   estimateElevenLabsCostUsd,

@@ -56,6 +56,14 @@ const PRICING = {
   klingMultiClipClipsPerVariant: 16,
   klingMultiClipPerClipUsd: 0.35,
 
+  // Polish-11: continuous TTS + lipsync layer added to the multi-clip
+  // pipeline. ElevenLabs cost is ~200 chars per variant at $0.30/1k
+  // chars = $0.06; lipsync cost on Replicate varies by model
+  // (~$0.50-1.50 per ~30s output). Both are env-tunable on the
+  // ai-providers clients.
+  klingMultiClipTtsPerVariantUsd: 0.06,
+  klingMultiClipLipsyncPerVariantUsd: 1.0,
+
   // Polish-10 / Polish-10.1: Kling 3.0 Omni multi-segment pipeline.
   // Default mode dropped pro→standard for cheaper iteration (720p is
   // indistinguishable from 1080p on phone viewers for 9:16 UGC).
@@ -255,6 +263,18 @@ function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostE
       breakdown.push({
         item: `Kling 2.6 clips (${totalClips} clips × $${PRICING.klingMultiClipPerClipUsd.toFixed(2)})`,
         cost: round4(totalClips * PRICING.klingMultiClipPerClipUsd),
+      });
+      // Polish-11: continuous TTS + lipsync layer. Estimates are
+      // rough (~200 char dialogue per variant × $0.30/1k chars + a
+      // single lipsync pass on the stitched composite); env override
+      // tunes both costs at runtime.
+      breakdown.push({
+        item: `ElevenLabs voiceover (${variantCount} × $${PRICING.klingMultiClipTtsPerVariantUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.klingMultiClipTtsPerVariantUsd),
+      });
+      breakdown.push({
+        item: `Lipsync (${variantCount} × $${PRICING.klingMultiClipLipsyncPerVariantUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.klingMultiClipLipsyncPerVariantUsd),
       });
       break;
     }

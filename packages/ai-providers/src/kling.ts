@@ -139,13 +139,13 @@ export async function submitKlingVideo(input: KlingSubmitInput): Promise<KlingSu
     aspect_ratio: input.aspectRatio ?? '9:16',
     // Polish-9.18: suppress burned-in captions + plastic-skin look.
     negative_prompt: input.negativePrompt ?? DEFAULT_KLING_NEGATIVE_PROMPT,
-    // Polish-10.4: removed the Polish-9.17 audio shotgun
-    // (enable_audio / with_audio / generate_audio / audio). Kling 2.5
-    // turbo pro rejects these with strict input validation. Path 1
-    // architecture handles audio out-of-band via ElevenLabs + a
-    // lip-sync pass (Polish-11), not via Kling's own model. The
-    // Omni client (kling-omni.ts) keeps its own audio handling for
-    // the Experimental pipeline.
+    // Polish-11: Kling clips are always silent. Audio is generated
+    // out-of-band via ElevenLabs from the full Section C dialogue
+    // (one continuous track, not per-clip chunks) and applied to
+    // the stitched composite via a Replicate lipsync model. Kling
+    // 2.5 turbo pro ignores generate_audio entirely (silent model);
+    // Kling 2.6 / Omni see it explicitly and skip native-audio.
+    generate_audio: false,
   };
   if (input.startImageUrl) {
     klingInput.start_image = input.startImageUrl;

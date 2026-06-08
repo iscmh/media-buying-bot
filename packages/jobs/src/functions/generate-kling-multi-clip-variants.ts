@@ -3,12 +3,17 @@ import {
   callClaude,
   callGeminiImage,
   checkAudioTrim,
+  checkLipsync,
   checkReplicateConcat,
+  getDefaultElevenLabsVoiceId,
   getUniversalUgcMasterPrompt,
   isAudioTrimEnabled,
+  isLipsyncEnabled,
   isVideoConcatEnabled,
   submitAudioTrim,
+  submitElevenLabsTts,
   submitKlingVideo,
+  submitLipsync,
   submitReplicateConcat,
   checkKlingPrediction,
 } from '@mbb/ai-providers';
@@ -16,7 +21,11 @@ import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
-import { downloadGeneratedImageAsBase64, uploadGeneratedImage } from '../lib/storage';
+import {
+  downloadGeneratedImageAsBase64,
+  uploadGeneratedAudio,
+  uploadGeneratedImage,
+} from '../lib/storage';
 
 /**
  * Polish-6 item 4: Kling 3.0 multi-clip native lipsync pipeline.
@@ -510,6 +519,9 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
     // ffmpeg-concat. Skipped when REPLICATE_VIDEO_CONCAT_MODEL_ID is
     // unset; per-clip rows remain so the user can still download
     // individually. Stitching failure is non-fatal — clips stay.
+    // Polish-11: hoisted so the post-stitch ElevenLabs + lipsync
+    // block (below the isVideoConcatEnabled branch) can read it.
+    let stitchedUrl: string | undefined;
     if (isVideoConcatEnabled() && finalClipUrls.length >= 2) {
       const orderedUrls = finalClipUrls;
 
@@ -530,7 +542,6 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
         });
       });
 
-      let stitchedUrl: string | undefined;
       let stitchCost = 0;
       if (stitchSubmit.ok && 'predictionId' in stitchSubmit && stitchSubmit.predictionId) {
         const predictionId = stitchSubmit.predictionId;
@@ -595,6 +606,152 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
       console.log(
         '[kling-stitch] REPLICATE_VIDEO_CONCAT_MODEL_ID not set; skipping stitching. Per-clip rows kept.',
       );
+    }
+
+    // Polish-11: ElevenLabs continuous TTS + Replicate lipsync. Runs
+    // only when there's a stitched composite AND at least one dialogue
+    // line in the manual. Failures are non-fatal — the silent
+    // composite + per-clip rows remain so the job is still useful.
+    if (stitchedUrl) {
+      const continuousDialogue = extractContinuousDialogue(manual.clips);
+      if (continuousDialogue.length === 0) {
+        console.log('[kling-tts] no dialogue extracted; final = silent composite');
+      } else {
+        const ttsResult = await step.run('elevenlabs-tts', async () => {
+          let keys;
+          try {
+            keys = await loadDecryptedKeys(userId, ['elevenlabs']);
+          } catch (err) {
+            if (err instanceof MissingProviderKeyError)
+              return { ok: false as const, error: err.message, costUsd: 0 };
+            throw err;
+          }
+          const tts = await submitElevenLabsTts({
+            userId,
+            apiKey: keys.elevenlabs!,
+            text: continuousDialogue,
+            voiceId: getDefaultElevenLabsVoiceId(),
+            generationJobId: jobId,
+          });
+          if (!tts.ok || !tts.audioBase64) {
+            return {
+              ok: false as const,
+              error: tts.errorMessage ?? 'ElevenLabs TTS returned no audio',
+              costUsd: tts.costUsd,
+            };
+          }
+          try {
+            const upload = await uploadGeneratedAudio({
+              userId,
+              jobId,
+              audioBase64: tts.audioBase64,
+              mimeType: tts.contentType ?? 'audio/mpeg',
+              filename: 'voiceover',
+            });
+            return {
+              ok: true as const,
+              audioUrl: upload.publicUrl,
+              costUsd: tts.costUsd,
+            };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              ok: false as const,
+              error: `Audio upload failed: ${msg}`,
+              costUsd: tts.costUsd,
+            };
+          }
+        });
+
+        totalCost += ttsResult.costUsd;
+        if (!ttsResult.ok) {
+          console.log(`[kling-tts] failed: ${ttsResult.error}; final = silent composite`);
+        } else if (!isLipsyncEnabled()) {
+          console.log(
+            '[kling-lipsync] REPLICATE_LIPSYNC_MODEL_ID not set; final = silent composite (TTS audio uploaded for manual mux)',
+          );
+        } else {
+          const lipsyncSubmit = await step.run('lipsync-submit', async () => {
+            let keys;
+            try {
+              keys = await loadDecryptedKeys(userId, ['kling']);
+            } catch (err) {
+              if (err instanceof MissingProviderKeyError)
+                return { ok: false as const, error: err.message };
+              throw err;
+            }
+            return submitLipsync({
+              userId,
+              apiKey: keys.kling!,
+              videoUrl: stitchedUrl!,
+              audioUrl: ttsResult.audioUrl,
+              generationJobId: jobId,
+            });
+          });
+
+          let lipsyncedUrl: string | undefined;
+          let lipsyncCost = 0;
+          if (lipsyncSubmit.ok && 'predictionId' in lipsyncSubmit && lipsyncSubmit.predictionId) {
+            const predictionId = lipsyncSubmit.predictionId;
+            for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+              await step.sleep(`lipsync-poll-${attempt}`, `${POLL_INTERVAL_SECONDS}s`);
+              const tick = await step.run(`lipsync-check-${attempt}`, async () => {
+                const keys = await loadDecryptedKeys(userId, ['kling']);
+                return checkLipsync({
+                  userId,
+                  apiKey: keys.kling!,
+                  predictionId,
+                  generationJobId: jobId,
+                });
+              });
+              if (tick.status === 'completed') {
+                lipsyncedUrl = tick.videoUrl;
+                lipsyncCost = tick.costUsd;
+                break;
+              }
+              if (tick.status === 'failed') {
+                console.log(`[kling-lipsync] failed: ${tick.errorMessage ?? 'unknown'}`);
+                break;
+              }
+            }
+          } else {
+            const err =
+              'errorMessage' in lipsyncSubmit
+                ? lipsyncSubmit.errorMessage
+                : 'error' in lipsyncSubmit
+                  ? lipsyncSubmit.error
+                  : 'submit failed';
+            console.log(`[kling-lipsync] submit failed: ${err}`);
+          }
+
+          if (lipsyncedUrl) {
+            totalCost += lipsyncCost;
+            await step.run('write-lipsynced', async () => {
+              const db = getDb();
+              await db.insert(schema.generatedCreatives).values({
+                userId,
+                generationJobId: jobId,
+                fileUrl: lipsyncedUrl!,
+                aspectRatio: '9:16',
+                status: 'ready_for_review',
+                format: 'kling_multi_clip_lipsynced',
+                isClipPart: false,
+                generationMetadata: {
+                  silent_composite_url: stitchedUrl,
+                  audio_url: ttsResult.audioUrl,
+                  source_clip_count: clipVideoUrls.length,
+                  character_prompt: manual.characterPrompt,
+                  set_prompt: manual.setPrompt,
+                  dialogue_chars: continuousDialogue.length,
+                },
+              });
+            });
+            console.log(`[kling-lipsync] lipsynced composite written: ${lipsyncedUrl}`);
+          } else {
+            console.log('[kling-lipsync] no lipsynced URL produced; final = silent composite');
+          }
+        }
+      }
     }
 
     await markJobCompleted({
@@ -1149,6 +1306,43 @@ export function buildKlingSubmitPrompt(
   ]
     .filter(Boolean)
     .join('\n\n');
+}
+
+/**
+ * Polish-11: build one continuous TTS script from every clip's
+ * dialogue, in clip order. Prefers clip.dialogue (already parsed),
+ * falls back to scanning the body for the `[GENERATE NATIVE AUDIO
+ * AND LIP-SYNC TO EXACT DIALOGUE]: "..."` bracket form, then to
+ * quoted strings. Dedupes consecutive identical lines so a clip
+ * body that duplicates the parser's dialogue field doesn't echo
+ * twice. Returns '' when no usable dialogue is found — the worker
+ * skips the TTS + lipsync steps and falls back to the silent
+ * composite.
+ */
+export function extractContinuousDialogue(clips: ClipSpec[]): string {
+  const lines: string[] = [];
+  let prev = '';
+  for (const clip of clips) {
+    const line = pickClipDialogue(clip).trim();
+    if (!line || line === prev) continue;
+    lines.push(line);
+    prev = line;
+  }
+  return lines.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function pickClipDialogue(clip: ClipSpec): string {
+  if (clip.dialogue && clip.dialogue.trim()) return clip.dialogue.trim();
+  const body = clip.videoPrompt ?? '';
+  const bracket = body.match(
+    /\[GENERATE\s+NATIVE\s+AUDIO\s+AND\s+LIP-?SYNC[^\]]*\]\s*:\s*"([^"]+)"/i,
+  );
+  if (bracket && bracket[1]) return bracket[1].trim();
+  const audioBracket = body.match(/\[GENERATE\s+NATIVE\s+AUDIO[^\]]*\]\s*:\s*"([^"]+)"/i);
+  if (audioBracket && audioBracket[1]) return audioBracket[1].trim();
+  const quoted = body.match(/"([^"]{4,})"/);
+  if (quoted && quoted[1]) return quoted[1].trim();
+  return '';
 }
 
 void logAuditEvent;

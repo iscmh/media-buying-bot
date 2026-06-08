@@ -14,6 +14,7 @@ import {
   buildKlingSubmitPrompt,
   continuationImagePrompt,
   decideKlingJobOutcome,
+  extractContinuousDialogue,
   extractWardrobeFromCharacter,
   hasQuotedDialogue,
   isSilentKlingModel,
@@ -812,5 +813,71 @@ describe('Polish-10.5: SILENT_UGC_HARD_DIRECTIVE content', () => {
   it('locks the camera on the character', () => {
     expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/Camera stays on the character/);
     expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/Continuous unbroken handheld iPhone selfie shot/);
+  });
+});
+
+describe('Polish-11: extractContinuousDialogue', () => {
+  const mkClip = (overrides: Partial<{ videoPrompt: string; dialogue: string }>) => ({
+    clipNumber: 1,
+    startingFrameImage: 1,
+    videoPrompt: overrides.videoPrompt ?? 'Body.',
+    dialogue: overrides.dialogue,
+  });
+
+  it('joins clip.dialogue values in clip order into one TTS-ready string', () => {
+    const out = extractContinuousDialogue([
+      mkClip({ dialogue: 'Hi there.' }),
+      mkClip({ dialogue: 'Today I tried this.' }),
+      mkClip({ dialogue: 'Click below.' }),
+    ]);
+    expect(out).toBe('Hi there. Today I tried this. Click below.');
+  });
+
+  it('falls back to [GENERATE NATIVE AUDIO ...]: "..." bracket when clip.dialogue is missing', () => {
+    const out = extractContinuousDialogue([
+      mkClip({
+        videoPrompt:
+          'Static iPhone shot. [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Morning!" Smile.',
+      }),
+    ]);
+    expect(out).toBe('Morning!');
+  });
+
+  it('falls back to any quoted string when neither dialogue nor bracket is present', () => {
+    const out = extractContinuousDialogue([
+      mkClip({ videoPrompt: 'She holds up "this product".' }),
+    ]);
+    expect(out).toBe('this product');
+  });
+
+  it('skips clips with no extractable dialogue', () => {
+    const out = extractContinuousDialogue([
+      mkClip({ dialogue: 'Real.' }),
+      mkClip({ videoPrompt: 'B-roll only.' }),
+      mkClip({ dialogue: 'Done.' }),
+    ]);
+    expect(out).toBe('Real. Done.');
+  });
+
+  it('deduplicates consecutive identical lines (parser + bracket echo)', () => {
+    const out = extractContinuousDialogue([
+      mkClip({
+        videoPrompt: 'Body. [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Same thing"',
+        dialogue: 'Same thing',
+      }),
+      mkClip({ dialogue: 'Same thing' }),
+      mkClip({ dialogue: 'Different.' }),
+    ]);
+    expect(out).toBe('Same thing Different.');
+  });
+
+  it('returns empty string when no clip carries dialogue', () => {
+    expect(extractContinuousDialogue([mkClip({ videoPrompt: 'b-roll only' })])).toBe('');
+    expect(extractContinuousDialogue([])).toBe('');
+  });
+
+  it('collapses internal whitespace runs', () => {
+    const out = extractContinuousDialogue([mkClip({ dialogue: 'Multi  word    spaces.' })]);
+    expect(out).toBe('Multi word spaces.');
   });
 });
