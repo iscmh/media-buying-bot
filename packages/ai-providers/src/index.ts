@@ -88,6 +88,7 @@ export {
   checkKlingPrediction,
   classifyKlingError,
   getKlingModelId,
+  isAudioCapableKlingModel,
   estimateKlingClipCostUsd,
   type KlingSubmitInput,
   type KlingSubmitResult,

@@ -185,6 +185,86 @@ describe('Polish-9.17: defaults to kling-v2.6 + sends native-audio params', () =
   });
 });
 
+describe('Polish-11.1: isAudioCapableKlingModel', () => {
+  it('Kling 2.5 turbo pro → not audio-capable', async () => {
+    const { isAudioCapableKlingModel } = await import('../src/kling');
+    expect(isAudioCapableKlingModel('kwaivgi/kling-v2.5-turbo-pro')).toBe(false);
+  });
+
+  it('"v2.5" pattern matches even without turbo-pro suffix', async () => {
+    const { isAudioCapableKlingModel } = await import('../src/kling');
+    expect(isAudioCapableKlingModel('vendor/kling-v2.5-anything')).toBe(false);
+  });
+
+  it('"turbo-pro" / "turbo_pro" / "turbopro" spellings all silent', async () => {
+    const { isAudioCapableKlingModel } = await import('../src/kling');
+    expect(isAudioCapableKlingModel('vendor/turbo-pro')).toBe(false);
+    expect(isAudioCapableKlingModel('vendor/turbo_pro')).toBe(false);
+    expect(isAudioCapableKlingModel('vendor/turbopro')).toBe(false);
+  });
+
+  it('Kling 2.6 → audio-capable', async () => {
+    const { isAudioCapableKlingModel } = await import('../src/kling');
+    expect(isAudioCapableKlingModel('kwaivgi/kling-v2.6')).toBe(true);
+  });
+
+  it('Kling v3 omni → audio-capable', async () => {
+    const { isAudioCapableKlingModel } = await import('../src/kling');
+    expect(isAudioCapableKlingModel('kwaivgi/kling-v3-omni-video')).toBe(true);
+  });
+
+  it('empty model id → not audio-capable (safe default)', async () => {
+    const { isAudioCapableKlingModel } = await import('../src/kling');
+    expect(isAudioCapableKlingModel('')).toBe(false);
+  });
+});
+
+describe('Polish-11.1: generate_audio is model-aware (only emitted for audio-capable Kling)', () => {
+  it('KLING_MODEL_ID=kling-v2.5-turbo-pro → submit body OMITS generate_audio entirely', async () => {
+    process.env = { ...realEnv, KLING_MODEL_ID: 'kwaivgi/kling-v2.5-turbo-pro' };
+    const calls = captureFetch({ status: 201, body: { id: 'pred_silent' } });
+    const r = await submitKlingVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'A 30yo woman, silent clip',
+      durationSeconds: 5,
+      aspectRatio: '9:16',
+    });
+    expect(r.ok).toBe(true);
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    // Strict 2.5 schema rejects unknown fields — generate_audio
+    // must NOT land in the body for this model.
+    expect(body.input).not.toHaveProperty('generate_audio');
+    // Other fields still set.
+    expect(body.input.prompt).toMatch(/30yo woman/);
+    expect(body.input.negative_prompt).toMatch(/captions/i);
+  });
+
+  it('KLING_MODEL_ID=kling-v2.6 → submit body includes generate_audio: false', async () => {
+    process.env = { ...realEnv, KLING_MODEL_ID: 'kwaivgi/kling-v2.6' };
+    const calls = captureFetch({ status: 201, body: { id: 'pred_audio' } });
+    const r = await submitKlingVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'A 30yo woman, audio-capable model',
+      durationSeconds: 5,
+      aspectRatio: '9:16',
+    });
+    expect(r.ok).toBe(true);
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.input.generate_audio).toBe(false);
+  });
+
+  it('default model id (kling-v2.6) → submit body includes generate_audio: false', async () => {
+    process.env = { ...realEnv };
+    delete process.env.KLING_MODEL_ID;
+    const calls = captureFetch({ status: 201, body: { id: 'pred_default' } });
+    await submitKlingVideo({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.input.generate_audio).toBe(false);
+  });
+});
+
 describe('Polish-4: classifyKlingError', () => {
   it('maps the buckets', () => {
     expect(classifyKlingError(401, 'x')).toBe('auth');

@@ -49,6 +49,23 @@ export function getKlingModelId(): string {
   return process.env.KLING_MODEL_ID?.trim() || KLING_MODEL_DEFAULT;
 }
 
+/**
+ * Polish-11.1: predicate for whether the configured Kling model
+ * accepts the `generate_audio` input field. Kling 2.5 turbo pro
+ * rejects any field not in its strict schema with "Unexpected
+ * field '...'"; Kling 2.6 / Omni accept generate_audio and we set
+ * it false so audio comes from the Polish-11 ElevenLabs + lipsync
+ * post-stitch flow.
+ *
+ * Exported so the test suite can drive both branches deterministically.
+ */
+export function isAudioCapableKlingModel(modelId: string = getKlingModelId()): boolean {
+  if (!modelId) return false;
+  if (/v2\.5/i.test(modelId)) return false;
+  if (/turbo[\s_-]?pro/i.test(modelId)) return false;
+  return true;
+}
+
 /** Per-clip cost estimate. Used by the form picker before submit. */
 export function estimateKlingClipCostUsd(): number {
   return KLING_COST_USD_PER_CLIP;
@@ -139,14 +156,17 @@ export async function submitKlingVideo(input: KlingSubmitInput): Promise<KlingSu
     aspect_ratio: input.aspectRatio ?? '9:16',
     // Polish-9.18: suppress burned-in captions + plastic-skin look.
     negative_prompt: input.negativePrompt ?? DEFAULT_KLING_NEGATIVE_PROMPT,
-    // Polish-11: Kling clips are always silent. Audio is generated
-    // out-of-band via ElevenLabs from the full Section C dialogue
-    // (one continuous track, not per-clip chunks) and applied to
-    // the stitched composite via a Replicate lipsync model. Kling
-    // 2.5 turbo pro ignores generate_audio entirely (silent model);
-    // Kling 2.6 / Omni see it explicitly and skip native-audio.
-    generate_audio: false,
   };
+  // Polish-11.1: generate_audio is only emitted for audio-capable
+  // models (Kling 2.6 / Omni). Kling 2.5 turbo pro has strict input
+  // validation and rejects "Unexpected field 'generate_audio'" — same
+  // class of break as the Polish-10.4 audio shotgun. Both 2.6 and
+  // Omni accept generate_audio: false and skip native audio,
+  // leaving the soundtrack to the Polish-11 ElevenLabs + lipsync
+  // post-stitch step.
+  if (isAudioCapableKlingModel(modelId)) {
+    klingInput.generate_audio = false;
+  }
   if (input.startImageUrl) {
     klingInput.start_image = input.startImageUrl;
   }
