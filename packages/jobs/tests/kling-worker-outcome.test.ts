@@ -17,6 +17,7 @@ import {
   extractContinuousDialogue,
   extractWardrobeFromCharacter,
   hasQuotedDialogue,
+  IMAGE_UGC_HARD_DIRECTIVE,
   isSilentKlingModel,
   parseProductionManual,
   SILENT_UGC_HARD_DIRECTIVE,
@@ -311,11 +312,12 @@ describe('Polish-9.12: buildImagePromptForClip — clip 0 path', () => {
       imagePrompt: 'Pre-baked image prompt for this clip.',
     };
     const out = buildImagePromptForClip(manual, clip);
-    // UGC framing prefix (Polish-9.18 amateur-smartphone phrasing) +
-    // double-newline + the pre-baked imagePrompt.
-    expect(out).toMatch(/^Single character, single view, NOT a character sheet/);
+    // Polish-11.2: IMAGE_UGC_HARD_DIRECTIVE comes first, then
+    // Polish-9.18 UGC_FRAMING, then the pre-baked imagePrompt.
+    expect(out).toMatch(/^AMATEUR SMARTPHONE SELFIE PHOTO/);
+    expect(out).toMatch(/Single character, single view, NOT a character sheet/);
     expect(out).toMatch(/AMATEUR SMARTPHONE SELFIE/);
-    expect(out).toMatch(/Real human skin\./);
+    expect(out).toMatch(/Real human skin/);
     expect(out).toMatch(/\n\nPre-baked image prompt for this clip\.$/);
   });
 });
@@ -394,9 +396,10 @@ describe('Polish-9.15: buildImagePromptForClip — clip 0 (UGC framing)', () => 
     expect(out).toMatch(/Static iPhone shot. Dr\. Marcus holds microphone/);
   });
 
-  it('appends explicit single-frame guard at the end', () => {
+  it('appends explicit single-frame + no-text guard at the end', () => {
     const out = buildImagePromptForClip(manual, clip);
-    expect(out).toMatch(/Generate ONE single frame from ONE camera angle/);
+    expect(out).toMatch(/ONE single frame, ONE camera angle/);
+    expect(out).toMatch(/NO text, NO captions, NO overlays/);
   });
 });
 
@@ -879,5 +882,142 @@ describe('Polish-11: extractContinuousDialogue', () => {
   it('collapses internal whitespace runs', () => {
     const out = extractContinuousDialogue([mkClip({ dialogue: 'Multi  word    spaces.' })]);
     expect(out).toBe('Multi word spaces.');
+  });
+});
+
+describe('Polish-11.2: IMAGE_UGC_HARD_DIRECTIVE content', () => {
+  it('forbids text / captions / overlays / watermarks / logos', () => {
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/ABSOLUTELY NO TEXT/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO captions/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO subtitles/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO title cards/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO lower thirds/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO chyrons/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO text overlays/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO watermarks/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO logos/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO speech bubbles/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO printed text on objects/);
+  });
+
+  it('forbids b-roll / insert / picture-in-picture / multi-panel compositions', () => {
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO B-roll inset/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO picture-in-picture/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO multi-panel layout/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO product close-ups composited in/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO money close-ups/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO phone screenshots superimposed/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/NO insert shots/);
+  });
+
+  it('locks the frame to a single character + single environment + photorealistic skin', () => {
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/AMATEUR SMARTPHONE SELFIE PHOTO/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/PHOTOREALISTIC/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/Real human skin texture with pores/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/Single clean clear photograph/);
+    expect(IMAGE_UGC_HARD_DIRECTIVE).toMatch(/Nothing else in frame/);
+  });
+});
+
+describe('Polish-11.2: buildImagePromptForClip scrubs captions / b-roll / audio brackets from inputs', () => {
+  const manual = {
+    characterPrompt:
+      'A 30yo woman with dark hair, wearing a blue cotton t-shirt. Lower-third caption shows her name throughout.',
+    setPrompt:
+      'Sunny morning kitchen. B-roll cutaway to coffee beans visible occasionally. Product shot of mug.',
+  };
+  const clip = {
+    clipNumber: 1,
+    startingFrameImage: 1,
+    videoPrompt:
+      '[USE IMAGE 1 AS STARTING FRAME] Hold mug. [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Morning!" Caption appears at the bottom of the screen.',
+    dialogue: 'Morning!',
+  };
+
+  it('prepends IMAGE_UGC_HARD_DIRECTIVE before the Polish-9.18 UGC_FRAMING', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out.startsWith('AMATEUR SMARTPHONE SELFIE PHOTO')).toBe(true);
+    // UGC_FRAMING follows the hard directive.
+    expect(out).toMatch(/Single character, single view, NOT a character sheet/);
+  });
+
+  it('strips caption / b-roll / lower-third language from user-supplied content', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    // None of the source-content phrases survive — only the hard-
+    // directive's "NO ..." suppressors remain.
+    expect(out).not.toMatch(/Lower-third caption shows her name/);
+    expect(out).not.toMatch(/B-roll cutaway to coffee beans/);
+    expect(out).not.toMatch(/Product shot of mug/);
+    expect(out).not.toMatch(/Caption appears at the bottom/);
+  });
+
+  it('strips [GENERATE NATIVE AUDIO ...] and [USE IMAGE X] directives from the clip body', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).not.toMatch(/GENERATE NATIVE AUDIO/);
+    expect(out).not.toMatch(/USE IMAGE 1 AS STARTING FRAME/);
+    expect(out).not.toMatch(/"Morning!"/);
+  });
+
+  it('preserves the surviving description content (character + scene + clip action)', () => {
+    const out = buildImagePromptForClip(manual, clip);
+    expect(out).toMatch(/30yo woman/);
+    expect(out).toMatch(/blue cotton t-shirt/);
+    expect(out).toMatch(/Sunny morning kitchen\./);
+    expect(out).toMatch(/Hold mug\./);
+  });
+
+  it('legacy clip.imagePrompt path still gets IMAGE_UGC_HARD_DIRECTIVE prepended', () => {
+    const out = buildImagePromptForClip(
+      { characterPrompt: 'C', setPrompt: 'S' },
+      {
+        clipNumber: 1,
+        startingFrameImage: 1,
+        videoPrompt: 'V',
+        imagePrompt: 'Pre-baked clip image prompt.',
+      },
+    );
+    expect(out.startsWith('AMATEUR SMARTPHONE SELFIE PHOTO')).toBe(true);
+    expect(out).toMatch(/Pre-baked clip image prompt\.$/);
+  });
+});
+
+describe('Polish-11.2: continuationImagePrompt scrubs the same inputs + prepends IMAGE_UGC_HARD_DIRECTIVE', () => {
+  const manual = {
+    characterPrompt:
+      'A 30yo woman with dark hair, wearing a blue cotton t-shirt. Lower-third caption banner shows the brand name.',
+    setPrompt: 'Sunny morning kitchen. Cutaway to product shot of coffee mug appears occasionally.',
+  };
+  const clip = {
+    clipNumber: 2,
+    startingFrameImage: 2,
+    videoPrompt:
+      '[USE IMAGE 2 AS STARTING FRAME] Raise mug, smile widens. [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Mmm!" Caption at bottom of screen.',
+  };
+
+  it('prepends IMAGE_UGC_HARD_DIRECTIVE', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out.startsWith('AMATEUR SMARTPHONE SELFIE PHOTO')).toBe(true);
+  });
+
+  it('strips caption / b-roll / lower-third language', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).not.toMatch(/Lower-third caption banner/);
+    expect(out).not.toMatch(/product shot of coffee mug/i);
+    expect(out).not.toMatch(/Caption at bottom of screen/);
+  });
+
+  it('strips audio-era brackets from the per-clip "Now: …" line', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).not.toMatch(/GENERATE NATIVE AUDIO/);
+    expect(out).not.toMatch(/USE IMAGE 2 AS STARTING FRAME/);
+    expect(out).not.toMatch(/"Mmm!"/);
+  });
+
+  it('preserves the same-framing / wardrobe-lock continuity language', () => {
+    const out = continuationImagePrompt(manual, clip);
+    expect(out).toMatch(/Exact same framing as Image 1/);
+    expect(out).toMatch(/Wardrobe: EXACTLY as in Image 1/);
+    expect(out).toMatch(/blue cotton t-shirt/);
+    expect(out).toMatch(/Raise mug, smile widens\./);
   });
 });

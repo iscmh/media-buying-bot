@@ -1125,20 +1125,51 @@ export function extractWardrobeFromCharacter(text: string): string {
  * The legacy clip.imagePrompt path is preserved for callers that
  * pre-bake a per-clip image prompt; the UGC framing still wraps it.
  */
+/**
+ * Polish-11.2: hard image-side directive prepended to every Nano
+ * Banana prompt. Polish-10.5 already locked the Kling video prompt
+ * down on captions / b-roll, but the image prompt was still leaking
+ * "lower-third" / "caption" / "b-roll" language from the reference
+ * deconstruction in Section A / B → Nano Banana baked captions into
+ * the first frame → Kling animated the captions across every clip.
+ * Verified visually on kling-frame-0 in production.
+ *
+ * Exported so the test suite can assert on its presence.
+ */
+export const IMAGE_UGC_HARD_DIRECTIVE = [
+  'AMATEUR SMARTPHONE SELFIE PHOTO. Single character. Eye-level iPhone front camera shot. Vertical 9:16 portrait.',
+  'PHOTOREALISTIC. Real human skin texture with pores. Natural lighting. NOT studio. NOT cinematic. NOT polished.',
+  'ABSOLUTELY NO TEXT visible anywhere in the image. NO captions. NO subtitles. NO on-screen text. NO title cards. NO lower thirds. NO chyrons. NO text overlays. NO watermarks. NO logos. NO graphics. NO speech bubbles. NO printed text on objects.',
+  'NO B-roll inset. NO picture-in-picture. NO multi-panel layout. NO product close-ups composited in. NO money close-ups. NO phone screenshots superimposed. NO insert shots.',
+  'JUST the single character in the single environment described. Single clean clear photograph. Nothing else in frame.',
+].join(' ');
+
 export function buildImagePromptForClip(
   manual: { characterPrompt: string; setPrompt: string; imageGuidance?: string },
   clip: ClipSpec,
 ): string {
   if (clip.imagePrompt && clip.imagePrompt.trim()) {
-    return [UGC_FRAMING, clip.imagePrompt].join('\n\n');
+    return [IMAGE_UGC_HARD_DIRECTIVE, UGC_FRAMING, clip.imagePrompt].join('\n\n');
   }
-  const character = stripCharacterSheetPattern(manual.characterPrompt);
+  // Polish-11.2: scrub the same caption / b-roll / audio-era language
+  // out of the image-prompt inputs that Polish-10.5 strips from the
+  // Kling video prompt. The reference deconstruction in Section A / B
+  // describes the source ad's lower-thirds + product inserts — those
+  // bleed into Nano Banana otherwise.
+  const character = stripTextCaptionsBroll(stripCharacterSheetPattern(manual.characterPrompt));
+  const scene = stripTextCaptionsBroll(manual.setPrompt);
+  const clipDescription = stripTextCaptionsBroll(
+    stripAudioEraArtifacts(
+      clip.videoPrompt.replace(/\[USE\s+IMAGE\s+\d+\s+AS\s+STARTING\s+FRAME\]/gi, ''),
+    ),
+  );
   return [
+    IMAGE_UGC_HARD_DIRECTIVE,
     UGC_FRAMING,
     `Character: ${character}`,
-    `Scene/Set: ${manual.setPrompt}`,
-    `Action this frame: ${clip.videoPrompt}`,
-    'CRITICAL: Generate ONE single frame from ONE camera angle. NOT a reference sheet. NOT multiple poses.',
+    `Scene/Set: ${scene}`,
+    `Action this frame: ${clipDescription}`,
+    'CRITICAL: ONE single frame, ONE camera angle. NO text, NO captions, NO overlays anywhere in the image. NOT a reference sheet. NOT multiple poses.',
   ]
     .filter((s) => s && s.trim().length > 0)
     .join('\n\n');
@@ -1152,19 +1183,29 @@ export function buildImagePromptForClip(
  * expression while preserving character identity, lighting, framing,
  * set, and (Polish-9.15) wardrobe. UGC framing repeated as defense
  * in depth — Nano Banana drifts on later clips otherwise.
+ *
+ * Polish-11.2: same caption / b-roll / audio-era scrub on inputs as
+ * buildImagePromptForClip. IMAGE_UGC_HARD_DIRECTIVE prepended.
  */
 export function continuationImagePrompt(
   manual: { characterPrompt: string; setPrompt: string },
   clip: ClipSpec,
 ): string {
-  const character = stripCharacterSheetPattern(manual.characterPrompt);
+  const character = stripTextCaptionsBroll(stripCharacterSheetPattern(manual.characterPrompt));
+  const scene = stripTextCaptionsBroll(manual.setPrompt);
+  const clipDescription = stripTextCaptionsBroll(
+    stripAudioEraArtifacts(
+      clip.videoPrompt.replace(/\[USE\s+IMAGE\s+\d+\s+AS\s+STARTING\s+FRAME\]/gi, ''),
+    ),
+  );
   const wardrobe = extractWardrobeFromCharacter(manual.characterPrompt);
   const lines = [
+    IMAGE_UGC_HARD_DIRECTIVE,
     UGC_FRAMING,
     'Exact same framing as Image 1 — same character, same scene, same lighting.',
-    `Now: ${clip.videoPrompt}`,
+    `Now: ${clipDescription}`,
     `Character reference: ${character}`,
-    `Set: ${manual.setPrompt}`,
+    `Set: ${scene}`,
     'Camera: same as Image 1. Deep focus on everything. No blur. Lighting: same as Image 1.',
   ];
   if (wardrobe) {
