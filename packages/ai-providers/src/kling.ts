@@ -86,9 +86,17 @@ export interface KlingSubmitInput {
 }
 
 /**
- * Polish-9.18: default negative prompt for every Kling submit. Suppresses:
- *   - burned-in captions / subtitles / on-screen text (Kling auto-burns
- *     these otherwise)
+ * Polish-9.18 / Polish-10.5: default negative prompt for every Kling
+ * submit. Polish-10.5 expanded coverage on text/graphics overlays and
+ * added explicit b-roll / cutaway / multi-shot suppression — silent
+ * Kling 2.5 was leaning into burned-in captions and product inserts
+ * to compensate for the lack of audio.
+ *
+ * Suppresses:
+ *   - burned-in captions / subtitles / on-screen text / title cards
+ *     / chyrons / lower-thirds / watermarks / logos
+ *   - b-roll / cutaways / insert shots / product shots / scenery
+ *     shots / split-screen / picture-in-picture
  *   - plastic / airbrushed / over-rendered AI skin look
  *   - cinematic / studio lighting (we want amateur smartphone UGC)
  *   - perfect-symmetry uncanny faces
@@ -96,9 +104,10 @@ export interface KlingSubmitInput {
  * Exported so callers (and tests) can reference / extend it.
  */
 export const DEFAULT_KLING_NEGATIVE_PROMPT = [
-  'captions, subtitles, closed captions, on-screen text, burned-in text, text overlays, watermarks, logos',
-  'smooth skin, plastic skin, plastic look, perfect skin, glossy skin, airbrushed, retouched',
-  'over-rendered, hyperreal, glossy, over-saturated, uncanny valley',
+  'on-screen text, captions, subtitles, closed captions, burned-in text, title cards, lower thirds, chyrons, text overlays, graphic overlays, watermarks, logos, brand marks',
+  'b-roll, cutaways, insert shots, product shots, scenery shots, transition shots, montage cuts, multi-shot composition',
+  'split screen, picture-in-picture, side-by-side comparison',
+  'smooth skin, plastic skin, plastic look, perfect skin, glossy skin, airbrushed, retouched, over-rendered, hyperreal, glossy, over-saturated, uncanny valley',
   'cinematic lighting, studio lighting, professional photography',
   'symmetric face, perfect symmetry',
 ].join(', ');

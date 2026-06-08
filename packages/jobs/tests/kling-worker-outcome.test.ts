@@ -11,12 +11,17 @@ import { dirname, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildImagePromptForClip,
+  buildKlingSubmitPrompt,
   continuationImagePrompt,
   decideKlingJobOutcome,
   extractWardrobeFromCharacter,
   hasQuotedDialogue,
+  isSilentKlingModel,
   parseProductionManual,
+  SILENT_UGC_HARD_DIRECTIVE,
+  stripAudioEraArtifacts,
   stripCharacterSheetPattern,
+  stripTextCaptionsBroll,
 } from '../src/functions/generate-kling-multi-clip-variants';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -596,5 +601,216 @@ describe('Polish-9.18: UGC_FRAMING covers amateur-smartphone realism cues', () =
     const out = continuationImagePrompt(manual, clip);
     expect(out).toMatch(/AMATEUR SMARTPHONE SELFIE/);
     expect(out).toMatch(/Real human skin/);
+  });
+});
+
+describe('Polish-10.5: isSilentKlingModel', () => {
+  it('detects v2.5 model id as silent', () => {
+    expect(isSilentKlingModel('kwaivgi/kling-v2.5-turbo-pro')).toBe(true);
+  });
+
+  it('detects bare "turbo-pro" slug as silent', () => {
+    expect(isSilentKlingModel('vendor/turbo-pro')).toBe(true);
+  });
+
+  it('detects "turbo_pro" / "turbopro" spelling as silent', () => {
+    expect(isSilentKlingModel('vendor/turbo_pro')).toBe(true);
+    expect(isSilentKlingModel('vendor/turbopro')).toBe(true);
+  });
+
+  it('treats Kling 2.6 as audio-capable', () => {
+    expect(isSilentKlingModel('kwaivgi/kling-v2.6')).toBe(false);
+  });
+
+  it('treats Kling v3 omni as audio-capable', () => {
+    expect(isSilentKlingModel('kwaivgi/kling-v3-omni-video')).toBe(false);
+  });
+
+  it('defaults to silent (safe) when env unset / empty', () => {
+    expect(isSilentKlingModel('')).toBe(true);
+  });
+});
+
+describe('Polish-10.5: stripAudioEraArtifacts', () => {
+  it('removes [GENERATE NATIVE AUDIO AND LIP-SYNC ...]: "dialogue" brackets', () => {
+    const out = stripAudioEraArtifacts(
+      'Hold mug. [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "Morning!" Smile.',
+    );
+    expect(out).not.toMatch(/GENERATE NATIVE AUDIO/i);
+    expect(out).not.toMatch(/"Morning!"/);
+    expect(out).toMatch(/Hold mug\..*Smile\./);
+  });
+
+  it('removes bare [GENERATE NATIVE AUDIO ...] brackets without dialogue', () => {
+    const out = stripAudioEraArtifacts(
+      'Action. [GENERATE NATIVE AUDIO: ambient sound] More action.',
+    );
+    expect(out).not.toMatch(/GENERATE NATIVE AUDIO/i);
+    expect(out).toMatch(/More action\./);
+  });
+
+  it('converts "says \\"...\\"" idiom into action description', () => {
+    const out = stripAudioEraArtifacts('He says "I made $2100" and smiles.');
+    expect(out).toMatch(/talks about I made \$2100/);
+    expect(out).not.toMatch(/"I made/);
+  });
+
+  it('handles "tells", "saying", "exclaims" too', () => {
+    expect(stripAudioEraArtifacts('She tells "great deal"')).toMatch(/talks about great deal/);
+    expect(stripAudioEraArtifacts('He saying "really fast"')).toMatch(/talks about really fast/);
+    expect(stripAudioEraArtifacts('She exclaims "wow!"')).toMatch(/talks about wow!/);
+  });
+
+  it('strips remaining stray quote marks around inline text', () => {
+    const out = stripAudioEraArtifacts('Hold the "premium" mug.');
+    expect(out).toBe('Hold the premium mug.');
+  });
+
+  it('collapses whitespace runs left behind by stripping', () => {
+    const out = stripAudioEraArtifacts(
+      '[GENERATE NATIVE AUDIO: x]   Hold     mug.   [GENERATE NATIVE AUDIO: y]',
+    );
+    expect(out).toBe('Hold mug.');
+  });
+});
+
+describe('Polish-10.5: stripTextCaptionsBroll', () => {
+  it('drops sentences mentioning captions / subtitles / on-screen text', () => {
+    const out = stripTextCaptionsBroll(
+      'Sunny kitchen scene. Caption appears at the bottom: "Day 1". Cabinets visible.',
+    );
+    expect(out).toMatch(/Sunny kitchen scene\./);
+    expect(out).toMatch(/Cabinets visible\./);
+    expect(out).not.toMatch(/Caption/i);
+  });
+
+  it('drops sentences mentioning b-roll / cutaways / product shots', () => {
+    const out = stripTextCaptionsBroll(
+      'Hold mug. Cutaway to product shot of the bottle. Look forward.',
+    );
+    expect(out).toMatch(/Hold mug\./);
+    expect(out).toMatch(/Look forward\./);
+    expect(out).not.toMatch(/Cutaway/i);
+    expect(out).not.toMatch(/product shot/i);
+  });
+
+  it('drops montage / split-screen / picture-in-picture sentences', () => {
+    const out = stripTextCaptionsBroll(
+      'Wide kitchen. Split screen comparison appears here. Walk forward.',
+    );
+    expect(out).not.toMatch(/Split screen/i);
+    expect(out).toMatch(/Walk forward\./);
+  });
+
+  it('preserves sentences that do not match the patterns', () => {
+    expect(stripTextCaptionsBroll('Sunny kitchen scene. Cabinets visible.')).toBe(
+      'Sunny kitchen scene. Cabinets visible.',
+    );
+  });
+});
+
+describe('Polish-10.5: buildKlingSubmitPrompt — silent branch', () => {
+  const manual = {
+    characterPrompt:
+      'A 30yo woman with dark hair, wearing a blue t-shirt. Lower-third caption shows her name.',
+    setPrompt: 'Sunny kitchen. B-roll cutaway to coffee beans visible occasionally.',
+  };
+  const clip = {
+    clipNumber: 1,
+    startingFrameImage: 1,
+    videoPrompt:
+      '[USE IMAGE 1 AS STARTING FRAME] Hold mug. [GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "I made $2100." She says "this is amazing" with a smile.',
+    dialogue: 'I made $2100.',
+  };
+
+  it('prepends the SILENT_UGC_HARD_DIRECTIVE block', () => {
+    const out = buildKlingSubmitPrompt(manual, clip, true);
+    expect(out.startsWith('PURE RAW UGC SELFIE VIDEO')).toBe(true);
+    expect(out).toMatch(/NO captions/);
+    expect(out).toMatch(/NO b-roll/);
+    expect(out).toMatch(/Continuous unbroken handheld iPhone selfie shot/);
+  });
+
+  it('does NOT include SPEECH_PACING (mentions "dialogue" / "speech" → caption bias)', () => {
+    const out = buildKlingSubmitPrompt(manual, clip, true);
+    expect(out).not.toMatch(/Speech delivery:/);
+    expect(out).not.toMatch(/NATURAL CONVERSATIONAL pace/);
+  });
+
+  it('scrubs [GENERATE NATIVE AUDIO ...] directives + quoted dialogue from clip body', () => {
+    const out = buildKlingSubmitPrompt(manual, clip, true);
+    expect(out).not.toMatch(/GENERATE NATIVE AUDIO/i);
+    expect(out).not.toMatch(/"I made \$2100"/);
+    expect(out).toMatch(/talks about this is amazing/);
+  });
+
+  it('scrubs lower-third / b-roll language from character + set prompts', () => {
+    const out = buildKlingSubmitPrompt(manual, clip, true);
+    // The user-supplied set/character sentences mentioning these
+    // patterns must be gone — only the SILENT_UGC_HARD_DIRECTIVE's
+    // "NO b-roll / NO cutaways" suppressor language remains.
+    expect(out).not.toMatch(/Lower-third caption shows her name/i);
+    expect(out).not.toMatch(/B-roll cutaway to coffee beans/i);
+    expect(out).not.toMatch(/coffee beans/i);
+    expect(out).not.toMatch(/shows her name/i);
+    // Other set/character content survives.
+    expect(out).toMatch(/Sunny kitchen\./);
+    expect(out).toMatch(/30yo woman/);
+  });
+});
+
+describe('Polish-10.5: buildKlingSubmitPrompt — audio-capable branch', () => {
+  const manual = {
+    characterPrompt: 'A 30yo woman in a sunny kitchen.',
+    setPrompt: 'Sunny kitchen.',
+  };
+  const clip = {
+    clipNumber: 1,
+    startingFrameImage: 1,
+    videoPrompt: 'Hold mug, smile.',
+    dialogue: 'Morning!',
+  };
+
+  it('preserves Polish-9.18 behavior: SPEECH_PACING prepended when dialogue present', () => {
+    const out = buildKlingSubmitPrompt(manual, clip, false);
+    expect(out).toMatch(/Speech delivery: NATURAL CONVERSATIONAL pace/);
+    expect(out).toMatch(/Hold mug, smile\./);
+  });
+
+  it('appends [GENERATE NATIVE AUDIO ...] when clip body does not already carry one', () => {
+    const out = buildKlingSubmitPrompt(manual, clip, false);
+    expect(out).toMatch(/GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE/);
+    expect(out).toMatch(/"Morning!"/);
+  });
+
+  it('does NOT prepend the silent hard directive', () => {
+    const out = buildKlingSubmitPrompt(manual, clip, false);
+    expect(out).not.toMatch(/PURE RAW UGC SELFIE VIDEO/);
+    expect(out).not.toMatch(/ABSOLUTELY NO text on screen/);
+  });
+});
+
+describe('Polish-10.5: SILENT_UGC_HARD_DIRECTIVE content', () => {
+  it('covers text / caption / overlay suppression', () => {
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO captions/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO subtitles/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO graphics/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO title cards/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO lower thirds/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO watermarks/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO logos/);
+  });
+
+  it('covers b-roll / cutaway / multi-shot suppression', () => {
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO b-roll/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO cutaways/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO product shots/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO insert shots/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/NO transitions to other subjects/);
+  });
+
+  it('locks the camera on the character', () => {
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/Camera stays on the character/);
+    expect(SILENT_UGC_HARD_DIRECTIVE).toMatch(/Continuous unbroken handheld iPhone selfie shot/);
   });
 });

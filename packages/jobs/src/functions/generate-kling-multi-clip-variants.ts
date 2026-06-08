@@ -282,19 +282,7 @@ export const generateKlingMultiClipVariants = inngest.createFunction(
             return { ok: false as const, error: err.message };
           throw err;
         }
-        // Polish-9.18: prepend SPEECH_PACING when the clip carries
-        // dialogue (in the body or via clip.dialogue). Kling defaults
-        // to a slow theatrical delivery otherwise.
-        const hasDialogue = hasQuotedDialogue(clip.videoPrompt) || Boolean(clip.dialogue);
-        const prompt = [
-          hasDialogue ? SPEECH_PACING : '',
-          clip.videoPrompt,
-          clip.dialogue && !/GENERATE NATIVE AUDIO AND LIP-SYNC/i.test(clip.videoPrompt)
-            ? `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "${clip.dialogue}"`
-            : '',
-        ]
-          .filter(Boolean)
-          .join('\n\n');
+        const prompt = buildKlingSubmitPrompt(manual, clip);
 
         return submitKlingVideo({
           userId,
@@ -1035,6 +1023,132 @@ export function continuationImagePrompt(
     'ABSOLUTELY NO phones, cameras, screens, social media UI, floating text, or digital overlays.',
   );
   return lines.join('\n\n');
+}
+
+// =========================================================================
+// Polish-10.5: silent-Kling prompt hygiene
+// =========================================================================
+
+/**
+ * Polish-10.5: detects when the configured Kling model is silent
+ * (Kling 2.5 turbo pro). Silent models render quoted dialogue as
+ * captions on screen — the worker must strip audio-era directives,
+ * dialogue quotes, and b-roll/text-overlay language from prompts.
+ *
+ * Defaults to true (assume silent) when the env var is missing so a
+ * fresh install gets the safer hygiene path even before the operator
+ * pins a model id. Audio-capable callers (Kling 2.6 / Omni) set
+ * KLING_MODEL_ID accordingly and get the existing behavior.
+ */
+export function isSilentKlingModel(modelId: string = process.env.KLING_MODEL_ID ?? ''): boolean {
+  if (!modelId) return true;
+  return /v2\.5/i.test(modelId) || /turbo[\s_-]?pro/i.test(modelId);
+}
+
+/**
+ * Polish-10.5: hard UGC-only directive prepended to the silent-Kling
+ * submit prompt. Suppresses on-screen text, b-roll, and multi-shot
+ * composition that the model would otherwise lean into when it can't
+ * make audio.
+ */
+export const SILENT_UGC_HARD_DIRECTIVE = [
+  'PURE RAW UGC SELFIE VIDEO. Single character talking to phone camera in continuous unbroken shot.',
+  'ABSOLUTELY NO text on screen. NO captions. NO subtitles. NO graphics. NO title cards. NO lower thirds. NO overlays. NO watermarks. NO logos.',
+  'NO b-roll. NO cutaways. NO product shots. NO insert shots. NO scenery shots. NO transitions to other subjects.',
+  'Camera stays on the character the entire time. Continuous unbroken handheld iPhone selfie shot.',
+].join(' ');
+
+/**
+ * Polish-10.5: strip [GENERATE NATIVE AUDIO ...] directives, lip-sync
+ * brackets, and inline quoted dialogue. Convert "X says: 'Y'" idioms
+ * into action descriptions ("X talks about Y") so the silent model
+ * doesn't render the quoted text as on-screen captions.
+ */
+export function stripAudioEraArtifacts(text: string): string {
+  return text
+    .replace(/\[GENERATE\s+NATIVE\s+AUDIO\s+AND\s+LIP-?SYNC[^\]]*\]\s*:\s*"[^"]*"/gi, '')
+    .replace(/\[GENERATE\s+NATIVE\s+AUDIO\s+AND\s+LIP-?SYNC[^\]]*\]/gi, '')
+    .replace(/\[GENERATE\s+NATIVE\s+AUDIO[^\]]*\]\s*:\s*"[^"]*"/gi, '')
+    .replace(/\[GENERATE\s+NATIVE\s+AUDIO[^\]]*\]/gi, '')
+    .replace(
+      /\b(?:says|saying|said|tells|telling|exclaims|exclaiming)\s+"([^"]+)"/gi,
+      (_, dialogue: string) => `talks about ${dialogue}`,
+    )
+    .replace(/"([^"]+)"/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Polish-10.5: drop sentences that explicitly call out on-screen
+ * text, captions, overlays, b-roll, or cutaways. The reference-
+ * deconstruction in Section A/B/C frequently mentions these because
+ * source ads have them; for silent UGC we want them gone.
+ */
+export function stripTextCaptionsBroll(text: string): string {
+  return text
+    .replace(
+      /[^.]*?\b(?:caption[s]?|subtitle[s]?|text\s+overlay|on[\s-]screen\s+text|graphic[s]?|title\s+card|lower\s+third|chyron|watermark|logo)\b[^.]*\.\s*/gi,
+      '',
+    )
+    .replace(
+      /[^.]*?\b(?:b[\s-]?roll|cutaway[s]?|insert\s+shot[s]?|product\s+shot[s]?|scenery\s+shot[s]?|montage|split\s+screen|picture[\s-]in[\s-]picture)\b[^.]*\.\s*/gi,
+      '',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Polish-10.5: build the prompt sent to submitKlingVideo per clip.
+ * Splits behavior by model capability:
+ *   - Silent Kling 2.5 turbo pro: aggressive scrub of audio-era
+ *     directives, dialogue quotes, text/b-roll language; prepend the
+ *     SILENT_UGC_HARD_DIRECTIVE; SPEECH_PACING is omitted (it
+ *     mentions "dialogue" / "speech" which biases the silent model
+ *     toward rendering captions).
+ *   - Audio-capable (Kling 2.6, anything not matching the silent
+ *     heuristic): preserve the Polish-9.18 behavior — prepend
+ *     SPEECH_PACING when the clip has dialogue, append the
+ *     [GENERATE NATIVE AUDIO...] directive if not already present in
+ *     the body.
+ *
+ * Exported so the test suite can drive the silent / audio branches
+ * deterministically.
+ */
+export function buildKlingSubmitPrompt(
+  manual: { characterPrompt: string; setPrompt: string },
+  clip: ClipSpec,
+  silent: boolean = isSilentKlingModel(),
+): string {
+  if (silent) {
+    const scrubbedBody = stripTextCaptionsBroll(stripAudioEraArtifacts(clip.videoPrompt));
+    const scrubbedCharacter = stripTextCaptionsBroll(
+      stripCharacterSheetPattern(manual.characterPrompt),
+    );
+    const scrubbedSet = stripTextCaptionsBroll(manual.setPrompt);
+    return [
+      SILENT_UGC_HARD_DIRECTIVE,
+      UGC_FRAMING,
+      `Character: ${scrubbedCharacter}`,
+      `Scene/Set: ${scrubbedSet}`,
+      `Action this clip: ${scrubbedBody}`,
+    ]
+      .filter((s) => s && s.trim().length > 0)
+      .join('\n\n');
+  }
+
+  // Audio-capable path (Polish-9.18 behavior preserved).
+  const hasDialogue = hasQuotedDialogue(clip.videoPrompt) || Boolean(clip.dialogue);
+  return [
+    hasDialogue ? SPEECH_PACING : '',
+    clip.videoPrompt,
+    clip.dialogue && !/GENERATE NATIVE AUDIO AND LIP-SYNC/i.test(clip.videoPrompt)
+      ? `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "${clip.dialogue}"`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 void logAuditEvent;
