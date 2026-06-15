@@ -84,6 +84,126 @@ const KIE_OMNI_COST_USD_PER_SEGMENT = 0.9;
 /** Polish-12.1: stitch cost when 2+ segments (idan054 ffmpeg-concat). */
 const KIE_OMNI_STITCH_COST_USD = 0.05;
 
+/**
+ * Polish-12.2: how many attempts per segment before giving up.
+ * Empirical Gemini safety-filter fail rate is ~30% per call; with 3
+ * attempts the probability of all three failing on a single segment
+ * drops to ~3%, so a 3-segment generation succeeds end-to-end in
+ * ~91% of jobs. Bound it so a malformed prompt that hits a true
+ * deterministic block doesn't loop forever.
+ */
+const MAX_OMNI_SEGMENT_RETRIES = 3;
+
+/**
+ * Polish-12.2: Gemini safety filter failure codes that are known to
+ * be stochastic — an identical retry can pass. We retry these with
+ * a fresh seed up to MAX_OMNI_SEGMENT_RETRIES. Auth (401), validation
+ * (422), balance (402), and rate-limit (429) errors are NOT retried
+ * because they're deterministic; retrying just burns time + credits.
+ */
+export const RETRYABLE_OMNI_FAIL_CODES: ReadonlySet<string> = new Set([
+  'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED',
+  'PUBLIC_ERROR_SAFETY_FILTER_FAILED',
+  'PUBLIC_ERROR_PERSON_GENERATION_FAILED',
+]);
+
+export function isRetryableOmniFailure(failCode: string | undefined | null): boolean {
+  if (!failCode) return false;
+  return RETRYABLE_OMNI_FAIL_CODES.has(failCode);
+}
+
+/**
+ * Polish-12.2: pure decision helper for the per-segment retry loop.
+ * Given the outcome of a single submit + poll attempt, return one
+ * of three actions:
+ *   - 'success' with the output URL → the worker proceeds to upload.
+ *   - 'retry' → loop to the next attempt with a fresh seed.
+ *   - 'abort' with a reason → fail the whole segment (no further
+ *     retries, no further cost).
+ *
+ * Branches:
+ *   submit not ok            → abort (auth/validation/balance —
+ *                              deterministic, no point retrying)
+ *   poll error (no state)    → abort
+ *   poll state=success       → success
+ *   poll state=fail:
+ *     non-retryable failCode → abort
+ *     retryable failCode + more attempts left → retry
+ *     retryable failCode + last attempt        → abort with "exhausted retries"
+ *   poll state=waiting (timed out without terminal) → abort with
+ *                              "did not reach terminal state"
+ *
+ * Exported so the retry-loop branches can be unit-tested without
+ * mocking Inngest's step harness.
+ */
+export type OmniAttemptOutcome =
+  | { kind: 'success'; outputUrl: string }
+  | { kind: 'retry' }
+  | { kind: 'abort'; reason: string };
+
+export function decideOmniAttemptOutcome(input: {
+  submitOk: boolean;
+  submitError?: string;
+  /** undefined when the poll layer itself errored before reaching a terminal state. */
+  pollState?: 'success' | 'fail' | 'waiting';
+  pollError?: string;
+  outputUrl?: string;
+  failCode?: string;
+  failMsg?: string;
+  attempt: number;
+  maxAttempts: number;
+}): OmniAttemptOutcome {
+  // Submit-level errors are deterministic — auth, validation, balance.
+  // Retrying them would just burn time + credits.
+  if (!input.submitOk) {
+    return {
+      kind: 'abort',
+      reason: input.submitError ?? 'submit failed',
+    };
+  }
+  // Successful generation — the only "success" branch.
+  if (input.pollState === 'success' && input.outputUrl) {
+    return { kind: 'success', outputUrl: input.outputUrl };
+  }
+  // Poll-layer error (kie.ai 5xx during poll, network blip etc.) —
+  // treat as deterministic for this attempt to avoid runaway retries.
+  if (input.pollState === undefined) {
+    return {
+      kind: 'abort',
+      reason: input.pollError ?? 'kie.ai poll failed',
+    };
+  }
+  // Documented failure state — decide retry vs abort by failCode.
+  if (input.pollState === 'fail') {
+    const retryable = isRetryableOmniFailure(input.failCode);
+    if (!retryable) {
+      return {
+        kind: 'abort',
+        reason:
+          input.failMsg ??
+          input.pollError ??
+          `kie.ai task failed${input.failCode ? ` (${input.failCode})` : ''}`,
+      };
+    }
+    if (input.attempt >= input.maxAttempts) {
+      return {
+        kind: 'abort',
+        reason: `Segment exhausted ${input.maxAttempts} attempt(s); last failure: ${input.failCode}${
+          input.failMsg ? ` — ${input.failMsg}` : ''
+        }`,
+      };
+    }
+    return { kind: 'retry' };
+  }
+  // Still waiting — the worker's poll loop hit its per-attempt
+  // timeout without seeing success or fail. Don't retry; failing the
+  // segment surfaces the kie.ai-side hang to the operator.
+  return {
+    kind: 'abort',
+    reason: input.pollError ?? 'kie.ai task did not reach a terminal state',
+  };
+}
+
 export const generateKieOmniFlashNative = inngest.createFunction(
   {
     id: 'generate-kie-omni-flash-native',
@@ -357,6 +477,8 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           kie_source_url: r.kieSourceUrl,
           reupload_ok: r.reuploadOk,
           duration_seconds: r.durationSeconds,
+          // Polish-12.2: track retry attempts per segment for QA.
+          attempts: r.attempts,
         },
       }));
       await db.insert(schema.generatedCreatives).values(rows);
@@ -380,10 +502,20 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           character_prompt: manual.characterPrompt,
           set_prompt: manual.setPrompt,
           resolution: KIE_OMNI_RESOLUTION,
+          // Polish-12.2: tally retry attempts across segments. Useful
+          // for QA: high totals on a single user indicate prompt
+          // content triggering Gemini filters frequently.
+          total_attempts: successes.reduce((s, x) => s + x.attempts, 0),
+          attempts_by_segment: successes.map((x) => x.attempts),
         },
       });
     });
-    console.log(`[kie-omni] composite written: ${finalUrl} (${segments.length} segment(s))`);
+    console.log(
+      `[kie-omni] composite written: ${finalUrl} (${segments.length} segment(s), ${successes.reduce(
+        (s, x) => s + x.attempts,
+        0,
+      )} total attempts)`,
+    );
 
     await markJobCompleted({
       jobId,
@@ -411,12 +543,17 @@ interface SegmentSuccess {
   kieSourceUrl: string;
   reuploadOk: boolean;
   durationSeconds: number;
+  /** Polish-12.2: number of submit/poll attempts spent on this segment. */
+  attempts: number;
+  /** Sum of kie.ai cost across all attempts (Gemini bills attempts, not successes). */
   costUsd: number;
 }
 interface SegmentFailure {
   ok: false;
   segmentIndex: number;
   error: string;
+  /** Polish-12.2: number of attempts spent before giving up. */
+  attempts: number;
   costUsd: number;
 }
 type SegmentResult = SegmentSuccess | SegmentFailure;
@@ -453,79 +590,164 @@ async function runOmniSegment(input: {
       totalSegments > 1 ? `Part ${segment.segmentIndex + 1} of ${totalSegments}` : undefined,
   });
 
-  const submitResult = await step.run(`kie-omni-submit-${segment.segmentIndex}`, async () => {
-    let keys;
-    try {
-      keys = await loadDecryptedKeys(userId, ['kie_ai']);
-    } catch (err) {
-      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
-      throw err;
-    }
-    return submitKieOmniVideo({
-      userId,
-      apiKey: keys.kie_ai!,
-      prompt: segmentPrompt,
-      imageUrls: [referenceImageUrl],
-      durationSeconds: durationToOmniLiteral(segmentDuration),
-      aspectRatio: '9:16',
-      resolution: KIE_OMNI_RESOLUTION,
-      generationJobId: jobId,
-    });
-  });
-  if (!submitResult.ok || !('taskId' in submitResult) || !submitResult.taskId) {
-    const err =
-      'errorMessage' in submitResult
-        ? submitResult.errorMessage
-        : 'error' in submitResult
-          ? submitResult.error
-          : 'kie.ai submit failed';
-    return {
-      ok: false,
-      segmentIndex: segment.segmentIndex,
-      error: err ?? 'submit failed',
-      costUsd: 0,
-    };
-  }
-  const taskId = submitResult.taskId;
-
-  await step.sleep(`kie-omni-warmup-${segment.segmentIndex}`, `${POLL_WARMUP_SECONDS}s`);
+  // Polish-12.2: retry loop for stochastic Gemini safety filter
+  // failures. Each attempt uses a fresh random seed; failed attempts
+  // still bill (Gemini charges attempts, not successes). Submit-level
+  // errors (auth, validation, balance) are NOT retried — they're
+  // deterministic and retrying would just burn time.
+  let attempts = 0;
+  let lastError = 'kie.ai segment failed without a recorded error';
+  let lastFailCode: string | undefined;
   let outputUrl: string | undefined;
-  let pollError: string | undefined;
-  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
-    const tick = await step.run(`kie-omni-check-${segment.segmentIndex}-${attempt}`, async () => {
-      const keys = await loadDecryptedKeys(userId, ['kie_ai']);
-      return pollKieOmniTask({
-        userId,
-        apiKey: keys.kie_ai!,
-        taskId,
-        generationJobId: jobId,
+  let lastTaskId: string | undefined;
+
+  retry: for (let attempt = 1; attempt <= MAX_OMNI_SEGMENT_RETRIES; attempt++) {
+    attempts = attempt;
+    const seedForAttempt = Math.floor(Math.random() * 2147483647);
+
+    const submitResult = await step.run(
+      `kie-omni-submit-${segment.segmentIndex}-a${attempt}`,
+      async () => {
+        let keys;
+        try {
+          keys = await loadDecryptedKeys(userId, ['kie_ai']);
+        } catch (err) {
+          if (err instanceof MissingProviderKeyError)
+            return { ok: false as const, error: err.message };
+          throw err;
+        }
+        return submitKieOmniVideo({
+          userId,
+          apiKey: keys.kie_ai!,
+          prompt: segmentPrompt,
+          imageUrls: [referenceImageUrl],
+          durationSeconds: durationToOmniLiteral(segmentDuration),
+          aspectRatio: '9:16',
+          resolution: KIE_OMNI_RESOLUTION,
+          seed: seedForAttempt,
+          generationJobId: jobId,
+        });
+      },
+    );
+    const submitOk = submitResult.ok && 'taskId' in submitResult && Boolean(submitResult.taskId);
+    const submitError =
+      'errorMessage' in submitResult
+        ? (submitResult.errorMessage ?? undefined)
+        : 'error' in submitResult
+          ? (submitResult.error ?? undefined)
+          : undefined;
+    if (!submitOk) {
+      const decision = decideOmniAttemptOutcome({
+        submitOk: false,
+        submitError,
+        attempt,
+        maxAttempts: MAX_OMNI_SEGMENT_RETRIES,
       });
-    });
-    if (!tick.ok) {
-      pollError = tick.errorMessage ?? 'kie.ai poll failed';
-      break;
+      // Submit branch never returns 'retry' — only 'abort' or
+      // (impossible here) 'success'.
+      return {
+        ok: false,
+        segmentIndex: segment.segmentIndex,
+        error: decision.kind === 'abort' ? decision.reason : 'submit failed',
+        attempts,
+        costUsd: (attempts - 1) * KIE_OMNI_COST_USD_PER_SEGMENT,
+      };
     }
-    if (tick.state === 'success') {
-      outputUrl = tick.outputUrl;
-      break;
-    }
-    if (tick.state === 'fail') {
-      pollError = tick.failMsg ?? `kie.ai task failed${tick.failCode ? ` (${tick.failCode})` : ''}`;
-      break;
-    }
+    const taskId = (submitResult as { taskId: string }).taskId;
+    lastTaskId = taskId;
+
     await step.sleep(
-      `kie-omni-poll-${segment.segmentIndex}-${attempt}`,
-      `${POLL_INTERVAL_SECONDS}s`,
+      `kie-omni-warmup-${segment.segmentIndex}-a${attempt}`,
+      `${POLL_WARMUP_SECONDS}s`,
+    );
+    let pollState: 'success' | 'fail' | 'waiting' | undefined;
+    let pollError: string | undefined;
+    let failCode: string | undefined;
+    let failMsg: string | undefined;
+    let attemptOutputUrl: string | undefined;
+    for (let pollIdx = 0; pollIdx < POLL_MAX_ATTEMPTS; pollIdx++) {
+      const tick = await step.run(
+        `kie-omni-check-${segment.segmentIndex}-a${attempt}-${pollIdx}`,
+        async () => {
+          const keys = await loadDecryptedKeys(userId, ['kie_ai']);
+          return pollKieOmniTask({
+            userId,
+            apiKey: keys.kie_ai!,
+            taskId,
+            generationJobId: jobId,
+          });
+        },
+      );
+      if (!tick.ok) {
+        pollError = tick.errorMessage ?? 'kie.ai poll failed';
+        // Leave pollState undefined → decideOmniAttemptOutcome maps
+        // that to 'abort' (deterministic poll-layer error).
+        break;
+      }
+      if (tick.state === 'success') {
+        pollState = 'success';
+        attemptOutputUrl = tick.outputUrl;
+        break;
+      }
+      if (tick.state === 'fail') {
+        pollState = 'fail';
+        failCode = tick.failCode;
+        failMsg = tick.failMsg;
+        pollError =
+          tick.failMsg ?? `kie.ai task failed${tick.failCode ? ` (${tick.failCode})` : ''}`;
+        break;
+      }
+      await step.sleep(
+        `kie-omni-poll-${segment.segmentIndex}-a${attempt}-${pollIdx}`,
+        `${POLL_INTERVAL_SECONDS}s`,
+      );
+    }
+    if (pollState === undefined && attemptOutputUrl === undefined && pollError === undefined) {
+      // Poll loop walked all attempts without seeing a terminal state.
+      pollState = 'waiting';
+    }
+
+    const decision = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState,
+      pollError,
+      outputUrl: attemptOutputUrl,
+      failCode,
+      failMsg,
+      attempt,
+      maxAttempts: MAX_OMNI_SEGMENT_RETRIES,
+    });
+
+    if (decision.kind === 'success') {
+      outputUrl = decision.outputUrl;
+      break retry;
+    }
+    if (decision.kind === 'abort') {
+      lastError = decision.reason;
+      lastFailCode = failCode;
+      return {
+        ok: false,
+        segmentIndex: segment.segmentIndex,
+        error: lastError,
+        attempts,
+        costUsd: attempts * KIE_OMNI_COST_USD_PER_SEGMENT,
+      };
+    }
+    // decision.kind === 'retry'
+    lastError = pollError ?? `attempt ${attempt} hit ${failCode ?? 'unknown'}`;
+    lastFailCode = failCode;
+    console.warn(
+      `[kie-omni] segment ${segment.segmentIndex} attempt ${attempt} hit ${failCode ?? 'unknown'}; retrying with a fresh seed`,
     );
   }
+
   if (!outputUrl) {
     return {
       ok: false,
       segmentIndex: segment.segmentIndex,
-      error:
-        pollError ??
-        `Omni Flash segment ${segment.segmentIndex} timed out after ${POLL_MAX_ATTEMPTS * POLL_INTERVAL_SECONDS}s`,
-      costUsd: 0,
+      error: `Segment ${segment.segmentIndex} failed after ${attempts} attempt(s)${lastFailCode ? ` (${lastFailCode})` : ''}: ${lastError}`,
+      attempts,
+      costUsd: attempts * KIE_OMNI_COST_USD_PER_SEGMENT,
     };
   }
 
@@ -548,11 +770,12 @@ async function runOmniSegment(input: {
     ok: true,
     segmentIndex: segment.segmentIndex,
     publicUrl,
-    taskId,
+    taskId: lastTaskId!,
     kieSourceUrl: outputUrl,
     reuploadOk: uploadResult.ok,
     durationSeconds: segmentDuration,
-    costUsd: KIE_OMNI_COST_USD_PER_SEGMENT,
+    attempts,
+    costUsd: attempts * KIE_OMNI_COST_USD_PER_SEGMENT,
   };
 }
 

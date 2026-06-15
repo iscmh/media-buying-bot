@@ -17,7 +17,10 @@ import {
   buildOmniFlashPrompt,
   buildOmniFlashSegmentPrompt,
   clampOmniDuration,
+  decideOmniAttemptOutcome,
   estimateDialogueSeconds,
+  isRetryableOmniFailure,
+  RETRYABLE_OMNI_FAIL_CODES,
   splitClipsIntoOmniSegments,
 } from '../src/functions/generate-kie-omni-flash-native';
 
@@ -339,5 +342,151 @@ describe('Polish-12.1: buildOmniFlashSegmentPrompt', () => {
       segmentDurationSeconds: 10,
     });
     expect(out).toMatch(/No dialogue — natural ambient sound only/);
+  });
+});
+
+describe('Polish-12.2: isRetryableOmniFailure', () => {
+  it('treats the three documented Gemini safety codes as retryable', () => {
+    expect(isRetryableOmniFailure('PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED')).toBe(true);
+    expect(isRetryableOmniFailure('PUBLIC_ERROR_SAFETY_FILTER_FAILED')).toBe(true);
+    expect(isRetryableOmniFailure('PUBLIC_ERROR_PERSON_GENERATION_FAILED')).toBe(true);
+  });
+
+  it('treats auth / validation / balance / rate-limit codes as NOT retryable', () => {
+    expect(isRetryableOmniFailure('401_UNAUTHORIZED')).toBe(false);
+    expect(isRetryableOmniFailure('402_INSUFFICIENT_BALANCE')).toBe(false);
+    expect(isRetryableOmniFailure('422_VALIDATION_FAILED')).toBe(false);
+    expect(isRetryableOmniFailure('429_RATE_LIMIT')).toBe(false);
+  });
+
+  it('returns false for empty / null / undefined input', () => {
+    expect(isRetryableOmniFailure('')).toBe(false);
+    expect(isRetryableOmniFailure(null)).toBe(false);
+    expect(isRetryableOmniFailure(undefined)).toBe(false);
+  });
+
+  it('returns false for any other code (defensive default)', () => {
+    expect(isRetryableOmniFailure('SOMETHING_NEW')).toBe(false);
+    expect(isRetryableOmniFailure('public_error_safety_filter_failed')).toBe(false); // case-sensitive
+  });
+
+  it('RETRYABLE_OMNI_FAIL_CODES exposes the canonical set', () => {
+    expect(RETRYABLE_OMNI_FAIL_CODES.has('PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED')).toBe(true);
+    expect(RETRYABLE_OMNI_FAIL_CODES.size).toBe(3);
+  });
+});
+
+describe('Polish-12.2: decideOmniAttemptOutcome', () => {
+  it('successful generation → success with outputUrl', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'success',
+      outputUrl: 'https://kie.ai/out.mp4',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('success');
+    if (r.kind === 'success') expect(r.outputUrl).toBe('https://kie.ai/out.mp4');
+  });
+
+  it('submit failure → abort immediately (never retried)', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: false,
+      submitError: 'invalid API key',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('abort');
+    if (r.kind === 'abort') expect(r.reason).toMatch(/invalid API key/);
+  });
+
+  it('retryable safety filter on a non-final attempt → retry', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'fail',
+      failCode: 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED',
+      failMsg: 'public figure detected',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('retry');
+  });
+
+  it('retryable safety filter on the FINAL attempt → abort with "exhausted" reason', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'fail',
+      failCode: 'PUBLIC_ERROR_SAFETY_FILTER_FAILED',
+      failMsg: 'flagged',
+      attempt: 3,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('abort');
+    if (r.kind === 'abort') {
+      expect(r.reason).toMatch(/exhausted 3 attempt\(s\)/);
+      expect(r.reason).toMatch(/PUBLIC_ERROR_SAFETY_FILTER_FAILED/);
+    }
+  });
+
+  it('non-retryable failure code → abort immediately even with attempts remaining', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'fail',
+      failCode: '422_VALIDATION_FAILED',
+      failMsg: 'prompt too long',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('abort');
+    if (r.kind === 'abort') {
+      expect(r.reason).toMatch(/prompt too long/);
+      expect(r.reason).not.toMatch(/exhausted/);
+    }
+  });
+
+  it('poll-layer error (no pollState) → abort (deterministic 5xx etc.)', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: undefined,
+      pollError: 'kie.ai 502 bad gateway',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('abort');
+    if (r.kind === 'abort') expect(r.reason).toMatch(/502 bad gateway/);
+  });
+
+  it('poll loop exhausted without terminal state (waiting) → abort', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'waiting',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('abort');
+    if (r.kind === 'abort') expect(r.reason).toMatch(/did not reach a terminal state/);
+  });
+
+  it('success state but missing outputUrl → not a success (defensive); abort path', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'success',
+      outputUrl: undefined,
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).not.toBe('success');
+  });
+
+  it('falls back to a generic reason when failMsg is missing', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'fail',
+      failCode: '422_VALIDATION_FAILED',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('abort');
+    if (r.kind === 'abort') expect(r.reason).toMatch(/kie\.ai task failed.*422/);
   });
 });
