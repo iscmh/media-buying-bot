@@ -223,3 +223,50 @@ describe('Polish-9.4: pipeline-only call sites (no provider)', () => {
     );
   });
 });
+
+describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', () => {
+  it('≤10s → 1 segment, no stitch: $0.05 + $0.05 + $0.90 = $1.00', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      estimatedDurationSeconds: 10,
+    });
+    expect(r.estimateUsd).toBeCloseTo(1, 4);
+    expect(r.breakdown.some((b) => /1 segment\b/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /stitching/.test(b.item))).toBe(false);
+  });
+
+  it('≤20s → 2 segments + stitch: $0.05 + $0.05 + $1.80 + $0.05 = $1.95', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      estimatedDurationSeconds: 20,
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.95, 4);
+    expect(r.breakdown.some((b) => /2 segments\b/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /idan054 video stitching/.test(b.item))).toBe(true);
+  });
+
+  it('>20s → 3 segments + stitch: $0.05 + $0.05 + $2.70 + $0.05 = $2.85', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      estimatedDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(2.85, 4);
+    expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
+  });
+
+  it('estimatedDurationSeconds omitted → worst-case 3 segments + stitch ($2.85)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+    });
+    expect(r.estimateUsd).toBeCloseTo(2.85, 4);
+    expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
+  });
+});

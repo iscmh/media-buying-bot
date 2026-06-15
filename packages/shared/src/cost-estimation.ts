@@ -71,6 +71,9 @@ const PRICING = {
   kieOmniFlashPerVariantUsd: 0.9,
   kieOmniFlashReferenceFrameUsd: 0.05,
   kieOmniFlashManualPromptUsd: 0.05,
+  // Polish-12.1: when 2+ segments, the existing Polish-9.12 idan054
+  // ffmpeg-concat path stitches them.
+  kieOmniFlashStitchUsd: 0.05,
 
   // Polish-10 / Polish-10.1: Kling 3.0 Omni multi-segment pipeline.
   // Default mode dropped pro→standard for cheaper iteration (720p is
@@ -130,6 +133,13 @@ export interface EstimateInput {
   format?: CreativeFormat;
   /** Polish-6: pipeline-level cost. Overrides format + provider when set. */
   pipeline?: PipelineType;
+  /**
+   * Polish-12.1: target dialogue duration in seconds, used by the
+   * kie_omni_flash_native branch to size segment count (1 / 2 / 3).
+   * When omitted that branch defaults to the worst case (3 segments)
+   * so the upfront estimate never under-quotes the variant.
+   */
+  estimatedDurationSeconds?: number;
 }
 
 export function estimateGenerationCost(input: EstimateInput): CostEstimate {
@@ -145,7 +155,7 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
 
   // Polish-6: pipeline-level estimation takes precedence when set.
   if (input.pipeline) {
-    return estimateByPipeline(input.pipeline, variantCount);
+    return estimateByPipeline(input.pipeline, variantCount, input.estimatedDurationSeconds);
   }
 
   if (conceptType === 'static') {
@@ -236,7 +246,11 @@ export function labelForProvider(provider: UgcVideoProvider): string {
   }
 }
 
-function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostEstimate {
+function estimateByPipeline(
+  pipeline: PipelineType,
+  variantCount: number,
+  estimatedDurationSeconds?: number,
+): CostEstimate {
   const breakdown: CostBreakdownItem[] = [];
   switch (pipeline) {
     case 'heygen_avatar_talking_head': {
@@ -309,6 +323,17 @@ function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostE
       break;
     }
     case 'kie_omni_flash_native': {
+      // Polish-12.1: cost scales with segment count.
+      //   ≤10s  → 1 segment, no stitch
+      //   ≤20s  → 2 segments + stitch
+      //   >20s  → 3 segments + stitch (cap)
+      // When estimatedDurationSeconds is omitted (form quotes the
+      // worst case up front), default to 3 segments so we never
+      // under-quote.
+      const seconds = estimatedDurationSeconds ?? 30;
+      const segmentCount = seconds <= 10 ? 1 : seconds <= 20 ? 2 : 3;
+      const totalSegments = variantCount * segmentCount;
+      const stitchCount = segmentCount >= 2 ? variantCount : 0;
       breakdown.push({
         item: `Production manual (Claude, ${variantCount} × $${PRICING.kieOmniFlashManualPromptUsd.toFixed(2)})`,
         cost: round4(variantCount * PRICING.kieOmniFlashManualPromptUsd),
@@ -318,9 +343,17 @@ function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostE
         cost: round4(variantCount * PRICING.kieOmniFlashReferenceFrameUsd),
       });
       breakdown.push({
-        item: `Gemini Omni Flash (${variantCount} × $${PRICING.kieOmniFlashPerVariantUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.kieOmniFlashPerVariantUsd),
+        item: `Gemini Omni Flash (${totalSegments} segment${
+          totalSegments === 1 ? '' : 's'
+        } × $${PRICING.kieOmniFlashPerVariantUsd.toFixed(2)})`,
+        cost: round4(totalSegments * PRICING.kieOmniFlashPerVariantUsd),
       });
+      if (stitchCount > 0) {
+        breakdown.push({
+          item: `idan054 video stitching (${stitchCount} × $${PRICING.kieOmniFlashStitchUsd.toFixed(2)})`,
+          cost: round4(stitchCount * PRICING.kieOmniFlashStitchUsd),
+        });
+      }
       break;
     }
     case 'nano_banana_static_image':

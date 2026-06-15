@@ -69,7 +69,7 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   },
   kie_omni_flash_native: {
     pipeline: 'kie_omni_flash_native',
-    label: 'UGC ad (Gemini Omni Flash, native audio) — experimental',
+    label: 'UGC ad (Gemini Omni Flash, 10-30s native audio)',
     providerChoice: 'kling',
     format: 'kie_omni_flash_native',
     workerEvent: 'generation/kie-omni-flash-native.requested',
