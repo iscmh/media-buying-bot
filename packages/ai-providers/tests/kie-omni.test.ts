@@ -168,6 +168,64 @@ describe('Polish-12: pollKieOmniTask parses resultJson STRING into resultUrls[0]
     expect(r.failMsg).toBe('flagged for review');
   });
 
+  it('Polish-12.2.2: failCode=null + failMsg=PUBLIC_ERROR_* identifier → inferred into failCode', async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          taskId: 't',
+          state: 'fail',
+          failCode: null,
+          failMsg: 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED',
+        },
+      },
+    });
+    const { pollKieOmniTask } = await import('../src/kie-omni');
+    const r = await pollKieOmniTask({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.state).toBe('fail');
+    expect(r.failCode).toBe('PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED');
+    expect(r.failMsg).toBe('PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED');
+  });
+
+  it('Polish-12.2.2: failCode and failMsg both populated → dedicated field wins', async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          taskId: 't',
+          state: 'fail',
+          failCode: 'CONTENT_POLICY',
+          failMsg: 'something descriptive',
+        },
+      },
+    });
+    const { pollKieOmniTask } = await import('../src/kie-omni');
+    const r = await pollKieOmniTask({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.failCode).toBe('CONTENT_POLICY');
+    expect(r.failMsg).toBe('something descriptive');
+  });
+
+  it('Polish-12.2.2: failCode=null + failMsg as a prose sentence → failCode stays undefined', async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          taskId: 't',
+          state: 'fail',
+          failCode: null,
+          failMsg: 'Generation failed due to safety',
+        },
+      },
+    });
+    const { pollKieOmniTask } = await import('../src/kie-omni');
+    const r = await pollKieOmniTask({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.failCode).toBeUndefined();
+    expect(r.failMsg).toBe('Generation failed due to safety');
+  });
+
   it('state=waiting → returns waiting with no error', async () => {
     captureFetch({
       status: 200,

@@ -107,9 +107,24 @@ export const RETRYABLE_OMNI_FAIL_CODES: ReadonlySet<string> = new Set([
   'PUBLIC_ERROR_PERSON_GENERATION_FAILED',
 ]);
 
-export function isRetryableOmniFailure(failCode: string | undefined | null): boolean {
-  if (!failCode) return false;
-  return RETRYABLE_OMNI_FAIL_CODES.has(failCode);
+/**
+ * Polish-12.2.2: defense-in-depth. The kie-omni client already infers
+ * failCode from failMsg when kie.ai returns the code inverted (which
+ * empirically happens for safety-filter failures). This second check
+ * catches any case where the client's pattern miss left failCode
+ * undefined but failMsg still carries the bare identifier — including
+ * possible future kie.ai response shape drift.
+ */
+export function isRetryableOmniFailure(
+  failCode: string | undefined | null,
+  failMsg?: string | undefined | null,
+): boolean {
+  if (failCode && RETRYABLE_OMNI_FAIL_CODES.has(failCode)) return true;
+  if (failMsg) {
+    const trimmed = failMsg.trim();
+    if (RETRYABLE_OMNI_FAIL_CODES.has(trimmed)) return true;
+  }
+  return false;
 }
 
 /**
@@ -175,7 +190,7 @@ export function decideOmniAttemptOutcome(input: {
   }
   // Documented failure state — decide retry vs abort by failCode.
   if (input.pollState === 'fail') {
-    const retryable = isRetryableOmniFailure(input.failCode);
+    const retryable = isRetryableOmniFailure(input.failCode, input.failMsg);
     if (!retryable) {
       return {
         kind: 'abort',

@@ -238,11 +238,20 @@ export async function pollKieOmniTask(input: KieOmniPollInput): Promise<KieOmniP
     };
   }
   if (state === 'fail') {
+    // Polish-12.2.2: kie.ai's actual response often returns the
+    // failure code in failMsg with failCode left null, despite docs
+    // showing them as separate fields. Treat failMsg as the code
+    // when it matches the documented identifier pattern
+    // (PUBLIC_ERROR_ uppercase identifier) and failCode is empty.
+    const rawCode = data.failCode ?? undefined;
+    const rawMsg = data.failMsg ?? undefined;
+    const inferredCode =
+      !rawCode && rawMsg && /^[A-Z][A-Z0-9_]+$/.test(rawMsg.trim()) ? rawMsg.trim() : rawCode;
     return {
       ok: true,
       state: 'fail',
-      failCode: data.failCode ?? undefined,
-      failMsg: data.failMsg ?? 'kie.ai task failed without a message',
+      failCode: inferredCode,
+      failMsg: rawMsg ?? 'kie.ai task failed without a message',
       latencyMs: result.latencyMs,
     };
   }

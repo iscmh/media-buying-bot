@@ -375,6 +375,25 @@ describe('Polish-12.2: isRetryableOmniFailure', () => {
     expect(RETRYABLE_OMNI_FAIL_CODES.has('PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED')).toBe(true);
     expect(RETRYABLE_OMNI_FAIL_CODES.size).toBe(3);
   });
+
+  // Polish-12.2.2: failMsg fallback for kie.ai's inverted shape
+  // (failCode left null, identifier surfaces in failMsg).
+  it('treats failMsg as retryable when failCode is missing but failMsg is a known identifier', () => {
+    expect(isRetryableOmniFailure(undefined, 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED')).toBe(
+      true,
+    );
+    expect(isRetryableOmniFailure(null, 'PUBLIC_ERROR_SAFETY_FILTER_FAILED')).toBe(true);
+  });
+
+  it('back-compat: single-arg call (failCode only) still works', () => {
+    expect(isRetryableOmniFailure('PUBLIC_ERROR_SAFETY_FILTER_FAILED')).toBe(true);
+    expect(isRetryableOmniFailure('PUBLIC_ERROR_SAFETY_FILTER_FAILED', undefined)).toBe(true);
+  });
+
+  it("failMsg fallback ignores prose messages that aren't known identifiers", () => {
+    expect(isRetryableOmniFailure(undefined, 'unrelated error message')).toBe(false);
+    expect(isRetryableOmniFailure(undefined, 'Generation failed due to safety')).toBe(false);
+  });
 });
 
 describe('Polish-12.2: decideOmniAttemptOutcome', () => {
@@ -595,6 +614,41 @@ describe('Polish-12.2.1: runOmniSegment poll-loop classifier', () => {
       expect(result.costUsd).toBeCloseTo(2.7, 4);
     }
     expect(seen).toContain('kie-omni-submit-0-a3');
+  });
+
+  it('Polish-12.2.2: ok:true + state:fail + failCode=undefined + failMsg=PUBLIC_ERROR_* → retries via failMsg fallback', async () => {
+    const { step, seen } = makeStubStep({
+      'kie-omni-submit-0-a1': { ok: true, taskId: 'tsk-1' },
+      'kie-omni-check-0-a1-0': {
+        ok: true,
+        state: 'fail',
+        failCode: undefined,
+        failMsg: 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED',
+      },
+      'kie-omni-submit-0-a2': { ok: true, taskId: 'tsk-2' },
+      'kie-omni-check-0-a2-0': {
+        ok: true,
+        state: 'success',
+        outputUrl: 'https://kie.ai/out.mp4',
+      },
+      'kie-omni-upload-0': { ok: true, publicUrl: 'https://supa/out.mp4' },
+    });
+    const result = await runOmniSegment({
+      step,
+      segment,
+      totalSegments: 1,
+      referenceImageUrl: 'https://supa/ref.png',
+      characterDescription: 'A 30yo woman.',
+      sceneDescription: 'Sunny kitchen.',
+      userId: 'user-1',
+      jobId: 'job-1',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.attempts).toBe(2);
+      expect(result.publicUrl).toBe('https://supa/out.mp4');
+    }
+    expect(seen).toContain('kie-omni-submit-0-a2');
   });
 
   it('ok:false + state:undefined + errorMessage → aborts on first attempt (poll-layer error, no retry)', async () => {
