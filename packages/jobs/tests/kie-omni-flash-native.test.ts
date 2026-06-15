@@ -21,6 +21,7 @@ import {
   estimateDialogueSeconds,
   isRetryableOmniFailure,
   RETRYABLE_OMNI_FAIL_CODES,
+  runOmniSegment,
   splitClipsIntoOmniSegments,
 } from '../src/functions/generate-kie-omni-flash-native';
 
@@ -488,5 +489,140 @@ describe('Polish-12.2: decideOmniAttemptOutcome', () => {
     });
     expect(r.kind).toBe('abort');
     if (r.kind === 'abort') expect(r.reason).toMatch(/kie\.ai task failed.*422/);
+  });
+});
+
+describe('Polish-12.2.1: runOmniSegment poll-loop classifier', () => {
+  // The poll-loop bug we're guarding against: pollKieOmniTask may
+  // surface a documented task failure as { ok: false, state: 'fail',
+  // failCode } when kie.ai returns a non-200 envelope code alongside
+  // a body-level failCode. The pre-12.2.1 ordering ate the state on
+  // the !tick.ok branch and aborted as a poll-layer error — retry
+  // never fired. These three tests pin the corrected ordering.
+
+  const segment = {
+    segmentIndex: 0,
+    clips: [{ videoPrompt: 'Hi.', dialogue: 'Hi.' }],
+    estimatedDurationSeconds: 5,
+    combinedDialogue: '"Hi."',
+  };
+
+  function makeStubStep(responses: Record<string, unknown>) {
+    const seen: string[] = [];
+    const step = {
+      run: async (name: string, _fn: () => Promise<unknown>) => {
+        seen.push(name);
+        if (!(name in responses)) {
+          throw new Error(`unexpected step.run("${name}")`);
+        }
+        return responses[name];
+      },
+      sleep: async (_name: string, _duration: string) => undefined,
+    };
+    return { step, seen };
+  }
+
+  it('ok:false + state:fail + retryable failCode on attempt 1, success on attempt 2 → segment succeeds with attempts=2', async () => {
+    const { step, seen } = makeStubStep({
+      'kie-omni-submit-0-a1': { ok: true, taskId: 'tsk-1' },
+      'kie-omni-check-0-a1-0': {
+        ok: false,
+        state: 'fail',
+        failCode: 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED',
+        failMsg: 'public figure detected',
+      },
+      'kie-omni-submit-0-a2': { ok: true, taskId: 'tsk-2' },
+      'kie-omni-check-0-a2-0': {
+        ok: true,
+        state: 'success',
+        outputUrl: 'https://kie.ai/out.mp4',
+      },
+      'kie-omni-upload-0': { ok: true, publicUrl: 'https://supa/out.mp4' },
+    });
+    const result = await runOmniSegment({
+      step,
+      segment,
+      totalSegments: 1,
+      referenceImageUrl: 'https://supa/ref.png',
+      characterDescription: 'A 30yo woman.',
+      sceneDescription: 'Sunny kitchen.',
+      userId: 'user-1',
+      jobId: 'job-1',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.attempts).toBe(2);
+      expect(result.publicUrl).toBe('https://supa/out.mp4');
+      expect(result.costUsd).toBeCloseTo(1.8, 4);
+    }
+    // Both attempt step names must have fired — proves retry path ran.
+    expect(seen).toContain('kie-omni-submit-0-a1');
+    expect(seen).toContain('kie-omni-check-0-a1-0');
+    expect(seen).toContain('kie-omni-submit-0-a2');
+    expect(seen).toContain('kie-omni-check-0-a2-0');
+  });
+
+  it('ok:false + state:fail + retryable failCode 3x → segment fails with "exhausted 3 attempt(s)" message', async () => {
+    const failTick = {
+      ok: false,
+      state: 'fail',
+      failCode: 'PUBLIC_ERROR_SAFETY_FILTER_FAILED',
+      failMsg: 'flagged',
+    };
+    const { step, seen } = makeStubStep({
+      'kie-omni-submit-0-a1': { ok: true, taskId: 'tsk-1' },
+      'kie-omni-check-0-a1-0': failTick,
+      'kie-omni-submit-0-a2': { ok: true, taskId: 'tsk-2' },
+      'kie-omni-check-0-a2-0': failTick,
+      'kie-omni-submit-0-a3': { ok: true, taskId: 'tsk-3' },
+      'kie-omni-check-0-a3-0': failTick,
+    });
+    const result = await runOmniSegment({
+      step,
+      segment,
+      totalSegments: 1,
+      referenceImageUrl: 'https://supa/ref.png',
+      characterDescription: 'A 30yo woman.',
+      sceneDescription: 'Sunny kitchen.',
+      userId: 'user-1',
+      jobId: 'job-1',
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.attempts).toBe(3);
+      expect(result.error).toMatch(/exhausted 3 attempt\(s\)/);
+      expect(result.error).toMatch(/PUBLIC_ERROR_SAFETY_FILTER_FAILED/);
+      expect(result.costUsd).toBeCloseTo(2.7, 4);
+    }
+    expect(seen).toContain('kie-omni-submit-0-a3');
+  });
+
+  it('ok:false + state:undefined + errorMessage → aborts on first attempt (poll-layer error, no retry)', async () => {
+    const { step, seen } = makeStubStep({
+      'kie-omni-submit-0-a1': { ok: true, taskId: 'tsk-1' },
+      'kie-omni-check-0-a1-0': {
+        ok: false,
+        state: undefined,
+        errorMessage: 'network error',
+      },
+    });
+    const result = await runOmniSegment({
+      step,
+      segment,
+      totalSegments: 1,
+      referenceImageUrl: 'https://supa/ref.png',
+      characterDescription: 'A 30yo woman.',
+      sceneDescription: 'Sunny kitchen.',
+      userId: 'user-1',
+      jobId: 'job-1',
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.attempts).toBe(1);
+      expect(result.error).toMatch(/network error/);
+      expect(result.error).not.toMatch(/exhausted/);
+    }
+    // No second attempt should have been issued.
+    expect(seen).not.toContain('kie-omni-submit-0-a2');
   });
 });

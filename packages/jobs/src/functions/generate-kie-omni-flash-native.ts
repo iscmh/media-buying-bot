@@ -569,7 +569,7 @@ type InngestStepLike = {
   sleep: (name: string, duration: string) => Promise<unknown>;
 };
 
-async function runOmniSegment(input: {
+export async function runOmniSegment(input: {
   step: InngestStepLike;
   segment: OmniFlashSegment;
   totalSegments: number;
@@ -678,12 +678,13 @@ async function runOmniSegment(input: {
           });
         },
       );
-      if (!tick.ok) {
-        pollError = tick.errorMessage ?? 'kie.ai poll failed';
-        // Leave pollState undefined → decideOmniAttemptOutcome maps
-        // that to 'abort' (deterministic poll-layer error).
-        break;
-      }
+      // Polish-12.2.1: check documented terminal states (success, fail)
+      // BEFORE the generic !ok branch. pollKieOmniTask may surface a
+      // documented task failure as { ok: false, state: 'fail', ... }
+      // (e.g. when kie.ai returns a non-200 envelope code alongside
+      // a stochastic Gemini safety-filter failCode in the body).
+      // That's a retryable outcome, NOT a poll-layer error.
+      // Misclassifying it killed retry in Polish-12.2.
       if (tick.state === 'success') {
         pollState = 'success';
         attemptOutputUrl = tick.outputUrl;
@@ -695,6 +696,14 @@ async function runOmniSegment(input: {
         failMsg = tick.failMsg;
         pollError =
           tick.failMsg ?? `kie.ai task failed${tick.failCode ? ` (${tick.failCode})` : ''}`;
+        break;
+      }
+      // state is 'waiting' OR undefined (network blip / 5xx mid-poll).
+      // If state is undefined AND ok is false → poll-layer error → abort
+      // (pollState stays undefined → decideOmniAttemptOutcome aborts).
+      // If state is 'waiting' → fall through to the next poll interval.
+      if (!tick.ok && tick.state === undefined) {
+        pollError = tick.errorMessage ?? 'kie.ai poll failed';
         break;
       }
       await step.sleep(
