@@ -264,6 +264,7 @@ async function loadJobRoutingEvent(
   | 'generation/cinematic.requested'
   | 'generation/kling-multi-clip.requested'
   | 'generation/kling-3-omni-multi-segment.requested'
+  | 'generation/kie-omni-flash-native.requested'
   | 'generation/sora.requested'
   | 'generation/nano-banana.requested'
 > {

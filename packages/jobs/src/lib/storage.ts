@@ -114,6 +114,48 @@ export async function downloadGeneratedImageAsBase64(input: {
 }
 
 /**
+ * Polish-12: fetch a remote MP4 (kie.ai CDN, Replicate delivery, etc.)
+ * and re-upload to the user-scoped generated-creatives bucket so the
+ * deliverable has a durable URL that won't expire when the upstream
+ * model provider rotates its hosting. Returns the path + public URL.
+ */
+export async function uploadGeneratedVideoFromUrl(input: {
+  userId: string;
+  jobId: string;
+  remoteUrl: string;
+  filename?: string;
+  maxBytes?: number;
+}): Promise<{ path: string; publicUrl: string; sizeBytes: number }> {
+  const supabase = getServiceRoleSupabase();
+  const stem = input.filename ?? 'output';
+  const path = `${input.userId}/generated/${input.jobId}/${stem}.mp4`;
+  let res: Response;
+  try {
+    res = await fetch(input.remoteUrl);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Remote video fetch failed for ${input.remoteUrl}: ${msg}`);
+  }
+  if (!res.ok) {
+    throw new Error(`Remote video fetch failed: HTTP ${res.status} for ${input.remoteUrl}`);
+  }
+  const buffer = Buffer.from(await res.arrayBuffer());
+  if (input.maxBytes != null && buffer.byteLength > input.maxBytes) {
+    throw new Error(
+      `Remote video ${input.remoteUrl} is ${buffer.byteLength} bytes; max allowed is ${input.maxBytes}`,
+    );
+  }
+  const { error } = await supabase.storage
+    .from('generated-creatives')
+    .upload(path, buffer, { contentType: 'video/mp4', upsert: true });
+  if (error) {
+    throw new Error(`Video upload failed for ${path}: ${error.message}`);
+  }
+  const { data } = supabase.storage.from('generated-creatives').getPublicUrl(path);
+  return { path, publicUrl: data.publicUrl, sizeBytes: buffer.byteLength };
+}
+
+/**
  * Polish-11: upload an ElevenLabs MP3 to the generated-creatives
  * bucket so the Replicate lipsync model can fetch it via public URL.
  * Path mirrors uploadGeneratedImage but with an audio-specific stem

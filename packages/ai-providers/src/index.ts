@@ -143,6 +143,22 @@ export {
   type CheckLipsyncResult,
 } from './replicate-lipsync';
 export {
+  submitKieOmniVideo,
+  pollKieOmniTask,
+  estimateKieOmniGenerationCostUsd,
+  parseResultJsonOutputUrl,
+  translateKieErrorStatus,
+  KIE_OMNI_VIDEO_MODEL,
+  type KieOmniSubmitInput,
+  type KieOmniSubmitResult,
+  type KieOmniPollInput,
+  type KieOmniPollResult,
+  type KieOmniDuration,
+  type KieOmniAspectRatio,
+  type KieOmniResolution,
+  type KieOmniState,
+} from './kie-omni';
+export {
   submitElevenLabsTts,
   getDefaultElevenLabsVoiceId,
   estimateElevenLabsCostUsd,

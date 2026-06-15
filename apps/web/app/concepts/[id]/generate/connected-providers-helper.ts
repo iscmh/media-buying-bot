@@ -15,6 +15,11 @@ export interface ConnectedProviders {
   elevenlabs: { connected: boolean };
   openai: { connected: boolean };
   gemini: { connected: boolean };
+  // Polish-12: Claude + kie.ai needed for the Gemini Omni Flash
+  // pipeline. Both live in tool_connections (not ai_provider_
+  // connections) — toolProviders is the auth source for them.
+  claude: { connected: boolean };
+  kie_ai: { connected: boolean };
 }
 
 export interface AiProviderRow {
@@ -43,6 +48,8 @@ export function buildConnectedProviders(
     elevenlabs: { connected: byAi.has('elevenlabs') },
     openai: { connected: byAi.has('openai') },
     gemini: { connected: toolProviders.has('gemini') },
+    claude: { connected: toolProviders.has('claude') },
+    kie_ai: { connected: toolProviders.has('kie_ai') },
   };
 }
 

@@ -88,7 +88,17 @@ describe('Polish-9.3: other provider slots unaffected', () => {
       elevenlabs: { connected: false },
       openai: { connected: false },
       gemini: { connected: false },
+      // Polish-12: claude + kie_ai tool slots added.
+      claude: { connected: false },
+      kie_ai: { connected: false },
     });
+  });
+
+  it('Polish-12: claude + kie_ai slots fill from tool_connections', () => {
+    const r = buildConnectedProviders([], new Set(['claude', 'kie_ai']));
+    expect(r.claude.connected).toBe(true);
+    expect(r.kie_ai.connected).toBe(true);
+    expect(r.gemini.connected).toBe(false);
   });
 });
 

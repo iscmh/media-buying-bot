@@ -64,6 +64,14 @@ const PRICING = {
   klingMultiClipTtsPerVariantUsd: 0.06,
   klingMultiClipLipsyncPerVariantUsd: 1.0,
 
+  // Polish-12: kie.ai Gemini Omni Flash native pipeline. One 10s
+  // 1080p generation = $0.90 (Nov 2026 kie.ai pricing) + $0.05 Nano
+  // Banana reference frame. Collapses the Polish-11 multi-clip +
+  // ElevenLabs + lipsync stack into a single API call.
+  kieOmniFlashPerVariantUsd: 0.9,
+  kieOmniFlashReferenceFrameUsd: 0.05,
+  kieOmniFlashManualPromptUsd: 0.05,
+
   // Polish-10 / Polish-10.1: Kling 3.0 Omni multi-segment pipeline.
   // Default mode dropped pro→standard for cheaper iteration (720p is
   // indistinguishable from 1080p on phone viewers for 9:16 UGC).
@@ -106,6 +114,7 @@ export type PipelineType =
   | 'sora_2_single_shot'
   | 'kling_3_multi_clip_native_lipsync'
   | 'kling_3_omni_multi_segment'
+  | 'kie_omni_flash_native'
   | 'nano_banana_static_image';
 
 export interface EstimateInput {
@@ -296,6 +305,21 @@ function estimateByPipeline(pipeline: PipelineType, variantCount: number): CostE
       breakdown.push({
         item: `Crossfade stitch (${variantCount} × $${PRICING.klingOmniStitchUsd.toFixed(2)})`,
         cost: round4(variantCount * PRICING.klingOmniStitchUsd),
+      });
+      break;
+    }
+    case 'kie_omni_flash_native': {
+      breakdown.push({
+        item: `Production manual (Claude, ${variantCount} × $${PRICING.kieOmniFlashManualPromptUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.kieOmniFlashManualPromptUsd),
+      });
+      breakdown.push({
+        item: `Reference frames (${variantCount} × $${PRICING.kieOmniFlashReferenceFrameUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.kieOmniFlashReferenceFrameUsd),
+      });
+      breakdown.push({
+        item: `Gemini Omni Flash (${variantCount} × $${PRICING.kieOmniFlashPerVariantUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.kieOmniFlashPerVariantUsd),
       });
       break;
     }

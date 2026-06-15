@@ -552,6 +552,10 @@ function providerReadyForPipeline(pipeline: PipelineType, conns: ConnectedProvid
     if (r === 'openai' && !conns.openai.connected) return false;
     if (r === 'gemini' && !conns.gemini.connected) return false;
     if (r === 'elevenlabs' && !conns.elevenlabs.connected) return false;
+    // Polish-12: kie.ai + Claude land here. Both live in
+    // tool_connections (paste API key at /connections/tools).
+    if (r === 'claude' && !conns.claude.connected) return false;
+    if (r === 'kie_ai' && !conns.kie_ai.connected) return false;
   }
   return true;
 }

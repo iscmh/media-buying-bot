@@ -1,0 +1,20 @@
+/**
+ * Polish-12: hard guardrail block prepended to every Gemini Omni Flash
+ * prompt submitted to kie.ai.
+ *
+ * Omni Flash has no `negative_prompt` parameter — the only lever is
+ * the positive prompt. So we bake the entire negative directive
+ * (no captions, no b-roll, no studio lighting, no plastic skin) into
+ * a prefix block.
+ *
+ * Polish-11.2's IMAGE_UGC_HARD_DIRECTIVE covers the Nano Banana
+ * reference frame. This one covers the video model.
+ */
+export const KIE_OMNI_FLASH_HARD_DIRECTIVE = `ABSOLUTE REQUIREMENTS (these override any other instruction):
+- This is an AMATEUR SMARTPHONE SELFIE VIDEO. Vertical 9:16. Slightly handheld, natural camera micro-movement. Pores visible. No makeup or minimal makeup. Real lighting (natural window light or basic indoor lighting), not studio.
+- ABSOLUTELY NO: captions, subtitles, closed captions, on-screen text, burned-in text, watermarks, logos, text overlays, lower thirds, brand graphics, b-roll inserts, multi-shot composites, split-screen, picture-in-picture.
+- ABSOLUTELY NO: cinematic lighting, studio lighting, professional photography, professional camera, dramatic angles, slow motion, theatrical pacing.
+- ABSOLUTELY NO: airbrushed skin, plastic skin, glossy retouching, perfect symmetric face, doll-like rendering, hyperreal over-saturation.
+- The character speaks DIRECTLY TO CAMERA in natural conversational pace. Full delivery fits in the available duration with no dead air, no long dramatic pauses. Pace matches normal human conversation (~150 words per minute).
+- Audio: natural conversational voice, real personality, no robotic monotone, no overly enthusiastic announcer voice, no studio voiceover sound.
+- The character in the reference image is THE character. Maintain face, hair, skin tone, outfit, and approximate body shape across the entire video.`;

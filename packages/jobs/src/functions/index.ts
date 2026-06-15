@@ -4,6 +4,7 @@ import { manualDailySummary } from './manual-daily-summary';
 import { generateCinematicVariants } from './generate-cinematic-variants';
 import { generateKlingMultiClipVariants } from './generate-kling-multi-clip-variants';
 import { generateKling3OmniMultiSegment } from './generate-kling-3-omni-multi-segment';
+import { generateKieOmniFlashNative } from './generate-kie-omni-flash-native';
 import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
 import { generateStaticVariants } from './generate-static-variants';
@@ -31,6 +32,8 @@ export const functions = [
   generateStaticImageVariants,
   // Polish-10: Kling 3.0 Omni multi-segment (default Kling pipeline).
   generateKling3OmniMultiSegment,
+  // Polish-12: kie.ai Gemini Omni Flash native pipeline (opt-in).
+  generateKieOmniFlashNative,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

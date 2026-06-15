@@ -9,6 +9,7 @@ export * from './tool-provider-form';
 export * from './timezone';
 export * from './cost-estimation';
 export * from './pipeline-descriptors';
+export * from './kie-omni-prompt';
 export * from './actual-cost';
 export * from './prompts';
 export * from './decision-engine';

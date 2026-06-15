@@ -64,8 +64,8 @@ describe('Polish-9.2: pipelineFromString', () => {
   });
 });
 
-describe('Polish-9.2 / Polish-10: ALL_PIPELINES coverage', () => {
-  it('covers all 5 PipelineType values (Polish-10 added kling_3_omni_multi_segment)', () => {
+describe('Polish-9.2 / Polish-10 / Polish-12: ALL_PIPELINES coverage', () => {
+  it('covers all 6 PipelineType values (Polish-12 added kie_omni_flash_native)', () => {
     // If a new PipelineType is added without updating ALL_PIPELINES,
     // this assertion fails at type-check time via the satisfies clause
     // below — and the count check catches a stale list at runtime.
@@ -74,6 +74,7 @@ describe('Polish-9.2 / Polish-10: ALL_PIPELINES coverage', () => {
       'sora_2_single_shot',
       'kling_3_multi_clip_native_lipsync',
       'kling_3_omni_multi_segment',
+      'kie_omni_flash_native',
       'nano_banana_static_image',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));

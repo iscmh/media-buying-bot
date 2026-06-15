@@ -75,6 +75,12 @@ export type Events = {
   'generation/kling-3-omni-multi-segment.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-12: kie.ai Gemini Omni Flash native pipeline. Opt-in via
+  // Override Dialog — single API call replacing the Polish-11
+  // multi-clip + ElevenLabs + lipsync stack.
+  'generation/kie-omni-flash-native.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   // Polish-6: Sora 2 single-shot pipeline.
   'generation/sora.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };

@@ -25,10 +25,13 @@ export interface PipelineDescriptor {
     | 'generation/ugc.requested'
     | 'generation/kling-multi-clip.requested'
     | 'generation/kling-3-omni-multi-segment.requested'
+    | 'generation/kie-omni-flash-native.requested'
     | 'generation/sora.requested'
     | 'generation/nano-banana.requested';
   /** providers the user MUST have connected for this pipeline to work. */
-  requiredProviders: Array<'heygen' | 'kling' | 'openai' | 'gemini' | 'elevenlabs'>;
+  requiredProviders: Array<
+    'heygen' | 'kling' | 'openai' | 'gemini' | 'elevenlabs' | 'claude' | 'kie_ai'
+  >;
 }
 
 const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
@@ -64,6 +67,14 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     workerEvent: 'generation/kling-3-omni-multi-segment.requested',
     requiredProviders: ['kling', 'gemini'],
   },
+  kie_omni_flash_native: {
+    pipeline: 'kie_omni_flash_native',
+    label: 'UGC ad (Gemini Omni Flash, native audio) — experimental',
+    providerChoice: 'kling',
+    format: 'kie_omni_flash_native',
+    workerEvent: 'generation/kie-omni-flash-native.requested',
+    requiredProviders: ['claude', 'gemini', 'kie_ai'],
+  },
   nano_banana_static_image: {
     pipeline: 'nano_banana_static_image',
     label: 'Static image (Nano Banana)',
@@ -88,5 +99,6 @@ export const ALL_PIPELINES: PipelineType[] = [
   'sora_2_single_shot',
   'kling_3_omni_multi_segment',
   'kling_3_multi_clip_native_lipsync',
+  'kie_omni_flash_native',
   'nano_banana_static_image',
 ];
