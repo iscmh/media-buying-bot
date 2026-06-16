@@ -22,6 +22,7 @@ import {
   isRetryableOmniFailure,
   RETRYABLE_OMNI_FAIL_CODES,
   runOmniSegment,
+  scrubCelebrityReferences,
   splitClipsIntoOmniSegments,
 } from '../src/functions/generate-kie-omni-flash-native';
 
@@ -704,5 +705,61 @@ describe('Polish-12.2.1: runOmniSegment poll-loop classifier', () => {
     }
     // No second attempt should have been issued.
     expect(seen).not.toContain('kie-omni-submit-0-a2');
+  });
+});
+
+describe('Polish-12.3: scrubCelebrityReferences', () => {
+  it('replaces a known celebrity name with the generic placeholder', () => {
+    expect(scrubCelebrityReferences('Looks like Kim Kardashian, healthy glow.')).toBe(
+      'Looks like a popular figure, healthy glow.',
+    );
+    expect(scrubCelebrityReferences('Sounds like joe rogan after the gym.')).toBe(
+      'Sounds like a popular figure after the gym.',
+    );
+  });
+
+  it('handles multiple references in one string', () => {
+    const out = scrubCelebrityReferences('Elon Musk meets MrBeast meets Andrew Tate in one ad.');
+    expect(out).toBe('a popular figure meets a popular figure meets a popular figure in one ad.');
+  });
+
+  it('is case-insensitive', () => {
+    expect(scrubCelebrityReferences('ELON MUSK')).toBe('a popular figure');
+    expect(scrubCelebrityReferences('elon musk')).toBe('a popular figure');
+    expect(scrubCelebrityReferences('Elon Musk')).toBe('a popular figure');
+  });
+
+  it('handles Mr. Beast / MrBeast / Mr Beast spelling variants', () => {
+    expect(scrubCelebrityReferences('Mr. Beast challenge')).toBe('a popular figure challenge');
+    expect(scrubCelebrityReferences('MrBeast challenge')).toBe('a popular figure challenge');
+    expect(scrubCelebrityReferences('Mr Beast challenge')).toBe('a popular figure challenge');
+  });
+
+  it('leaves clean text untouched', () => {
+    const clean = 'A 42yo white American man named John, weathered tan skin, three-day stubble.';
+    expect(scrubCelebrityReferences(clean)).toBe(clean);
+  });
+
+  it('is word-boundary aware — does NOT mangle innocent overlaps', () => {
+    // "trumpet" must not match "trump", "muskrat" must not match "musk", etc.
+    expect(scrubCelebrityReferences('She plays the trumpet beautifully.')).toBe(
+      'She plays the trumpet beautifully.',
+    );
+    expect(scrubCelebrityReferences('A muskrat swims by.')).toBe('A muskrat swims by.');
+  });
+
+  it('handles empty / null-shaped input safely', () => {
+    expect(scrubCelebrityReferences('')).toBe('');
+  });
+});
+
+describe('Polish-12.3: KIE_OMNI_FLASH_HARD_DIRECTIVE anti-celebrity language', () => {
+  it('contains anti-celebrity language', async () => {
+    const { KIE_OMNI_FLASH_HARD_DIRECTIVE } = await import('@mbb/shared');
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/fictional everyday person/i);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/celebrity/i);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/public personality/i);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/REJECTED by upstream filters/);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/No copyrighted character names/i);
   });
 });

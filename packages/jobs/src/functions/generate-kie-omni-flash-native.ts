@@ -413,17 +413,25 @@ export const generateKieOmniFlashNative = inngest.createFunction(
         .join(' ')}`,
     );
 
-    const scrubbedCharacter = stripTextCaptionsBroll(
-      stripCharacterSheetPattern(manual.characterPrompt),
+    // Polish-12.3: layered scrub before the prompt hits Omni Flash.
+    // Master prompt now instructs Claude to avoid public figures up
+    // front, but if a celebrity name slipped through (e.g., echoed
+    // from the source creative's analysis), strip it here so Gemini's
+    // PROMINENT_PEOPLE_FILTER doesn't trip on segment after segment.
+    const scrubbedCharacter = scrubCelebrityReferences(
+      stripTextCaptionsBroll(stripCharacterSheetPattern(manual.characterPrompt)),
     );
-    const scrubbedScene = stripTextCaptionsBroll(manual.setPrompt);
+    const scrubbedScene = scrubCelebrityReferences(stripTextCaptionsBroll(manual.setPrompt));
 
     // 3. Generate each segment in parallel.
     const segmentResults = await Promise.all(
       segments.map((segment) =>
         runOmniSegment({
           step,
-          segment,
+          segment: {
+            ...segment,
+            combinedDialogue: scrubCelebrityReferences(segment.combinedDialogue),
+          },
           totalSegments: segments.length,
           referenceImageUrl,
           characterDescription: scrubbedCharacter,
@@ -912,6 +920,46 @@ async function runOmniStitch(input: {
 // =========================================================================
 // Pure helpers — exported for unit tests
 // =========================================================================
+
+/**
+ * Polish-12.3: defense-in-depth scrub. The master prompt now
+ * instructs Claude up front to avoid public figures, but if a
+ * celebrity name slips through (e.g., echoed verbatim from the
+ * source creative's analysis), we replace it with a generic
+ * placeholder before the prompt hits Gemini Omni Flash —
+ * PROMINENT_PEOPLE_FILTER fails the whole segment otherwise and
+ * retries with fresh seeds can't recover from CONTENT triggers.
+ *
+ * Patterns are word-boundary-anchored to avoid mangling names that
+ * happen to overlap (e.g., "Bieber" stays untouched inside the
+ * legitimate fictional surname "Biebermann"). New patterns get
+ * added as the upstream filter trips on them in production.
+ */
+const COMMON_CELEBRITY_PATTERNS: ReadonlyArray<RegExp> = [
+  /\b(kim|khloe|kourtney|kris|kylie|kendall)\s+kardashian\b/gi,
+  /\b(kim|khloe|kourtney|kris|kylie|kendall)\s+jenner\b/gi,
+  /\bjustin\s+bieber\b/gi,
+  /\bhailey\s+(bieber|baldwin)\b/gi,
+  /\b(joe|jane)\s+rogan\b/gi,
+  /\bmr\.?\s*beast\b/gi,
+  /\belon\s+musk\b/gi,
+  /\bdonald\s+trump\b/gi,
+  /\bbeyonc[eé]\b/gi,
+  /\btaylor\s+swift\b/gi,
+  /\bbrad\s+pitt\b/gi,
+  /\bleonardo\s+(di\s*caprio|dicaprio)\b/gi,
+  /\bandrew\s+tate\b/gi,
+  /\bjordan\s+peterson\b/gi,
+];
+
+export function scrubCelebrityReferences(text: string): string {
+  if (!text) return text;
+  let scrubbed = text;
+  for (const pattern of COMMON_CELEBRITY_PATTERNS) {
+    scrubbed = scrubbed.replace(pattern, 'a popular figure');
+  }
+  return scrubbed;
+}
 
 interface OmniManualLike {
   characterPrompt: string;

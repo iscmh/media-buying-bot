@@ -28,6 +28,23 @@ describe('Polish-6: prompt-loader', () => {
     expect(getUniversalUgcMasterPrompt().length).toBeGreaterThan(100);
   });
 
+  it('Polish-12.3: UNIVERSAL_UGC_MASTER_PROMPT contains the anti-celebrity restrictions block', () => {
+    const text = getUniversalUgcMasterPrompt();
+    expect(text).toContain('CRITICAL CONTENT RESTRICTIONS');
+    expect(text).toMatch(/real public figure/i);
+    expect(text).toMatch(/celebrity/i);
+    expect(text).toMatch(/Gemini/);
+    // Sanity: DO / DO NOT sections both present.
+    expect(text).toMatch(/DO NOT:/);
+    expect(text).toMatch(/\nDO:/);
+    // The restrictions sit BEFORE the existing "Crucial Hyper-Realism"
+    // block — earlier instructions weight higher with Claude.
+    const restrictionsIdx = text.indexOf('CRITICAL CONTENT RESTRICTIONS');
+    const realismIdx = text.indexOf('Crucial Hyper-Realism');
+    expect(restrictionsIdx).toBeGreaterThan(-1);
+    expect(realismIdx).toBeGreaterThan(restrictionsIdx);
+  });
+
   it('loads FORGE_EXAMPLE (non-empty)', () => {
     expect(getForgeExample().length).toBeGreaterThan(100);
   });

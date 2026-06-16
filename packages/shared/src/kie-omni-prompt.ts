@@ -15,6 +15,8 @@ export const KIE_OMNI_FLASH_HARD_DIRECTIVE = `ABSOLUTE REQUIREMENTS (these overr
 - ABSOLUTELY NO: captions, subtitles, closed captions, on-screen text, burned-in text, watermarks, logos, text overlays, lower thirds, brand graphics, b-roll inserts, multi-shot composites, split-screen, picture-in-picture.
 - ABSOLUTELY NO: cinematic lighting, studio lighting, professional photography, professional camera, dramatic angles, slow motion, theatrical pacing.
 - ABSOLUTELY NO: airbrushed skin, plastic skin, glossy retouching, perfect symmetric face, doll-like rendering, hyperreal over-saturation.
+- The character is a fictional everyday person, NOT based on any real or famous individual. The face, body, voice, and mannerisms must not resemble any celebrity, athlete, musician, politician, influencer, or public personality. Output that resembles a real prominent person is REJECTED by upstream filters.
+- No copyrighted character names, no real-world brand spokespeople, no recognizable public figure styling.
 - The character speaks DIRECTLY TO CAMERA in natural conversational pace. Full delivery fits in the available duration with no dead air, no long dramatic pauses. Pace matches normal human conversation (~150 words per minute).
 - Audio: natural conversational voice, real personality, no robotic monotone, no overly enthusiastic announcer voice, no studio voiceover sound.
 - The character in the reference image is THE character. Maintain face, hair, skin tone, outfit, and approximate body shape across the entire video.`;
