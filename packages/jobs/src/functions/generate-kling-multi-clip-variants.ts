@@ -947,23 +947,68 @@ function sliceSectionC(text: string): string | null {
  *   - Plain `Global Character Prompt:` (Forge fixture style)
  *   - `**Global Character Prompt:**` (bold)
  *   - `### Global Character Prompt:` (markdown heading — Polish-9.16,
- *      the shape Claude emits in production)
+ *      the shape Claude Sonnet 4 emits in production)
  *   - `### **Global Character Prompt:**` (heading + bold)
+ *   - Polish-13.1: `### 🧍 GLOBAL CHARACTER PROMPT — "JOHN"` (Sonnet
+ *     4.6 form: emoji prefix, em-dash separator, body on subsequent
+ *     lines inside a triple-backtick code block)
  *
- * Boundary symmetry: the lookahead that terminates the value match
- * also allows the heading prefix so a `### Global Set Prompt` after a
- * `### Global Character Prompt` is recognized as the stop marker.
+ * Two-pattern strategy: try the colon form first (covers every legacy
+ * variant + the production Sonnet 4 shape with multi-line capture),
+ * fall back to the heading-only form (Sonnet 4.6). On either match,
+ * if the captured body holds a triple-backtick code block with
+ * meaningful content, that's preferred over the raw body — Sonnet 4.6
+ * wraps the actual prompt in a fenced block with one-line decorative
+ * labels above it.
+ *
+ * Boundary symmetry: both lookaheads also tolerate the emoji/decoration
+ * prefix so the next "Global X Prompt" subsection is still recognized
+ * as the stop marker regardless of which format the manual uses.
  */
 function extractGlobalPrompt(sectionA: string, kind: 'Character' | 'Set'): string {
   if (!sectionA) return '';
-  const re = new RegExp(
-    `(?:^|\\n)\\s*#{0,6}\\s*\\**\\s*Global\\s+${kind}\\s+Prompt\\s*\\**\\s*:\\s*\\**\\s*` +
-      `([\\s\\S]+?)(?=\\n\\s*#{0,6}\\s*\\**\\s*Global\\s+\\w+\\s+Prompt\\s*\\**\\s*:|\\n\\s*(?:#+\\s*)?SECTION\\s+[A-Z]\\b|$)`,
+  // Pattern 1 — legacy + Sonnet 4 production: "Global X Prompt:" form.
+  // Value sits after the colon (same line or wrapping to subsequent
+  // lines). Optional H1-H6 heading prefix, bold wrap, and Polish-13.1
+  // emoji prefix.
+  const colonRe = new RegExp(
+    `(?:^|\\n)\\s*#{0,6}\\s*(?:[^\\w\\s*\\n]+\\s*)?\\**\\s*Global\\s+${kind}\\s+Prompt\\s*\\**\\s*:\\s*\\**\\s*` +
+      `([\\s\\S]+?)(?=\\n\\s*#{0,6}\\s*(?:[^\\w\\s*\\n]+\\s*)?\\**\\s*Global\\s+\\w+\\s+Prompt\\b|\\n\\s*(?:#+\\s*)?\\**\\s*SECTION\\s+[A-Z]\\b|$)`,
     'i',
   );
-  const m = sectionA.match(re);
-  if (!m || !m[1]) return '';
-  return m[1].replace(/\*\*/g, '').trim();
+  const colonMatch = sectionA.match(colonRe);
+  if (colonMatch && colonMatch[1] && colonMatch[1].trim().length > 0) {
+    return cleanPromptBody(colonMatch[1]);
+  }
+  // Pattern 2 — Polish-13.1 / Sonnet 4.6: "Global X Prompt — \"NAME\""
+  // form. No colon after "Prompt"; em-dash or annotation absorbed via
+  // `[^\\n]*`. Body captured from next line until the next subsection
+  // / SECTION boundary.
+  const headingRe = new RegExp(
+    `(?:^|\\n)\\s*#{0,6}\\s*(?:[^\\w\\s*\\n]+\\s*)?\\**\\s*Global\\s+${kind}\\s+Prompt\\b[^\\n]*\\n` +
+      `([\\s\\S]+?)(?=\\n\\s*#{0,6}\\s*(?:[^\\w\\s*\\n]+\\s*)?\\**\\s*Global\\s+\\w+\\s+Prompt\\b|\\n\\s*(?:#+\\s*)?\\**\\s*SECTION\\s+[A-Z]\\b|$)`,
+    'i',
+  );
+  const headingMatch = sectionA.match(headingRe);
+  if (headingMatch && headingMatch[1]) {
+    return cleanPromptBody(headingMatch[1]);
+  }
+  return '';
+}
+
+/**
+ * Polish-13.1: when the captured body contains a fenced code block
+ * with substantial content (>50 chars), that's the actual prompt —
+ * Sonnet 4.6 sticks the prompt inside ```...``` and uses the body
+ * above it for a one-line label like "**Three-View Character
+ * Sheet — Photorealistic, Front / Side / Back:**".
+ */
+function cleanPromptBody(body: string): string {
+  const codeBlock = body.match(/```(?:\w+)?\s*\n([\s\S]+?)\n\s*```/);
+  if (codeBlock && codeBlock[1] && codeBlock[1].trim().length > 50) {
+    return codeBlock[1].replace(/\*\*/g, '').trim();
+  }
+  return body.replace(/\*\*/g, '').trim();
 }
 
 const USE_IMAGE_DIRECTIVE = /\[USE\s+IMAGE\s+(\d+)\s+AS\s+STARTING\s+FRAME\]/gi;

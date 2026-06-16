@@ -559,6 +559,165 @@ describe('Polish-9.16: Section A — Global Prompt extraction tolerates markdown
   });
 });
 
+describe('Polish-13.1: parseProductionManual tolerant of Sonnet 4.6 formatting', () => {
+  // Captures the surface variations Sonnet 4.6 emits that broke
+  // the Sonnet-4-era parser:
+  //   - "## SECTION A — ..." em-dash header (the existing slice already
+  //     handles this, but we pin the contract here).
+  //   - "### 🧍 GLOBAL CHARACTER PROMPT — \"NAME\"" subsection with
+  //     emoji prefix + em-dash + quoted annotation, NO colon.
+  //   - Prompt body inside a triple-backtick code block.
+  //   - Preamble blocks (PRE-PRODUCTION NOTES, COMPLIANCE NOTE) before
+  //     Section A that the parser must ignore, not error on.
+
+  const sonnet46SectionA =
+    `## SECTION A — CHARACTER & SET GENERATION\n` +
+    `\n` +
+    `### 🧍 GLOBAL CHARACTER PROMPT — "JOHN"\n` +
+    `**Three-View Character Sheet — Photorealistic, Front / Side / Back:**\n` +
+    `\n` +
+    '```\n' +
+    `Photorealistic three-view character sheet of a 42yo white American man named John, ` +
+    `weathered tan skin, short brown hair with grey at the temples, three-day stubble, ` +
+    `wearing a faded blue cotton t-shirt and jeans, casual home posture.\n` +
+    '```\n' +
+    `\n` +
+    `### 🏠 GLOBAL SET PROMPT — "JOHN'S KITCHEN"\n` +
+    `**Wide Establishing Shot, Photorealistic:**\n` +
+    `\n` +
+    '```\n' +
+    `Sunny morning kitchen, oak cabinets, granite counter with a half-finished mug ` +
+    `of coffee and a laptop showing a banking dashboard, soft natural window light.\n` +
+    '```\n';
+
+  const sonnet46SectionC =
+    `## SECTION C — CLIP-BY-CLIP ANIMATION DIRECTIVES\n` +
+    `\n` +
+    `### CLIP 1\n` +
+    `[USE IMAGE 1 AS STARTING FRAME]\n` +
+    `Subject: JOHN, ref: 1, a 42yo man.\n` +
+    `[GENERATE NATIVE AUDIO AND LIP-SYNC TO EXACT DIALOGUE]: "I made wifi income."\n` +
+    `Static iPhone shot.\n`;
+
+  const sonnet46Preamble =
+    `# COMPLETE VIDEO PRODUCTION MANUAL: WIFI INCOME TESTIMONIAL\n` +
+    `\n` +
+    `---\n` +
+    `\n` +
+    `> ⚠️ **PRE-PRODUCTION NOTES BEFORE PRODUCTION:**\n` +
+    `> Read this entire manual before any image generation.\n` +
+    `\n` +
+    `---\n` +
+    `\n` +
+    `> 🚨 **COMPLIANCE NOTE BEFORE PRODUCTION:**\n` +
+    `> Verify all claims with internal legal review.\n` +
+    `\n` +
+    `---\n` +
+    `\n`;
+
+  it('extracts characterPrompt + setPrompt from emoji/em-dash heading + code-block body', () => {
+    const md = sonnet46Preamble + sonnet46SectionA + '\n' + sonnet46SectionC;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manual.characterPrompt).toMatch(/Photorealistic three-view character sheet/);
+      expect(r.manual.characterPrompt).toMatch(/42yo white American man named John/);
+      // Decoration label above the code block must NOT bleed in.
+      expect(r.manual.characterPrompt).not.toMatch(/Three-View Character Sheet — Photorealistic/);
+      // Closing/opening fences must NOT bleed in.
+      expect(r.manual.characterPrompt).not.toMatch(/```/);
+      expect(r.manual.setPrompt).toMatch(/Sunny morning kitchen/);
+      expect(r.manual.setPrompt).toMatch(/oak cabinets/);
+      expect(r.manual.setPrompt).not.toMatch(/Wide Establishing Shot/);
+      expect(r.manual.setPrompt).not.toMatch(/```/);
+      expect(r.manual.clips).toHaveLength(1);
+    }
+  });
+
+  it('preamble blocks (PRE-PRODUCTION NOTES, COMPLIANCE NOTE) before Section A are ignored, not errored', () => {
+    const md = sonnet46Preamble + sonnet46SectionA + '\n' + sonnet46SectionC;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+  });
+
+  it('Set extraction stops at the next Global X Prompt subsection (no character-body bleed)', () => {
+    const md = sonnet46Preamble + sonnet46SectionA + '\n' + sonnet46SectionC;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // Character must not contain anything from the Set block.
+      expect(r.manual.characterPrompt).not.toMatch(/oak cabinets/);
+      expect(r.manual.characterPrompt).not.toMatch(/GLOBAL SET PROMPT/i);
+      // Set must not contain anything from the Character block.
+      expect(r.manual.setPrompt).not.toMatch(/weathered tan skin/);
+    }
+  });
+
+  it('legacy colon form continues to work alongside the new heading form', () => {
+    // Mixed: Character in Sonnet 4.6 heading form, Set in colon form.
+    const md =
+      `## SECTION A — CHARACTER & SET GENERATION\n` +
+      `### 🧍 GLOBAL CHARACTER PROMPT — "JOHN"\n` +
+      `**Sheet label:**\n` +
+      `\n` +
+      '```\n' +
+      `Photorealistic 42yo man named John with weathered tan skin.\n` +
+      '```\n' +
+      `\n` +
+      `Global Set Prompt: Sunny morning kitchen with oak cabinets.\n` +
+      `\n` +
+      sonnet46SectionC;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manual.characterPrompt).toMatch(/42yo man named John/);
+      expect(r.manual.setPrompt).toBe('Sunny morning kitchen with oak cabinets.');
+    }
+  });
+
+  it('falls back to raw body when no code block is present in the new heading form', () => {
+    // Heading-only form, body as plain prose (no fenced block). The
+    // parser should accept the body verbatim.
+    const md =
+      `## SECTION A — CHARACTER & SET GENERATION\n` +
+      `### 🧍 GLOBAL CHARACTER PROMPT — "JANE"\n` +
+      `A 30yo woman with dark hair, wearing a blue cotton t-shirt, sunny smile.\n` +
+      `\n` +
+      `### 🏠 GLOBAL SET PROMPT — "JANE'S KITCHEN"\n` +
+      `Sunny morning kitchen with messy counter and tangled charger cables.\n` +
+      `\n` +
+      sonnet46SectionC;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manual.characterPrompt).toMatch(/30yo woman with dark hair/);
+      expect(r.manual.setPrompt).toMatch(/Sunny morning kitchen with messy counter/);
+    }
+  });
+
+  it('ignores a short / empty code block (defensive — could be a syntax sample, not the prompt)', () => {
+    // A trivially-small fenced block (<50 chars) should NOT shadow the
+    // surrounding prose; cleanPromptBody must fall through to raw body.
+    const md =
+      `## SECTION A\n` +
+      `### 🧍 GLOBAL CHARACTER PROMPT — "JANE"\n` +
+      `A 30yo woman with dark hair, wearing a blue cotton t-shirt.\n` +
+      `Example tag: \`\`\`\nshort\n\`\`\`\n` +
+      `\n` +
+      `### 🏠 GLOBAL SET PROMPT — "JANE'S KITCHEN"\n` +
+      `Sunny morning kitchen.\n` +
+      `\n` +
+      sonnet46SectionC;
+    const r = parseProductionManual(md);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.manual.characterPrompt).toMatch(/30yo woman with dark hair/);
+      // The body still contains the short fence verbatim — that's fine.
+      // The important thing is the substantive prose survived.
+    }
+  });
+});
+
 describe('Polish-9.18: hasQuotedDialogue', () => {
   it('detects quoted dialogue in clip body', () => {
     expect(hasQuotedDialogue('Static iPhone shot. "Your skin care routine is wrong."')).toBe(true);
