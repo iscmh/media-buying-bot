@@ -323,15 +323,14 @@ function estimateByPipeline(
       break;
     }
     case 'kie_omni_flash_native': {
-      // Polish-12.1: cost scales with segment count.
-      //   ≤10s  → 1 segment, no stitch
-      //   ≤20s  → 2 segments + stitch
-      //   >20s  → 3 segments + stitch (cap)
-      // When estimatedDurationSeconds is omitted (form quotes the
-      // worst case up front), default to 3 segments so we never
-      // under-quote.
+      // Polish-12.1 / Polish-14: cost scales linearly with segment
+      // count via ceiling-divide (1 segment per 10s of dialogue),
+      // capped at the worker's sanity ceiling of 30 segments (5 min).
+      // When estimatedDurationSeconds is omitted the form quotes
+      // 30s up front (3 segments) — the most common UGC length and
+      // matches the legacy quote for back-compat.
       const seconds = estimatedDurationSeconds ?? 30;
-      const segmentCount = seconds <= 10 ? 1 : seconds <= 20 ? 2 : 3;
+      const segmentCount = Math.min(Math.max(1, Math.ceil(seconds / 10)), 30);
       const totalSegments = variantCount * segmentCount;
       const stitchCount = segmentCount >= 2 ? variantCount : 0;
       breakdown.push({

@@ -247,13 +247,39 @@ describe('Polish-12.1: splitClipsIntoOmniSegments', () => {
     expect(totalClips).toBe(6);
   });
 
-  it('8 clips totaling > 30s → capped at 3 segments, last segment may overflow target', () => {
+  it('Polish-14: 8 clips × 6s (~48s total) → 5 segments (linear scale, no artificial cap)', () => {
     const segments = splitClipsIntoOmniSegments(
       Array.from({ length: 8 }, (_, i) => clipForSeconds(6, `C${i}`)),
     );
-    expect(segments).toHaveLength(3);
+    expect(segments).toHaveLength(5);
     const totalClips = segments.reduce((s, x) => s + x.clips.length, 0);
     expect(totalClips).toBe(8);
+  });
+
+  it('Polish-14: 10 clips × 6s (~60s total) → 6 segments', () => {
+    const segments = splitClipsIntoOmniSegments(
+      Array.from({ length: 10 }, (_, i) => clipForSeconds(6, `C${i}`)),
+    );
+    expect(segments).toHaveLength(6);
+    const totalClips = segments.reduce((s, x) => s + x.clips.length, 0);
+    expect(totalClips).toBe(10);
+  });
+
+  it('Polish-14: 15 clips × 6s (~90s total) → 9 segments', () => {
+    const segments = splitClipsIntoOmniSegments(
+      Array.from({ length: 15 }, (_, i) => clipForSeconds(6, `C${i}`)),
+    );
+    expect(segments).toHaveLength(9);
+  });
+
+  it('Polish-14: runaway script (200 clips × 6s ≈ 1200s) → capped at sanity ceiling of 30 segments', () => {
+    const segments = splitClipsIntoOmniSegments(
+      Array.from({ length: 200 }, (_, i) => clipForSeconds(6, `C${i}`)),
+    );
+    expect(segments).toHaveLength(30);
+    // Every clip still represented (last segment absorbs the overflow).
+    const totalClips = segments.reduce((s, x) => s + x.clips.length, 0);
+    expect(totalClips).toBe(200);
   });
 
   it('preserves clip boundaries — a single clip never spans segments', () => {

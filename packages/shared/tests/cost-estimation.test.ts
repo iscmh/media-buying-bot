@@ -270,3 +270,66 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
     expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
   });
 });
+
+describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () => {
+  // Polish-14 removed the 3-segment cap. Cost now scales linearly
+  // with duration via ceil(seconds / 10), bounded by the worker's
+  // sanity ceiling of 30 segments (5 minutes). Existing ≤30s cases
+  // stay unchanged (back-compat with Polish-12.1.x tests above).
+
+  it('60s → 6 segments: $0.05 + $0.05 + $5.40 + $0.05 = $5.55', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      estimatedDurationSeconds: 60,
+    });
+    expect(r.estimateUsd).toBeCloseTo(5.55, 4);
+    expect(r.breakdown.some((b) => /6 segments\b/.test(b.item))).toBe(true);
+  });
+
+  it('90s → 9 segments: $0.05 + $0.05 + $8.10 + $0.05 = $8.25', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      estimatedDurationSeconds: 90,
+    });
+    expect(r.estimateUsd).toBeCloseTo(8.25, 4);
+    expect(r.breakdown.some((b) => /9 segments\b/.test(b.item))).toBe(true);
+  });
+
+  it('120s → 12 segments: $0.05 + $0.05 + $10.80 + $0.05 = $10.95', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      estimatedDurationSeconds: 120,
+    });
+    expect(r.estimateUsd).toBeCloseTo(10.95, 4);
+    expect(r.breakdown.some((b) => /12 segments\b/.test(b.item))).toBe(true);
+  });
+
+  it('600s (10 min) → caps at 30 segments: $0.05 + $0.05 + $27.00 + $0.05 = $27.15', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      estimatedDurationSeconds: 600,
+    });
+    expect(r.estimateUsd).toBeCloseTo(27.15, 4);
+    expect(r.breakdown.some((b) => /30 segments\b/.test(b.item))).toBe(true);
+  });
+
+  it('boundary: 31s → 4 segments (ceil(31/10) = 4)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      estimatedDurationSeconds: 31,
+    });
+    // $0.05 + $0.05 + 4 × $0.90 + $0.05 = $3.75
+    expect(r.estimateUsd).toBeCloseTo(3.75, 4);
+    expect(r.breakdown.some((b) => /4 segments\b/.test(b.item))).toBe(true);
+  });
+});

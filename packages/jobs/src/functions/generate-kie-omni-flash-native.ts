@@ -72,11 +72,20 @@ const POLL_MAX_ATTEMPTS = 30;
 
 // Polish-12.1: Omni Flash supports 4/6/8/10 second generations. We
 // cap each segment at 10s and refuse to split below 4s (would just
-// confuse the model). MAX_SEGMENTS keeps cost predictable at 3 × 10s
-// = 30s ad.
+// confuse the model).
+// Polish-14: removed the artificial 3-segment cap. Real production
+// sources run 60s testimonials, 90s long-form, 2-3 min podcast
+// clips — the bot should follow the script length, not truncate at
+// 30s. MAX_SEGMENTS now serves only as a sanity ceiling (30 × 10s
+// = 5 min) to bound runaway Claude output and unbounded billing.
 const SEGMENT_MAX_SECONDS = 10;
 const SEGMENT_MIN_SECONDS = 4;
-const MAX_SEGMENTS = 3;
+const MAX_SEGMENTS = 30;
+/** Polish-14: target script length sent to Claude (in seconds). Generous ceiling
+ * lets Claude write the natural length for the source — the master prompt
+ * instructs natural pacing so longer scripts only get written when the
+ * source merits it. */
+const CLAUDE_TARGET_DURATION_SECONDS = 90;
 /** Polish-12.1: average natural-speech rate, used to estimate dialogue duration. */
 const WORDS_PER_MINUTE = 150;
 /** Polish-12.1: Omni Flash per-segment cost (mirrors the kie-omni client constant). */
@@ -294,7 +303,7 @@ export const generateKieOmniFlashNative = inngest.createFunction(
       const userMessage = JSON.stringify({
         analysis: job.metadata ?? {},
         variant_count: 1,
-        target_duration_seconds: MAX_SEGMENTS * SEGMENT_MAX_SECONDS,
+        target_duration_seconds: CLAUDE_TARGET_DURATION_SECONDS,
       });
       const claude = await callClaude({
         userId,
@@ -947,21 +956,24 @@ function durationToOmniLiteral(d: 4 | 6 | 8 | 10): KieOmniDuration {
 }
 
 /**
- * Polish-12.1: split a parsed manual's clips into 1-3 segments such
- * that each segment's estimated dialogue duration sits ≤ 10s. Clip
- * boundaries are preserved — a single clip never spans segments.
+ * Polish-12.1 / Polish-14: split a parsed manual's clips into N
+ * segments such that each segment's estimated dialogue duration sits
+ * ≤ SEGMENT_MAX_SECONDS (10s). Clip boundaries are preserved — a
+ * single clip never spans segments.
  *
  * Algorithm:
  *   - Estimate per-clip dialogue duration via words / 150 wpm.
- *   - totalSeconds ≤ 10s → 1 segment.
- *   - totalSeconds 10-20s → target 2 segments.
- *   - totalSeconds > 20s → target 3 segments (cap).
+ *   - Polish-14: segmentCount scales linearly with totalSeconds via
+ *     ceiling-divide (ceil(totalSeconds / 10)). MAX_SEGMENTS (30 ×
+ *     10s = 5 min) is a sanity ceiling for runaway Claude output,
+ *     not a target. Clip count is the other natural ceiling — can't
+ *     have more segments than clips.
  *   - Walk clips in order, accumulating into the current segment.
  *     Start a new segment when adding the next clip would exceed
  *     SEGMENT_MAX_SECONDS (10s) OR the per-segment target. Always
  *     keep at least one clip per segment.
  *   - If MAX_SEGMENTS reached and clips remain, append them to the
- *     last segment (capped 30s budget will absorb).
+ *     last segment.
  */
 export function splitClipsIntoOmniSegments(clips: OmniManualLike['clips']): OmniFlashSegment[] {
   if (clips.length === 0) return [];
@@ -976,11 +988,12 @@ export function splitClipsIntoOmniSegments(clips: OmniManualLike['clips']): Omni
   });
 
   const totalSeconds = augmented.reduce((s, a) => s + a.seconds, 0);
-  let segmentCount: number;
-  if (totalSeconds <= SEGMENT_MAX_SECONDS) segmentCount = 1;
-  else if (totalSeconds <= 2 * SEGMENT_MAX_SECONDS) segmentCount = 2;
-  else segmentCount = MAX_SEGMENTS;
+  // Polish-14: linear scale. 1 segment per 10s, with sanity ceiling +
+  // floor-of-1 for short scripts.
+  let segmentCount = Math.ceil(totalSeconds / SEGMENT_MAX_SECONDS);
+  segmentCount = Math.min(segmentCount, MAX_SEGMENTS);
   segmentCount = Math.min(segmentCount, augmented.length);
+  segmentCount = Math.max(segmentCount, 1);
 
   const groups: (typeof augmented)[] = Array.from({ length: segmentCount }, () => []);
   const targetPerSegment = totalSeconds / segmentCount;
