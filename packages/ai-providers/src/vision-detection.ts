@@ -1,5 +1,6 @@
 import { computeClaudeCost } from '@mbb/shared';
 import { callProvider } from './chokepoint';
+import { DEFAULT_CLAUDE_MODEL } from './claude-client';
 
 /**
  * Polish-6 item 1: auto-detect the format of an uploaded winning
@@ -67,7 +68,6 @@ export interface DetectCreativeFormatResult {
 // =========================================================================
 
 const CLAUDE_BASE = 'https://api.anthropic.com/v1';
-const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
 const DETECT_TIMEOUT_MS = 60_000;
 
 const DETECTION_SYSTEM_PROMPT = `You are an expert ad creative analyst. You receive one or more frames from an ad creative (video frames or a static image) plus an optional audio transcript.
@@ -138,7 +138,7 @@ export async function detectCreativeFormat(
   content.push({ type: 'text', text: userText });
 
   const body = {
-    model: CLAUDE_MODEL,
+    model: DEFAULT_CLAUDE_MODEL,
     max_tokens: 1024,
     system: DETECTION_SYSTEM_PROMPT,
     messages: [{ role: 'user' as const, content }],

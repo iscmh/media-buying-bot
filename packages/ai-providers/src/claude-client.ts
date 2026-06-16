@@ -2,17 +2,25 @@ import { computeClaudeCost } from '@mbb/shared';
 import { callProvider } from './chokepoint';
 
 /**
- * Anthropic Claude messages client (Sonnet 4).
+ * Anthropic Claude messages client (Sonnet 4.6).
  *
  * Endpoint: POST https://api.anthropic.com/v1/messages
  * Auth: `x-api-key` header. Also requires `anthropic-version: 2023-06-01`.
  *
- * Phase 3b uses fetch directly. Model pinned to `claude-sonnet-4-20250514`
- * per spec; bump in actual-cost.ts pricing snapshot if rotated.
+ * Polish-13: migrated off claude-sonnet-4-20250514, which was retired
+ * from the Anthropic API on June 15, 2026. Anthropic's deprecation
+ * cadence runs ~12 months, so plan to revisit DEFAULT_CLAUDE_MODEL
+ * when 4.6 nears its own retirement window. Bump in actual-cost.ts
+ * pricing snapshot if rotated.
  */
 
 const CLAUDE_BASE = 'https://api.anthropic.com/v1';
-const CLAUDE_MODEL = 'claude-sonnet-4-20250514';
+/**
+ * Polish-13: centralized model id so future migrations are a one-line
+ * change. Vision-detection.ts and any other Claude call site imports
+ * this constant rather than hardcoding a string.
+ */
+export const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 // Polish-9.6: bumped from 30s to 180s. The Kling pipeline's production-
 // manual call asks Claude to write 16 clip prompts at maxTokens=16384,
 // which routinely runs 30-90s — the old 30s ceiling fired before the
@@ -55,7 +63,7 @@ export interface ClaudeMessagesResult {
 export async function callClaude(input: ClaudeMessagesInput): Promise<ClaudeMessagesResult> {
   const url = `${CLAUDE_BASE}/messages`;
   const body = {
-    model: CLAUDE_MODEL,
+    model: DEFAULT_CLAUDE_MODEL,
     max_tokens: input.maxTokens ?? 4096,
     system: input.systemPrompt,
     messages: [{ role: 'user' as const, content: input.userMessage }],
@@ -74,7 +82,7 @@ export async function callClaude(input: ClaudeMessagesInput): Promise<ClaudeMess
     body,
     timeoutMs: CLAUDE_TIMEOUT_MS,
     requestBodyForLog: {
-      model: CLAUDE_MODEL,
+      model: DEFAULT_CLAUDE_MODEL,
       max_tokens: body.max_tokens,
       system_prompt_chars: input.systemPrompt.length,
       user_message_chars: input.userMessage.length,
@@ -148,7 +156,7 @@ export async function verifyClaudeKey(
       'content-type': 'application/json',
     },
     body: {
-      model: CLAUDE_MODEL,
+      model: DEFAULT_CLAUDE_MODEL,
       max_tokens: 4,
       messages: [{ role: 'user', content: 'pong' }],
     },
