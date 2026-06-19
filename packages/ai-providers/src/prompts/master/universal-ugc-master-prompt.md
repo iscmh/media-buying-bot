@@ -13,6 +13,7 @@ DO NOT:
 - Describe the character with features clearly modeled on a famous person (e.g., "looks like a younger Brad Pitt", "Beyoncé-style hair", "Elon Musk vibes")
 - Use copyrighted character names from films, TV, comics, games (no Marvel/DC, no Disney, no specific anime characters)
 - Reference real social media account names, handles, or specific creators
+- Reference brand names that are inseparable from their founders/owners (Disney/Disneyland, Tesla, SpaceX, Trump properties, Virgin Galactic, Oprah, Dolly Parton). Use generic alternatives (a theme park, an EV company, a luxury hotel, etc.).
 
 DO:
 

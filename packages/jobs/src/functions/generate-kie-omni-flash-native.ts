@@ -447,15 +447,16 @@ export const generateKieOmniFlashNative = inngest.createFunction(
         .join(' ')}`,
     );
 
-    // Polish-12.3: layered scrub before the prompt hits Omni Flash.
-    // Master prompt now instructs Claude to avoid public figures up
-    // front, but if a celebrity name slipped through (e.g., echoed
-    // from the source creative's analysis), strip it here so Gemini's
+    // Polish-12.3 / 12.3.1: layered scrub before the prompt hits Omni
+    // Flash. Master prompt now instructs Claude to avoid public figures
+    // up front, but if a celebrity name OR a brand-as-person reference
+    // (Disney/Tesla/Trump Tower etc.) slipped through (e.g., echoed
+    // from the source creative's analysis), strip both here so Gemini's
     // PROMINENT_PEOPLE_FILTER doesn't trip on segment after segment.
-    const scrubbedCharacter = scrubCelebrityReferences(
+    const scrubbedCharacter = scrubAll(
       stripTextCaptionsBroll(stripCharacterSheetPattern(manual.characterPrompt)),
     );
-    const scrubbedScene = scrubCelebrityReferences(stripTextCaptionsBroll(manual.setPrompt));
+    const scrubbedScene = scrubAll(stripTextCaptionsBroll(manual.setPrompt));
 
     // 3. Generate each segment in parallel.
     const segmentResults = await Promise.all(
@@ -464,7 +465,7 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           step,
           segment: {
             ...segment,
-            combinedDialogue: scrubCelebrityReferences(segment.combinedDialogue),
+            combinedDialogue: scrubAll(segment.combinedDialogue),
           },
           totalSegments: segments.length,
           referenceImageUrl,
@@ -993,6 +994,55 @@ export function scrubCelebrityReferences(text: string): string {
     scrubbed = scrubbed.replace(pattern, 'a popular figure');
   }
   return scrubbed;
+}
+
+/**
+ * Polish-12.3.1: brands inseparable from a real founder / owner /
+ * spokesperson trip the same PROMINENT_PEOPLE_FILTER even when the
+ * person's name is never spoken. "Disney World" reads as Walt Disney
+ * to the classifier; "Tesla" reads as Musk; "Trump Tower" reads as
+ * Trump. Replace each with a generic category so the story stays
+ * intact but the trigger disappears. Maintenance list — extend as
+ * production trips on new ones; the long-term fix is Polish-12.4
+ * (kie.ai character_ids) which removes the inference-layer trigger.
+ */
+const BRAND_PERSON_PATTERNS: ReadonlyArray<{ pattern: RegExp; replacement: string }> = [
+  // The trailing (?!\w) (negative lookahead) lets "Disney+" match —
+  // a plain \b fails there because both `+` and the following space
+  // are non-word characters, so no word boundary exists between them.
+  {
+    pattern: /\bdisney(?:\s*(?:world|land|plus|park|cruise)|\+)?(?!\w)/gi,
+    replacement: 'a theme park',
+  },
+  { pattern: /\btesla\b/gi, replacement: 'an EV company' },
+  { pattern: /\bspacex\b/gi, replacement: 'a space company' },
+  { pattern: /\btrump\s+(tower|hotel|organization|properties)\b/gi, replacement: 'a luxury hotel' },
+  {
+    pattern: /\bvirgin\s+(galactic|atlantic|records)\b/gi,
+    replacement: 'a transportation company',
+  },
+  { pattern: /\bberkshire\s+hathaway\b/gi, replacement: 'an investment firm' },
+  { pattern: /\bdolly\s+parton\b/gi, replacement: 'a country music star' },
+  { pattern: /\boprah\b/gi, replacement: 'a popular talk show host' },
+];
+
+export function scrubBrandPersonReferences(text: string): string {
+  if (!text) return text;
+  let scrubbed = text;
+  for (const { pattern, replacement } of BRAND_PERSON_PATTERNS) {
+    scrubbed = scrubbed.replace(pattern, replacement);
+  }
+  return scrubbed;
+}
+
+/**
+ * Polish-12.3.1: compose both scrubbers in canonical order. Direct
+ * celebrity names first (replaced with the same placeholder so the
+ * sentence stays grammatical), then brand-as-person patterns (each
+ * with a category-specific replacement).
+ */
+export function scrubAll(text: string): string {
+  return scrubBrandPersonReferences(scrubCelebrityReferences(text));
 }
 
 interface OmniManualLike {

@@ -23,6 +23,8 @@ import {
   RETRYABLE_OMNI_FAIL_CODES,
   resolveTargetDuration,
   runOmniSegment,
+  scrubAll,
+  scrubBrandPersonReferences,
   scrubCelebrityReferences,
   splitClipsIntoOmniSegments,
 } from '../src/functions/generate-kie-omni-flash-native';
@@ -806,5 +808,107 @@ describe('Polish-14.1: resolveTargetDuration', () => {
 
   it('falls back to 30s default when source_duration_seconds is Infinity', () => {
     expect(resolveTargetDuration({ source_duration_seconds: Infinity })).toBe(30);
+  });
+});
+
+describe('Polish-12.3.1: scrubBrandPersonReferences', () => {
+  it('replaces Disney World / Disneyland / Disney+ with a generic theme park', () => {
+    expect(scrubBrandPersonReferences('Took the kids to Disney World last summer.')).toBe(
+      'Took the kids to a theme park last summer.',
+    );
+    expect(scrubBrandPersonReferences('Disneyland Paris was magic.')).toBe(
+      'a theme park Paris was magic.',
+    );
+    expect(scrubBrandPersonReferences('I watch Disney+ every night.')).toBe(
+      'I watch a theme park every night.',
+    );
+  });
+
+  it('replaces Tesla with a generic EV company', () => {
+    expect(scrubBrandPersonReferences('Drove my Tesla home.')).toBe('Drove my an EV company home.');
+  });
+
+  it('replaces SpaceX with a generic space company', () => {
+    expect(scrubBrandPersonReferences('SpaceX launched another rocket.')).toBe(
+      'a space company launched another rocket.',
+    );
+  });
+
+  it('replaces Trump Tower / Trump Hotel with a generic luxury hotel', () => {
+    expect(scrubBrandPersonReferences('Met him at Trump Tower.')).toBe(
+      'Met him at a luxury hotel.',
+    );
+    expect(scrubBrandPersonReferences('Stayed at the Trump Hotel in Vegas.')).toBe(
+      'Stayed at the a luxury hotel in Vegas.',
+    );
+  });
+
+  it('replaces Virgin Galactic / Atlantic / Records', () => {
+    expect(scrubBrandPersonReferences('Booked a Virgin Atlantic flight.')).toBe(
+      'Booked a a transportation company flight.',
+    );
+  });
+
+  it('replaces Oprah / Dolly Parton with category descriptors', () => {
+    expect(scrubBrandPersonReferences('She watches Oprah every day.')).toBe(
+      'She watches a popular talk show host every day.',
+    );
+    expect(scrubBrandPersonReferences('Dolly Parton sang the opener.')).toBe(
+      'a country music star sang the opener.',
+    );
+  });
+
+  it('is word-boundary aware — leaves "tesla coil" inside a science context untouched-ish', () => {
+    // The pattern matches "tesla" as a standalone word, so "tesla coil"
+    // DOES match (boundary between "tesla" and " coil"). That's fine —
+    // an EV-company coil is unlikely prose. Word-boundary-tightening is
+    // a future polish; for now we accept over-scrub over filter-trip.
+    // The important guarantee is that mid-word matches like "TESLAtest"
+    // remain UNTOUCHED.
+    expect(scrubBrandPersonReferences('TESLAtest is a fake brand.')).toBe(
+      'TESLAtest is a fake brand.',
+    );
+    expect(scrubBrandPersonReferences('virginiaplate')).toBe('virginiaplate');
+  });
+
+  it('leaves clean text untouched', () => {
+    const clean = 'A 30yo woman with dark hair, wearing a blue cotton t-shirt.';
+    expect(scrubBrandPersonReferences(clean)).toBe(clean);
+  });
+
+  it('handles empty input safely', () => {
+    expect(scrubBrandPersonReferences('')).toBe('');
+  });
+});
+
+describe('Polish-12.3.1: scrubAll composes both scrubbers', () => {
+  it('strips a direct celebrity name AND a brand-person reference in one pass', () => {
+    const input = 'Elon Musk runs Tesla and is a popular figure.';
+    // First scrubCelebrityReferences runs ("Elon Musk" → "a popular
+    // figure"), then scrubBrandPersonReferences runs ("Tesla" → "an EV
+    // company"). Order matters only because the celebrity scrub may
+    // change context — none of the brand patterns depend on celebrity
+    // text remaining, so the result is stable either way.
+    const out = scrubAll(input);
+    expect(out).not.toMatch(/Elon Musk/i);
+    expect(out).not.toMatch(/\bTesla\b/i);
+    expect(out).toMatch(/an EV company/);
+    expect(out).toMatch(/a popular figure/);
+  });
+
+  it('leaves clean text untouched', () => {
+    const clean = 'A 30yo woman with dark hair, wearing a blue cotton t-shirt.';
+    expect(scrubAll(clean)).toBe(clean);
+  });
+});
+
+describe('Polish-12.3.1: KIE_OMNI_FLASH_HARD_DIRECTIVE pairs with the master-prompt brand-person list', () => {
+  it('master prompt names the brand-as-person trap', async () => {
+    const { getUniversalUgcMasterPrompt } = await import('@mbb/ai-providers');
+    const text = getUniversalUgcMasterPrompt();
+    expect(text).toMatch(/inseparable from their founders\/owners/i);
+    expect(text).toMatch(/Disney/);
+    expect(text).toMatch(/Tesla/);
+    expect(text).toMatch(/Trump properties/);
   });
 });
