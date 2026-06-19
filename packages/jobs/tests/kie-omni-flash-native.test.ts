@@ -11,7 +11,7 @@
  * The Inngest function itself is integration-tested via the Inngest
  * dashboard — these tests cover the prompt math.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildContinuousMonologue,
   buildOmniFlashPrompt,
@@ -22,6 +22,7 @@ import {
   isRetryableOmniFailure,
   RETRYABLE_OMNI_FAIL_CODES,
   resolveTargetDuration,
+  runFrameExtract,
   runOmniSegment,
   scrubAll,
   scrubBrandPersonReferences,
@@ -1012,5 +1013,170 @@ describe('Polish-12.4: runOmniSegment plumbs characterId into the submit call', 
     });
     expect(result.ok).toBe(true);
     expect(seen).toContain('kie-omni-submit-0-a1');
+  });
+});
+
+describe('Polish-12.5: runOmniSegment surfaces referenceUrlUsed on SegmentSuccess', () => {
+  // Audit: caller's chain-continuity bookkeeping reads referenceUrlUsed
+  // off each SegmentSuccess to populate the composite's
+  // per_segment_reference_urls metadata. Pin that we surface it.
+
+  const segment = {
+    segmentIndex: 0,
+    clips: [{ videoPrompt: 'Hi.', dialogue: 'Hi.' }],
+    estimatedDurationSeconds: 5,
+    combinedDialogue: '"Hi."',
+  };
+
+  function makeStubStep(responses: Record<string, unknown>) {
+    const step = {
+      run: async (name: string, _fn: () => Promise<unknown>) => {
+        if (!(name in responses)) throw new Error(`unexpected step.run("${name}")`);
+        return responses[name];
+      },
+      sleep: async () => undefined,
+    };
+    return step;
+  }
+
+  it('reports the referenceImageUrl that fed the segment', async () => {
+    const step = makeStubStep({
+      'kie-omni-submit-0-a1': { ok: true, taskId: 't' },
+      'kie-omni-check-0-a1-0': {
+        ok: true,
+        state: 'success',
+        outputUrl: 'https://kie.ai/out.mp4',
+      },
+      'kie-omni-upload-0': { ok: true, publicUrl: 'https://supa/out.mp4' },
+    });
+    const result = await runOmniSegment({
+      step,
+      segment,
+      totalSegments: 1,
+      referenceImageUrl: 'https://supa/chain-link-frame.jpg',
+      characterId: 'char_abc',
+      characterDescription: 'A 30yo woman.',
+      sceneDescription: 'Sunny kitchen.',
+      userId: 'user-1',
+      jobId: 'job-1',
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.referenceUrlUsed).toBe('https://supa/chain-link-frame.jpg');
+    }
+  });
+});
+
+describe('Polish-12.5: runFrameExtract chain helper', () => {
+  const realEnv = process.env;
+  beforeEach(() => {
+    process.env = { ...realEnv };
+  });
+  afterEach(() => {
+    process.env = realEnv;
+  });
+
+  function makeStubStep(responses: Record<string, unknown>) {
+    const seen: string[] = [];
+    const step = {
+      run: async (name: string, _fn: () => Promise<unknown>) => {
+        seen.push(name);
+        if (!(name in responses)) throw new Error(`unexpected step.run("${name}")`);
+        return responses[name];
+      },
+      sleep: async (_name: string, _duration: string) => undefined,
+    };
+    return { step, seen };
+  }
+
+  it('returns ok=false with a clear reason when REPLICATE_FRAME_EXTRACT_MODEL_ID is unset', async () => {
+    delete process.env.REPLICATE_FRAME_EXTRACT_MODEL_ID;
+    const { step } = makeStubStep({});
+    const r = await runFrameExtract({
+      step,
+      videoUrl: 'https://supa/seg-0.mp4',
+      segmentIndex: 0,
+      userId: 'u',
+      jobId: 'j',
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/REPLICATE_FRAME_EXTRACT_MODEL_ID|chain continuity disabled/);
+    }
+  });
+
+  it('success: submit OK → poll completed → returns frame URL + cost', async () => {
+    process.env.REPLICATE_FRAME_EXTRACT_MODEL_ID = 'owner/ffmpeg-util';
+    const { step, seen } = makeStubStep({
+      'kie-omni-frame-extract-submit-0': {
+        ok: true,
+        predictionId: 'pred_x',
+        modelId: 'owner/ffmpeg-util',
+      },
+      'kie-omni-frame-extract-check-0-0': {
+        status: 'completed',
+        frameUrl: 'https://replicate/frame.jpg',
+        costUsd: 0.02,
+      },
+    });
+    const r = await runFrameExtract({
+      step,
+      videoUrl: 'https://supa/seg-0.mp4',
+      segmentIndex: 0,
+      userId: 'u',
+      jobId: 'j',
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.publicUrl).toBe('https://replicate/frame.jpg');
+      expect(r.costUsd).toBeCloseTo(0.02, 4);
+    }
+    expect(seen).toContain('kie-omni-frame-extract-submit-0');
+    expect(seen).toContain('kie-omni-frame-extract-check-0-0');
+  });
+
+  it('failure: submit returns ok=false → bubbles error reason', async () => {
+    process.env.REPLICATE_FRAME_EXTRACT_MODEL_ID = 'owner/ffmpeg-util';
+    const { step } = makeStubStep({
+      'kie-omni-frame-extract-submit-1': {
+        ok: false,
+        modelId: 'owner/ffmpeg-util',
+        errorMessage: 'rate limit',
+      },
+    });
+    const r = await runFrameExtract({
+      step,
+      videoUrl: 'https://supa/seg-1.mp4',
+      segmentIndex: 1,
+      userId: 'u',
+      jobId: 'j',
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/rate limit/);
+  });
+
+  it('failure: poll returns status=failed → bubbles errorMessage', async () => {
+    process.env.REPLICATE_FRAME_EXTRACT_MODEL_ID = 'owner/ffmpeg-util';
+    const { step } = makeStubStep({
+      'kie-omni-frame-extract-submit-2': {
+        ok: true,
+        predictionId: 'pred_y',
+        modelId: 'owner/ffmpeg-util',
+      },
+      'kie-omni-frame-extract-check-2-0': {
+        status: 'failed',
+        errorMessage: 'codec unsupported',
+        costUsd: 0,
+      },
+    });
+    const r = await runFrameExtract({
+      step,
+      videoUrl: 'https://supa/seg-2.mp4',
+      segmentIndex: 2,
+      userId: 'u',
+      jobId: 'j',
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/codec unsupported/);
   });
 });

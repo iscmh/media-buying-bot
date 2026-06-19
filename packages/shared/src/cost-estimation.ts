@@ -79,6 +79,13 @@ const PRICING = {
   // against the kie.ai dashboard credit deduction after the first
   // prod call lands.
   kieOmniFlashCharacterCreateUsd: 0.15,
+  // Polish-12.5: per-chain-link frame extraction via a Replicate
+  // ffmpeg-style utility model. Charged on N-1 segments (the final
+  // segment doesn't need its last frame). $0.02 matches most
+  // community ffmpeg-utility model pricing on Replicate. Override
+  // via REPLICATE_FRAME_EXTRACT_COST_USD env to track the picked
+  // model's actual rate.
+  kieOmniFlashFrameExtractUsd: 0.02,
 
   // Polish-10 / Polish-10.1: Kling 3.0 Omni multi-segment pipeline.
   // Default mode dropped pro→standard for cheaper iteration (720p is
@@ -370,6 +377,15 @@ function estimateByPipeline(
         } × $${PRICING.kieOmniFlashPerVariantUsd.toFixed(2)})`,
         cost: round4(totalSegments * PRICING.kieOmniFlashPerVariantUsd),
       });
+      // Polish-12.5: frame extraction for chain continuity. N-1 per
+      // variant — the final segment's last frame is never extracted.
+      const frameExtractCount = variantCount * Math.max(0, segmentCount - 1);
+      if (frameExtractCount > 0) {
+        breakdown.push({
+          item: `Chain-continuity frame extracts (${frameExtractCount} × $${PRICING.kieOmniFlashFrameExtractUsd.toFixed(2)})`,
+          cost: round4(frameExtractCount * PRICING.kieOmniFlashFrameExtractUsd),
+        });
+      }
       if (stitchCount > 0) {
         breakdown.push({
           item: `idan054 video stitching (${stitchCount} × $${PRICING.kieOmniFlashStitchUsd.toFixed(2)})`,

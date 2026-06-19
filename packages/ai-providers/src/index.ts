@@ -108,6 +108,16 @@ export {
   type CheckConcatResult,
 } from './replicate-concat';
 export {
+  submitReplicateFrameExtract,
+  checkReplicateFrameExtract,
+  getFrameExtractModelId,
+  isFrameExtractEnabled,
+  type SubmitFrameExtractInput,
+  type SubmitFrameExtractResult,
+  type CheckFrameExtractInput,
+  type CheckFrameExtractResult,
+} from './replicate-frame-extract';
+export {
   submitKlingOmni,
   checkKlingOmni,
   getKlingOmniRawModelId,

@@ -3,12 +3,15 @@ import {
   callClaude,
   callGeminiImage,
   checkReplicateConcat,
+  checkReplicateFrameExtract,
   createKieOmniCharacter,
   getUniversalUgcMasterPrompt,
+  isFrameExtractEnabled,
   isVideoConcatEnabled,
   pollKieOmniTask,
   submitKieOmniVideo,
   submitReplicateConcat,
+  submitReplicateFrameExtract,
   type KieOmniDuration,
   type KieOmniResolution,
 } from '@mbb/ai-providers';
@@ -524,33 +527,93 @@ export const generateKieOmniFlashNative = inngest.createFunction(
       ? characterResult.characterId
       : undefined;
 
-    // 3. Generate each segment in parallel.
-    const segmentResults = await Promise.all(
-      segments.map((segment) =>
-        runOmniSegment({
+    // 3. Generate segments SEQUENTIALLY with chain continuity (Polish-12.5).
+    //    Each segment grounds on the previous segment's actual rendered last
+    //    frame, eliminating per-segment character drift. The Polish-12.4
+    //    character_id still anchors identity, but the chained image_urls
+    //    reference pins pixel-level consistency segment-to-segment.
+    //
+    //    Trade-off: ~3x wall-clock vs the Polish-12.4 parallel path. The
+    //    sequential + retry-loop math is the conscious cost for visual
+    //    stability across the stitched output.
+    //
+    //    Graceful degradation:
+    //      - First segment uses the Nano Banana reference (unchanged).
+    //      - If a segment's last-frame extraction fails (or
+    //        REPLICATE_FRAME_EXTRACT_MODEL_ID is unset), the next segment
+    //        falls back to the Nano Banana reference — character_id still
+    //        anchors identity, so quality degrades modestly rather than
+    //        failing the job.
+    //      - If a segment itself fails (after its own internal retries),
+    //        the chain stops and the worker reports the failure.
+    const segmentResults: SegmentResult[] = [];
+    let currentReferenceUrl = referenceImageUrl;
+    let chainBreakReason: string | undefined;
+    let frameExtractTotalCost = 0;
+    const chainReferenceUrls: string[] = [];
+
+    for (const segment of segments) {
+      const result = await runOmniSegment({
+        step,
+        segment: {
+          ...segment,
+          combinedDialogue: scrubAll(segment.combinedDialogue),
+        },
+        totalSegments: segments.length,
+        referenceImageUrl: currentReferenceUrl,
+        characterId: characterIdForSegments,
+        characterDescription: scrubbedCharacter,
+        sceneDescription: scrubbedScene,
+        userId,
+        jobId,
+      });
+      segmentResults.push(result);
+
+      if (!result.ok) {
+        chainBreakReason = `segment ${segment.segmentIndex} failed: ${result.error}`;
+        console.log(`[kie-omni] chain broken — ${chainBreakReason}`);
+        break;
+      }
+
+      const isLastSegment = segment.segmentIndex === segments.length - 1;
+      if (!isLastSegment) {
+        const frameResult = await runFrameExtract({
           step,
-          segment: {
-            ...segment,
-            combinedDialogue: scrubAll(segment.combinedDialogue),
-          },
-          totalSegments: segments.length,
-          referenceImageUrl,
-          characterId: characterIdForSegments,
-          characterDescription: scrubbedCharacter,
-          sceneDescription: scrubbedScene,
+          videoUrl: result.publicUrl,
+          segmentIndex: segment.segmentIndex,
           userId,
           jobId,
-        }),
-      ),
-    );
+        });
+        if (frameResult.ok) {
+          currentReferenceUrl = frameResult.publicUrl;
+          chainReferenceUrls.push(frameResult.publicUrl);
+          frameExtractTotalCost += frameResult.costUsd;
+          console.log(
+            `[kie-omni] segment ${segment.segmentIndex} → next ref (chained): ${frameResult.publicUrl}`,
+          );
+        } else {
+          // currentReferenceUrl stays as whatever fed segment N. The
+          // first fallback is the Nano Banana reference; if a later
+          // segment's extraction fails, we keep using the last frame
+          // we successfully extracted (or Nano Banana when nothing has
+          // worked yet). character_id still anchors identity.
+          console.warn(
+            `[kie-omni] segment ${segment.segmentIndex} frame extraction failed (${frameResult.error}); ` +
+              `next segment will reuse the current reference (degraded chain continuity)`,
+          );
+        }
+      }
+    }
 
     const failures = segmentResults.filter((r) => !r.ok);
     if (failures.length > 0) {
       const msg = failures.map((f) => `segment ${f.segmentIndex}: ${f.error}`).join('; ');
       console.log(`[kie-omni] segment failure(s): ${msg}`);
       // Tally any costs that did land (segment Omni cost charged on
-      // success only; nothing partial here).
+      // success only; nothing partial here). Frame extract costs from
+      // successful chain links also stick.
       for (const r of segmentResults) totalCost += r.costUsd;
+      totalCost += frameExtractTotalCost;
       await markJobFailed(jobId, userId, `Omni segment(s) failed: ${msg}`, totalCost);
       return { jobId, mode, generated: 0 };
     }
@@ -561,6 +624,7 @@ export const generateKieOmniFlashNative = inngest.createFunction(
     const successes = segmentResults.filter((r): r is SegmentSuccess => r.ok);
     const segmentUrls = successes.map((r) => r.publicUrl);
     for (const r of successes) totalCost += r.costUsd;
+    totalCost += frameExtractTotalCost;
 
     // 4. Stitch when 2+ segments. Single-segment path skips this.
     let finalUrl: string;
@@ -613,6 +677,9 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           duration_seconds: r.durationSeconds,
           // Polish-12.2: track retry attempts per segment for QA.
           attempts: r.attempts,
+          // Polish-12.5: which reference fed this segment. Lets QA
+          // walk the chain back to its anchor.
+          reference_url_used: r.referenceUrlUsed,
         },
       }));
       await db.insert(schema.generatedCreatives).values(rows);
@@ -650,6 +717,15 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           // content triggering Gemini filters frequently.
           total_attempts: successes.reduce((s, x) => s + x.attempts, 0),
           attempts_by_segment: successes.map((x) => x.attempts),
+          // Polish-12.5: chain-continuity audit trail. Each entry is
+          // the extracted last-frame URL that fed into the NEXT
+          // segment's image_urls reference. Length = successes-1 when
+          // every chain link extracted cleanly. chain_break_reason
+          // populated only when a segment itself failed mid-chain.
+          chain_continuity_enabled: isFrameExtractEnabled(),
+          chain_reference_urls: chainReferenceUrls,
+          chain_break_reason: chainBreakReason ?? null,
+          per_segment_reference_urls: successes.map((x) => x.referenceUrlUsed),
         },
       });
     });
@@ -690,6 +766,13 @@ interface SegmentSuccess {
   attempts: number;
   /** Sum of kie.ai cost across all attempts (Gemini bills attempts, not successes). */
   costUsd: number;
+  /**
+   * Polish-12.5: which image_urls reference this segment actually
+   * generated against. Segment 0 = Nano Banana shared reference;
+   * segments 1..N = the previous segment's extracted last frame
+   * (or Nano Banana fallback when extraction failed).
+   */
+  referenceUrlUsed: string;
 }
 interface SegmentFailure {
   ok: false;
@@ -940,7 +1023,110 @@ export async function runOmniSegment(input: {
     durationSeconds: segmentDuration,
     attempts,
     costUsd: attempts * KIE_OMNI_COST_USD_PER_SEGMENT,
+    // Polish-12.5: surface which image_urls reference fed into this
+    // segment so the caller can audit chain continuity per segment.
+    referenceUrlUsed: referenceImageUrl,
   };
+}
+
+// =========================================================================
+// Polish-12.5: per-chain-link frame extraction (sequential helper)
+// =========================================================================
+
+/**
+ * Polish-12.5: chain-continuity frame extraction. Submits the just-
+ * generated segment's MP4 to the Replicate frame-extract model, polls
+ * for completion, returns the extracted last frame's public URL.
+ *
+ * Disabled gracefully when REPLICATE_FRAME_EXTRACT_MODEL_ID isn't
+ * configured — caller falls back to the existing Nano Banana reference
+ * for the next segment (character_id still anchors identity).
+ *
+ * Pure step-orchestration around the Replicate API surface. The
+ * returned frame URL is what the model emits — we don't re-host it
+ * to Supabase because the next segment's kie.ai call only needs to
+ * dereference it once during inference, and Replicate's delivery
+ * URLs are stable for the prediction's TTL (24h+). If kie.ai ever
+ * complains about cross-origin fetches we'd add a re-upload step
+ * here.
+ */
+export async function runFrameExtract(input: {
+  step: InngestStepLike;
+  videoUrl: string;
+  segmentIndex: number;
+  userId: string;
+  jobId: string;
+}): Promise<{ ok: true; publicUrl: string; costUsd: number } | { ok: false; error: string }> {
+  const { step, videoUrl, segmentIndex, userId, jobId } = input;
+
+  if (!isFrameExtractEnabled()) {
+    return {
+      ok: false,
+      error: 'REPLICATE_FRAME_EXTRACT_MODEL_ID not set; chain continuity disabled',
+    };
+  }
+
+  const submit = await step.run(`kie-omni-frame-extract-submit-${segmentIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['kling']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+    return submitReplicateFrameExtract({
+      userId,
+      apiKey: keys.kling!,
+      videoUrl,
+      generationJobId: jobId,
+    });
+  });
+  if (!submit.ok || !('predictionId' in submit) || !submit.predictionId) {
+    const err =
+      'errorMessage' in submit
+        ? submit.errorMessage
+        : 'error' in submit
+          ? submit.error
+          : 'frame-extract submit failed';
+    return { ok: false, error: err ?? 'submit failed' };
+  }
+  const predictionId = submit.predictionId;
+
+  let frameUrl: string | undefined;
+  let extractCost = 0;
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    await step.sleep(
+      `kie-omni-frame-extract-poll-${segmentIndex}-${attempt}`,
+      `${POLL_INTERVAL_SECONDS}s`,
+    );
+    const tick = await step.run(
+      `kie-omni-frame-extract-check-${segmentIndex}-${attempt}`,
+      async () => {
+        const keys = await loadDecryptedKeys(userId, ['kling']);
+        return checkReplicateFrameExtract({
+          userId,
+          apiKey: keys.kling!,
+          predictionId,
+          generationJobId: jobId,
+        });
+      },
+    );
+    if (tick.status === 'completed') {
+      frameUrl = tick.frameUrl;
+      extractCost = tick.costUsd;
+      break;
+    }
+    if (tick.status === 'failed') {
+      return { ok: false, error: tick.errorMessage ?? 'frame-extract failed' };
+    }
+  }
+  if (!frameUrl) {
+    return {
+      ok: false,
+      error: `frame-extract timed out after ${POLL_MAX_ATTEMPTS * POLL_INTERVAL_SECONDS}s`,
+    };
+  }
+  return { ok: true, publicUrl: frameUrl, costUsd: extractCost };
 }
 
 interface StitchSuccess {
