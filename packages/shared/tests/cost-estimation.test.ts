@@ -232,9 +232,11 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
       pipeline: 'kie_omni_flash_native',
       estimatedDurationSeconds: 10,
     });
-    expect(r.estimateUsd).toBeCloseTo(1, 4);
+    // Polish-12.4: +$0.15 character registration → $1.15 total.
+    expect(r.estimateUsd).toBeCloseTo(1.15, 4);
     expect(r.breakdown.some((b) => /1 segment\b/.test(b.item))).toBe(true);
     expect(r.breakdown.some((b) => /stitching/.test(b.item))).toBe(false);
+    expect(r.breakdown.some((b) => /character registration/i.test(b.item))).toBe(true);
   });
 
   it('≤20s → 2 segments + stitch: $0.05 + $0.05 + $1.80 + $0.05 = $1.95', () => {
@@ -244,7 +246,8 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
       pipeline: 'kie_omni_flash_native',
       estimatedDurationSeconds: 20,
     });
-    expect(r.estimateUsd).toBeCloseTo(1.95, 4);
+    // Polish-12.4: +$0.15 character registration → $2.10 total.
+    expect(r.estimateUsd).toBeCloseTo(2.1, 4);
     expect(r.breakdown.some((b) => /2 segments\b/.test(b.item))).toBe(true);
     expect(r.breakdown.some((b) => /idan054 video stitching/.test(b.item))).toBe(true);
   });
@@ -256,7 +259,8 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
       pipeline: 'kie_omni_flash_native',
       estimatedDurationSeconds: 30,
     });
-    expect(r.estimateUsd).toBeCloseTo(2.85, 4);
+    // Polish-12.4: +$0.15 character registration → $3.00 total.
+    expect(r.estimateUsd).toBeCloseTo(3, 4);
     expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -266,7 +270,8 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
       variantCount: 1,
       pipeline: 'kie_omni_flash_native',
     });
-    expect(r.estimateUsd).toBeCloseTo(2.85, 4);
+    // Polish-12.4: +$0.15 character registration → $3.00 total.
+    expect(r.estimateUsd).toBeCloseTo(3, 4);
     expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
   });
 });
@@ -284,7 +289,8 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       pipeline: 'kie_omni_flash_native',
       estimatedDurationSeconds: 60,
     });
-    expect(r.estimateUsd).toBeCloseTo(5.55, 4);
+    // Polish-12.4: +$0.15 character registration → $5.70 total.
+    expect(r.estimateUsd).toBeCloseTo(5.7, 4);
     expect(r.breakdown.some((b) => /6 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -295,7 +301,8 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       pipeline: 'kie_omni_flash_native',
       estimatedDurationSeconds: 90,
     });
-    expect(r.estimateUsd).toBeCloseTo(8.25, 4);
+    // Polish-12.4: +$0.15 character registration → $8.40 total.
+    expect(r.estimateUsd).toBeCloseTo(8.4, 4);
     expect(r.breakdown.some((b) => /9 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -306,7 +313,8 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       pipeline: 'kie_omni_flash_native',
       estimatedDurationSeconds: 120,
     });
-    expect(r.estimateUsd).toBeCloseTo(10.95, 4);
+    // Polish-12.4: +$0.15 character registration → $11.10 total.
+    expect(r.estimateUsd).toBeCloseTo(11.1, 4);
     expect(r.breakdown.some((b) => /12 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -317,7 +325,8 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       pipeline: 'kie_omni_flash_native',
       estimatedDurationSeconds: 600,
     });
-    expect(r.estimateUsd).toBeCloseTo(27.15, 4);
+    // Polish-12.4: +$0.15 character registration → $27.30 total.
+    expect(r.estimateUsd).toBeCloseTo(27.3, 4);
     expect(r.breakdown.some((b) => /30 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -328,8 +337,9 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       pipeline: 'kie_omni_flash_native',
       estimatedDurationSeconds: 31,
     });
-    // $0.05 + $0.05 + 4 × $0.90 + $0.05 = $3.75
-    expect(r.estimateUsd).toBeCloseTo(3.75, 4);
+    // Polish-12.4: + $0.15 character registration. Total
+    // $0.05 + $0.05 + $0.15 + 4 × $0.90 + $0.05 = $3.90
+    expect(r.estimateUsd).toBeCloseTo(3.9, 4);
     expect(r.breakdown.some((b) => /4 segments\b/.test(b.item))).toBe(true);
   });
 });
@@ -348,7 +358,8 @@ describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native qu
       pipeline: 'kie_omni_flash_native',
       sourceDurationSeconds: 18,
     });
-    expect(r.estimateUsd).toBeCloseTo(1.95, 4);
+    // Polish-12.4: +$0.15 character registration → $2.10 total.
+    expect(r.estimateUsd).toBeCloseTo(2.1, 4);
     expect(r.breakdown.some((b) => /2 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -359,7 +370,8 @@ describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native qu
       pipeline: 'kie_omni_flash_native',
       sourceDurationSeconds: 60,
     });
-    expect(r.estimateUsd).toBeCloseTo(5.55, 4);
+    // Polish-12.4: +$0.15 character registration → $5.70 total.
+    expect(r.estimateUsd).toBeCloseTo(5.7, 4);
     expect(r.breakdown.some((b) => /6 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -371,16 +383,18 @@ describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native qu
       sourceDurationSeconds: 18,
       estimatedDurationSeconds: 90, // would imply 9 segments
     });
-    // Source wins → 2 segments → $1.95
-    expect(r.estimateUsd).toBeCloseTo(1.95, 4);
+    // Source wins → 2 segments → $1.95 + $0.15 character = $2.10
+    expect(r.estimateUsd).toBeCloseTo(2.1, 4);
   });
 
-  it('back-compat: neither source nor estimated supplied → 30s default → $2.85', () => {
+  it('back-compat: neither source nor estimated supplied → 30s default → $3.00 (post-12.4)', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'kie_omni_flash_native',
     });
-    expect(r.estimateUsd).toBeCloseTo(2.85, 4);
+    // Polish-12.4: was $2.85 pre-character-creation; now $3.00 with
+    // the kie.ai character registration line added.
+    expect(r.estimateUsd).toBeCloseTo(3, 4);
   });
 });

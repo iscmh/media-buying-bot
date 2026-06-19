@@ -316,3 +316,156 @@ describe('Polish-12: translateKieErrorStatus', () => {
     expect(translateKieErrorStatus(undefined, 'unknown')).toBe('unknown');
   });
 });
+
+describe('Polish-12.4: submitKieOmniVideo characterIds plumbing', () => {
+  it('includes character_ids on body.input when caller passes characterIds', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, data: { taskId: 'task_xyz' } },
+    });
+    const { submitKieOmniVideo } = await import('../src/kie-omni');
+    await submitKieOmniVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      imageUrls: ['https://x/ref.png'],
+      characterIds: ['char_abc'],
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.input.character_ids).toEqual(['char_abc']);
+  });
+
+  it('omits character_ids from body.input when caller passes undefined (back-compat)', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, data: { taskId: 'task_xyz' } },
+    });
+    const { submitKieOmniVideo } = await import('../src/kie-omni');
+    await submitKieOmniVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      imageUrls: ['https://x/ref.png'],
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.input.character_ids).toBeUndefined();
+  });
+
+  it('truncates character_ids to kie.ai max of 3 when caller passes more', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, data: { taskId: 't' } },
+    });
+    const { submitKieOmniVideo } = await import('../src/kie-omni');
+    await submitKieOmniVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      characterIds: ['c1', 'c2', 'c3', 'c4', 'c5'],
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.input.character_ids).toEqual(['c1', 'c2', 'c3']);
+  });
+});
+
+describe('Polish-12.4: createKieOmniCharacter', () => {
+  it('POSTs the documented body shape to /omni/character/create', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        msg: 'success',
+        data: {
+          characterId: 'b09dbf56_abc',
+          characterName: 'ad_character',
+          imageUrl: 'https://kie.ai/cached.png',
+        },
+      },
+    });
+    const { createKieOmniCharacter } = await import('../src/kie-omni');
+    const r = await createKieOmniCharacter({
+      userId: 'u',
+      apiKey: 'k',
+      imageUrl: 'https://supa/ref.png',
+      characterDescription: 'A 30yo woman with dark hair.',
+      characterName: 'ad_character',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.characterId).toBe('b09dbf56_abc');
+    expect(r.characterName).toBe('ad_character');
+    expect(r.imageUrl).toBe('https://kie.ai/cached.png');
+    expect(calls[0]!.url).toContain('/api/v1/omni/character/create');
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.description).toBe('A 30yo woman with dark hair.');
+    expect(body.image_urls).toEqual(['https://supa/ref.png']);
+    expect(body.character_name).toBe('ad_character');
+  });
+
+  it('returns ok=false when response is 200 OK but characterId is missing', async () => {
+    captureFetch({
+      status: 200,
+      body: { code: 200, data: { characterName: 'x' } },
+    });
+    const { createKieOmniCharacter } = await import('../src/kie-omni');
+    const r = await createKieOmniCharacter({
+      userId: 'u',
+      apiKey: 'k',
+      imageUrl: 'https://x/r.png',
+      characterDescription: 'd',
+      characterName: 'n',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/missing characterId/);
+  });
+
+  it('translates 402 insufficient balance', async () => {
+    captureFetch({
+      status: 402,
+      body: { code: 402, msg: 'insufficient' },
+    });
+    const { createKieOmniCharacter } = await import('../src/kie-omni');
+    const r = await createKieOmniCharacter({
+      userId: 'u',
+      apiKey: 'k',
+      imageUrl: 'https://x/r.png',
+      characterDescription: 'd',
+      characterName: 'n',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/insufficient balance/i);
+  });
+
+  it('treats a 200-wrapped non-success code as a soft failure', async () => {
+    captureFetch({
+      status: 200,
+      body: { code: 422, msg: 'image too large' },
+    });
+    const { createKieOmniCharacter } = await import('../src/kie-omni');
+    const r = await createKieOmniCharacter({
+      userId: 'u',
+      apiKey: 'k',
+      imageUrl: 'https://x/r.png',
+      characterDescription: 'd',
+      characterName: 'n',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/validation failed/i);
+  });
+
+  it('translates 401 invalid API key', async () => {
+    captureFetch({
+      status: 401,
+      body: { code: 401, msg: 'unauthorized' },
+    });
+    const { createKieOmniCharacter } = await import('../src/kie-omni');
+    const r = await createKieOmniCharacter({
+      userId: 'u',
+      apiKey: 'bad',
+      imageUrl: 'https://x/r.png',
+      characterDescription: 'd',
+      characterName: 'n',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/invalid API key/i);
+  });
+});

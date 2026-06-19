@@ -74,6 +74,11 @@ const PRICING = {
   // Polish-12.1: when 2+ segments, the existing Polish-9.12 idan054
   // ffmpeg-concat path stitches them.
   kieOmniFlashStitchUsd: 0.05,
+  // Polish-12.4: kie.ai character/create endpoint cost. Docs don't
+  // publish pricing; $0.15 is a placeholder pending reconciliation
+  // against the kie.ai dashboard credit deduction after the first
+  // prod call lands.
+  kieOmniFlashCharacterCreateUsd: 0.15,
 
   // Polish-10 / Polish-10.1: Kling 3.0 Omni multi-segment pipeline.
   // Default mode dropped pro→standard for cheaper iteration (720p is
@@ -353,6 +358,11 @@ function estimateByPipeline(
       breakdown.push({
         item: `Reference frames (${variantCount} × $${PRICING.kieOmniFlashReferenceFrameUsd.toFixed(2)})`,
         cost: round4(variantCount * PRICING.kieOmniFlashReferenceFrameUsd),
+      });
+      // Polish-12.4: kie.ai character registration. One per variant.
+      breakdown.push({
+        item: `kie.ai character registration (${variantCount} × $${PRICING.kieOmniFlashCharacterCreateUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.kieOmniFlashCharacterCreateUsd),
       });
       breakdown.push({
         item: `Gemini Omni Flash (${totalSegments} segment${

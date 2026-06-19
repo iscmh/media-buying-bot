@@ -49,6 +49,14 @@ export interface KieOmniSubmitInput {
   prompt: string;
   /** Public URLs, max 10MB each, jpeg/png/webp/jpg. */
   imageUrls?: string[];
+  /**
+   * Polish-12.4: pre-registered character_ids from createKieOmniCharacter.
+   * Max 3 per request — kie.ai's quota is image_urls (1 each) + character_ids
+   * (1 each) + video_list (2 each) ≤ 7 total. Signals to kie.ai's pipeline
+   * that the character is a pre-registered fictional entity, lowering
+   * PROMINENT_PEOPLE_FILTER trigger rate at the inference layer.
+   */
+  characterIds?: string[];
   /** Default '10' (max for Omni). */
   durationSeconds?: KieOmniDuration;
   /** Default '9:16' for UGC ads. */
@@ -88,6 +96,12 @@ export async function submitKieOmniVideo(input: KieOmniSubmitInput): Promise<Kie
   if (input.imageUrls && input.imageUrls.length > 0) {
     body.input.image_urls = input.imageUrls;
   }
+  if (input.characterIds && input.characterIds.length > 0) {
+    // Polish-12.4: kie.ai caps character_ids at 3 per request; caller
+    // is expected to respect that. Truncate defensively so a slip-up
+    // doesn't trip the 422 path.
+    body.input.character_ids = input.characterIds.slice(0, 3);
+  }
   if (input.seed !== undefined) {
     body.input.seed = input.seed;
   }
@@ -114,6 +128,7 @@ export async function submitKieOmniVideo(input: KieOmniSubmitInput): Promise<Kie
       aspect_ratio: body.input.aspect_ratio,
       resolution: body.input.resolution,
       reference_image_count: input.imageUrls?.length ?? 0,
+      character_id_count: input.characterIds?.length ?? 0,
     },
     generationJobId: input.generationJobId,
     generatedCreativeId: input.generatedCreativeId,
@@ -307,4 +322,112 @@ export function translateKieErrorStatus(
   if (typeof status === 'number' && status >= 500)
     return `kie.ai upstream error (HTTP ${status}${fallback ? `: ${fallback}` : ''}).`;
   return fallback ?? `kie.ai request failed${status ? ` (status ${status})` : ''}.`;
+}
+
+// =========================================================================
+// Polish-12.4: Gemini Omni character registration
+// =========================================================================
+
+/**
+ * Polish-12.4: distinct endpoint from /jobs/createTask. Verified against
+ * https://docs.kie.ai/market/gemini-omni-character — POST to
+ * /api/v1/omni/character/create with {description, image_urls,
+ * character_name} body, response is SYNCHRONOUS (no polling), returns
+ * a characterId that can be passed to subsequent submitKieOmniVideo
+ * calls via the character_ids array.
+ */
+const KIE_CHARACTER_CREATE_URL = `${KIE_BASE}/omni/character/create`;
+const CHARACTER_CREATE_TIMEOUT_MS = 60_000;
+
+export interface KieCharacterCreateInput {
+  userId: string;
+  apiKey: string;
+  /** Single Nano Banana reference frame URL. kie.ai accepts up to 20MB. */
+  imageUrl: string;
+  /** Free-form character description; passed as the `description` field. */
+  characterDescription: string;
+  /**
+   * Short human-readable label kie.ai stores alongside the character.
+   * Doesn't affect generation — only for the operator's debugging.
+   */
+  characterName: string;
+  generationJobId?: string;
+}
+
+export interface KieCharacterCreateResult {
+  ok: boolean;
+  characterId?: string;
+  characterName?: string;
+  imageUrl?: string;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+/**
+ * Register a character with kie.ai's Gemini Omni Character endpoint.
+ * Synchronous — returns characterId directly, no polling. The returned
+ * characterId is passed to submitKieOmniVideo via the characterIds
+ * array, signaling to kie.ai's pipeline that the character is a
+ * pre-registered fictional entity and lowering PROMINENT_PEOPLE_FILTER
+ * trigger rate at the inference layer.
+ */
+export async function createKieOmniCharacter(
+  input: KieCharacterCreateInput,
+): Promise<KieCharacterCreateResult> {
+  const result = await callProvider<{
+    code?: number;
+    msg?: string;
+    data?: { characterId?: string; characterName?: string; imageUrl?: string };
+  }>({
+    userId: input.userId,
+    provider: 'kie_ai',
+    url: KIE_CHARACTER_CREATE_URL,
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body: {
+      description: input.characterDescription,
+      image_urls: [input.imageUrl],
+      character_name: input.characterName,
+    },
+    timeoutMs: CHARACTER_CREATE_TIMEOUT_MS,
+    requestBodyForLog: {
+      character_name: input.characterName,
+      description_chars: input.characterDescription.length,
+      reference_image_count: 1,
+    },
+    generationJobId: input.generationJobId,
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateKieErrorStatus(result.status, result.errorMessage),
+    };
+  }
+  if (result.data.code !== undefined && result.data.code !== 200) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateKieErrorStatus(result.data.code, result.data.msg),
+    };
+  }
+  const data = result.data.data;
+  if (!data?.characterId) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: 'kie.ai character/create response missing characterId',
+    };
+  }
+  return {
+    ok: true,
+    characterId: data.characterId,
+    characterName: data.characterName,
+    imageUrl: data.imageUrl,
+    latencyMs: result.latencyMs,
+  };
 }

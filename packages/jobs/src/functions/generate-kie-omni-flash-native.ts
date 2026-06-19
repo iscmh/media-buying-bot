@@ -3,6 +3,7 @@ import {
   callClaude,
   callGeminiImage,
   checkReplicateConcat,
+  createKieOmniCharacter,
   getUniversalUgcMasterPrompt,
   isVideoConcatEnabled,
   pollKieOmniTask,
@@ -117,6 +118,14 @@ const WORDS_PER_MINUTE = 150;
 const KIE_OMNI_COST_USD_PER_SEGMENT = 0.9;
 /** Polish-12.1: stitch cost when 2+ segments (idan054 ffmpeg-concat). */
 const KIE_OMNI_STITCH_COST_USD = 0.05;
+/**
+ * Polish-12.4: kie.ai character creation cost. The docs page for
+ * the character/create endpoint doesn't publish pricing, so this is
+ * a $0.15 placeholder. TODO: reconcile against the kie.ai dashboard
+ * credit deduction after the first prod call lands; update both this
+ * constant and the matching value in the shared cost estimator.
+ */
+const KIE_CHARACTER_CREATE_COST_USD = 0.15;
 
 /**
  * Polish-12.2: how many attempts per segment before giving up.
@@ -458,6 +467,63 @@ export const generateKieOmniFlashNative = inngest.createFunction(
     );
     const scrubbedScene = scrubAll(stripTextCaptionsBroll(manual.setPrompt));
 
+    // Polish-12.4: register the Nano Banana reference as a kie.ai
+    // Gemini Omni character. The returned characterId is passed as
+    // character_ids to every segment submit, signaling to kie.ai's
+    // pipeline that the character is a pre-registered fictional
+    // entity — lowers PROMINENT_PEOPLE_FILTER trigger rate at the
+    // inference layer (the scrubbers are still applied below as
+    // defense-in-depth on the prompt text).
+    //
+    // Graceful fallback: if creation fails (quota, transient kie.ai
+    // issue), segments still run with image_urls only — that's the
+    // Polish-12.3 behavior, unchanged.
+    const characterResult = await step.run('kie-omni-character-create', async () => {
+      let keys;
+      try {
+        keys = await loadDecryptedKeys(userId, ['kie_ai']);
+      } catch (err) {
+        if (err instanceof MissingProviderKeyError)
+          return { ok: false as const, errorMessage: err.message, costUsd: 0 };
+        throw err;
+      }
+      const result = await createKieOmniCharacter({
+        userId,
+        apiKey: keys.kie_ai!,
+        imageUrl: referenceImageUrl,
+        characterDescription: scrubbedCharacter,
+        // character_name doesn't affect generation — kie.ai keeps it as a
+        // label for the operator's debugging view. Generic placeholder.
+        characterName: 'ad_character',
+        generationJobId: jobId,
+      });
+      return {
+        ok: result.ok,
+        characterId: result.characterId,
+        errorMessage: result.errorMessage,
+        // kie.ai docs don't publish character-creation pricing; treat
+        // as $0.15 placeholder. Reconcile against kie.ai dashboard
+        // credit deductions after first prod call.
+        costUsd: KIE_CHARACTER_CREATE_COST_USD,
+      };
+    });
+    if (characterResult.ok) {
+      totalCost += characterResult.costUsd;
+    } else {
+      console.warn(
+        `[kie-omni] character creation failed (${characterResult.errorMessage ?? 'unknown'}); ` +
+          `falling back to image_urls-only path`,
+      );
+      // We still bill the operator if the character creation request
+      // hit kie.ai (auth / validation / 4xx eat credits). Only zero-
+      // cost the path is a MissingProviderKeyError, which never
+      // reaches kie.ai.
+      if (characterResult.costUsd > 0) totalCost += characterResult.costUsd;
+    }
+    const characterIdForSegments: string | undefined = characterResult.ok
+      ? characterResult.characterId
+      : undefined;
+
     // 3. Generate each segment in parallel.
     const segmentResults = await Promise.all(
       segments.map((segment) =>
@@ -469,6 +535,7 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           },
           totalSegments: segments.length,
           referenceImageUrl,
+          characterId: characterIdForSegments,
           characterDescription: scrubbedCharacter,
           sceneDescription: scrubbedScene,
           userId,
@@ -566,6 +633,15 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           stitched,
           segment_urls: segmentUrls,
           reference_image_url: referenceImageUrl,
+          // Polish-12.4: trace the kie.ai character used (if any) so QA
+          // can correlate filter-trigger rates against character_ids
+          // present vs. fallback path. character_create_error captured
+          // verbatim when the soft-fallback fired.
+          kie_character_id: characterIdForSegments ?? null,
+          character_create_succeeded: characterResult.ok,
+          character_create_error: characterResult.ok
+            ? null
+            : (characterResult.errorMessage ?? null),
           character_prompt: manual.characterPrompt,
           set_prompt: manual.setPrompt,
           resolution: KIE_OMNI_RESOLUTION,
@@ -641,12 +717,18 @@ export async function runOmniSegment(input: {
   segment: OmniFlashSegment;
   totalSegments: number;
   referenceImageUrl: string;
+  /**
+   * Polish-12.4: kie.ai-registered character id, passed as character_ids
+   * to every submitKieOmniVideo call. Undefined → fall back to
+   * image_urls-only (legacy Polish-12 behavior).
+   */
+  characterId?: string;
   characterDescription: string;
   sceneDescription: string;
   userId: string;
   jobId: string;
 }): Promise<SegmentResult> {
-  const { step, segment, totalSegments, referenceImageUrl, userId, jobId } = input;
+  const { step, segment, totalSegments, referenceImageUrl, characterId, userId, jobId } = input;
   const segmentDuration = clampOmniDuration(segment.estimatedDurationSeconds);
   const segmentPrompt = buildOmniFlashSegmentPrompt({
     characterDescription: input.characterDescription,
@@ -688,6 +770,12 @@ export async function runOmniSegment(input: {
           apiKey: keys.kie_ai!,
           prompt: segmentPrompt,
           imageUrls: [referenceImageUrl],
+          // Polish-12.4: send the registered character id alongside
+          // the reference image when available. character_ids signals
+          // a pre-registered fictional entity to kie.ai's filter
+          // pipeline. Undefined when character creation failed →
+          // submit ignores the field and falls back to image-only.
+          characterIds: characterId ? [characterId] : undefined,
           durationSeconds: durationToOmniLiteral(segmentDuration),
           aspectRatio: '9:16',
           resolution: KIE_OMNI_RESOLUTION,

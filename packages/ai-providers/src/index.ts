@@ -145,6 +145,7 @@ export {
 export {
   submitKieOmniVideo,
   pollKieOmniTask,
+  createKieOmniCharacter,
   estimateKieOmniGenerationCostUsd,
   parseResultJsonOutputUrl,
   translateKieErrorStatus,
@@ -153,6 +154,8 @@ export {
   type KieOmniSubmitResult,
   type KieOmniPollInput,
   type KieOmniPollResult,
+  type KieCharacterCreateInput,
+  type KieCharacterCreateResult,
   type KieOmniDuration,
   type KieOmniAspectRatio,
   type KieOmniResolution,
