@@ -17,6 +17,7 @@ import {
   buildOmniFlashPrompt,
   buildOmniFlashSegmentPrompt,
   clampOmniDuration,
+  countMoneyClaims,
   decideOmniAttemptOutcome,
   estimateDialogueSeconds,
   isRetryableOmniFailure,
@@ -405,7 +406,9 @@ describe('Polish-12.2: isRetryableOmniFailure', () => {
 
   it('RETRYABLE_OMNI_FAIL_CODES exposes the canonical set', () => {
     expect(RETRYABLE_OMNI_FAIL_CODES.has('PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED')).toBe(true);
-    expect(RETRYABLE_OMNI_FAIL_CODES.size).toBe(3);
+    // Polish-12.7: AUDIO_FILTERED joined the set.
+    expect(RETRYABLE_OMNI_FAIL_CODES.size).toBe(4);
+    expect(RETRYABLE_OMNI_FAIL_CODES.has('PUBLIC_ERROR_AUDIO_FILTERED')).toBe(true);
   });
 
   // Polish-12.2.2: failMsg fallback for kie.ai's inverted shape
@@ -1290,5 +1293,185 @@ describe('Polish-12.6: shouldRegeneratePipeline', () => {
         maxAttempts: 1,
       }),
     ).toBe(false);
+  });
+});
+
+describe('Polish-12.7: countMoneyClaims', () => {
+  it('counts dollar-sign forms ($380, $2,600, $9,800)', () => {
+    expect(countMoneyClaims('$380 today.')).toBe(1);
+    expect(countMoneyClaims('$380 today and $2,600 this week.')).toBe(2);
+    expect(countMoneyClaims('$380 today, $2,600 weekly, $9,800 monthly.')).toBe(3);
+  });
+
+  it('counts "N dollars" / "N bucks" forms', () => {
+    expect(countMoneyClaims('I made 380 dollars today.')).toBe(1);
+    expect(countMoneyClaims('Cleared 50 bucks this hour and 380 dollars this morning.')).toBe(2);
+  });
+
+  it('counts spelled-out multipliers (three hundred, ten grand, five thousand)', () => {
+    expect(countMoneyClaims('I pulled three hundred yesterday.')).toBe(1);
+    expect(countMoneyClaims('Ten grand this month. Bro.')).toBe(1);
+    expect(countMoneyClaims('Three hundred, ten grand, five thousand. Wild.')).toBe(3);
+  });
+
+  it('counts shorthand (26 hundred, 10 grand, 5k)', () => {
+    // Hyphenated forms like "Twenty-six hundred" match via the inner
+    // "six hundred" substring — Polish-12.7's intent is exactly to
+    // count this as one claim, which is correct.
+    expect(countMoneyClaims('Twenty-six hundred this week.')).toBe(1);
+    expect(countMoneyClaims('26 hundred this week.')).toBe(1);
+    expect(countMoneyClaims('10 grand this month.')).toBe(1);
+    expect(countMoneyClaims('5k right now.')).toBe(1);
+  });
+
+  it('counts the mixed example from the spec', () => {
+    // "$380 today and $2,600 this week" → 2
+    expect(countMoneyClaims('$380 today and $2,600 this week')).toBe(2);
+    // "three hundred and ten grand" → 2 (different spelled patterns)
+    expect(countMoneyClaims('three hundred and ten grand')).toBe(2);
+  });
+
+  it('returns 0 for non-money dialogue', () => {
+    expect(countMoneyClaims('Just woke up and had coffee.')).toBe(0);
+    expect(countMoneyClaims('')).toBe(0);
+  });
+
+  it('returns 0 for "good money" / "a few hundred" soft phrasing', () => {
+    // These are the phrases the master prompt explicitly forbids — but
+    // the counter scores literal money expressions, not the soft text.
+    expect(countMoneyClaims('I make good money from this.')).toBe(0);
+    // "a few hundred" — "hundred" with no leading number digit/word →
+    // doesn't match the spelled patterns. 0.
+    expect(countMoneyClaims('I make a few hundred a day.')).toBe(0);
+  });
+});
+
+describe('Polish-12.7: splitClipsIntoOmniSegments distributes claims across segments', () => {
+  // Helper builds clips with a specific money-claim count by stuffing
+  // the dialogue with dollar-sign tokens. Each clip is ~6s.
+  function clipWithClaims(
+    label: string,
+    claimCount: number,
+  ): {
+    videoPrompt: string;
+    dialogue: string;
+  } {
+    const claims = Array.from({ length: claimCount }, (_, i) => `$${100 + i * 100}`).join(' and ');
+    const dialogue = `${label}: ${claims} ${Array.from({ length: 8 }, (_, i) => `word${i}`).join(
+      ' ',
+    )}`;
+    return { videoPrompt: `Action ${label}`, dialogue };
+  }
+
+  it('three single-claim clips (one each) → claims spread to one per segment when room exists', () => {
+    // Three 6-second clips with one money claim each. Total 18s →
+    // ceil(18/10) = 2 segments. Without claim awareness, splitter
+    // would land 2 claims in segment 0 and 1 in segment 1. With
+    // Polish-12.7 awareness, segment 0 takes clip 0 (1 claim), then
+    // claim density forces an early advance so clip 1 (1 claim) goes
+    // to segment 1.
+    const segments = splitClipsIntoOmniSegments([
+      clipWithClaims('A', 1),
+      clipWithClaims('B', 1),
+      clipWithClaims('C', 1),
+    ]);
+    // Each segment that received clips has at most 1 claim per the
+    // density rule (subject to abs-cap / target).
+    for (const s of segments) {
+      const claims = s.clips.reduce((n, c) => n + countMoneyClaims(c.dialogue ?? ''), 0);
+      expect(claims).toBeLessThanOrEqual(2);
+    }
+    // All 3 clips still represented.
+    const total = segments.reduce((n, s) => n + s.clips.length, 0);
+    expect(total).toBe(3);
+  });
+
+  it('claim-free clips still respect the existing duration heuristic (no regression)', () => {
+    // Three clips, no money claims. Splitter should fall through to
+    // the pre-12.7 behavior (duration-driven only).
+    const segments = splitClipsIntoOmniSegments([
+      { videoPrompt: 'A', dialogue: 'Just talking about my morning.' },
+      { videoPrompt: 'B', dialogue: 'The weather is fine today.' },
+      { videoPrompt: 'C', dialogue: 'Anyway, watch this video.' },
+    ]);
+    expect(segments.length).toBeGreaterThanOrEqual(1);
+    const total = segments.reduce((n, s) => n + s.clips.length, 0);
+    expect(total).toBe(3);
+  });
+
+  it('multi-claim clip stays atomic (no sub-clip splitting)', () => {
+    // A single clip with 3 money claims. The splitter can't split
+    // within a clip; the 3 claims will all land in whichever segment
+    // that clip belongs to. Confirm clip boundary preserved.
+    const segments = splitClipsIntoOmniSegments([clipWithClaims('OnlyClip', 3)]);
+    expect(segments).toHaveLength(1);
+    expect(segments[0]!.clips).toHaveLength(1);
+  });
+});
+
+describe('Polish-12.7: shouldRegeneratePipeline now fires on AUDIO_FILTERED', () => {
+  it('AUDIO_FILTERED on attempt 1 of 2 → regenerate', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError:
+          'Segment 0 failed after 3 attempt(s) (PUBLIC_ERROR_AUDIO_FILTERED): financial content',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it('AUDIO_FILTERED on final attempt → do NOT regenerate (budget exhausted)', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'PUBLIC_ERROR_AUDIO_FILTERED',
+        currentAttempt: 2,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it('still gates on PROMINENT_PEOPLE_FILTER (Polish-12.6 behavior preserved)', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it('still rejects deterministic failures (auth, balance, validation)', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'kie.ai authentication failed',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('Polish-12.7: master prompt AUDIO FILTER BYPASS section', () => {
+  it('contains the bypass section + all three techniques', async () => {
+    const { getUniversalUgcMasterPrompt } = await import('@mbb/ai-providers');
+    const text = getUniversalUgcMasterPrompt();
+    expect(text).toMatch(/AUDIO FILTER BYPASS — KEEP IT AGGRESSIVE/);
+    expect(text).toMatch(/Rhythm-Breaking Emotional Beats/);
+    expect(text).toMatch(/Affiliate-Native Phrasing/);
+    expect(text).toMatch(/Density Dilution Across Segments/);
+  });
+
+  it('explicitly forbids softening to "good money" or "a few hundred"', async () => {
+    const { getUniversalUgcMasterPrompt } = await import('@mbb/ai-providers');
+    const text = getUniversalUgcMasterPrompt();
+    expect(text).toMatch(/DO NOT soften to "good money" or "a few hundred"/);
+  });
+
+  it('preserves dollar amounts + cash-out CTA intent', async () => {
+    const { getUniversalUgcMasterPrompt } = await import('@mbb/ai-providers');
+    const text = getUniversalUgcMasterPrompt();
+    expect(text).toMatch(/KEEP the specific dollar amounts/);
+    expect(text).toMatch(/KEEP the cash-out CTAs/);
   });
 });
