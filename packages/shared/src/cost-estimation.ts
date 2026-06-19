@@ -140,6 +140,14 @@ export interface EstimateInput {
    * so the upfront estimate never under-quotes the variant.
    */
   estimatedDurationSeconds?: number;
+  /**
+   * Polish-14.1: actual source video duration in seconds, detected
+   * client-side from the uploaded creative. Wins over
+   * estimatedDurationSeconds when present so the form's upfront cost
+   * preview matches what the worker actually generates. Missing →
+   * falls back to estimatedDurationSeconds → 30s default.
+   */
+  sourceDurationSeconds?: number;
 }
 
 export function estimateGenerationCost(input: EstimateInput): CostEstimate {
@@ -155,7 +163,12 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
 
   // Polish-6: pipeline-level estimation takes precedence when set.
   if (input.pipeline) {
-    return estimateByPipeline(input.pipeline, variantCount, input.estimatedDurationSeconds);
+    // Polish-14.1: sourceDurationSeconds wins over estimatedDurationSeconds.
+    return estimateByPipeline(
+      input.pipeline,
+      variantCount,
+      input.sourceDurationSeconds ?? input.estimatedDurationSeconds,
+    );
   }
 
   if (conceptType === 'static') {

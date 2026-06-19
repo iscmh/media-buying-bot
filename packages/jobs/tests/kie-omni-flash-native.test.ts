@@ -21,6 +21,7 @@ import {
   estimateDialogueSeconds,
   isRetryableOmniFailure,
   RETRYABLE_OMNI_FAIL_CODES,
+  resolveTargetDuration,
   runOmniSegment,
   scrubCelebrityReferences,
   splitClipsIntoOmniSegments,
@@ -761,5 +762,49 @@ describe('Polish-12.3: KIE_OMNI_FLASH_HARD_DIRECTIVE anti-celebrity language', (
     expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/public personality/i);
     expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/REJECTED by upstream filters/);
     expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/No copyrighted character names/i);
+  });
+});
+
+describe('Polish-14.1: resolveTargetDuration', () => {
+  it('returns the source duration when in range', () => {
+    expect(resolveTargetDuration({ source_duration_seconds: 22 })).toBe(22);
+    expect(resolveTargetDuration({ source_duration_seconds: 60 })).toBe(60);
+    expect(resolveTargetDuration({ source_duration_seconds: 8 })).toBe(8);
+    expect(resolveTargetDuration({ source_duration_seconds: 90 })).toBe(90);
+  });
+
+  it('ceiling-rounds fractional durations (so 21.6s becomes 22)', () => {
+    expect(resolveTargetDuration({ source_duration_seconds: 21.4 })).toBe(22);
+    expect(resolveTargetDuration({ source_duration_seconds: 8.01 })).toBe(9);
+  });
+
+  it('clamps below-floor inputs up to the 8s minimum', () => {
+    expect(resolveTargetDuration({ source_duration_seconds: 3 })).toBe(8);
+    expect(resolveTargetDuration({ source_duration_seconds: 0.5 })).toBe(8);
+  });
+
+  it('clamps above-ceiling inputs down to the 90s maximum', () => {
+    expect(resolveTargetDuration({ source_duration_seconds: 120 })).toBe(90);
+    expect(resolveTargetDuration({ source_duration_seconds: 500 })).toBe(90);
+  });
+
+  it('falls back to 30s default when metadata is null', () => {
+    expect(resolveTargetDuration(null)).toBe(30);
+  });
+
+  it('falls back to 30s default when source_duration_seconds is missing', () => {
+    expect(resolveTargetDuration({})).toBe(30);
+    expect(resolveTargetDuration({ other_field: 'noise' })).toBe(30);
+  });
+
+  it('falls back to 30s default for NaN / non-number / negative / zero', () => {
+    expect(resolveTargetDuration({ source_duration_seconds: NaN })).toBe(30);
+    expect(resolveTargetDuration({ source_duration_seconds: -5 })).toBe(30);
+    expect(resolveTargetDuration({ source_duration_seconds: 0 })).toBe(30);
+    expect(resolveTargetDuration({ source_duration_seconds: '22' as unknown as number })).toBe(30);
+  });
+
+  it('falls back to 30s default when source_duration_seconds is Infinity', () => {
+    expect(resolveTargetDuration({ source_duration_seconds: Infinity })).toBe(30);
   });
 });

@@ -44,6 +44,20 @@ export interface CreateGenerationJobResult {
 
 const VALID_INTENSITY = new Set(['small', 'medium', 'big']);
 const VALID_UGC_PROVIDERS: ReadonlySet<UgcVideoProvider> = new Set(['kie_ai', 'heygen', 'arcads']);
+
+/**
+ * Polish-14.1: defensive clamp on a client-submitted source video
+ * duration. Mirrors the worker's resolveTargetDuration range so the
+ * cost estimate matches what the worker will use. Returns null when
+ * the value is missing, NaN, negative, or zero — caller falls back
+ * to the 30s default in the estimator + worker.
+ */
+function clampSourceDuration(raw: number): number | null {
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  // Inline constants — match worker's MIN_TARGET_DURATION /
+  // MAX_TARGET_DURATION (8s / 90s).
+  return Math.max(8, Math.min(90, Math.ceil(raw)));
+}
 // Polish-4: creative format. avatar_talking_head=HeyGen; cinematic_voiceover=Kling+ElevenLabs.
 // Polish-9.2: format is no longer accepted as a free-form input — it
 // derives from the pipeline descriptor. The legacy VALID_FORMATS set
@@ -81,6 +95,16 @@ export async function createGenerationJobAction(
   const rawReferencePath = formData.get('referenceStoragePath');
   const referenceStoragePath =
     typeof rawReferencePath === 'string' && rawReferencePath.length > 0 ? rawReferencePath : null;
+  // Polish-14.1: client-detected source video duration. Persisted on
+  // job.metadata so the worker's resolveTargetDuration() can read it
+  // and pass through to Claude as target_duration_seconds. Same
+  // sanity clamp as the worker — defense-in-depth against malformed
+  // form payloads.
+  const rawSourceDuration = formData.get('sourceDurationSeconds');
+  const sourceDurationSeconds =
+    typeof rawSourceDuration === 'string' && rawSourceDuration.length > 0
+      ? clampSourceDuration(Number(rawSourceDuration))
+      : null;
 
   if (!conceptId) return { ok: false, errorMessage: 'Missing concept id.' };
   if (!VALID_INTENSITY.has(intensity)) {
@@ -152,6 +176,9 @@ export async function createGenerationJobAction(
     variantCount,
     provider: pickedProvider,
     pipeline: pipelineDesc.pipeline,
+    // Polish-14.1: match the form's displayed quote — source duration
+    // drives segment count for kie_omni_flash_native.
+    sourceDurationSeconds: sourceDurationSeconds ?? undefined,
   });
 
   // Cost cap. Counts both mock + live jobs against the per-user daily cap
@@ -215,6 +242,13 @@ export async function createGenerationJobAction(
       pickedPipeline: pipelineDesc.pipeline,
       // Polish-9: reference creative storage path (auto-detect upload).
       ...(referenceStoragePath ? { referenceCreativeStoragePath: referenceStoragePath } : {}),
+      // Polish-14.1: source video duration persisted on metadata so
+      // the kie_omni_flash_native worker can read it and pass through
+      // as target_duration_seconds to Claude. Worker tolerates a null
+      // metadata column (defaults to 30s).
+      ...(sourceDurationSeconds != null
+        ? { metadata: { source_duration_seconds: sourceDurationSeconds } }
+        : {}),
       // Phase 1's enum aiProviderUsed: only populate when UGC + provider is
       // also one of arcads/heygen/creatify. Kie.ai isn't in that enum, so
       // leave null when picked.

@@ -333,3 +333,54 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
     expect(r.breakdown.some((b) => /4 segments\b/.test(b.item))).toBe(true);
   });
 });
+
+describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native quote', () => {
+  // Polish-14.1 lets the form pass the actual detected source-video
+  // duration into the estimator so the upfront cost preview matches
+  // what the worker will generate. sourceDurationSeconds wins over
+  // estimatedDurationSeconds when both are present; back-compat is
+  // preserved when neither is supplied.
+
+  it('sourceDurationSeconds=18 → 2 segments → $1.95', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      sourceDurationSeconds: 18,
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.95, 4);
+    expect(r.breakdown.some((b) => /2 segments\b/.test(b.item))).toBe(true);
+  });
+
+  it('sourceDurationSeconds=60 → 6 segments → $5.55', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      sourceDurationSeconds: 60,
+    });
+    expect(r.estimateUsd).toBeCloseTo(5.55, 4);
+    expect(r.breakdown.some((b) => /6 segments\b/.test(b.item))).toBe(true);
+  });
+
+  it('sourceDurationSeconds wins over estimatedDurationSeconds when both passed', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+      sourceDurationSeconds: 18,
+      estimatedDurationSeconds: 90, // would imply 9 segments
+    });
+    // Source wins → 2 segments → $1.95
+    expect(r.estimateUsd).toBeCloseTo(1.95, 4);
+  });
+
+  it('back-compat: neither source nor estimated supplied → 30s default → $2.85', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_omni_flash_native',
+    });
+    expect(r.estimateUsd).toBeCloseTo(2.85, 4);
+  });
+});

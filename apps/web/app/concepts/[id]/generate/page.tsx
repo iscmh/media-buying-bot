@@ -4,6 +4,7 @@ import { assertDailyCostCap, getDb, schema } from '@mbb/db';
 import { type ConceptType } from '@mbb/shared';
 import { AppShell } from '@/components/shell/app-shell';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { loadConnectedProviders } from './actions';
 import { GenerationRequestForm } from './generation-request-form';
 
@@ -29,12 +30,23 @@ export default async function GenerateRequestPage({ params }: Props) {
       contentType: true,
       staticHeadline: true,
       nicheTag: true,
+      fileUrl: true,
     },
   });
   if (!concept) notFound();
   if (concept.contentType !== 'static' && concept.contentType !== 'ugc') {
     // Legacy 'video'/'text' concepts can't drive Phase 3a generation.
     notFound();
+  }
+
+  // Polish-14.1: sign a short-lived URL for UGC sources so the form can
+  // detect duration client-side (hidden <video> + onloadedmetadata).
+  // The cost preview + worker target_duration_seconds both ride on this.
+  let sourceVideoUrl: string | null = null;
+  if (concept.contentType === 'ugc' && concept.fileUrl) {
+    const supabase = await getSupabaseServerClient();
+    const { data } = await supabase.storage.from('concepts').createSignedUrl(concept.fileUrl, 3600);
+    sourceVideoUrl = data?.signedUrl ?? null;
   }
 
   // Pre-compute remaining cost cap for the form's "X% used today" hint.
@@ -76,6 +88,7 @@ export default async function GenerateRequestPage({ params }: Props) {
         capUsd={capUsd}
         liveAcknowledged={liveAcknowledged}
         connectedProviders={connectedProviders}
+        sourceVideoUrl={sourceVideoUrl}
       />
     </AppShell>
   );

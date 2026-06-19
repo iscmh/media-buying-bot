@@ -81,11 +81,36 @@ const POLL_MAX_ATTEMPTS = 30;
 const SEGMENT_MAX_SECONDS = 10;
 const SEGMENT_MIN_SECONDS = 4;
 const MAX_SEGMENTS = 30;
-/** Polish-14: target script length sent to Claude (in seconds). Generous ceiling
- * lets Claude write the natural length for the source — the master prompt
- * instructs natural pacing so longer scripts only get written when the
- * source merits it. */
-const CLAUDE_TARGET_DURATION_SECONDS = 90;
+/**
+ * Polish-14.1: target script length sent to Claude, derived from the
+ * source video's actual duration when available. Falls back to a
+ * conservative default for image sources / legacy concepts where
+ * duration detection isn't available, and clamps to a sane range so
+ * neither a 3s misdetection nor a 5-minute outlier surprises the
+ * operator. Polish-14's MAX_SEGMENTS sanity ceiling is independent.
+ */
+const DEFAULT_TARGET_DURATION = 30;
+const MIN_TARGET_DURATION = 8;
+const MAX_TARGET_DURATION = 90;
+
+/**
+ * Polish-14.1: read `source_duration_seconds` (if any) off the job's
+ * metadata jsonb and clamp to [MIN_TARGET_DURATION, MAX_TARGET_DURATION].
+ * The clamp protects against:
+ *   - missing / null / NaN / 0 → default 30s
+ *   - tiny detections (e.g. broken thumbnail) → 8s floor
+ *   - long-form outliers → 90s ceiling so a podcast clip doesn't trigger
+ *     a 5-minute generation at $27 a job without an explicit override
+ * Exported so the cost estimator + tests can mirror the same logic.
+ */
+export function resolveTargetDuration(jobMetadata: Record<string, unknown> | null): number {
+  if (!jobMetadata) return DEFAULT_TARGET_DURATION;
+  const raw = jobMetadata['source_duration_seconds'];
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+    return DEFAULT_TARGET_DURATION;
+  }
+  return Math.max(MIN_TARGET_DURATION, Math.min(MAX_TARGET_DURATION, Math.ceil(raw)));
+}
 /** Polish-12.1: average natural-speech rate, used to estimate dialogue duration. */
 const WORDS_PER_MINUTE = 150;
 /** Polish-12.1: Omni Flash per-segment cost (mirrors the kie-omni client constant). */
@@ -300,10 +325,19 @@ export const generateKieOmniFlashNative = inngest.createFunction(
       const systemPrompt = getUniversalUgcMasterPrompt();
       // Polish-12.1: target 30s so Claude has room to write a full
       // multi-clip script. Splitter caps at 3 × 10s segments.
+      // Polish-14.1: target follows the source video's actual length
+      // (persisted on job.metadata.source_duration_seconds at submit
+      // time). Falls back to 30s for image / legacy concepts where
+      // duration wasn't detected. resolveTargetDuration clamps to a
+      // sane range so neither a misdetection nor a runaway override
+      // burns the operator's daily AI budget.
+      const targetDurationSeconds = resolveTargetDuration(
+        (job.metadata ?? null) as Record<string, unknown> | null,
+      );
       const userMessage = JSON.stringify({
         analysis: job.metadata ?? {},
         variant_count: 1,
-        target_duration_seconds: CLAUDE_TARGET_DURATION_SECONDS,
+        target_duration_seconds: targetDurationSeconds,
       });
       const claude = await callClaude({
         userId,

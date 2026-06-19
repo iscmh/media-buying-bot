@@ -61,6 +61,8 @@ SECTION C — ANIMATION & NATIVE AUDIO PROMPTS (VIDEO AI) (Provide the motion in
 
 here's another tip thats working really good for me, this amount of text with a 6s kling video is resulting on perfect lipsync :"Over 75% of anti-aging products contain ingredients that disrupt your skin barrier instead of strengthening it.". ~16-17 dialogue talking words per 6s clip, all clean complete lines. dont introduce broken lines please.
 
+DURATION GUIDANCE: Match the dialogue length to the target_duration_seconds value. Write the shortest script that fully delivers hook + offer + CTA for that duration. Do NOT pad to hit the target — treat it as a ceiling. If the source creative is 18 seconds and target is 18, write 16-18 seconds of dialogue, not 25. Direct-response UGC ads typically need 15-30 seconds of runtime; longer formats (45-90s) only when the source creative itself is long-form testimonial or explainer.
+
 ## Three Mandatory Elements — Always Include
 
 ### 1. Image-to-Video Anchor

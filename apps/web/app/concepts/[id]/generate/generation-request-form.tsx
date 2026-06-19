@@ -43,6 +43,13 @@ interface Props {
   liveAcknowledged: boolean;
   /** Polish-4: drives the provider + format pickers. */
   connectedProviders: ConnectedProviders;
+  /**
+   * Polish-14.1: signed URL of the uploaded UGC source. Null for image
+   * concepts or when signing failed. When present, the form mounts a
+   * hidden <video> element and reads duration on metadata load so the
+   * upfront cost preview matches what the worker will actually generate.
+   */
+  sourceVideoUrl?: string | null;
 }
 
 const INTENSITIES: Array<{
@@ -81,6 +88,7 @@ export function GenerationRequestForm({
   capUsd,
   liveAcknowledged: initialLiveAck,
   connectedProviders,
+  sourceVideoUrl,
 }: Props) {
   const router = useRouter();
   const [intensity, setIntensity] = React.useState<'small' | 'medium' | 'big'>('medium');
@@ -110,6 +118,25 @@ export function GenerationRequestForm({
   const effectiveDescriptor = effectivePipeline ? describePipeline(effectivePipeline) : null;
   const effectiveFormat = (effectiveDescriptor?.format ?? 'avatar_talking_head') as CreativeFormat;
 
+  // Polish-14.1: source duration is detected client-side from a hidden
+  // <video> element once the signed URL loads. Until it resolves the
+  // estimate falls back to the 30s default in the shared estimator.
+  const [sourceDurationSeconds, setSourceDurationSeconds] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    if (!sourceVideoUrl) return;
+    let cancelled = false;
+    void import('./detect-video-duration').then(({ detectVideoDurationFromUrl }) =>
+      detectVideoDurationFromUrl(sourceVideoUrl).then((d) => {
+        if (!cancelled && typeof d === 'number') {
+          setSourceDurationSeconds(d);
+        }
+      }),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceVideoUrl]);
+
   const estimate = React.useMemo(
     () =>
       estimateGenerationCost({
@@ -118,8 +145,9 @@ export function GenerationRequestForm({
         provider: conceptType === 'ugc' ? 'heygen' : undefined,
         format: conceptType === 'ugc' ? effectiveFormat : undefined,
         pipeline: effectivePipeline ?? undefined,
+        sourceDurationSeconds: sourceDurationSeconds ?? undefined,
       }),
-    [conceptType, variantCount, effectiveFormat, effectivePipeline],
+    [conceptType, variantCount, effectiveFormat, effectivePipeline, sourceDurationSeconds],
   );
 
   const [referenceStoragePath, setReferenceStoragePath] = React.useState<string | null>(null);
@@ -211,6 +239,12 @@ export function GenerationRequestForm({
     // Polish-9: pass the uploaded reference's storage path so the job
     // row can re-load it later for re-detection or downstream pipelines.
     if (referenceStoragePath) formData.set('referenceStoragePath', referenceStoragePath);
+    // Polish-14.1: the worker's target_duration_seconds. The estimate
+    // already used this value above so the displayed cost matches the
+    // job we're actually submitting.
+    if (sourceDurationSeconds && sourceDurationSeconds > 0) {
+      formData.set('sourceDurationSeconds', String(sourceDurationSeconds));
+    }
 
     startTransition(async () => {
       setError(null);
