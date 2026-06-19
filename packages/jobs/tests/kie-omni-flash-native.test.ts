@@ -27,6 +27,7 @@ import {
   scrubAll,
   scrubBrandPersonReferences,
   scrubCelebrityReferences,
+  shouldRegeneratePipeline,
   splitClipsIntoOmniSegments,
 } from '../src/functions/generate-kie-omni-flash-native';
 
@@ -1178,5 +1179,116 @@ describe('Polish-12.5: runFrameExtract chain helper', () => {
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/codec unsupported/);
+  });
+});
+
+describe('Polish-12.6: shouldRegeneratePipeline', () => {
+  // Pure decision helper for the full-pipeline regeneration loop.
+  // Used by generateKieOmniFlashNative to decide whether a segment
+  // failure (after per-segment retries exhausted) warrants
+  // regenerating the whole Nano Banana → character → segment chain
+  // with a fresh face.
+
+  it('PROMINENT_PEOPLE_FILTER_FAILED on attempt 1 of 2 → regenerate', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError:
+          'Segment 0 failed after 3 attempt(s) (PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED): public figure detected',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it('PROMINENT_PEOPLE filter mention anywhere in error string → regenerate', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'Omni segment failed — PROMINENT_PEOPLE_FILTER_FAILED triggered',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it('PROMINENT_PEOPLE filter on FINAL attempt → do NOT regenerate (budget exhausted)', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED',
+        currentAttempt: 2,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it('non-filter failure (auth, balance, validation, network) → do NOT regenerate', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'kie.ai authentication failed (invalid API key)',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'kie.ai account has insufficient balance',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'kie.ai validation failed: prompt too long',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'network error: ECONNRESET',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it('safety-filter (not prominent-people) → do NOT regenerate (different remediation)', () => {
+    // SAFETY_FILTER_FAILED is retried per-segment via fresh seed (the
+    // generic safety filter is stochastic on the same prompt). A
+    // full pipeline regen costs more and doesn't actually fix the
+    // distinct trigger condition.
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'PUBLIC_ERROR_SAFETY_FILTER_FAILED',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it('undefined / empty error → do NOT regenerate', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: undefined,
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: '',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it('maxAttempts=1 → never regenerate (single-shot mode)', () => {
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED',
+        currentAttempt: 1,
+        maxAttempts: 1,
+      }),
+    ).toBe(false);
   });
 });

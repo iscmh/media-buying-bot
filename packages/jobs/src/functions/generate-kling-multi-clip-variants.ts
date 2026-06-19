@@ -1189,12 +1189,47 @@ export const IMAGE_UGC_HARD_DIRECTIVE = [
   'JUST the single character in the single environment described. Single clean clear photograph. Nothing else in frame.',
 ].join(' ');
 
+/**
+ * Polish-12.6: explicit anti-celebrity steering for Nano Banana. The
+ * scrubbers (Polish-12.3 / 12.3.1) catch celebrity NAMES in the
+ * downstream text prompt, but Nano Banana can still hallucinate a
+ * celebrity-resembling FACE from generic descriptors ("32yo woman
+ * with dark hair, blue cotton t-shirt" → face that looks like Anne
+ * Hathaway, etc.). Once that face is the reference frame, every Omni
+ * Flash segment trips PROMINENT_PEOPLE_FILTER and no per-segment retry
+ * with a fresh seed can recover.
+ *
+ * Appended to the END of buildImagePromptForClip output — Nano Banana
+ * (and Gemini's image-gen family broadly) weights the tail of the
+ * prompt heavily for the actual rendered subject.
+ *
+ * Exported so the test suite can pin the directive's presence and so
+ * future direct callers can opt out if they need a different policy.
+ */
+export const ANTI_CELEBRITY_NANO_BANANA_DIRECTIVE = [
+  'CRITICAL CONTENT REQUIREMENT:',
+  'The character must be a completely fictional, generic everyday person with NO resemblance whatsoever to any real-world celebrity, actor, musician, athlete, politician, influencer, public figure, or famous person living or dead. The face should be unremarkable and generic — like someone you would pass on the street and immediately forget.',
+  'DO NOT generate:',
+  '- Faces resembling Brad Pitt, Tom Cruise, Leonardo DiCaprio, or any actor',
+  '- Faces resembling Justin Bieber, Taylor Swift, Beyoncé, or any musician',
+  '- Faces resembling LeBron James, Cristiano Ronaldo, or any athlete',
+  '- Faces resembling Donald Trump, Barack Obama, or any politician',
+  '- Faces resembling Kim Kardashian, MrBeast, or any influencer',
+  '- Any face that could be reasonably mistaken for a famous person',
+  'If the rendered face resembles ANY famous person living or dead, the output will be REJECTED by downstream content filters and the production pipeline fails. Generate a face that is intentionally forgettable and generic.',
+].join('\n');
+
 export function buildImagePromptForClip(
   manual: { characterPrompt: string; setPrompt: string; imageGuidance?: string },
   clip: ClipSpec,
 ): string {
   if (clip.imagePrompt && clip.imagePrompt.trim()) {
-    return [IMAGE_UGC_HARD_DIRECTIVE, UGC_FRAMING, clip.imagePrompt].join('\n\n');
+    return [
+      IMAGE_UGC_HARD_DIRECTIVE,
+      UGC_FRAMING,
+      clip.imagePrompt,
+      ANTI_CELEBRITY_NANO_BANANA_DIRECTIVE,
+    ].join('\n\n');
   }
   // Polish-11.2: scrub the same caption / b-roll / audio-era language
   // out of the image-prompt inputs that Polish-10.5 strips from the
@@ -1215,6 +1250,10 @@ export function buildImagePromptForClip(
     `Scene/Set: ${scene}`,
     `Action this frame: ${clipDescription}`,
     'CRITICAL: ONE single frame, ONE camera angle. NO text, NO captions, NO overlays anywhere in the image. NOT a reference sheet. NOT multiple poses.',
+    // Polish-12.6: anti-celebrity directive at the tail. Nano Banana
+    // weights the tail heavily, so this lands closest to the actual
+    // rendered subject.
+    ANTI_CELEBRITY_NANO_BANANA_DIRECTIVE,
   ]
     .filter((s) => s && s.trim().length > 0)
     .join('\n\n');

@@ -318,7 +318,12 @@ describe('Polish-9.12: buildImagePromptForClip — clip 0 path', () => {
     expect(out).toMatch(/Single character, single view, NOT a character sheet/);
     expect(out).toMatch(/AMATEUR SMARTPHONE SELFIE/);
     expect(out).toMatch(/Real human skin/);
-    expect(out).toMatch(/\n\nPre-baked image prompt for this clip\.$/);
+    // Polish-12.6: the pre-baked imagePrompt is now followed by the
+    // anti-celebrity directive at the tail. Verify both are present
+    // and ordered correctly.
+    expect(out).toMatch(/\n\nPre-baked image prompt for this clip\.\n\n/);
+    expect(out).toMatch(/CRITICAL CONTENT REQUIREMENT/);
+    expect(out).toMatch(/forgettable and generic\.$/);
   });
 });
 
@@ -1136,7 +1141,10 @@ describe('Polish-11.2: buildImagePromptForClip scrubs captions / b-roll / audio 
       },
     );
     expect(out.startsWith('AMATEUR SMARTPHONE SELFIE PHOTO')).toBe(true);
-    expect(out).toMatch(/Pre-baked clip image prompt\.$/);
+    // Polish-12.6: anti-celebrity directive lands at the tail.
+    expect(out).toMatch(/Pre-baked clip image prompt\./);
+    expect(out).toMatch(/CRITICAL CONTENT REQUIREMENT/);
+    expect(out).toMatch(/forgettable and generic\.$/);
   });
 });
 
@@ -1178,5 +1186,62 @@ describe('Polish-11.2: continuationImagePrompt scrubs the same inputs + prepends
     expect(out).toMatch(/Wardrobe: EXACTLY as in Image 1/);
     expect(out).toMatch(/blue cotton t-shirt/);
     expect(out).toMatch(/Raise mug, smile widens\./);
+  });
+});
+
+describe('Polish-12.6: ANTI_CELEBRITY_NANO_BANANA_DIRECTIVE', () => {
+  it('buildImagePromptForClip appends the directive on the non-pre-baked path', () => {
+    const out = buildImagePromptForClip(
+      {
+        characterPrompt: 'A 30yo woman with dark hair.',
+        setPrompt: 'Sunny morning kitchen.',
+      },
+      {
+        clipNumber: 1,
+        startingFrameImage: 1,
+        videoPrompt: 'V',
+      },
+    );
+    expect(out).toMatch(/CRITICAL CONTENT REQUIREMENT/);
+    expect(out).toMatch(/completely fictional, generic everyday person/);
+    expect(out).toMatch(/NO resemblance whatsoever to any real-world celebrity/);
+    expect(out).toMatch(/Brad Pitt|Tom Cruise|Leonardo DiCaprio/);
+    expect(out).toMatch(/Justin Bieber|Taylor Swift|Beyoncé/);
+    expect(out).toMatch(/REJECTED by downstream content filters/);
+    // Tail position matters — Nano Banana weights the end of the
+    // prompt heavily.
+    expect(out).toMatch(/forgettable and generic\.$/);
+  });
+
+  it('buildImagePromptForClip appends the directive on the pre-baked imagePrompt path too', () => {
+    const out = buildImagePromptForClip(
+      { characterPrompt: 'C', setPrompt: 'S' },
+      {
+        clipNumber: 1,
+        startingFrameImage: 1,
+        videoPrompt: 'V',
+        imagePrompt: 'Custom pre-baked prompt body.',
+      },
+    );
+    expect(out).toMatch(/Custom pre-baked prompt body\./);
+    expect(out).toMatch(/CRITICAL CONTENT REQUIREMENT/);
+    expect(out).toMatch(/forgettable and generic\.$/);
+  });
+
+  it('preserves the surrounding character + scene + framing text', () => {
+    const out = buildImagePromptForClip(
+      {
+        characterPrompt: 'A 30yo woman with dark hair.',
+        setPrompt: 'Sunny morning kitchen.',
+      },
+      {
+        clipNumber: 1,
+        startingFrameImage: 1,
+        videoPrompt: 'V holding a mug',
+      },
+    );
+    expect(out).toMatch(/30yo woman with dark hair/);
+    expect(out).toMatch(/Sunny morning kitchen/);
+    expect(out).toMatch(/AMATEUR SMARTPHONE SELFIE/);
   });
 });

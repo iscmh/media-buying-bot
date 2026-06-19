@@ -131,6 +131,44 @@ const KIE_OMNI_STITCH_COST_USD = 0.05;
 const KIE_CHARACTER_CREATE_COST_USD = 0.15;
 
 /**
+ * Polish-12.6: cap on full-pipeline regenerations (Nano Banana → kie.ai
+ * character → all segments). When per-segment retries (Polish-12.2) exhaust
+ * with the PROMINENT_PEOPLE_FILTER, the most likely culprit is the Nano
+ * Banana reference frame's face — Gemini's classifier interpreted it as
+ * celebrity-resembling and no per-segment seed retry can recover. A single
+ * full regeneration with a fresh Nano Banana face (and fresh character_id)
+ * clears most of those. Bounded at 2 total attempts so the worst case is
+ * ~2x base cost.
+ */
+const MAX_FULL_PIPELINE_REGENERATIONS = 2;
+
+/**
+ * Polish-12.6: pure decision helper. Given the first segment failure's
+ * error string + the current pipeline attempt number, decide whether to
+ * regenerate the whole pipeline (true) or fail definitively (false).
+ *
+ * Branches:
+ *   - currentAttempt at or past maxAttempts → false (budget exhausted)
+ *   - segmentError missing → false (nothing actionable to retry on)
+ *   - error mentions PROMINENT_PEOPLE_FILTER_FAILED → true (the one
+ *     thing a Nano Banana regen actually fixes — fresh face)
+ *   - any other failure (auth, balance, validation, network) → false
+ *     (deterministic, regen burns money without helping)
+ *
+ * Exported so the branches can be unit-tested without driving the
+ * whole Inngest function.
+ */
+export function shouldRegeneratePipeline(input: {
+  segmentError: string | undefined;
+  currentAttempt: number;
+  maxAttempts: number;
+}): boolean {
+  if (input.currentAttempt >= input.maxAttempts) return false;
+  if (!input.segmentError) return false;
+  return input.segmentError.includes('PROMINENT_PEOPLE_FILTER_FAILED');
+}
+
+/**
  * Polish-12.2: how many attempts per segment before giving up.
  * Empirical Gemini safety-filter fail rate is ~30% per call; with 3
  * attempts the probability of all three failing on a single segment
@@ -386,68 +424,9 @@ export const generateKieOmniFlashNative = inngest.createFunction(
     const manual = manualResult.manual;
     let totalCost = manualResult.costUsd;
 
-    // 1. Generate ONE shared character reference frame via Nano Banana.
-    //    The same URL is reused across every segment so the character
-    //    stays identical across the whole stitched ad.
-    const referenceResult = await step.run('nano-banana-reference', async () => {
-      let keys;
-      try {
-        keys = await loadDecryptedKeys(userId, ['gemini']);
-      } catch (err) {
-        if (err instanceof MissingProviderKeyError)
-          return { ok: false as const, error: err.message, costUsd: 0 };
-        throw err;
-      }
-      const firstClip = manual.clips[0];
-      if (!firstClip) {
-        return { ok: false as const, error: 'Manual has 0 clips', costUsd: 0 };
-      }
-      const prompt = buildImagePromptForClip(manual, firstClip);
-      const image = await callGeminiImage({
-        userId,
-        apiKey: keys.gemini!,
-        prompt,
-        generationJobId: jobId,
-      });
-      if (!image.ok || !image.imageBase64 || !image.imageMimeType) {
-        return {
-          ok: false as const,
-          error: image.errorMessage ?? 'Nano Banana returned no image',
-          costUsd: image.costUsd,
-        };
-      }
-      try {
-        const upload = await uploadGeneratedImage({
-          userId,
-          jobId,
-          variantIndex: 0,
-          imageBase64: image.imageBase64,
-          mimeType: image.imageMimeType,
-          filenamePrefix: 'kie-omni-ref-',
-        });
-        return { ok: true as const, publicUrl: upload.publicUrl, costUsd: image.costUsd };
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return {
-          ok: false as const,
-          error: `Reference frame upload failed: ${msg}`,
-          costUsd: image.costUsd,
-        };
-      }
-    });
-    if (!referenceResult.ok) {
-      await markJobFailed(
-        jobId,
-        userId,
-        referenceResult.error,
-        totalCost + referenceResult.costUsd,
-      );
-      return { jobId, mode, generated: 0 };
-    }
-    totalCost += referenceResult.costUsd;
-    const referenceImageUrl = referenceResult.publicUrl;
-
-    // 2. Split clips into 1-3 segments capped at 10s each.
+    // Split clips into 1-30 segments (sanity-capped). Independent of
+    // the pipeline-attempt loop below — same script feeds every
+    // attempt, so the split is computed once.
     const segments = splitClipsIntoOmniSegments(manual.clips);
     if (segments.length === 0) {
       await markJobFailed(jobId, userId, 'Manual has no dialogue to split', totalCost);
@@ -465,162 +444,264 @@ export const generateKieOmniFlashNative = inngest.createFunction(
     // (Disney/Tesla/Trump Tower etc.) slipped through (e.g., echoed
     // from the source creative's analysis), strip both here so Gemini's
     // PROMINENT_PEOPLE_FILTER doesn't trip on segment after segment.
+    // Scrubbed strings are pipeline-attempt-invariant — same source
+    // text feeds every regeneration.
     const scrubbedCharacter = scrubAll(
       stripTextCaptionsBroll(stripCharacterSheetPattern(manual.characterPrompt)),
     );
     const scrubbedScene = scrubAll(stripTextCaptionsBroll(manual.setPrompt));
 
-    // Polish-12.4: register the Nano Banana reference as a kie.ai
-    // Gemini Omni character. The returned characterId is passed as
-    // character_ids to every segment submit, signaling to kie.ai's
-    // pipeline that the character is a pre-registered fictional
-    // entity — lowers PROMINENT_PEOPLE_FILTER trigger rate at the
-    // inference layer (the scrubbers are still applied below as
-    // defense-in-depth on the prompt text).
+    // ===================================================================
+    // Polish-12.6: full-pipeline regeneration loop.
     //
-    // Graceful fallback: if creation fails (quota, transient kie.ai
-    // issue), segments still run with image_urls only — that's the
-    // Polish-12.3 behavior, unchanged.
-    const characterResult = await step.run('kie-omni-character-create', async () => {
-      let keys;
-      try {
-        keys = await loadDecryptedKeys(userId, ['kie_ai']);
-      } catch (err) {
-        if (err instanceof MissingProviderKeyError)
-          return { ok: false as const, errorMessage: err.message, costUsd: 0 };
-        throw err;
-      }
-      const result = await createKieOmniCharacter({
-        userId,
-        apiKey: keys.kie_ai!,
-        imageUrl: referenceImageUrl,
-        characterDescription: scrubbedCharacter,
-        // character_name doesn't affect generation — kie.ai keeps it as a
-        // label for the operator's debugging view. Generic placeholder.
-        characterName: 'ad_character',
-        generationJobId: jobId,
-      });
-      return {
-        ok: result.ok,
-        characterId: result.characterId,
-        errorMessage: result.errorMessage,
-        // kie.ai docs don't publish character-creation pricing; treat
-        // as $0.15 placeholder. Reconcile against kie.ai dashboard
-        // credit deductions after first prod call.
-        costUsd: KIE_CHARACTER_CREATE_COST_USD,
-      };
-    });
-    if (characterResult.ok) {
-      totalCost += characterResult.costUsd;
-    } else {
-      console.warn(
-        `[kie-omni] character creation failed (${characterResult.errorMessage ?? 'unknown'}); ` +
-          `falling back to image_urls-only path`,
-      );
-      // We still bill the operator if the character creation request
-      // hit kie.ai (auth / validation / 4xx eat credits). Only zero-
-      // cost the path is a MissingProviderKeyError, which never
-      // reaches kie.ai.
-      if (characterResult.costUsd > 0) totalCost += characterResult.costUsd;
-    }
-    const characterIdForSegments: string | undefined = characterResult.ok
-      ? characterResult.characterId
-      : undefined;
-
-    // 3. Generate segments SEQUENTIALLY with chain continuity (Polish-12.5).
-    //    Each segment grounds on the previous segment's actual rendered last
-    //    frame, eliminating per-segment character drift. The Polish-12.4
-    //    character_id still anchors identity, but the chained image_urls
-    //    reference pins pixel-level consistency segment-to-segment.
+    //   Each iteration: fresh Nano Banana reference → fresh kie.ai
+    //   character_id → sequential segment chain (Polish-12.5).
     //
-    //    Trade-off: ~3x wall-clock vs the Polish-12.4 parallel path. The
-    //    sequential + retry-loop math is the conscious cost for visual
-    //    stability across the stitched output.
+    //   When per-segment retries (Polish-12.2) exhaust with
+    //   PROMINENT_PEOPLE_FILTER_FAILED, the most likely culprit is the
+    //   Nano Banana face — Gemini's classifier flagged it as
+    //   celebrity-resembling and no per-segment seed retry can
+    //   recover. shouldRegeneratePipeline() decides whether the failure
+    //   warrants another pass (filter-only); deterministic failures
+    //   (auth, balance, validation) abort immediately.
     //
-    //    Graceful degradation:
-    //      - First segment uses the Nano Banana reference (unchanged).
-    //      - If a segment's last-frame extraction fails (or
-    //        REPLICATE_FRAME_EXTRACT_MODEL_ID is unset), the next segment
-    //        falls back to the Nano Banana reference — character_id still
-    //        anchors identity, so quality degrades modestly rather than
-    //        failing the job.
-    //      - If a segment itself fails (after its own internal retries),
-    //        the chain stops and the worker reports the failure.
-    const segmentResults: SegmentResult[] = [];
-    let currentReferenceUrl = referenceImageUrl;
+    //   Step names are suffixed with `-p2`, `-p3`, … on regen so
+    //   Inngest's dedupe layer doesn't replay the cached attempt-1
+    //   result. Attempt 1 keeps the un-suffixed names so the common
+    //   single-attempt path looks identical to Polish-12.5.
+    // ===================================================================
+    let referenceImageUrl = '';
+    let characterIdForSegments: string | undefined;
+    let characterResult: {
+      ok: boolean;
+      characterId?: string;
+      errorMessage?: string;
+      costUsd: number;
+    } = { ok: false, costUsd: 0 };
+    let segmentResults: SegmentResult[] = [];
     let chainBreakReason: string | undefined;
     let frameExtractTotalCost = 0;
-    const chainReferenceUrls: string[] = [];
+    let chainReferenceUrls: string[] = [];
+    let pipelineAttempts = 0;
+    let pipelineFinalFailure: { message: string; costUsd: number } | undefined;
 
-    for (const segment of segments) {
-      const result = await runOmniSegment({
-        step,
-        segment: {
-          ...segment,
-          combinedDialogue: scrubAll(segment.combinedDialogue),
-        },
-        totalSegments: segments.length,
-        referenceImageUrl: currentReferenceUrl,
-        characterId: characterIdForSegments,
-        characterDescription: scrubbedCharacter,
-        sceneDescription: scrubbedScene,
-        userId,
-        jobId,
+    for (
+      let pipelineAttempt = 1;
+      pipelineAttempt <= MAX_FULL_PIPELINE_REGENERATIONS;
+      pipelineAttempt++
+    ) {
+      pipelineAttempts = pipelineAttempt;
+      const pipelineStep = suffixStep(step, pipelineAttempt === 1 ? '' : `-p${pipelineAttempt}`);
+
+      // Reset per-attempt state.
+      segmentResults = [];
+      chainBreakReason = undefined;
+      frameExtractTotalCost = 0;
+      chainReferenceUrls = [];
+
+      // 1. Nano Banana reference. Each pipeline attempt re-runs this
+      //    with a fresh Inngest step (via the -pN suffix), so Gemini
+      //    rolls a fresh face each time we regenerate.
+      const referenceResult = await pipelineStep.run('nano-banana-reference', async () => {
+        let keys;
+        try {
+          keys = await loadDecryptedKeys(userId, ['gemini']);
+        } catch (err) {
+          if (err instanceof MissingProviderKeyError)
+            return { ok: false as const, error: err.message, costUsd: 0 };
+          throw err;
+        }
+        const firstClip = manual.clips[0];
+        if (!firstClip) {
+          return { ok: false as const, error: 'Manual has 0 clips', costUsd: 0 };
+        }
+        const prompt = buildImagePromptForClip(manual, firstClip);
+        const image = await callGeminiImage({
+          userId,
+          apiKey: keys.gemini!,
+          prompt,
+          generationJobId: jobId,
+        });
+        if (!image.ok || !image.imageBase64 || !image.imageMimeType) {
+          return {
+            ok: false as const,
+            error: image.errorMessage ?? 'Nano Banana returned no image',
+            costUsd: image.costUsd,
+          };
+        }
+        try {
+          const upload = await uploadGeneratedImage({
+            userId,
+            jobId,
+            // Bump variantIndex per pipeline attempt so the regen
+            // upload doesn't collide with the original reference path.
+            variantIndex: pipelineAttempt - 1,
+            imageBase64: image.imageBase64,
+            mimeType: image.imageMimeType,
+            filenamePrefix: 'kie-omni-ref-',
+          });
+          return { ok: true as const, publicUrl: upload.publicUrl, costUsd: image.costUsd };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return {
+            ok: false as const,
+            error: `Reference frame upload failed: ${msg}`,
+            costUsd: image.costUsd,
+          };
+        }
       });
-      segmentResults.push(result);
-
-      if (!result.ok) {
-        chainBreakReason = `segment ${segment.segmentIndex} failed: ${result.error}`;
-        console.log(`[kie-omni] chain broken — ${chainBreakReason}`);
+      if (!referenceResult.ok) {
+        // Nano Banana failures aren't retryable via regen (the cause
+        // is the prompt or the provider, not stochastic face output).
+        pipelineFinalFailure = {
+          message: referenceResult.error,
+          costUsd: referenceResult.costUsd,
+        };
         break;
       }
+      totalCost += referenceResult.costUsd;
+      referenceImageUrl = referenceResult.publicUrl;
 
-      const isLastSegment = segment.segmentIndex === segments.length - 1;
-      if (!isLastSegment) {
-        const frameResult = await runFrameExtract({
-          step,
-          videoUrl: result.publicUrl,
-          segmentIndex: segment.segmentIndex,
+      // 2. Polish-12.4: register the Nano Banana reference as a
+      //    kie.ai character. Each pipeline attempt registers a NEW
+      //    character_id pinned to its specific Nano Banana frame.
+      characterResult = await pipelineStep.run('kie-omni-character-create', async () => {
+        let keys;
+        try {
+          keys = await loadDecryptedKeys(userId, ['kie_ai']);
+        } catch (err) {
+          if (err instanceof MissingProviderKeyError)
+            return { ok: false as const, errorMessage: err.message, costUsd: 0 };
+          throw err;
+        }
+        const result = await createKieOmniCharacter({
+          userId,
+          apiKey: keys.kie_ai!,
+          imageUrl: referenceImageUrl,
+          characterDescription: scrubbedCharacter,
+          characterName: 'ad_character',
+          generationJobId: jobId,
+        });
+        return {
+          ok: result.ok,
+          characterId: result.characterId,
+          errorMessage: result.errorMessage,
+          costUsd: KIE_CHARACTER_CREATE_COST_USD,
+        };
+      });
+      if (characterResult.ok) {
+        totalCost += characterResult.costUsd;
+      } else {
+        console.warn(
+          `[kie-omni] character creation failed (${characterResult.errorMessage ?? 'unknown'}); ` +
+            `falling back to image_urls-only path`,
+        );
+        // Bill the operator when the character/create request actually
+        // hit kie.ai. MissingProviderKeyError reports costUsd=0.
+        if (characterResult.costUsd > 0) totalCost += characterResult.costUsd;
+      }
+      characterIdForSegments = characterResult.ok ? characterResult.characterId : undefined;
+
+      // 3. Sequential segment chain (Polish-12.5).
+      let currentReferenceUrl = referenceImageUrl;
+      for (const segment of segments) {
+        const result = await runOmniSegment({
+          step: pipelineStep,
+          segment: {
+            ...segment,
+            combinedDialogue: scrubAll(segment.combinedDialogue),
+          },
+          totalSegments: segments.length,
+          referenceImageUrl: currentReferenceUrl,
+          characterId: characterIdForSegments,
+          characterDescription: scrubbedCharacter,
+          sceneDescription: scrubbedScene,
           userId,
           jobId,
         });
-        if (frameResult.ok) {
-          currentReferenceUrl = frameResult.publicUrl;
-          chainReferenceUrls.push(frameResult.publicUrl);
-          frameExtractTotalCost += frameResult.costUsd;
-          console.log(
-            `[kie-omni] segment ${segment.segmentIndex} → next ref (chained): ${frameResult.publicUrl}`,
-          );
-        } else {
-          // currentReferenceUrl stays as whatever fed segment N. The
-          // first fallback is the Nano Banana reference; if a later
-          // segment's extraction fails, we keep using the last frame
-          // we successfully extracted (or Nano Banana when nothing has
-          // worked yet). character_id still anchors identity.
-          console.warn(
-            `[kie-omni] segment ${segment.segmentIndex} frame extraction failed (${frameResult.error}); ` +
-              `next segment will reuse the current reference (degraded chain continuity)`,
-          );
+        segmentResults.push(result);
+
+        if (!result.ok) {
+          chainBreakReason = `segment ${segment.segmentIndex} failed: ${result.error}`;
+          console.log(`[kie-omni] chain broken — ${chainBreakReason}`);
+          break;
+        }
+
+        const isLastSegment = segment.segmentIndex === segments.length - 1;
+        if (!isLastSegment) {
+          const frameResult = await runFrameExtract({
+            step: pipelineStep,
+            videoUrl: result.publicUrl,
+            segmentIndex: segment.segmentIndex,
+            userId,
+            jobId,
+          });
+          if (frameResult.ok) {
+            currentReferenceUrl = frameResult.publicUrl;
+            chainReferenceUrls.push(frameResult.publicUrl);
+            frameExtractTotalCost += frameResult.costUsd;
+            console.log(
+              `[kie-omni] segment ${segment.segmentIndex} → next ref (chained): ${frameResult.publicUrl}`,
+            );
+          } else {
+            console.warn(
+              `[kie-omni] segment ${segment.segmentIndex} frame extraction failed (${frameResult.error}); ` +
+                `next segment will reuse the current reference (degraded chain continuity)`,
+            );
+          }
         }
       }
-    }
 
-    const failures = segmentResults.filter((r) => !r.ok);
-    if (failures.length > 0) {
-      const msg = failures.map((f) => `segment ${f.segmentIndex}: ${f.error}`).join('; ');
-      console.log(`[kie-omni] segment failure(s): ${msg}`);
-      // Tally any costs that did land (segment Omni cost charged on
-      // success only; nothing partial here). Frame extract costs from
-      // successful chain links also stick.
+      const failures = segmentResults.filter((r) => !r.ok);
+      if (failures.length === 0) {
+        // Whole chain succeeded — exit the pipeline loop. Cost
+        // accumulation for the successes happens below alongside
+        // frameExtractTotalCost.
+        break;
+      }
+
+      // Failed: accumulate sunk costs from THIS attempt so the next
+      // iteration's segment retries are billed too.
       for (const r of segmentResults) totalCost += r.costUsd;
       totalCost += frameExtractTotalCost;
-      await markJobFailed(jobId, userId, `Omni segment(s) failed: ${msg}`, totalCost);
+
+      const firstFailure = failures[0]!;
+      if (
+        !shouldRegeneratePipeline({
+          segmentError: firstFailure.error,
+          currentAttempt: pipelineAttempt,
+          maxAttempts: MAX_FULL_PIPELINE_REGENERATIONS,
+        })
+      ) {
+        pipelineFinalFailure = {
+          message: `Omni segment(s) failed: ${failures
+            .map((f) => `segment ${f.segmentIndex}: ${f.error}`)
+            .join('; ')}`,
+          costUsd: 0,
+        };
+        break;
+      }
+      console.warn(
+        `[kie-omni] pipeline attempt ${pipelineAttempt} hit PROMINENT_PEOPLE filter; ` +
+          `regenerating Nano Banana with fresh seed ` +
+          `(next attempt ${pipelineAttempt + 1}/${MAX_FULL_PIPELINE_REGENERATIONS})`,
+      );
+    }
+
+    if (pipelineFinalFailure) {
+      await markJobFailed(
+        jobId,
+        userId,
+        pipelineFinalFailure.message,
+        totalCost + pipelineFinalFailure.costUsd,
+      );
       return { jobId, mode, generated: 0 };
     }
 
-    // Narrow to successes — TS doesn't propagate the .length>0 guard
-    // through the discriminated union, but at this point every entry
-    // is a SegmentSuccess.
+    // Polish-12.6: success path. segmentResults / chainReferenceUrls /
+    // frameExtractTotalCost reflect the WINNING pipeline attempt only;
+    // sunk costs from failed earlier attempts already accumulated
+    // inside the loop.
     const successes = segmentResults.filter((r): r is SegmentSuccess => r.ok);
     const segmentUrls = successes.map((r) => r.publicUrl);
     for (const r of successes) totalCost += r.costUsd;
@@ -726,6 +807,12 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           chain_reference_urls: chainReferenceUrls,
           chain_break_reason: chainBreakReason ?? null,
           per_segment_reference_urls: successes.map((x) => x.referenceUrlUsed),
+          // Polish-12.6: tracks whether the full-pipeline regen loop
+          // fired and how many attempts it took. >1 means PROMINENT_
+          // PEOPLE_FILTER tripped at least once and a fresh Nano
+          // Banana face cleared it.
+          pipeline_attempts: pipelineAttempts,
+          pipeline_filter_regeneration_used: pipelineAttempts > 1,
         },
       });
     });
@@ -794,6 +881,25 @@ type InngestStepLike = {
   run: (name: string, fn: () => Promise<any>) => Promise<any>;
   sleep: (name: string, duration: string) => Promise<unknown>;
 };
+
+/**
+ * Polish-12.6: wrap an InngestStepLike so every step.run / step.sleep
+ * call gets a suffix appended to its name. Used by the full-pipeline
+ * regeneration loop so the 2nd attempt's steps have distinct names
+ * from the 1st attempt's — without this, Inngest's dedupe layer
+ * replays the cached failed result from attempt 1 instead of running
+ * fresh.
+ *
+ * Attempt 1 passes the raw step (empty suffix) so the common
+ * single-attempt path keeps its existing step names unchanged.
+ */
+function suffixStep(step: InngestStepLike, suffix: string): InngestStepLike {
+  if (suffix === '') return step;
+  return {
+    run: (name, fn) => step.run(`${name}${suffix}`, fn),
+    sleep: (name, duration) => step.sleep(`${name}${suffix}`, duration),
+  };
+}
 
 export async function runOmniSegment(input: {
   step: InngestStepLike;
