@@ -204,6 +204,14 @@ export const RETRYABLE_OMNI_FAIL_CODES: ReadonlySet<string> = new Set([
   // claims across emotional beats / segments for content that
   // commonly trips this.
   'PUBLIC_ERROR_AUDIO_FILTERED',
+  // Polish-12.7.1: kie.ai's generic 5xx transient backend error.
+  // Retry with the same content (a fresh seed is irrelevant — this
+  // is a backend hiccup, not a content trigger). Most retries
+  // succeed on the next attempt. Explicitly NOT added to
+  // shouldRegeneratePipeline: full Nano Banana regen costs $0.05
+  // every time and doesn't help when the failure is a kie.ai
+  // backend issue.
+  'INTERNAL',
 ]);
 
 /**

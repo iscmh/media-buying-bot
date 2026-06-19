@@ -406,9 +406,10 @@ describe('Polish-12.2: isRetryableOmniFailure', () => {
 
   it('RETRYABLE_OMNI_FAIL_CODES exposes the canonical set', () => {
     expect(RETRYABLE_OMNI_FAIL_CODES.has('PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED')).toBe(true);
-    // Polish-12.7: AUDIO_FILTERED joined the set.
-    expect(RETRYABLE_OMNI_FAIL_CODES.size).toBe(4);
+    // Polish-12.7.1: INTERNAL joined the set (5 total now).
+    expect(RETRYABLE_OMNI_FAIL_CODES.size).toBe(5);
     expect(RETRYABLE_OMNI_FAIL_CODES.has('PUBLIC_ERROR_AUDIO_FILTERED')).toBe(true);
+    expect(RETRYABLE_OMNI_FAIL_CODES.has('INTERNAL')).toBe(true);
   });
 
   // Polish-12.2.2: failMsg fallback for kie.ai's inverted shape
@@ -1473,5 +1474,53 @@ describe('Polish-12.7: master prompt AUDIO FILTER BYPASS section', () => {
     const text = getUniversalUgcMasterPrompt();
     expect(text).toMatch(/KEEP the specific dollar amounts/);
     expect(text).toMatch(/KEEP the cash-out CTAs/);
+  });
+});
+
+describe('Polish-12.7.1: INTERNAL is per-segment retryable but NOT pipeline-regen-triggering', () => {
+  it('isRetryableOmniFailure(INTERNAL) → true', () => {
+    expect(isRetryableOmniFailure('INTERNAL')).toBe(true);
+  });
+
+  it('decideOmniAttemptOutcome with INTERNAL on a non-final attempt → retry', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'fail',
+      failCode: 'INTERNAL',
+      failMsg: 'internal server error',
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('retry');
+  });
+
+  it('decideOmniAttemptOutcome with INTERNAL on the FINAL attempt → abort with exhausted reason', () => {
+    const r = decideOmniAttemptOutcome({
+      submitOk: true,
+      pollState: 'fail',
+      failCode: 'INTERNAL',
+      failMsg: 'internal server error',
+      attempt: 3,
+      maxAttempts: 3,
+    });
+    expect(r.kind).toBe('abort');
+    if (r.kind === 'abort') {
+      expect(r.reason).toMatch(/exhausted 3 attempt\(s\)/);
+      expect(r.reason).toMatch(/INTERNAL/);
+    }
+  });
+
+  it('shouldRegeneratePipeline returns false for INTERNAL (backend errors do not warrant full regen)', () => {
+    // INTERNAL is a kie.ai backend hiccup, not a content trigger. A
+    // fresh Nano Banana face + character_id wastes $0.20 without
+    // fixing the underlying transient. Per-segment retry (3x) is the
+    // right level of remediation.
+    expect(
+      shouldRegeneratePipeline({
+        segmentError: 'Segment 2 failed after 3 attempt(s) (INTERNAL): internal server error',
+        currentAttempt: 1,
+        maxAttempts: 2,
+      }),
+    ).toBe(false);
   });
 });
