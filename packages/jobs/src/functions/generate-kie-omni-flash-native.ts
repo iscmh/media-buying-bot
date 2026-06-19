@@ -215,12 +215,36 @@ export const RETRYABLE_OMNI_FAIL_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Polish-12.7.2: substring patterns for kie.ai transient backend
+ * errors that arrive as human-readable strings instead of bare codes.
+ * "Internal Error, Please try again later." doesn't match the
+ * RETRYABLE_OMNI_FAIL_CODES set's exact 'INTERNAL' entry; the patterns
+ * here catch the prose form. Stays conservative — only well-known
+ * transient signals; deterministic errors (auth, validation, balance)
+ * don't trip these patterns even if their messages mention "error".
+ */
+const TRANSIENT_OMNI_PATTERNS: ReadonlyArray<RegExp> = [
+  /internal\s*error/i,
+  /please\s+try\s+again/i,
+  /service\s+unavailable/i,
+  /timeout/i,
+  /deadline\s+exceeded/i,
+  /temporarily\s+unavailable/i,
+  /backend\s+error/i,
+];
+
+/**
  * Polish-12.2.2: defense-in-depth. The kie-omni client already infers
  * failCode from failMsg when kie.ai returns the code inverted (which
  * empirically happens for safety-filter failures). This second check
  * catches any case where the client's pattern miss left failCode
  * undefined but failMsg still carries the bare identifier — including
  * possible future kie.ai response shape drift.
+ *
+ * Polish-12.7.2: also match free-form human-readable transient errors
+ * via TRANSIENT_OMNI_PATTERNS so prose like "Internal Error, Please
+ * try again later." gets the same per-segment retry treatment as the
+ * bare 'INTERNAL' code.
  */
 export function isRetryableOmniFailure(
   failCode: string | undefined | null,
@@ -230,6 +254,9 @@ export function isRetryableOmniFailure(
   if (failMsg) {
     const trimmed = failMsg.trim();
     if (RETRYABLE_OMNI_FAIL_CODES.has(trimmed)) return true;
+    for (const pattern of TRANSIENT_OMNI_PATTERNS) {
+      if (pattern.test(trimmed)) return true;
+    }
   }
   return false;
 }

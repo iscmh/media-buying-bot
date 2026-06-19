@@ -1524,3 +1524,53 @@ describe('Polish-12.7.1: INTERNAL is per-segment retryable but NOT pipeline-rege
     ).toBe(false);
   });
 });
+
+describe('Polish-12.7.2: substring-match transient kie.ai errors', () => {
+  it('matches the production-observed "Internal Error, Please try again later." prose', () => {
+    expect(isRetryableOmniFailure(undefined, 'Internal Error, Please try again later.')).toBe(true);
+  });
+
+  it('preserves bare-code matching (Polish-12.7.1 back-compat)', () => {
+    expect(isRetryableOmniFailure('INTERNAL')).toBe(true);
+  });
+
+  it('matches lone "Service Unavailable" prose', () => {
+    expect(isRetryableOmniFailure(undefined, 'Service Unavailable')).toBe(true);
+  });
+
+  it('matches "Request timeout, please retry" prose', () => {
+    expect(isRetryableOmniFailure(undefined, 'Request timeout, please retry')).toBe(true);
+  });
+
+  it('matches "deadline exceeded" / "temporarily unavailable" / "backend error" prose', () => {
+    expect(isRetryableOmniFailure(undefined, 'Upstream deadline exceeded')).toBe(true);
+    expect(isRetryableOmniFailure(undefined, 'The service is temporarily unavailable')).toBe(true);
+    expect(isRetryableOmniFailure(undefined, 'Backend error: lost connection')).toBe(true);
+  });
+
+  it('rejects deterministic prose like "invalid prompt format"', () => {
+    expect(isRetryableOmniFailure(undefined, 'invalid prompt format')).toBe(false);
+    expect(isRetryableOmniFailure(undefined, 'unauthorized: bad API key')).toBe(false);
+    expect(isRetryableOmniFailure(undefined, 'insufficient balance')).toBe(false);
+  });
+
+  it('still rejects rate-limit prose (deterministic, retry burns quota)', () => {
+    // Polish-12.2's contract: rate-limit is NOT in the retryable set
+    // because retrying just hits the same wall. The transient patterns
+    // intentionally don't match "rate limit" prose.
+    expect(isRetryableOmniFailure(undefined, 'Rate limit exceeded, slow down')).toBe(false);
+  });
+
+  it('still matches set members via failMsg (Polish-12.2.2 back-compat preserved)', () => {
+    expect(isRetryableOmniFailure(undefined, 'PUBLIC_ERROR_AUDIO_FILTERED')).toBe(true);
+    expect(isRetryableOmniFailure(undefined, 'PUBLIC_ERROR_PROMINENT_PEOPLE_FILTER_FAILED')).toBe(
+      true,
+    );
+  });
+
+  it('returns false when both failCode and failMsg are missing', () => {
+    expect(isRetryableOmniFailure(undefined, undefined)).toBe(false);
+    expect(isRetryableOmniFailure(null, null)).toBe(false);
+    expect(isRetryableOmniFailure(undefined, '')).toBe(false);
+  });
+});
