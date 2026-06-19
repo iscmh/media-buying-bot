@@ -1574,3 +1574,133 @@ describe('Polish-12.7.2: substring-match transient kie.ai errors', () => {
     expect(isRetryableOmniFailure(undefined, '')).toBe(false);
   });
 });
+
+describe('Polish-12.7.3: KIE_OMNI_FLASH_HARD_DIRECTIVE — end-pause + UI suppression', () => {
+  it('contains the new "no end-of-clip pause / smile" bullet', async () => {
+    const { KIE_OMNI_FLASH_HARD_DIRECTIVE } = await import('@mbb/shared');
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/end-of-clip pause/i);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/smile-to-camera/i);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/idle reaction frame/i);
+  });
+
+  it('contains the new "no phone UI / momentary UI flashes" bullet', async () => {
+    const { KIE_OMNI_FLASH_HARD_DIRECTIVE } = await import('@mbb/shared');
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/phone UI/);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/momentary UI flashes/i);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/screen reflections/i);
+  });
+
+  it('contains the positive "SEGMENT of a longer continuous video / HARD CUT mid-action" requirement', async () => {
+    const { KIE_OMNI_FLASH_HARD_DIRECTIVE } = await import('@mbb/shared');
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/SEGMENT of a longer continuous video/);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/HARD CUT mid-action/);
+    expect(KIE_OMNI_FLASH_HARD_DIRECTIVE).toMatch(/NO ending gesture/);
+  });
+});
+
+describe('Polish-12.7.3: master prompt — Dialogue Pacing for Multi-Segment Output', () => {
+  it('contains the new pacing section + em-dash boundary guidance', async () => {
+    const { getUniversalUgcMasterPrompt } = await import('@mbb/ai-providers');
+    const text = getUniversalUgcMasterPrompt();
+    expect(text).toMatch(/Dialogue Pacing for Multi-Segment Output/);
+    expect(text).toMatch(/ends MID-SENTENCE or MID-THOUGHT/);
+    expect(text).toMatch(/em-dash \+ lowercase start signals the cut is mid-sentence/);
+  });
+
+  it('contains the BAD / GOOD example pair contrasting complete vs. continuous segments', async () => {
+    const { getUniversalUgcMasterPrompt } = await import('@mbb/ai-providers');
+    const text = getUniversalUgcMasterPrompt();
+    expect(text).toMatch(/Segment 1: "I'm 64\. My pension barely covers/);
+    expect(text).toMatch(/Segment 2: "— a theme park\./);
+  });
+});
+
+describe('Polish-12.7.3: buildOmniFlashSegmentPrompt em-dash continuity detection', () => {
+  const baseInput = {
+    characterDescription: 'A 30yo woman.',
+    sceneDescription: 'Sunny kitchen.',
+    segmentDurationSeconds: 10 as const,
+  };
+
+  it('trailing em-dash → "ends mid-sentence" CONTINUITY hint', () => {
+    const out = buildOmniFlashSegmentPrompt({
+      ...baseInput,
+      segmentDialogue:
+        '"I\'m 64. My pension barely covers the bills and there\'s nothing left for —"',
+    });
+    expect(out).toMatch(/CONTINUITY: This clip ends mid-sentence/);
+    expect(out).toMatch(/character is still speaking when the cut happens/);
+    expect(out).not.toMatch(
+      /CONTINUITY: This clip continues a sentence from the previous segment\s+—\s+character is already mid-speech/,
+    );
+  });
+
+  it('leading em-dash → "continues a sentence from the previous segment" CONTINUITY hint', () => {
+    const out = buildOmniFlashSegmentPrompt({
+      ...baseInput,
+      segmentDialogue: '"— a theme park. I told her, we\'ll see, baby."',
+    });
+    expect(out).toMatch(/CONTINUITY: This clip continues a sentence from the previous segment/);
+    expect(out).toMatch(/already mid-speech when the clip begins/);
+  });
+
+  it('em-dash on BOTH ends → continuous-through-cut hint (middle segment of chain)', () => {
+    const out = buildOmniFlashSegmentPrompt({
+      ...baseInput,
+      segmentDialogue: '"— a theme park, and the kids keep asking when we\'re going —"',
+    });
+    expect(out).toMatch(
+      /continues a sentence from the previous segment and continues into the next/,
+    );
+    expect(out).toMatch(/speaking continuously, no breaks in delivery/);
+  });
+
+  it('no em-dash on either end → no CONTINUITY hint added (standalone / final segment)', () => {
+    const out = buildOmniFlashSegmentPrompt({
+      ...baseInput,
+      segmentDialogue: '"Hello there. This is a complete thought."',
+    });
+    // Polish-12.7.3 boundary hint not present.
+    expect(out).not.toMatch(/CONTINUITY: This clip continues a sentence/);
+    expect(out).not.toMatch(/CONTINUITY: This clip ends mid-sentence/);
+  });
+
+  it('en-dash and hyphen also count as boundary markers (defensive)', () => {
+    const out1 = buildOmniFlashSegmentPrompt({
+      ...baseInput,
+      segmentDialogue: '"trailing en-dash –"',
+    });
+    expect(out1).toMatch(/CONTINUITY: This clip ends mid-sentence/);
+    const out2 = buildOmniFlashSegmentPrompt({
+      ...baseInput,
+      segmentDialogue: '"- leading hyphen"',
+    });
+    expect(out2).toMatch(/CONTINUITY: This clip continues a sentence from the previous segment/);
+  });
+});
+
+describe('Polish-12.7.3: pacing block forbids end-pause / smile-to-camera', () => {
+  it('explicitly bans "pause at the end" / "smile to camera" / "reaction beat"', () => {
+    const out = buildOmniFlashSegmentPrompt({
+      characterDescription: 'C',
+      sceneDescription: 'S',
+      segmentDialogue: '"hi"',
+      segmentDurationSeconds: 10,
+    });
+    expect(out).toMatch(/PACING:/);
+    expect(out).toMatch(/no pause at the end/i);
+    expect(out).toMatch(/No smile to camera/);
+    expect(out).toMatch(/No "reaction beat" before the cut/);
+    expect(out).toMatch(/cut happens mid-action/);
+  });
+
+  it('insists the dialogue occupies the ENTIRE segment duration', () => {
+    const out8 = buildOmniFlashSegmentPrompt({
+      characterDescription: 'C',
+      sceneDescription: 'S',
+      segmentDialogue: '"hi"',
+      segmentDurationSeconds: 8,
+    });
+    expect(out8).toMatch(/occupy the ENTIRE 8-second duration/);
+  });
+});

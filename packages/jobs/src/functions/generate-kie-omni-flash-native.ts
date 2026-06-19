@@ -1661,7 +1661,29 @@ export function buildOmniFlashSegmentPrompt(input: {
   segmentIndexLabel?: string;
 }): string {
   const dialogue = input.segmentDialogue.trim();
-  const parts = [
+  // Polish-12.7.3: detect em-dash boundaries that Claude writes at
+  // segment edges. A leading "—" means the character is continuing
+  // a sentence from the previous segment; a trailing "—" means the
+  // sentence continues into the next. The model uses these signals
+  // to keep the character speaking through the cut rather than
+  // pausing + smiling at the end of each segment.
+  //
+  // The dialogue passes through buildContinuousMonologue which wraps
+  // each line in quotes, so the actual boundary chars sit just inside
+  // the quotes. Strip the leading/trailing quote when checking.
+  const dialogueCore = dialogue.replace(/^["']|["']$/g, '').trim();
+  const continuesFromPrevious = /^[—–-]/.test(dialogueCore);
+  const continuesIntoNext = /[—–-]$/.test(dialogueCore);
+  const continuityHint =
+    continuesFromPrevious && continuesIntoNext
+      ? 'This clip continues a sentence from the previous segment and continues into the next — character is speaking continuously, no breaks in delivery.'
+      : continuesIntoNext
+        ? 'This clip ends mid-sentence — character is still speaking when the cut happens, no pause or wrap-up at the end.'
+        : continuesFromPrevious
+          ? 'This clip continues a sentence from the previous segment — character is already mid-speech when the clip begins.'
+          : '';
+
+  const parts: string[] = [
     KIE_OMNI_FLASH_HARD_DIRECTIVE,
     '',
     `CHARACTER: ${input.characterDescription}`,
@@ -1671,9 +1693,19 @@ export function buildOmniFlashSegmentPrompt(input: {
     dialogue
       ? `DIALOGUE (the character speaks the following lines naturally to camera, in order): ${dialogue}`
       : 'No dialogue — natural ambient sound only.',
-    '',
-    `PACING: Deliver the dialogue at natural conversational pace (~150 words per minute). The complete dialogue must fit in the ${input.segmentDurationSeconds}-second duration with no dead air at start or end and no long dramatic pauses.`,
   ];
+  if (continuityHint) {
+    parts.push('', `CONTINUITY: ${continuityHint}`);
+  }
+  parts.push(
+    '',
+    // Polish-12.7.3: pacing block explicitly forbids the end-pause /
+    // smile-to-camera artifact the model was producing at segment
+    // boundaries. The earlier "no dead air" phrasing alone wasn't
+    // strong enough — the model interpreted "no dead air" as "no
+    // silence", not "no idle reaction frame".
+    `PACING: Deliver the dialogue at natural conversational pace (~150 words per minute). The complete dialogue must occupy the ENTIRE ${input.segmentDurationSeconds}-second duration. The character is STILL SPEAKING or STILL IN MID-EXPRESSION when the clip ends. CRITICAL: no pause at the end. No smile to camera. No "reaction beat" before the cut. The cut happens mid-action.`,
+  );
   if (input.segmentIndexLabel) {
     parts.push(
       '',
