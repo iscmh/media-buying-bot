@@ -70,21 +70,21 @@ export default async function ConceptDetailPage({ params }: Props) {
         </Button>
       }
     >
-      <header className="mb-6">
+      <div className="mb-6">
         <ConceptNameEdit conceptId={concept.id} initialName={displayName} />
         <p className="text-fg-muted mt-1 text-sm">
           {labelForType(concept.contentType)}
           {concept.nicheTag ? ` · ${concept.nicheTag}` : ''}
           {concept.sourcePlatform ? ` · from ${concept.sourcePlatform}` : ''}
           {' · uploaded '}
-          {formatDateTime(concept.createdAt)}
+          <span className="font-mono">{formatDateTime(concept.createdAt)}</span>
         </p>
-      </header>
+      </div>
 
       {/* Hero preview — image or video based on contentType. Bucket
           is private; previewUrl is a 1h signed URL generated above. */}
       {previewUrl && (
-        <div className="bg-bg-elevated mb-6 overflow-hidden rounded-md border">
+        <div className="border-border mb-6 overflow-hidden border bg-black">
           {concept.contentType === 'ugc' ? (
             <video
               src={previewUrl}
@@ -104,7 +104,7 @@ export default async function ConceptDetailPage({ params }: Props) {
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle className="text-base">Source metadata</CardTitle>
+          <CardTitle>Source metadata</CardTitle>
           <CardDescription className="font-mono text-xs">{concept.fileUrl ?? '—'}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3 text-sm">
@@ -120,38 +120,44 @@ export default async function ConceptDetailPage({ params }: Props) {
           {concept.contentType === 'ugc' && concept.ugcOriginalScript && (
             <Row label="Original script" value={concept.ugcOriginalScript} />
           )}
-          {concept.offerUrl && <Row label="Offer URL" value={concept.offerUrl} />}
+          {concept.offerUrl && <Row label="Offer URL" value={concept.offerUrl} mono />}
           {concept.originalCpaUsd != null && (
-            <Row label="Original CPA" value={`$${concept.originalCpaUsd}`} />
+            <Row label="Original CPA" value={`$${concept.originalCpaUsd}`} mono />
           )}
           {concept.originalRoas != null && (
-            <Row label="Original ROAS" value={String(concept.originalRoas)} />
+            <Row label="Original ROAS" value={String(concept.originalRoas)} mono />
           )}
           {concept.description && <Row label="Notes" value={concept.description} />}
         </CardContent>
       </Card>
 
-      {ourJobs.length > 0 && (
-        <section>
-          <h2 className="text-fg mb-3 text-base font-semibold">Generation history</h2>
-          <ul className="space-y-2">
+      <section>
+        <h2 className="text-fg mb-3 text-xs font-medium uppercase tracking-wider">
+          Generation history
+        </h2>
+        {ourJobs.length === 0 ? (
+          <p className="text-fg-muted border-border-subtle border-y py-8 text-center text-sm">
+            No generations yet. Use the button above to run one.
+          </p>
+        ) : (
+          <ul className="border-border-subtle border-y">
             {ourJobs.map((j) => (
               <li key={j.id}>
                 <Link
                   href={`/jobs/${j.id}`}
-                  className="bg-bg-elevated hover:bg-bg-hover flex items-center justify-between rounded-md border p-3 transition-colors"
+                  className="hover:bg-bg-surfaceHover/50 border-border-subtle flex items-center justify-between gap-3 border-b px-3 py-2.5 transition-colors last:border-b-0"
                 >
-                  <div className="flex flex-col gap-0.5 text-sm">
+                  <div className="flex min-w-0 flex-col gap-0.5 text-sm">
                     <span className="text-fg font-medium">
-                      {j.variantCount ?? 0} variants{' '}
+                      <span className="font-mono">{j.variantCount ?? 0}</span> variants
                       {j.providerChoice && (
-                        <span className="text-fg-muted font-mono text-xs">
+                        <span className="text-fg-muted ml-1.5 font-mono text-xs">
                           · {j.providerChoice}
                         </span>
                       )}
                     </span>
                     <span className="text-fg-muted text-xs">
-                      {j.status}
+                      <span className="font-mono">{j.status}</span>
                       {j.estimatedCostUsd != null && (
                         <span className="font-mono"> · est ${j.estimatedCostUsd}</span>
                       )}
@@ -163,17 +169,19 @@ export default async function ConceptDetailPage({ params }: Props) {
               </li>
             ))}
           </ul>
-        </section>
-      )}
+        )}
+      </section>
     </AppShell>
   );
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:gap-4">
-      <span className="text-fg-muted sm:w-44">{label}</span>
-      <span className="text-fg whitespace-pre-line">{value}</span>
+      <span className="text-fg-muted text-xs uppercase tracking-wider sm:w-44 sm:pt-0.5">
+        {label}
+      </span>
+      <span className={'text-fg whitespace-pre-line' + (mono ? ' font-mono' : '')}>{value}</span>
     </div>
   );
 }

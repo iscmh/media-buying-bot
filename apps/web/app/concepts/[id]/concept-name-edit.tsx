@@ -115,7 +115,7 @@ export function ConceptNameEdit({ conceptId, initialName }: Props) {
 
   return (
     <div className="group flex items-center gap-2">
-      <h1 className="text-fg text-2xl font-semibold tracking-tight">{initialName}</h1>
+      <h1 className="text-fg text-xl font-semibold tracking-tight">{initialName}</h1>
       <Button
         type="button"
         size="icon"
