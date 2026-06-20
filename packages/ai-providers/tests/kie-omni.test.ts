@@ -469,3 +469,60 @@ describe('Polish-12.4: createKieOmniCharacter', () => {
     expect(r.errorMessage).toMatch(/invalid API key/i);
   });
 });
+
+describe('Polish-16 Fix 1: getKieAiBalance', () => {
+  it('GETs /api/v1/chat/credit with the Bearer auth header', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, msg: 'success', data: 4250 },
+    });
+    const { getKieAiBalance } = await import('../src/kie-omni');
+    await getKieAiBalance({ userId: 'u', apiKey: 'k' });
+    expect(calls[0]!.url).toContain('/api/v1/chat/credit');
+    const headers = calls[0]!.init!.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer k');
+  });
+
+  it('returns ok=true with the credit count on success', async () => {
+    captureFetch({
+      status: 200,
+      body: { code: 200, msg: 'success', data: 4250 },
+    });
+    const { getKieAiBalance } = await import('../src/kie-omni');
+    const r = await getKieAiBalance({ userId: 'u', apiKey: 'k' });
+    expect(r.ok).toBe(true);
+    expect(r.credits).toBe(4250);
+  });
+
+  it('returns ok=true with 0 credits when the account is empty', async () => {
+    captureFetch({ status: 200, body: { code: 200, data: 0 } });
+    const { getKieAiBalance } = await import('../src/kie-omni');
+    const r = await getKieAiBalance({ userId: 'u', apiKey: 'k' });
+    expect(r.ok).toBe(true);
+    expect(r.credits).toBe(0);
+  });
+
+  it('translates HTTP 401 → invalid API key', async () => {
+    captureFetch({ status: 401, body: { code: 401 } });
+    const { getKieAiBalance } = await import('../src/kie-omni');
+    const r = await getKieAiBalance({ userId: 'u', apiKey: 'bad' });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/invalid API key/i);
+  });
+
+  it('treats 200-wrapped non-success envelope code as a soft failure', async () => {
+    captureFetch({ status: 200, body: { code: 401, msg: 'unauthorized' } });
+    const { getKieAiBalance } = await import('../src/kie-omni');
+    const r = await getKieAiBalance({ userId: 'u', apiKey: 'k' });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/invalid API key/i);
+  });
+
+  it('returns ok=false when the data field is missing or non-numeric', async () => {
+    captureFetch({ status: 200, body: { code: 200, msg: 'success' } });
+    const { getKieAiBalance } = await import('../src/kie-omni');
+    const r = await getKieAiBalance({ userId: 'u', apiKey: 'k' });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/missing data field/);
+  });
+});

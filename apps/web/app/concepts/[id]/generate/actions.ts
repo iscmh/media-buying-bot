@@ -303,6 +303,50 @@ export async function createGenerationJobAction(
  * 'replicate' enum value but Replicate is the host for Kling 3.0 in
  * our architecture). See buildConnectedProviders for the mapping.
  */
+/**
+ * Polish-16 Fix 1: pre-flight kie.ai credit balance check for the
+ * generate page. Returns the raw credit count so the form can
+ * display it alongside the dollar estimate. kie.ai's credit-to-USD
+ * ratio depends on the account's billing plan and isn't published
+ * programmatically, so we don't try to convert.
+ *
+ * Returns `{ ok: false }` cleanly when:
+ *   - the user has no kie_ai key connected (silent skip — the form
+ *     shows no balance notice for non-kie pipelines)
+ *   - the kie.ai API errors (the form shows a warning)
+ *
+ * Cheap call. Doesn't bill the operator.
+ */
+export interface KieBalanceResult {
+  ok: boolean;
+  credits?: number;
+  errorMessage?: string;
+}
+
+export async function loadKieAiBalance(userId: string): Promise<KieBalanceResult> {
+  const db = getDb();
+  const toolRow = await db.query.toolConnections.findFirst({
+    where: and(
+      eq(schema.toolConnections.userId, userId),
+      eq(schema.toolConnections.provider, 'kie_ai'),
+      eq(schema.toolConnections.status, 'active'),
+      isNull(schema.toolConnections.deletedAt),
+    ),
+    columns: { apiKeyEncrypted: true },
+  });
+  if (!toolRow?.apiKeyEncrypted) {
+    return { ok: false, errorMessage: 'kie_ai not connected' };
+  }
+  const apiKey = await decryptSecret(toolRow.apiKeyEncrypted);
+  const { getKieAiBalance } = await import('@mbb/ai-providers');
+  const balance = await getKieAiBalance({ userId, apiKey });
+  return {
+    ok: balance.ok,
+    credits: balance.credits,
+    errorMessage: balance.errorMessage,
+  };
+}
+
 export async function loadConnectedProviders(userId: string): Promise<ConnectedProviders> {
   const db = getDb();
   const aiRows = await db.query.aiProviderConnections.findMany({

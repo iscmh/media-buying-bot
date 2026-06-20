@@ -50,6 +50,16 @@ interface Props {
    * upfront cost preview matches what the worker will actually generate.
    */
   sourceVideoUrl?: string | null;
+  /**
+   * Polish-16 Fix 1: kie.ai credit balance for the user's connected
+   * key. `ok=false` when the user has no kie_ai connection (silent
+   * skip) or when the kie.ai API errored (form shows a warning).
+   * Credits are NOT auto-converted to USD — kie.ai's credit-to-USD
+   * ratio depends on the operator's billing plan and isn't published
+   * programmatically. The notice displays credits + USD estimate
+   * side-by-side and lets the operator eyeball coverage.
+   */
+  kieBalance?: { ok: boolean; credits?: number; errorMessage?: string };
 }
 
 const INTENSITIES: Array<{
@@ -89,6 +99,7 @@ export function GenerationRequestForm({
   liveAcknowledged: initialLiveAck,
   connectedProviders,
   sourceVideoUrl,
+  kieBalance,
 }: Props) {
   const router = useRouter();
   const [intensity, setIntensity] = React.useState<'small' | 'medium' | 'big'>('medium');
@@ -446,6 +457,30 @@ export function GenerationRequestForm({
           <p className="text-xs text-[color:var(--destructive-color)]">
             This job would exceed your remaining daily cap. Reduce variant count or wait for the cap
             to reset.
+          </p>
+        )}
+        {/*
+         * Polish-16 Fix 1: kie.ai credit balance pre-flight notice.
+         * kie.ai returns the balance in credits, not USD, and the
+         * credit→USD ratio depends on the operator's billing plan
+         * (not published programmatically). We show the credit count
+         * alongside the dollar estimate and let the operator eyeball
+         * whether it covers the planned spend. No automated blocking
+         * — we'd be guessing the conversion.
+         */}
+        {kieBalance?.ok && kieBalance.credits !== undefined && (
+          <p className="text-fg-muted border-border border-t pt-2 text-xs">
+            kie.ai balance:{' '}
+            <span className="text-fg font-mono">{kieBalance.credits.toLocaleString()}</span>{' '}
+            credits. Generation needs about{' '}
+            <span className="text-fg font-mono">${estimate.estimateUsd.toFixed(2)}</span>. Check
+            this covers the spend at your account&apos;s credit rate before submitting.
+          </p>
+        )}
+        {kieBalance && !kieBalance.ok && kieBalance.errorMessage !== 'kie_ai not connected' && (
+          <p className="border-border border-t pt-2 text-xs text-amber-600 dark:text-amber-500">
+            Couldn&apos;t verify kie.ai balance ({kieBalance.errorMessage}). Confirm you have
+            credits before generating — the job may fail mid-flow if you run out.
           </p>
         )}
       </div>

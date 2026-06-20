@@ -5,7 +5,7 @@ import { type ConceptType } from '@mbb/shared';
 import { AppShell } from '@/components/shell/app-shell';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
-import { loadConnectedProviders } from './actions';
+import { loadConnectedProviders, loadKieAiBalance } from './actions';
 import { GenerationRequestForm } from './generation-request-form';
 
 export const metadata = { title: 'Generate variants — Ads Bot' };
@@ -65,6 +65,11 @@ export default async function GenerateRequestPage({ params }: Props) {
   // Polish-4: which providers does the user have keys for? Drives the
   // Provider + Format pickers.
   const connectedProviders = await loadConnectedProviders(userId);
+  // Polish-16 Fix 1: pre-flight kie.ai credit balance. Silently null
+  // when the user has no kie_ai connection or the API errors — the
+  // form treats null as "no balance notice shown" which matches the
+  // pre-Polish-16 behavior on non-kie pipelines.
+  const kieBalance = await loadKieAiBalance(userId);
 
   return (
     <AppShell
@@ -88,6 +93,7 @@ export default async function GenerateRequestPage({ params }: Props) {
         capUsd={capUsd}
         liveAcknowledged={liveAcknowledged}
         connectedProviders={connectedProviders}
+        kieBalance={kieBalance}
         sourceVideoUrl={sourceVideoUrl}
       />
     </AppShell>

@@ -325,6 +325,82 @@ export function translateKieErrorStatus(
 }
 
 // =========================================================================
+// Polish-16 Fix 1: account credit balance check
+// =========================================================================
+
+/**
+ * Polish-16: pre-flight balance lookup. kie.ai exposes the account
+ * credit balance at GET /api/v1/chat/credit (response shape
+ * `{ code, msg, data: <credits> }`). The endpoint returns CREDITS,
+ * not USD — kie.ai's credit-to-USD ratio depends on the account's
+ * billing plan and isn't published programmatically, so the
+ * generate-page UI displays the raw credit count alongside the
+ * dollar estimate and lets the operator eyeball whether it covers
+ * the planned spend. We do NOT block submission on insufficient
+ * balance because we'd be guessing the conversion.
+ *
+ * Cheap call (~$0 to the operator) — the balance endpoint itself
+ * isn't metered.
+ */
+const KIE_CREDIT_URL = `${KIE_BASE}/chat/credit`;
+const CREDIT_CHECK_TIMEOUT_MS = 10_000;
+
+export interface KieCreditBalanceInput {
+  userId: string;
+  apiKey: string;
+}
+
+export interface KieCreditBalanceResult {
+  ok: boolean;
+  /** Raw credit balance returned by kie.ai's `/chat/credit.data` field. */
+  credits?: number;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+export async function getKieAiBalance(
+  input: KieCreditBalanceInput,
+): Promise<KieCreditBalanceResult> {
+  const result = await callProvider<{
+    code?: number;
+    msg?: string;
+    data?: number;
+  }>({
+    userId: input.userId,
+    provider: 'kie_ai',
+    url: KIE_CREDIT_URL,
+    method: 'GET',
+    headers: { Authorization: `Bearer ${input.apiKey}` },
+    timeoutMs: CREDIT_CHECK_TIMEOUT_MS,
+    requestBodyForLog: { kind: 'credit_check' },
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateKieErrorStatus(result.status, result.errorMessage),
+    };
+  }
+  if (result.data.code !== undefined && result.data.code !== 200) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateKieErrorStatus(result.data.code, result.data.msg),
+    };
+  }
+  const credits = result.data.data;
+  if (typeof credits !== 'number' || !Number.isFinite(credits)) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: 'kie.ai credit response missing data field',
+    };
+  }
+  return { ok: true, credits, latencyMs: result.latencyMs };
+}
+
+// =========================================================================
 // Polish-12.4: Gemini Omni character registration
 // =========================================================================
 
