@@ -10,6 +10,7 @@ export * from './timezone';
 export * from './cost-estimation';
 export * from './pipeline-descriptors';
 export * from './kie-omni-prompt';
+export * from './error-translation';
 export * from './actual-cost';
 export * from './prompts';
 export * from './decision-engine';

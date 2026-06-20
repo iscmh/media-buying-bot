@@ -6,6 +6,7 @@ import {
   PLATFORM_HARD_AD_DAILY_BUDGET_USD,
   describePipeline,
   pipelineFromString,
+  translateGenerationError,
 } from '@mbb/shared';
 import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -228,8 +229,32 @@ export default async function JobReviewPage({ params }: Props) {
               Generation failed
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-fg-muted text-sm">
-            {job.errorMessage ?? 'Unknown error.'}
+          <CardContent className="space-y-3">
+            {(() => {
+              const t = translateGenerationError(job.errorMessage ?? null);
+              return (
+                <>
+                  <p className="text-fg text-sm">{t.userMessage}</p>
+                  <p className="text-fg-muted text-xs">{t.suggestion}</p>
+                  {t.retryable && conceptIds[0] && (
+                    <a
+                      href={`/concepts/${conceptIds[0]}/generate`}
+                      className="bg-bg-elevated hover:bg-bg-elevated/80 inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-medium"
+                    >
+                      Retry generation
+                    </a>
+                  )}
+                  {job.errorMessage && (
+                    <details className="text-fg-subtle text-xs">
+                      <summary className="cursor-pointer">Technical details</summary>
+                      <pre className="bg-bg-elevated mt-2 overflow-x-auto rounded-md p-2 font-mono text-[10px] leading-relaxed">
+                        {job.errorMessage}
+                      </pre>
+                    </details>
+                  )}
+                </>
+              );
+            })()}
           </CardContent>
         </Card>
       )}
