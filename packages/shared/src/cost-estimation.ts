@@ -74,25 +74,27 @@ const PRICING = {
   // Polish-12.1: when 2+ segments, the existing Polish-9.12 idan054
   // ffmpeg-concat path stitches them.
   kieOmniFlashStitchUsd: 0.05,
-  // Polish-12.4: kie.ai character/create endpoint cost. Docs don't
-  // publish pricing; $0.15 is a placeholder pending reconciliation
-  // against the kie.ai dashboard credit deduction after the first
-  // prod call lands.
+  // Polish-12.4 / Polish-16: kie.ai character/create endpoint cost.
+  // The docs page for the endpoint doesn't publish pricing. Initial
+  // $0.15 placeholder hasn't been reconciled against actual dashboard
+  // deductions in production yet; Polish-16 leaves it in place pending
+  // a real billing data point.
   kieOmniFlashCharacterCreateUsd: 0.15,
-  // Polish-12.8 v2: anti-celebrity pre-validation overhead. Averages
-  // ~2 Nano Banana retries × $0.05 + ~3 validator calls × $0.005 =
-  // $0.115. We quote $0.10 as the expected-case overhead — under-
-  // quoting modestly so the headline cost stays palatable on the
-  // happy path (which is the common case once the master prompt's
-  // anti-celebrity directive lands a clean face on attempt 1 or 2).
-  kieOmniFlashFaceValidationUsd: 0.1,
-  // Polish-12.5: per-chain-link frame extraction via a Replicate
-  // ffmpeg-style utility model. Charged on N-1 segments (the final
-  // segment doesn't need its last frame). $0.02 matches most
-  // community ffmpeg-utility model pricing on Replicate. Override
-  // via REPLICATE_FRAME_EXTRACT_COST_USD env to track the picked
-  // model's actual rate.
-  kieOmniFlashFrameExtractUsd: 0.02,
+  // Polish-12.8 v2 / Polish-16: anti-celebrity pre-validation overhead.
+  // Reconciled from production observation — typical happy-path
+  // generation lands a clean face on attempt 1 or 2 (~4 Gemini Vision
+  // calls × ~$0.005 each = $0.02 expected case). The earlier $0.10
+  // placeholder over-quoted by ~5x. The face-validation flow stays
+  // bounded at MAX_NANO_BANANA_VALIDATION_ATTEMPTS=8, so the worst
+  // case is still small absolute dollars.
+  kieOmniFlashFaceValidationUsd: 0.02,
+  // Polish-12.5 / Polish-16: per-chain-link frame extraction via the
+  // Replicate ffmpeg-style utility model. Charged on N-1 segments.
+  // Reconciled from the lucataco/frame-extractor model's published
+  // pricing — the initial $0.02 placeholder was ~200× the actual
+  // ~$0.0001 per call. Override via REPLICATE_FRAME_EXTRACT_COST_USD
+  // env to track a different picked model's rate.
+  kieOmniFlashFrameExtractUsd: 0.0001,
 
   // Polish-10 / Polish-10.1: Kling 3.0 Omni multi-segment pipeline.
   // Default mode dropped pro→standard for cheaper iteration (720p is

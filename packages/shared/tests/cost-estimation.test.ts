@@ -233,7 +233,7 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
       estimatedDurationSeconds: 10,
     });
     // Polish-12.4: +$0.15 character registration → $1.15 total.
-    expect(r.estimateUsd).toBeCloseTo(1.25, 4);
+    expect(r.estimateUsd).toBeCloseTo(1.17, 4);
     expect(r.breakdown.some((b) => /1 segment\b/.test(b.item))).toBe(true);
     expect(r.breakdown.some((b) => /stitching/.test(b.item))).toBe(false);
     expect(r.breakdown.some((b) => /character registration/i.test(b.item))).toBe(true);
@@ -247,7 +247,7 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
       estimatedDurationSeconds: 20,
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 1 frame extract → $2.12.
-    expect(r.estimateUsd).toBeCloseTo(2.22, 4);
+    expect(r.estimateUsd).toBeCloseTo(2.1201, 4);
     expect(r.breakdown.some((b) => /2 segments\b/.test(b.item))).toBe(true);
     expect(r.breakdown.some((b) => /idan054 video stitching/.test(b.item))).toBe(true);
     expect(r.breakdown.some((b) => /Chain-continuity frame extracts/.test(b.item))).toBe(true);
@@ -261,7 +261,7 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
       estimatedDurationSeconds: 30,
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 2 frame extracts → $3.04.
-    expect(r.estimateUsd).toBeCloseTo(3.14, 4);
+    expect(r.estimateUsd).toBeCloseTo(3.0202, 4);
     expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -272,7 +272,7 @@ describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', ()
       pipeline: 'kie_omni_flash_native',
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 2 frame extracts → $3.04.
-    expect(r.estimateUsd).toBeCloseTo(3.14, 4);
+    expect(r.estimateUsd).toBeCloseTo(3.0202, 4);
     expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
   });
 });
@@ -291,7 +291,7 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       estimatedDurationSeconds: 60,
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 5 frame extracts → $5.80.
-    expect(r.estimateUsd).toBeCloseTo(5.9, 4);
+    expect(r.estimateUsd).toBeCloseTo(5.7205, 4);
     expect(r.breakdown.some((b) => /6 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -303,7 +303,7 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       estimatedDurationSeconds: 90,
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 8 frame extracts → $8.56.
-    expect(r.estimateUsd).toBeCloseTo(8.66, 4);
+    expect(r.estimateUsd).toBeCloseTo(8.4208, 4);
     expect(r.breakdown.some((b) => /9 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -315,7 +315,7 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       estimatedDurationSeconds: 120,
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 11 frame extracts → $11.32.
-    expect(r.estimateUsd).toBeCloseTo(11.42, 4);
+    expect(r.estimateUsd).toBeCloseTo(11.1211, 4);
     expect(r.breakdown.some((b) => /12 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -327,7 +327,7 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
       estimatedDurationSeconds: 600,
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 29 frame extracts → $27.88.
-    expect(r.estimateUsd).toBeCloseTo(27.98, 4);
+    expect(r.estimateUsd).toBeCloseTo(27.3229, 4);
     expect(r.breakdown.some((b) => /30 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -340,7 +340,7 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
     });
     // Polish-12.4 + 12.5. Total $0.05 + $0.05 + $0.15 + 4 × $0.90
     // + $0.05 stitch + 3 × $0.02 frame extract = $3.96.
-    expect(r.estimateUsd).toBeCloseTo(4.06, 4);
+    expect(r.estimateUsd).toBeCloseTo(3.9203, 4);
     expect(r.breakdown.some((b) => /4 segments\b/.test(b.item))).toBe(true);
   });
 });
@@ -360,7 +360,7 @@ describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native qu
       sourceDurationSeconds: 18,
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 1 frame extract → $2.12.
-    expect(r.estimateUsd).toBeCloseTo(2.22, 4);
+    expect(r.estimateUsd).toBeCloseTo(2.1201, 4);
     expect(r.breakdown.some((b) => /2 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -372,7 +372,7 @@ describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native qu
       sourceDurationSeconds: 60,
     });
     // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 5 frame extracts → $5.80.
-    expect(r.estimateUsd).toBeCloseTo(5.9, 4);
+    expect(r.estimateUsd).toBeCloseTo(5.7205, 4);
     expect(r.breakdown.some((b) => /6 segments\b/.test(b.item))).toBe(true);
   });
 
@@ -386,7 +386,7 @@ describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native qu
     });
     // Source wins → 2 segments → $1.95 + $0.15 character + $0.02
     // chain-frame-extract = $2.12.
-    expect(r.estimateUsd).toBeCloseTo(2.22, 4);
+    expect(r.estimateUsd).toBeCloseTo(2.1201, 4);
   });
 
   it('back-compat: neither source nor estimated supplied → 30s default → $3.04 (post-12.5)', () => {
@@ -396,6 +396,6 @@ describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native qu
       pipeline: 'kie_omni_flash_native',
     });
     // Polish-12.5: 3 segments → 2 frame extracts → $3.00 + $0.04 = $3.04.
-    expect(r.estimateUsd).toBeCloseTo(3.14, 4);
+    expect(r.estimateUsd).toBeCloseTo(3.0202, 4);
   });
 });
