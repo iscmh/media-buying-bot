@@ -221,47 +221,65 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
         />
       )}
 
-      {/* Niche + Source platform side by side on md+. */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <SelectField
-          name="nicheTag"
-          label="Niche"
-          options={NICHE_TAGS_LIST}
-          value={niche}
-          onChange={setNiche}
-          placeholder="Pick a niche"
-        />
-        <SelectField
-          name="sourcePlatform"
-          label="Source platform"
-          options={SOURCE_PLATFORMS_LIST}
-          value={platform}
-          onChange={setPlatform}
-          placeholder="Where it ran"
-        />
-      </div>
+      {/*
+       * Polish-15 Fix 3: every field below is optional metadata used
+       * by downstream analytics + Phase-4 decision-engine routing,
+       * but isn't required to upload + generate. Hide behind an
+       * Advanced disclosure so first-time users land on the minimal
+       * "video + name (+ static copy)" flow. State doesn't persist —
+       * each page visit starts collapsed.
+       */}
+      <details className="group">
+        <summary className="text-fg-muted hover:text-fg cursor-pointer select-none text-xs">
+          <span className="group-open:hidden">
+            Advanced (niche, source, offer URL, metrics, notes)
+          </span>
+          <span className="hidden group-open:inline">Advanced</span>
+        </summary>
+        <div className="mt-4 space-y-4">
+          {/* Niche + Source platform side by side on md+. */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <SelectField
+              name="nicheTag"
+              label="Niche"
+              options={NICHE_TAGS_LIST}
+              value={niche}
+              onChange={setNiche}
+              placeholder="Pick a niche"
+            />
+            <SelectField
+              name="sourcePlatform"
+              label="Source platform"
+              options={SOURCE_PLATFORMS_LIST}
+              value={platform}
+              onChange={setPlatform}
+              placeholder="Where it ran"
+            />
+          </div>
 
-      <FormField name="offerUrl" label="Offer URL (optional)" type="url" />
+          <FormField name="offerUrl" label="Offer URL (optional)" type="url" />
 
-      {/* Original CPA + Original ROAS side by side on md+. */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <FormField
-          name="originalCpaUsd"
-          label="Original CPA (USD, optional)"
-          type="number"
-          step="0.01"
-          mono
-        />
-        <FormField
-          name="originalRoas"
-          label="Original ROAS (optional)"
-          type="number"
-          step="0.01"
-          mono
-        />
-      </div>
+          {/* Original CPA + Original ROAS side by side on md+. */}
+          <div className="grid gap-4 md:grid-cols-2">
+            <FormField
+              name="originalCpaUsd"
+              label="Original CPA (USD, optional)"
+              type="number"
+              step="0.01"
+              mono
+            />
+            <FormField
+              name="originalRoas"
+              label="Original ROAS (optional)"
+              type="number"
+              step="0.01"
+              mono
+            />
+          </div>
 
-      <FormField name="description" label="Notes (optional)" textarea maxLength={2000} />
+          <FormField name="description" label="Notes (optional)" textarea maxLength={2000} />
+        </div>
+      </details>
 
       {error && (
         <p className="text-sm text-[color:var(--destructive-color)]" role="alert">
