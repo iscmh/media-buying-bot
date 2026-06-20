@@ -79,6 +79,13 @@ const PRICING = {
   // against the kie.ai dashboard credit deduction after the first
   // prod call lands.
   kieOmniFlashCharacterCreateUsd: 0.15,
+  // Polish-12.8 v2: anti-celebrity pre-validation overhead. Averages
+  // ~2 Nano Banana retries × $0.05 + ~3 validator calls × $0.005 =
+  // $0.115. We quote $0.10 as the expected-case overhead — under-
+  // quoting modestly so the headline cost stays palatable on the
+  // happy path (which is the common case once the master prompt's
+  // anti-celebrity directive lands a clean face on attempt 1 or 2).
+  kieOmniFlashFaceValidationUsd: 0.1,
   // Polish-12.5: per-chain-link frame extraction via a Replicate
   // ffmpeg-style utility model. Charged on N-1 segments (the final
   // segment doesn't need its last frame). $0.02 matches most
@@ -365,6 +372,13 @@ function estimateByPipeline(
       breakdown.push({
         item: `Reference frames (${variantCount} × $${PRICING.kieOmniFlashReferenceFrameUsd.toFixed(2)})`,
         cost: round4(variantCount * PRICING.kieOmniFlashReferenceFrameUsd),
+      });
+      // Polish-12.8 v2: anti-celeb face pre-screen overhead. Bills
+      // even when the validator skips on a clean first attempt; the
+      // averaging across retries makes this a stable estimate.
+      breakdown.push({
+        item: `Face validation (anti-celeb pre-screen) (${variantCount} × $${PRICING.kieOmniFlashFaceValidationUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.kieOmniFlashFaceValidationUsd),
       });
       // Polish-12.4: kie.ai character registration. One per variant.
       breakdown.push({

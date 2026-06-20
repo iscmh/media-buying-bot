@@ -9,6 +9,7 @@ import {
   isFrameExtractEnabled,
   isVideoConcatEnabled,
   pollKieOmniTask,
+  rateGeminiFaceSimilarity,
   submitKieOmniVideo,
   submitReplicateConcat,
   submitReplicateFrameExtract,
@@ -141,6 +142,22 @@ const KIE_CHARACTER_CREATE_COST_USD = 0.15;
  * ~2x base cost.
  */
 const MAX_FULL_PIPELINE_REGENERATIONS = 2;
+
+/**
+ * Polish-12.8 v2: pre-validate the Nano Banana reference frame for
+ * celebrity-resemblance via a cheap Gemini Vision call (~$0.005) and
+ * regenerate the face with a fresh seed when it scores above the
+ * filter-risk threshold. Cap at MAX_NANO_BANANA_VALIDATION_ATTEMPTS
+ * cycles ($0.05 Nano Banana + $0.005 validator each, bounded ~$0.50
+ * worst case vs $5+ wasted on a failed Omni Flash run).
+ *
+ * The filter doesn't have a public similarity score we can predict
+ * exactly, but the validator uses the SAME model family as the
+ * downstream filter (gemini-2.5-flash), so the signals are aligned —
+ * faces the validator scores low tend to clear the downstream filter.
+ */
+const MAX_NANO_BANANA_VALIDATION_ATTEMPTS = 8;
+const FACE_SIMILARITY_THRESHOLD = 4;
 
 /**
  * Polish-12.6 / 12.7: pure decision helper. Given the first segment
@@ -534,6 +551,12 @@ export const generateKieOmniFlashNative = inngest.createFunction(
     let chainReferenceUrls: string[] = [];
     let pipelineAttempts = 0;
     let pipelineFinalFailure: { message: string; costUsd: number } | undefined;
+    // Polish-12.8 v2: telemetry for the winning attempt's Nano Banana
+    // validation loop. Surfaced into the composite metadata so
+    // production can correlate filter-trigger rates against
+    // validation behavior.
+    let nanoBananaValidationAttempts = 0;
+    let nanoBananaFinalScore: number | null = null;
 
     for (
       let pipelineAttempt = 1;
@@ -549,56 +572,153 @@ export const generateKieOmniFlashNative = inngest.createFunction(
       frameExtractTotalCost = 0;
       chainReferenceUrls = [];
 
-      // 1. Nano Banana reference. Each pipeline attempt re-runs this
-      //    with a fresh Inngest step (via the -pN suffix), so Gemini
-      //    rolls a fresh face each time we regenerate.
-      const referenceResult = await pipelineStep.run('nano-banana-reference', async () => {
+      // 1. Nano Banana reference with Polish-12.8 v2 anti-celebrity
+      //    pre-validation. Each pipeline attempt re-runs this with a
+      //    fresh Inngest step (via the -pN suffix), so Gemini rolls
+      //    a fresh face each time we regenerate. Inside the step, a
+      //    bounded inner loop generates faces until one scores below
+      //    FACE_SIMILARITY_THRESHOLD on the validator (or we exhaust
+      //    the attempt budget and fall back to the lowest-scoring
+      //    candidate so the pipeline still ships something).
+      const referenceResult = await pipelineStep.run('nano-banana-validated', async () => {
         let keys;
         try {
           keys = await loadDecryptedKeys(userId, ['gemini']);
         } catch (err) {
           if (err instanceof MissingProviderKeyError)
-            return { ok: false as const, error: err.message, costUsd: 0 };
+            return {
+              ok: false as const,
+              error: err.message,
+              costUsd: 0,
+              validationAttempts: 0,
+              finalScore: null,
+            };
           throw err;
         }
         const firstClip = manual.clips[0];
         if (!firstClip) {
-          return { ok: false as const, error: 'Manual has 0 clips', costUsd: 0 };
+          return {
+            ok: false as const,
+            error: 'Manual has 0 clips',
+            costUsd: 0,
+            validationAttempts: 0,
+            finalScore: null,
+          };
         }
         const prompt = buildImagePromptForClip(manual, firstClip);
-        const image = await callGeminiImage({
-          userId,
-          apiKey: keys.gemini!,
-          prompt,
-          generationJobId: jobId,
-        });
-        if (!image.ok || !image.imageBase64 || !image.imageMimeType) {
-          return {
-            ok: false as const,
-            error: image.errorMessage ?? 'Nano Banana returned no image',
-            costUsd: image.costUsd,
-          };
-        }
-        try {
-          const upload = await uploadGeneratedImage({
+
+        let bestImage: { publicUrl: string } | undefined;
+        let bestScore: number | undefined;
+        let costSoFar = 0;
+        let validationAttempts = 0;
+
+        for (let vAttempt = 1; vAttempt <= MAX_NANO_BANANA_VALIDATION_ATTEMPTS; vAttempt++) {
+          validationAttempts = vAttempt;
+          const image = await callGeminiImage({
             userId,
-            jobId,
-            // Bump variantIndex per pipeline attempt so the regen
-            // upload doesn't collide with the original reference path.
-            variantIndex: pipelineAttempt - 1,
-            imageBase64: image.imageBase64,
-            mimeType: image.imageMimeType,
-            filenamePrefix: 'kie-omni-ref-',
+            apiKey: keys.gemini!,
+            prompt,
+            generationJobId: jobId,
           });
-          return { ok: true as const, publicUrl: upload.publicUrl, costUsd: image.costUsd };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return {
-            ok: false as const,
-            error: `Reference frame upload failed: ${msg}`,
-            costUsd: image.costUsd,
-          };
+          if (!image.ok || !image.imageBase64 || !image.imageMimeType) {
+            return {
+              ok: false as const,
+              error: image.errorMessage ?? 'Nano Banana returned no image',
+              costUsd: costSoFar + image.costUsd,
+              validationAttempts,
+              finalScore: bestScore ?? null,
+            };
+          }
+          costSoFar += image.costUsd;
+
+          let upload;
+          try {
+            upload = await uploadGeneratedImage({
+              userId,
+              jobId,
+              // variantIndex disambiguates per pipeline attempt AND
+              // per validation attempt — a regen on a 2nd pipeline
+              // attempt that does 3 inner validation cycles writes
+              // distinct files instead of overwriting each other.
+              variantIndex: (pipelineAttempt - 1) * MAX_NANO_BANANA_VALIDATION_ATTEMPTS + vAttempt,
+              imageBase64: image.imageBase64,
+              mimeType: image.imageMimeType,
+              filenamePrefix: 'kie-omni-ref-',
+            });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              ok: false as const,
+              error: `Reference frame upload failed: ${msg}`,
+              costUsd: costSoFar,
+              validationAttempts,
+              finalScore: bestScore ?? null,
+            };
+          }
+
+          // Validate against celebrity-resemblance threshold.
+          const similarity = await rateGeminiFaceSimilarity({
+            userId,
+            apiKey: keys.gemini!,
+            imageUrl: upload.publicUrl,
+            generationJobId: jobId,
+          });
+          costSoFar += similarity.costUsd;
+
+          if (!similarity.ok || similarity.similarityScore === undefined) {
+            // Validator failed — accept this image conservatively
+            // rather than burn more Nano Banana cycles on a broken
+            // validator. character_ids + the Polish-12.6 pipeline
+            // regen still backstop downstream filter failures.
+            console.warn(
+              `[nano-banana-validation] vAttempt ${vAttempt} validator failed (${similarity.errorMessage ?? 'unknown'}); proceeding with current image`,
+            );
+            return {
+              ok: true as const,
+              publicUrl: upload.publicUrl,
+              costUsd: costSoFar,
+              validationAttempts,
+              finalScore: null,
+            };
+          }
+
+          console.log(
+            `[nano-banana-validation] vAttempt ${vAttempt} score=${similarity.similarityScore}`,
+          );
+
+          if (similarity.similarityScore <= FACE_SIMILARITY_THRESHOLD) {
+            return {
+              ok: true as const,
+              publicUrl: upload.publicUrl,
+              costUsd: costSoFar,
+              validationAttempts,
+              finalScore: similarity.similarityScore,
+            };
+          }
+
+          // Score too high — track best candidate so far and retry.
+          if (bestScore === undefined || similarity.similarityScore < bestScore) {
+            bestImage = { publicUrl: upload.publicUrl };
+            bestScore = similarity.similarityScore;
+          }
+          console.warn(
+            `[nano-banana-validation] vAttempt ${vAttempt} score=${similarity.similarityScore} > threshold ${FACE_SIMILARITY_THRESHOLD}; regenerating`,
+          );
         }
+
+        // Exhausted validation budget — ship the lowest-scoring
+        // candidate. The Polish-12.6 pipeline regen + per-segment
+        // retry still backstop a downstream filter failure.
+        console.warn(
+          `[nano-banana-validation] all ${MAX_NANO_BANANA_VALIDATION_ATTEMPTS} attempts exceeded threshold; using best available (score=${bestScore})`,
+        );
+        return {
+          ok: true as const,
+          publicUrl: bestImage!.publicUrl,
+          costUsd: costSoFar,
+          validationAttempts,
+          finalScore: bestScore ?? null,
+        };
       });
       if (!referenceResult.ok) {
         // Nano Banana failures aren't retryable via regen (the cause
@@ -611,6 +731,8 @@ export const generateKieOmniFlashNative = inngest.createFunction(
       }
       totalCost += referenceResult.costUsd;
       referenceImageUrl = referenceResult.publicUrl;
+      nanoBananaValidationAttempts = referenceResult.validationAttempts;
+      nanoBananaFinalScore = referenceResult.finalScore;
 
       // 2. Polish-12.4: register the Nano Banana reference as a
       //    kie.ai character. Each pipeline attempt registers a NEW
@@ -863,6 +985,13 @@ export const generateKieOmniFlashNative = inngest.createFunction(
           // Banana face cleared it.
           pipeline_attempts: pipelineAttempts,
           pipeline_filter_regeneration_used: pipelineAttempts > 1,
+          // Polish-12.8 v2: pre-validation telemetry. >1 attempt means
+          // at least one Nano Banana frame scored above the threshold
+          // and got rejected; final score = the score of the frame
+          // that actually fed Omni Flash. null when the validator
+          // itself failed (graceful fallback path).
+          nano_banana_validation_attempts: nanoBananaValidationAttempts,
+          nano_banana_final_similarity_score: nanoBananaFinalScore,
         },
       });
     });

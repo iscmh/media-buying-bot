@@ -687,6 +687,174 @@ function extractImage(response: GeminiResponse): { data: string; mimeType: strin
   return null;
 }
 
+/**
+ * Polish-12.8 v2: rate how strongly an AI-generated face resembles
+ * any specific real-world public figure. Used to pre-validate Nano
+ * Banana reference frames before sending them through Omni Flash —
+ * Gemini's video safety classifier rejects celebrity-resembling
+ * output downstream, and that's a $5+ wasted generation per trip.
+ *
+ * Cheap (~$0.0005 - $0.005 per call) — uses the same gemini-2.5-flash
+ * text/vision model the deconstructor uses. The validator is the same
+ * model family as the downstream Omni Flash filter, so the signals
+ * are aligned: a low validator score correlates strongly with a clean
+ * downstream filter pass.
+ *
+ * The image is fetched and inlined as base64 so the call doesn't
+ * depend on Gemini Files API (which adds its own polling latency).
+ * Assumes the image is small (a single Nano Banana frame, typically
+ * < 2 MB) so the inline path is fast.
+ */
+export interface GeminiFaceSimilarityInput {
+  userId: string;
+  apiKey: string;
+  /** Public URL of the face to validate — typically a Supabase-hosted Nano Banana frame. */
+  imageUrl: string;
+  generationJobId?: string;
+}
+
+export interface GeminiFaceSimilarityResult {
+  ok: boolean;
+  /** Integer 0-10. Higher = more celebrity-resembling. Undefined when ok=false. */
+  similarityScore?: number;
+  /** Raw Gemini text response (for diagnostics when the parse fails). */
+  rawResponse?: string;
+  costUsd: number;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+const FACE_SIMILARITY_PROMPT = `You are evaluating an AI-generated face. Rate how strongly this person's face resembles any specific real-world public figure (celebrity actor, musician, athlete, politician, influencer, business figure, or well-known personality from anywhere in the world).
+
+Score from 0 to 10:
+- 0 = looks like a completely generic, forgettable person you'd pass on the street and never recognize
+- 5 = some superficial resemblance to a public figure (similar hair, general age/ethnicity vibe) but not enough to mistake them
+- 10 = could be mistaken for a specific famous person, family member of one, or strongly evokes a particular celebrity
+
+Respond with ONLY the number, no explanation. Just a single integer 0 through 10.`;
+
+/**
+ * Polish-12.8 v2: parse Gemini's single-digit response. Returns the
+ * number in [0, 10] when present; undefined when the response is
+ * malformed (caller's worker treats undefined as validator failure
+ * and proceeds with the current image rather than burning more
+ * Nano Banana cycles).
+ */
+export function parseFaceSimilarityScore(raw: string | null | undefined): number | undefined {
+  if (!raw) return undefined;
+  // Gemini sometimes wraps the digit in markdown / sentences despite
+  // the "ONLY the number" instruction. Pull the first 1-2 digit run
+  // and clamp to [0, 10].
+  const match = raw.match(/\b(10|[0-9])\b/);
+  if (!match) return undefined;
+  const score = Number(match[1]);
+  if (!Number.isFinite(score) || score < 0 || score > 10) return undefined;
+  return score;
+}
+
+export async function rateGeminiFaceSimilarity(
+  input: GeminiFaceSimilarityInput,
+): Promise<GeminiFaceSimilarityResult> {
+  // 1. Download the image and inline as base64. The Nano Banana frame
+  //    lives in Supabase storage at a public URL — we fetch + re-inline
+  //    rather than using Files API because the image is small and the
+  //    Files API path adds ~5s of polling latency we don't need.
+  let inlineData: { mimeType: string; data: string };
+  const fetchStart = Date.now();
+  try {
+    const response = await fetch(input.imageUrl);
+    if (!response.ok) {
+      return {
+        ok: false,
+        costUsd: 0,
+        latencyMs: Date.now() - fetchStart,
+        errorMessage: `Failed to fetch face image (HTTP ${response.status})`,
+      };
+    }
+    const mimeType = response.headers.get('content-type') ?? 'image/png';
+    const arrayBuffer = await response.arrayBuffer();
+    inlineData = {
+      mimeType,
+      data: Buffer.from(arrayBuffer).toString('base64'),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      costUsd: 0,
+      latencyMs: Date.now() - fetchStart,
+      errorMessage: `Face image fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  // 2. Call gemini-2.5-flash with the inlined image + similarity prompt.
+  const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
+  const body = {
+    contents: [
+      {
+        role: 'user' as const,
+        parts: [
+          { inline_data: { mime_type: inlineData.mimeType, data: inlineData.data } },
+          { text: FACE_SIMILARITY_PROMPT },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.2,
+      // Constrain to a single integer — no JSON wrapper needed.
+      maxOutputTokens: 8,
+    },
+  };
+  const result = await callProvider<GeminiResponse>({
+    userId: input.userId,
+    provider: 'gemini',
+    url,
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': input.apiKey,
+      'content-type': 'application/json',
+    },
+    body,
+    timeoutMs: VISION_TIMEOUT_MS,
+    requestBodyForLog: {
+      model: VISION_MODEL,
+      purpose: 'face_similarity_validation',
+      image_mime: inlineData.mimeType,
+      image_base64_chars: inlineData.data.length,
+    },
+    generationJobId: input.generationJobId,
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      costUsd: 0,
+      latencyMs: result.latencyMs,
+      errorMessage: result.errorMessage,
+    };
+  }
+
+  const rawText = extractText(result.data) ?? undefined;
+  const usage = result.data.usageMetadata ?? {};
+  const costUsd = computeGeminiTextCost(usage);
+  const score = parseFaceSimilarityScore(rawText);
+  if (score === undefined) {
+    return {
+      ok: false,
+      rawResponse: rawText,
+      costUsd,
+      latencyMs: result.latencyMs,
+      errorMessage: `Could not parse similarity score from response: "${rawText ?? '(empty)'}"`,
+    };
+  }
+  return {
+    ok: true,
+    similarityScore: score,
+    rawResponse: rawText,
+    costUsd,
+    latencyMs: result.latencyMs,
+  };
+}
+
 /** Lightweight verify: 1-token text request. Returns 200 on valid key. */
 export async function verifyGeminiKey(
   apiKey: string,

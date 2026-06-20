@@ -17,6 +17,8 @@ export { ElevenLabsProvider } from './elevenlabs-provider';
 export {
   callGeminiVision,
   callGeminiImage,
+  rateGeminiFaceSimilarity,
+  parseFaceSimilarityScore,
   verifyGeminiKey,
   uploadGeminiFile,
   pollGeminiFileReady,
@@ -25,6 +27,8 @@ export {
   type GeminiVisionResult,
   type GeminiImageInput,
   type GeminiImageResult,
+  type GeminiFaceSimilarityInput,
+  type GeminiFaceSimilarityResult,
   type UploadGeminiFileInput,
   type UploadGeminiFileResult,
   type PollGeminiFileInput,
