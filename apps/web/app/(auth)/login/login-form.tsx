@@ -42,7 +42,7 @@ export function LoginForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor="email">Email</Label>
         <Input
           id="email"
@@ -50,9 +50,11 @@ export function LoginForm() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          mono
+          autoComplete="email"
         />
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor="password">Password</Label>
         <Input
           id="password"
@@ -60,13 +62,15 @@ export function LoginForm() {
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          mono
+          autoComplete="current-password"
         />
       </div>
-      {error && <p className="text-destructive text-sm">{error}</p>}
-      <Button type="submit" className="w-full" disabled={submitting}>
+      {error && <p className="text-sm text-[color:var(--accent-negative)]">{error}</p>}
+      <Button type="submit" variant="primary" className="w-full" disabled={submitting}>
         {submitting ? 'Logging in…' : 'Log in'}
       </Button>
-      <Button type="button" variant="outline" className="w-full" onClick={onGoogle}>
+      <Button type="button" variant="secondary" className="w-full" onClick={onGoogle}>
         Continue with Google
       </Button>
     </form>

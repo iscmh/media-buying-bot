@@ -74,7 +74,7 @@ export function SignupForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor="invite-code">Invite code</Label>
         <Input
           id="invite-code"
@@ -85,16 +85,17 @@ export function SignupForm() {
           placeholder="ABC12345"
           autoComplete="off"
           spellCheck={false}
-          className="font-mono uppercase tracking-wider"
+          mono
+          className="uppercase tracking-wider"
         />
-        <p className="text-muted-foreground text-xs">
+        <p className="text-fg-muted text-xs">
           No code?{' '}
-          <Link href="/waitlist" className="text-primary underline underline-offset-4">
-            Join the waitlist →
+          <Link href="/waitlist" className="text-fg underline-offset-4 hover:underline">
+            Join the waitlist
           </Link>
         </p>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor="email">Email</Label>
         <Input
           id="email"
@@ -102,9 +103,11 @@ export function SignupForm() {
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          mono
+          autoComplete="email"
         />
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor="password">Password</Label>
         <Input
           id="password"
@@ -113,15 +116,22 @@ export function SignupForm() {
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          mono
+          autoComplete="new-password"
         />
       </div>
-      {error && <p className="text-destructive text-sm">{error}</p>}
-      <Button type="submit" className="w-full" disabled={submitting || !codeLooksValid}>
+      {error && <p className="text-sm text-[color:var(--accent-negative)]">{error}</p>}
+      <Button
+        type="submit"
+        variant="primary"
+        className="w-full"
+        disabled={submitting || !codeLooksValid}
+      >
         {submitting ? 'Creating…' : 'Create account'}
       </Button>
       <Button
         type="button"
-        variant="outline"
+        variant="secondary"
         className="w-full"
         onClick={onGoogle}
         disabled={!codeLooksValid}

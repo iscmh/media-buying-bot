@@ -11,10 +11,10 @@ export default function SignupPage() {
       <div className="flex flex-1 items-center justify-center px-6 py-12">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle className="text-xl">Create your account</CardTitle>
+            <CardTitle>Create account</CardTitle>
             <CardDescription>
               By signing up you agree to the{' '}
-              <Link href="/legal/tos" className="hover:text-fg underline transition-colors">
+              <Link href="/legal/tos" className="hover:text-fg underline-offset-4 hover:underline">
                 Terms of Service
               </Link>
               .

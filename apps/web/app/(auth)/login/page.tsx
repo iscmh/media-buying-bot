@@ -12,13 +12,12 @@ export default function LoginPage() {
       <div className="flex flex-1 items-center justify-center px-6 py-12">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <CardTitle className="text-xl">Welcome back</CardTitle>
+            <CardTitle>Log in</CardTitle>
             <CardDescription>
               New here?{' '}
-              <Link href="/apply" className="hover:text-fg underline transition-colors">
+              <Link href="/apply" className="hover:text-fg underline-offset-4 hover:underline">
                 Apply for access
               </Link>
-              .
             </CardDescription>
           </CardHeader>
           <CardContent>
