@@ -6,13 +6,21 @@ import { cn } from '@/lib/utils';
  * variants. Use outline + state color for status pills; solid only for
  * the rare destructive-emphasis case.
  *
+ * Polish-17 Phase 2:
+ *   - rounded-full → rounded-sm (square corners, "real tool" look).
+ *   - font-medium → font-mono (status text reads as a code, not a
+ *     label — "ACTIVE" / "PAUSED" / "FAILED" in mono is the
+ *     trading-terminal aesthetic).
+ *   - Accent color slots remap to the brighter Polish-17 palette
+ *     (--accent-positive / --accent-negative / --accent-warning).
+ *
  * Variants:
  *   default     — neutral filled (primary bg, dark text). Sparingly.
  *   secondary   — neutral filled grey.
  *   outline     — neutral border-only.
- *   destructive — red border + text for negative states (rejected, errored).
- *   success     — desaturated green border + text for "active" pills.
- *   warning     — desaturated amber for "needs review" / "kill recommended".
+ *   destructive — red tint for negative states (rejected, errored).
+ *   success     — green tint for "active" pills.
+ *   warning     — amber for "needs review" / "kill recommended".
  */
 export type BadgeVariant =
   | 'default'
@@ -30,16 +38,19 @@ const variantClass: Record<BadgeVariant, string> = {
   default: 'bg-primary text-primary-foreground border-transparent',
   secondary: 'bg-secondary text-secondary-foreground border-transparent',
   outline: 'text-fg border-border',
-  destructive: 'text-[color:var(--destructive-color)] border-[color:var(--destructive-color)]/40',
-  success: 'text-[color:var(--success)] border-[color:var(--success)]/40',
-  warning: 'text-[color:var(--warning)] border-[color:var(--warning)]/40',
+  destructive:
+    'bg-[color:var(--accent-negative)]/10 text-[color:var(--accent-negative)] border-[color:var(--accent-negative)]/30',
+  success:
+    'bg-[color:var(--accent-positive)]/10 text-[color:var(--accent-positive)] border-[color:var(--accent-positive)]/30',
+  warning:
+    'bg-[color:var(--accent-warning)]/10 text-[color:var(--accent-warning)] border-[color:var(--accent-warning)]/30',
 };
 
 export function Badge({ className, variant = 'default', ...props }: BadgeProps) {
   return (
     <span
       className={cn(
-        'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium leading-none',
+        'inline-flex items-center rounded-sm border px-1.5 py-0.5 font-mono text-xs leading-none',
         variantClass[variant],
         className,
       )}

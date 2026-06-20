@@ -1,6 +1,20 @@
 import * as React from 'react';
 import { cn } from '@/lib/utils';
 
+/*
+ * Polish-17 Phase 2: data-dense operator table.
+ *   - TableHead h-12 → h-9 (tighter).
+ *   - Header text: text-muted-foreground (kept) + uppercase + text-xs
+ *     + tracking-wider — terminal/Vercel header treatment.
+ *   - Cell padding p-4 → px-3 py-2.
+ *   - Row separators use border-border-subtle (#181818) instead of
+ *     the default --border (#1f1f1f) for a softer divider between
+ *     data rows.
+ *   - Add tabularNums prop on TableCell so numeric columns line up.
+ *
+ * No structural API changes — existing consumers keep working.
+ * Numeric columns should pass `tabularNums right` className.
+ */
 const Table = React.forwardRef<HTMLTableElement, React.HTMLAttributes<HTMLTableElement>>(
   ({ className, ...props }, ref) => (
     <div className="relative w-full overflow-auto">
@@ -30,7 +44,10 @@ const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTML
   ({ className, ...props }, ref) => (
     <tr
       ref={ref}
-      className={cn('hover:bg-muted/50 border-b transition-colors', className)}
+      className={cn(
+        'border-border-subtle hover:bg-bg-surfaceHover/50 border-b transition-colors',
+        className,
+      )}
       {...props}
     />
   ),
@@ -43,7 +60,10 @@ const TableHead = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <th
     ref={ref}
-    className={cn('text-muted-foreground h-12 px-4 text-left align-middle font-medium', className)}
+    className={cn(
+      'text-fg-muted h-9 px-3 text-left align-middle text-xs font-medium uppercase tracking-wider',
+      className,
+    )}
     {...props}
   />
 ));
@@ -53,7 +73,7 @@ const TableCell = React.forwardRef<
   HTMLTableCellElement,
   React.TdHTMLAttributes<HTMLTableCellElement>
 >(({ className, ...props }, ref) => (
-  <td ref={ref} className={cn('p-4 align-middle', className)} {...props} />
+  <td ref={ref} className={cn('px-3 py-2 align-middle', className)} {...props} />
 ));
 TableCell.displayName = 'TableCell';
 
