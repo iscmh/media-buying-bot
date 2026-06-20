@@ -71,6 +71,11 @@ export const creativeStatusEnum = pgEnum('creative_status', [
   'launch_failed',
   'rejected',
   'archived',
+  // Polish-16 Fix 2: generation itself failed before review.
+  // Lets failed jobs write per-segment + composite rows with
+  // diagnostic metadata (segment index, attempts, error code,
+  // dialogue, reference frame URL) instead of being a black box.
+  'failed',
 ]);
 
 // Phase 3a (migration 0008): Gemini / Claude / Kie.ai BYOK keys live in

@@ -861,12 +861,98 @@ export const generateKieOmniFlashNative = inngest.createFunction(
     }
 
     if (pipelineFinalFailure) {
-      await markJobFailed(
-        jobId,
-        userId,
-        pipelineFinalFailure.message,
-        totalCost + pipelineFinalFailure.costUsd,
-      );
+      // Polish-16 Fix 2: write the audit trail BEFORE markJobFailed so
+      // failed jobs leave queryable diagnostic rows instead of being a
+      // black box. Per-segment rows capture which segments failed +
+      // how many retries were spent + the dialogue that was rendering;
+      // composite row captures the failure_reason + total cost burned.
+      const totalCostBurned = totalCost + pipelineFinalFailure.costUsd;
+      await step.run('write-failure-segment-audit', async () => {
+        if (segmentResults.length === 0) return;
+        const db = getDb();
+        const rows = segmentResults.map((r, i) => {
+          if (r.ok) {
+            return {
+              userId,
+              generationJobId: jobId,
+              fileUrl: r.publicUrl,
+              aspectRatio: '9:16' as const,
+              // Successful segment of a failed job — operator can
+              // still review the rendered piece. Composite never
+              // landed so the parent job is 'failed'.
+              status: 'ready_for_review' as const,
+              format: 'kie_omni_flash_native_segment',
+              clipIndex: i,
+              isClipPart: true,
+              generationMetadata: {
+                segment_index: r.segmentIndex,
+                kie_task_id: r.taskId,
+                kie_source_url: r.kieSourceUrl,
+                reupload_ok: r.reuploadOk,
+                duration_seconds: r.durationSeconds,
+                attempts: r.attempts,
+                reference_url_used: r.referenceUrlUsed,
+              },
+            };
+          }
+          // Polish-16 Fix 2: failed segment. fileUrl is required by
+          // the schema, so use an empty-sentinel placeholder; the
+          // status='failed' + metadata are the real audit signals.
+          return {
+            userId,
+            generationJobId: jobId,
+            fileUrl: '',
+            aspectRatio: '9:16' as const,
+            status: 'failed' as const,
+            format: 'kie_omni_flash_native_segment',
+            clipIndex: i,
+            isClipPart: true,
+            generationMetadata: {
+              segment_index: r.segmentIndex,
+              attempts: r.attempts,
+              last_error_message: r.error,
+              // Echo the structured shape from the success path so
+              // joined queries don't need branchy SQL.
+              reupload_ok: false,
+            },
+          };
+        });
+        await db.insert(schema.generatedCreatives).values(rows);
+      });
+      await step.run('write-failure-composite-audit', async () => {
+        const db = getDb();
+        await db.insert(schema.generatedCreatives).values({
+          userId,
+          generationJobId: jobId,
+          fileUrl: '',
+          aspectRatio: '9:16',
+          status: 'failed',
+          format: 'kie_omni_flash_native',
+          isClipPart: false,
+          generationMetadata: {
+            failure_reason: pipelineFinalFailure.message,
+            total_cost_burned: totalCostBurned,
+            segments_planned: segments.length,
+            reference_image_url: referenceImageUrl,
+            kie_character_id: characterIdForSegments ?? null,
+            character_create_succeeded: characterResult.ok,
+            character_create_error: characterResult.ok
+              ? null
+              : (characterResult.errorMessage ?? null),
+            character_prompt: manual.characterPrompt,
+            set_prompt: manual.setPrompt,
+            resolution: KIE_OMNI_RESOLUTION,
+            chain_continuity_enabled: isFrameExtractEnabled(),
+            chain_reference_urls: chainReferenceUrls,
+            chain_break_reason: chainBreakReason ?? null,
+            pipeline_attempts: pipelineAttempts,
+            pipeline_filter_regeneration_used: pipelineAttempts > 1,
+            nano_banana_validation_attempts: nanoBananaValidationAttempts,
+            nano_banana_final_similarity_score: nanoBananaFinalScore,
+          },
+        });
+      });
+      await markJobFailed(jobId, userId, pipelineFinalFailure.message, totalCostBurned);
       return { jobId, mode, generated: 0 };
     }
 
