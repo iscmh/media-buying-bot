@@ -22,10 +22,19 @@ const config: Config = {
         mono: ['var(--font-geist-mono)', 'ui-monospace', 'monospace'],
       },
       colors: {
-        // Brand canonical tokens — prefer these in new code.
+        // === Brand canonical tokens — prefer these in new code. ===
+        // Polish-17 (Phase 1): the `bg.surface` / `bg.surfaceHover` /
+        // `bg.inset` aliases live ALONGSIDE the legacy `bg.elevated` /
+        // `bg.hover` / `bg.active`. They resolve to the same colors.
+        // New code should use the surface / inset names; legacy code
+        // keeps working until Polish-17 Phase 3 migrates it.
         bg: {
           DEFAULT: 'var(--bg)',
+          base: 'var(--bg-base)',
           elevated: 'var(--bg-elevated)',
+          surface: 'var(--bg-surface)',
+          surfaceHover: 'var(--bg-surface-hover)',
+          inset: 'var(--bg-inset)',
           hover: 'var(--bg-hover)',
           active: 'var(--bg-active)',
         },
@@ -33,13 +42,28 @@ const config: Config = {
           DEFAULT: 'var(--fg)',
           muted: 'var(--fg-muted)',
           subtle: 'var(--fg-subtle)',
+          inverse: 'var(--fg-inverse)',
         },
         success: 'var(--success)',
         warning: 'var(--warning)',
+        // Polish-17 (Phase 1): semantic accent palette — used PURPOSEFULLY,
+        // not decoratively. Status pills, dots, alert text. NOT for buttons,
+        // backgrounds, or anything that competes with the primary/secondary
+        // hierarchy.
+        'accent-positive': 'var(--accent-positive)',
+        'accent-negative': 'var(--accent-negative)',
+        'accent-warning': 'var(--accent-warning)',
+        'accent-info': 'var(--accent-info)',
 
         // Shadcn aliases — repainted to the brand palette so existing
         // primitives in components/ui/* keep working untouched.
-        border: 'hsl(var(--border))',
+        border: {
+          DEFAULT: 'hsl(var(--border))',
+          // Polish-17 (Phase 1): subtler divider tint for table-row separators.
+          subtle: 'var(--border-subtle)',
+          strong: 'var(--border-strong)',
+          focus: 'var(--border-focus)',
+        },
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',
@@ -65,6 +89,9 @@ const config: Config = {
         },
       },
       borderRadius: {
+        // Polish-17 (Phase 1): --radius is now 2px. shadcn's cascaded
+        // sm/md sizes clamp to 0 at this scale, giving cards a much
+        // squarer "real tool" look.
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)',
