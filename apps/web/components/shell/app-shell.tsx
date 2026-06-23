@@ -46,13 +46,9 @@ export async function AppShell({ crumbs, action, contentClass, children }: Props
 
   return (
     <div className="bg-bg flex min-h-screen">
-      <Sidebar
-        email={user.email ?? 'unknown'}
-        isAdmin={isAdmin}
-        initialCollapsed={initialCollapsed}
-      />
+      <Sidebar initialCollapsed={initialCollapsed} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar crumbs={crumbs} action={action} />
+        <TopBar crumbs={crumbs} action={action} email={user.email ?? 'unknown'} isAdmin={isAdmin} />
         <main className={`mx-auto w-full flex-1 px-6 py-6 ${contentClass ?? 'max-w-7xl'}`}>
           {children}
         </main>

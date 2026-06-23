@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { SecondaryNavSheet } from './secondary-nav-sheet';
 
 export interface Breadcrumb {
   label: string;
@@ -12,15 +13,20 @@ interface Props {
   crumbs: Breadcrumb[];
   /** Optional right-aligned action (e.g. primary button on a list page). */
   action?: React.ReactNode;
+  /** Authenticated user email — surfaced in the side-panel header. */
+  email: string;
+  /** Whether to surface the Admin section in the side panel. */
+  isAdmin: boolean;
   className?: string;
 }
 
 /**
  * Thin (~48px) top bar above the page content. Breadcrumb on the left,
- * optional page-specific action on the right. Bottom-bordered so it
- * reads as separate from the page content even on dense routes.
+ * optional page-specific action then the avatar / secondary-nav trigger
+ * on the right. Polish-18 Commit 2: the avatar button opens a side
+ * panel housing Connections / Settings / Account / Billing / Sign out.
  */
-export function TopBar({ crumbs, action, className }: Props) {
+export function TopBar({ crumbs, action, email, isAdmin, className }: Props) {
   return (
     <header
       className={cn(
@@ -50,7 +56,10 @@ export function TopBar({ crumbs, action, className }: Props) {
           );
         })}
       </nav>
-      {action && <div className="flex shrink-0 items-center gap-2">{action}</div>}
+      <div className="flex shrink-0 items-center gap-2">
+        {action}
+        <SecondaryNavSheet email={email} isAdmin={isAdmin} />
+      </div>
     </header>
   );
 }
