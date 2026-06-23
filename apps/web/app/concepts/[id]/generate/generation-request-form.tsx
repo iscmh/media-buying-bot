@@ -492,7 +492,7 @@ export function GenerationRequestForm({
       )}
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={pending || overCap || overVariantCap}>
+        <Button type="submit" variant="primary" disabled={pending || overCap || overVariantCap}>
           {pending
             ? 'Creating job…'
             : `Generate ${variantCount} variants · $${estimate.estimateUsd.toFixed(2)}`}
@@ -500,9 +500,9 @@ export function GenerationRequestForm({
       </div>
 
       {conceptType === 'ugc' && !heygenReady && !connectedProviders.kling.connected && (
-        <p className="text-xs text-[color:var(--destructive-color)]">
+        <p className="text-xs text-[color:var(--accent-negative)]">
           Connect at least one provider on{' '}
-          <a className="underline" href="/connections/ai-provider">
+          <a className="underline-offset-4 hover:underline" href="/connections/ai-provider">
             /connections/ai-provider
           </a>{' '}
           before generating.
@@ -534,11 +534,11 @@ export function GenerationRequestForm({
           </p>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
-              <Button type="button" variant="outline">
+              <Button type="button" variant="secondary">
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="button" onClick={confirmLiveDialog} disabled={pending}>
+            <Button type="button" variant="primary" onClick={confirmLiveDialog} disabled={pending}>
               I understand, generate
             </Button>
           </div>
@@ -595,12 +595,13 @@ export function GenerationRequestForm({
           </fieldset>
           <div className="flex justify-end gap-2">
             <DialogClose asChild>
-              <Button type="button" variant="outline">
+              <Button type="button" variant="secondary">
                 Cancel
               </Button>
             </DialogClose>
             <Button
               type="button"
+              variant="primary"
               onClick={() => setShowOverrideDialog(false)}
               disabled={!overridePipeline && !detectedPipeline}
             >
