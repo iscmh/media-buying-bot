@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { AppShell } from '@/components/shell/app-shell';
+import { PageHeader } from '@/components/shell/page-header';
 import { formatDate } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { DisconnectedNotice } from '../_shared/disconnected-notice';
@@ -22,12 +23,10 @@ export default async function ConnectTelegramPage() {
   if (!conn || conn.status !== 'active' || !conn.tgChatId) {
     return (
       <AppShell crumbs={[{ label: 'Connections' }, { label: 'Telegram' }]} contentClass="max-w-2xl">
-        <header className="mb-6">
-          <h1 className="text-fg text-2xl font-semibold tracking-tight">Telegram</h1>
-          <p className="text-fg-muted mt-1 text-sm">
-            Where the bot pings you for kill/scale decisions and daily summaries.
-          </p>
-        </header>
+        <PageHeader
+          title="Telegram"
+          subtitle="Where the bot pings you for kill/scale decisions and daily summaries."
+        />
         <DisconnectedNotice
           reconnectHref="/onboarding/telegram"
           detail={conn?.updatedAt ? `Last linked ${formatDate(conn.updatedAt)}` : null}
@@ -38,12 +37,10 @@ export default async function ConnectTelegramPage() {
 
   return (
     <AppShell crumbs={[{ label: 'Connections' }, { label: 'Telegram' }]} contentClass="max-w-2xl">
-      <header className="mb-6">
-        <h1 className="text-fg text-2xl font-semibold tracking-tight">Telegram</h1>
-        <p className="text-fg-muted mt-1 text-sm">
-          Where the bot pings you for kill/scale decisions and daily summaries.
-        </p>
-      </header>
+      <PageHeader
+        title="Telegram"
+        subtitle="Where the bot pings you for kill/scale decisions and daily summaries."
+      />
 
       <TelegramConnectedSummary
         tgChatId={conn.tgChatId}

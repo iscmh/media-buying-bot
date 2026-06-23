@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull, ne } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { AppShell } from '@/components/shell/app-shell';
+import { PageHeader } from '@/components/shell/page-header';
 import { formatDate } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { DisconnectedNotice } from '../_shared/disconnected-notice';
@@ -41,12 +42,10 @@ export default async function ConnectMetaPage() {
     });
     return (
       <AppShell crumbs={[{ label: 'Connections' }, { label: 'Meta' }]} contentClass="max-w-2xl">
-        <header className="mb-6">
-          <h1 className="text-fg text-2xl font-semibold tracking-tight">Meta connection</h1>
-          <p className="text-fg-muted mt-1 text-sm">
-            BYO token — you own the credential, we never see your password.
-          </p>
-        </header>
+        <PageHeader
+          title="Meta connection"
+          subtitle="BYO token — you own the credential, we never see your password."
+        />
         <DisconnectedNotice
           reconnectHref="/onboarding/meta"
           detail={
@@ -59,12 +58,10 @@ export default async function ConnectMetaPage() {
 
   return (
     <AppShell crumbs={[{ label: 'Connections' }, { label: 'Meta' }]} contentClass="max-w-2xl">
-      <header className="mb-6">
-        <h1 className="text-fg text-2xl font-semibold tracking-tight">Meta connection</h1>
-        <p className="text-fg-muted mt-1 text-sm">
-          BYO token — you own the credential, we never see your password.
-        </p>
-      </header>
+      <PageHeader
+        title="Meta connection"
+        subtitle="BYO token — you own the credential, we never see your password."
+      />
 
       <MetaConnectedSummary
         businessManagerId={conn.businessManagerId}

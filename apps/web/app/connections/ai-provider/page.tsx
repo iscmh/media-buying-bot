@@ -2,6 +2,7 @@ import { and, eq, isNull, inArray } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { CONNECTABLE_AI_PROVIDERS, type AIProviderName } from '@mbb/shared';
 import { AppShell } from '@/components/shell/app-shell';
+import { PageHeader } from '@/components/shell/page-header';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { ProviderCard } from './provider-card';
 
@@ -38,18 +39,18 @@ export default async function ConnectAIProviderPage() {
       crumbs={[{ label: 'Connections' }, { label: 'AI providers' }]}
       contentClass="max-w-3xl"
     >
-      <header className="mb-6">
-        <h1 className="text-fg text-2xl font-semibold tracking-tight">AI providers</h1>
-        <p className="text-fg-muted mt-1 text-sm">
-          Connect the keys your generation pipelines need. The bot auto-routes uploaded reference
-          creatives to the pipeline matching what you have connected. For Gemini (vision + image
-          generation), use{' '}
-          <a href="/connections/tools" className="hover:text-fg underline">
-            /connections/tools
-          </a>
-          .
-        </p>
-      </header>
+      <PageHeader
+        title="AI providers"
+        subtitle="Connect the keys your generation pipelines need."
+      />
+      <p className="text-fg-muted -mt-4 mb-6 text-sm">
+        The bot auto-routes uploaded reference creatives to the pipeline matching what you have
+        connected. For Gemini (vision + image generation), use{' '}
+        <a href="/connections/tools" className="text-fg underline-offset-4 hover:underline">
+          /connections/tools
+        </a>
+        .
+      </p>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {CONNECTABLE_AI_PROVIDERS.map((provider) => {

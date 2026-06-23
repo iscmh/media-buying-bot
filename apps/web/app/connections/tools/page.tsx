@@ -2,6 +2,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { TOOL_PROVIDERS_ORDER, TOOL_PROVIDER_META, type ToolProviderName } from '@mbb/shared';
 import { AppShell } from '@/components/shell/app-shell';
+import { PageHeader } from '@/components/shell/page-header';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { ToolCard } from './tool-card';
@@ -22,14 +23,11 @@ export default async function ConnectToolsPage() {
 
   return (
     <AppShell crumbs={[{ label: 'Connections' }, { label: 'Tools' }]} contentClass="max-w-2xl">
-      <header className="mb-8">
-        <h1 className="text-fg text-2xl font-semibold tracking-tight">AI tools</h1>
-        <p className="text-fg-muted mt-1 text-sm">
-          BYOK keys for Gemini (vision + image), Claude (copy + prompts), and Kie.ai (Sora 2 video).
-          Distinct from your UGC video providers (HeyGen / Arcads). Phase 3a verifies key format
-          only — real verification happens at first generation.
-        </p>
-      </header>
+      <PageHeader title="AI tools" subtitle="BYOK keys for Gemini, Claude, and Kie.ai." />
+      <p className="text-fg-muted -mt-4 mb-6 text-sm">
+        Distinct from your UGC video providers (HeyGen / Arcads). Phase 3a verifies key format only
+        — real verification happens at first generation.
+      </p>
 
       <div className="space-y-4">
         {TOOL_PROVIDERS_ORDER.map((provider) => {
