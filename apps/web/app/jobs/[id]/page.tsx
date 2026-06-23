@@ -11,6 +11,7 @@ import {
 import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AppShell } from '@/components/shell/app-shell';
+import { PageHeader } from '@/components/shell/page-header';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { JobReviewClient } from './job-review-client';
@@ -142,51 +143,55 @@ export default async function JobReviewPage({ params }: Props) {
       crumbs={[{ label: 'Jobs', href: '/concepts' }, { label: job.id.slice(0, 8) }]}
       contentClass="max-w-5xl"
     >
-      <header className="mb-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-fg text-2xl font-semibold tracking-tight">Variants</h1>
-          <Badge variant={jobStatusVariant(job.status)}>{job.status.replace(/_/g, ' ')}</Badge>
-        </div>
-        <div className="text-fg-muted mt-2 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2 md:grid-cols-4">
-          <div>
-            <span className="text-fg-subtle">Requested </span>
-            <span className="font-mono">{job.variantCount ?? variants.length} variants</span>
-          </div>
-          <div>
-            <span className="text-fg-subtle">Provider </span>
-            <span className="font-mono">
-              {jobPipelineDesc?.providerChoice ?? job.providerChoice ?? 'gemini+claude'}
-            </span>
-          </div>
-          {jobPipelineDesc ? (
+      <PageHeader
+        title={`Generation ${job.id.slice(0, 8)}`}
+        actions={
+          <Badge variant={jobStatusVariant(job.status)}>
+            {job.status.replace(/_/g, ' ').toUpperCase()}
+          </Badge>
+        }
+        meta={
+          <div className="grid w-full gap-x-6 gap-y-1 text-xs sm:grid-cols-2 md:grid-cols-4">
             <div>
-              <span className="text-fg-subtle">Pipeline </span>
-              <span className="font-mono">{jobPipelineDesc.label}</span>
+              <span className="text-fg-subtle uppercase tracking-wider">Variants </span>
+              <span className="font-mono">{job.variantCount ?? variants.length}</span>
             </div>
-          ) : (
-            conceptType === 'ugc' && (
+            <div>
+              <span className="text-fg-subtle uppercase tracking-wider">Provider </span>
+              <span className="font-mono">
+                {jobPipelineDesc?.providerChoice ?? job.providerChoice ?? 'gemini+claude'}
+              </span>
+            </div>
+            {jobPipelineDesc ? (
               <div>
-                <span className="text-fg-subtle">Format </span>
-                <span className="font-mono">
-                  {job.format === 'cinematic_voiceover'
-                    ? 'cinematic voiceover'
-                    : 'avatar talking head'}
-                </span>
+                <span className="text-fg-subtle uppercase tracking-wider">Pipeline </span>
+                <span className="font-mono">{jobPipelineDesc.label}</span>
               </div>
-            )
-          )}
-          {job.estimatedCostUsd != null && (
+            ) : (
+              conceptType === 'ugc' && (
+                <div>
+                  <span className="text-fg-subtle uppercase tracking-wider">Format </span>
+                  <span className="font-mono">
+                    {job.format === 'cinematic_voiceover'
+                      ? 'cinematic voiceover'
+                      : 'avatar talking head'}
+                  </span>
+                </div>
+              )
+            )}
+            {job.estimatedCostUsd != null && (
+              <div>
+                <span className="text-fg-subtle uppercase tracking-wider">Est cost </span>
+                <span className="font-mono">${job.estimatedCostUsd}</span>
+              </div>
+            )}
             <div>
-              <span className="text-fg-subtle">Est cost </span>
-              <span className="font-mono">${job.estimatedCostUsd}</span>
+              <span className="text-fg-subtle uppercase tracking-wider">Queued </span>
+              <span className="font-mono">{formatDateTime(job.requestedAt)}</span>
             </div>
-          )}
-          <div>
-            <span className="text-fg-subtle">Queued </span>
-            <span className="font-mono">{formatDateTime(job.requestedAt)}</span>
           </div>
-        </div>
-      </header>
+        }
+      />
 
       <div className="mb-6">
         <JobTimeline
@@ -213,7 +218,7 @@ export default async function JobReviewPage({ params }: Props) {
       {isProcessing && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Working…</CardTitle>
+            <CardTitle>Working</CardTitle>
           </CardHeader>
           <CardContent className="text-fg-muted text-sm">
             This page auto-refreshes every 4 seconds.
@@ -225,9 +230,7 @@ export default async function JobReviewPage({ params }: Props) {
       {isFailed && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base text-[color:var(--destructive-color)]">
-              Generation failed
-            </CardTitle>
+            <CardTitle className="text-[color:var(--accent-negative)]">Generation failed</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {(() => {
@@ -239,7 +242,7 @@ export default async function JobReviewPage({ params }: Props) {
                   {t.retryable && conceptIds[0] && (
                     <a
                       href={`/concepts/${conceptIds[0]}/generate`}
-                      className="bg-bg-elevated hover:bg-bg-elevated/80 inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-medium"
+                      className="bg-bg-surface hover:bg-bg-surfaceHover border-border inline-flex items-center rounded-sm border px-3 py-1.5 text-xs font-medium"
                     >
                       Retry generation
                     </a>

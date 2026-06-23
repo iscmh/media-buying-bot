@@ -229,7 +229,7 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
 
   return (
     <>
-      <div className="bg-card mb-6 flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="bg-card mb-6 flex flex-col gap-3 rounded-sm border p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm">
           <strong>{approvedCount} approved</strong>
           {' · '}
@@ -277,7 +277,7 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
       </div>
 
       {allDecided && approvedCount > 0 && (
-        <div className="mb-6 rounded-lg border border-green-500/40 bg-green-500/5 p-4 text-sm">
+        <div className="border-[color:var(--accent-positive)]/30 bg-[color:var(--accent-positive)]/10 mb-6 rounded-sm border p-4 text-sm">
           <strong>Done — ready for launch.</strong>{' '}
           <span className="text-muted-foreground">
             {approvedCount} approved variants are sitting in `approved` status. Phase 4 (Meta auto-
@@ -304,7 +304,7 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
           ))}
       </div>
       {variants.some((v) => v.isClipPart) && (
-        <details className="border-border bg-bg-elevated mt-6 rounded-lg border p-4">
+        <details className="border-border bg-bg-elevated mt-6 rounded-sm border p-4">
           <summary className="cursor-pointer text-sm font-medium">
             Source clips ({variants.filter((v) => v.isClipPart).length}) — transparency / individual
             download
@@ -691,7 +691,7 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
   return (
     <article
       className={
-        'bg-card flex flex-col overflow-hidden rounded-lg border transition-opacity ' +
+        'bg-card flex flex-col overflow-hidden rounded-sm border transition-opacity ' +
         (isRejected ? 'opacity-50' : '')
       }
     >
