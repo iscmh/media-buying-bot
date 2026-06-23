@@ -13,6 +13,7 @@ import {
   PLATFORM_HARD_LAUNCH_CEILING_USD,
 } from '@mbb/shared';
 import { AppShell } from '@/components/shell/app-shell';
+import { PageHeader } from '@/components/shell/page-header';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { AutomationAcks } from './automation-acks';
 import { BillingSection } from './billing-section';
@@ -93,12 +94,10 @@ export default async function SettingsPage() {
 
   return (
     <AppShell crumbs={[{ label: 'Settings' }]} contentClass="max-w-4xl">
-      <header className="mb-6">
-        <h1 className="text-fg text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-fg-muted mt-1 text-sm">
-          Bot configuration. Changes apply on the next launch / poll cycle.
-        </p>
-      </header>
+      <PageHeader
+        title="Settings"
+        subtitle="Bot configuration. Changes apply on the next launch / poll cycle."
+      />
 
       <SettingsForm
         initialValues={current}

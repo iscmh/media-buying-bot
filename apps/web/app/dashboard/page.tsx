@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/table';
 import { AppShell } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/shell/empty-state';
+import { PageHeader } from '@/components/shell/page-header';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { MetricCard } from './_components/metric-card';
@@ -98,15 +99,11 @@ export default async function DashboardPage({ searchParams }: Props) {
         />
       )}
 
-      <div className="mb-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-fg text-2xl font-semibold tracking-tight">Dashboard</h1>
-          {isFoundingMember && <Badge variant="secondary">Founding member</Badge>}
-        </div>
-        <p className="text-fg-muted mt-1 text-sm">
-          {user.email} · timezone {userTimezone}
-        </p>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        subtitle={`${user.email} · timezone ${userTimezone}`}
+        actions={isFoundingMember ? <Badge variant="secondary">FOUNDING MEMBER</Badge> : undefined}
+      />
 
       {/* Metric cards — 3 columns on desktop, 2 on tablet, 1 on mobile. */}
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

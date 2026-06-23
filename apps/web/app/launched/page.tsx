@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/table';
 import { AppShell } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/shell/empty-state';
+import { PageHeader } from '@/components/shell/page-header';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 
@@ -74,32 +75,27 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
 
   return (
     <AppShell crumbs={[{ label: 'Launched ads' }]}>
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-fg text-2xl font-semibold tracking-tight">Launched ads</h1>
-          <p className="text-fg-muted mt-1 text-sm">
-            Every ad the bot has pushed to Meta.{' '}
-            {!showTest && (
-              <span>
-                Test rows (dry-run, rejected, failed) hidden by default.{' '}
-                <Link href={toggleHref} className="hover:text-fg underline transition-colors">
-                  Show
-                </Link>
-                .
-              </span>
-            )}
-            {showTest && (
-              <span>
-                Showing test rows.{' '}
-                <Link href={toggleHref} className="hover:text-fg underline transition-colors">
-                  Hide
-                </Link>
-                .
-              </span>
-            )}
-          </p>
-        </div>
-      </header>
+      <PageHeader title="Launched ads" subtitle="Every ad the bot has pushed to Meta." />
+      <p className="text-fg-muted -mt-4 mb-6 text-sm">
+        {!showTest && (
+          <>
+            Test rows (dry-run, rejected, failed) hidden by default.{' '}
+            <Link href={toggleHref} className="text-fg underline-offset-4 hover:underline">
+              Show
+            </Link>
+            .
+          </>
+        )}
+        {showTest && (
+          <>
+            Showing test rows.{' '}
+            <Link href={toggleHref} className="text-fg underline-offset-4 hover:underline">
+              Hide
+            </Link>
+            .
+          </>
+        )}
+      </p>
 
       {visible.length === 0 ? (
         <EmptyState
@@ -112,7 +108,7 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
           }
         />
       ) : (
-        <div className="overflow-x-auto rounded-md border">
+        <div className="border-border overflow-x-auto rounded-sm border">
           <Table>
             <TableHeader>
               <TableRow>
