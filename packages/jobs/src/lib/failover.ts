@@ -72,7 +72,7 @@ export function failoverEventName(
 export function buildAllProvidersFailedMessage(jobId: string): string {
   return (
     'All connected providers failed to generate variants for your last job.\n' +
-    `Job: /jobs/${jobId}\n\n` +
+    `Job: /runs/${jobId}\n\n` +
     'Open the job page for the per-variant error log and connect a backup provider on /connections/ai-provider.'
   );
 }

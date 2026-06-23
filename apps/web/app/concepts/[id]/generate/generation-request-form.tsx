@@ -264,7 +264,7 @@ export function GenerationRequestForm({
         setError(result.errorMessage ?? 'Could not create generation job.');
         return;
       }
-      router.push(`/jobs/${result.jobId}`);
+      router.push(`/runs/${result.jobId}`);
     });
   }
 

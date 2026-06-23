@@ -144,7 +144,7 @@ export default async function ConceptDetailPage({ params }: Props) {
             {ourJobs.map((j) => (
               <li key={j.id}>
                 <Link
-                  href={`/jobs/${j.id}`}
+                  href={`/runs/${j.id}`}
                   className="hover:bg-bg-surfaceHover/50 border-border-subtle flex items-center justify-between gap-3 border-b px-3 py-2.5 transition-colors last:border-b-0"
                 >
                   <div className="flex min-w-0 flex-col gap-0.5 text-sm">

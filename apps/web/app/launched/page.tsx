@@ -141,7 +141,7 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                     <TableCell>
                       <div className="flex items-start gap-3">
                         {creative?.fileUrl ? (
-                          <Link href={`/jobs/${row.generationJobId ?? ''}`}>
+                          <Link href={`/runs/${row.generationJobId ?? ''}`}>
                             <img
                               src={creative.fileUrl}
                               alt={creative.headline ?? 'variant'}

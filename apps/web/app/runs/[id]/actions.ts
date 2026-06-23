@@ -68,7 +68,7 @@ export async function decideVariantAction(
     },
   });
 
-  revalidatePath(`/jobs/${variant.generationJobId}`);
+  revalidatePath(`/runs/${variant.generationJobId}`);
   return { ok: true };
 }
 
@@ -111,7 +111,7 @@ export async function bulkDecideJobAction(
     },
   });
 
-  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath(`/runs/${jobId}`);
   return { ok: true, updated: result.length };
 }
 
@@ -417,7 +417,7 @@ export async function launchApprovedAction(
     perAdBudgetUsd: perAdBudget,
   });
 
-  revalidatePath(`/jobs/${input.jobId}`);
+  revalidatePath(`/runs/${input.jobId}`);
   revalidatePath('/launched');
   return {
     ok: true,

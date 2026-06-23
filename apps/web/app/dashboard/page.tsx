@@ -201,7 +201,7 @@ export default async function DashboardPage({ searchParams }: Props) {
                     <TableCell>
                       <div className="flex items-start gap-2">
                         {r.imageUrl ? (
-                          <Link href={`/jobs/${r.generationJobId ?? ''}`}>
+                          <Link href={`/runs/${r.generationJobId ?? ''}`}>
                             <img
                               src={r.imageUrl}
                               alt={r.headline ?? 'variant'}

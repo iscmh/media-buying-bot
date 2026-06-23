@@ -82,7 +82,7 @@ describe('Polish-4: failoverEventName', () => {
 describe('Polish-4: buildAllProvidersFailedMessage', () => {
   it('embeds the job link + points at /connections/ai-provider', () => {
     const m = buildAllProvidersFailedMessage('job_xyz');
-    expect(m).toMatch(/\/jobs\/job_xyz/);
+    expect(m).toMatch(/\/runs\/job_xyz/);
     expect(m).toMatch(/\/connections\/ai-provider/);
     expect(m).toMatch(/All connected providers failed/i);
   });
