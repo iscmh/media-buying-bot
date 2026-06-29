@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   KLING_AVATAR_DEFAULT_PROMPT,
+  computeKlingAvatarPollIntervalSeconds,
   resolveTargetDuration,
   resolveVoiceId,
 } from '../src/functions/generate-kie-kling-avatar-v2';
@@ -158,5 +159,91 @@ describe('Polish-19.0.4: Kling worker Claude output-format override', () => {
     // with the studio-portrait phrase), not the audit-trail comment
     // that explains why we removed it.
     expect(src).not.toMatch(/prompt\s*=\s*\[\s*'Portrait photograph/);
+  });
+});
+
+describe('Polish-19.0.5: computeKlingAvatarPollIntervalSeconds', () => {
+  // Locks the exponential-backoff curve used by the poll loop. Before
+  // 19.0.5 the loop ran 32 × flat-10s = 5min 20s and gave up while
+  // Kling was still running. The new curve: 10s start, gentle 1.15x
+  // growth per attempt, capped at 30s, so 80 attempts ≈ ~38 min total
+  // wall-clock — past every observed Kling run while still bounded.
+
+  it('attempt 0 returns the initial interval (10s)', () => {
+    expect(computeKlingAvatarPollIntervalSeconds(0)).toBe(10);
+  });
+
+  it('grows gently in the first several attempts', () => {
+    // attempt 1: 10 * 1.15 = 11.5 → ceil = 12
+    // attempt 2: 10 * 1.15^2 = 13.225 → ceil = 14
+    // attempt 3: 10 * 1.15^3 = 15.21 → ceil = 16
+    expect(computeKlingAvatarPollIntervalSeconds(1)).toBe(12);
+    expect(computeKlingAvatarPollIntervalSeconds(2)).toBe(14);
+    expect(computeKlingAvatarPollIntervalSeconds(3)).toBe(16);
+  });
+
+  it('caps at 30s on later attempts so the loop stays responsive when the result lands inside one interval window', () => {
+    // 1.15^8 ≈ 3.06 → 30.6 → ceil 31 → clamp 30
+    expect(computeKlingAvatarPollIntervalSeconds(8)).toBe(30);
+    expect(computeKlingAvatarPollIntervalSeconds(20)).toBe(30);
+    expect(computeKlingAvatarPollIntervalSeconds(79)).toBe(30);
+  });
+
+  it('clamps NaN / negative / non-finite attempt indices to the initial interval', () => {
+    // All three fall into the Number.isFinite() guard and return the
+    // floor — safer than letting Infinity * 1.15 propagate to step.sleep.
+    expect(computeKlingAvatarPollIntervalSeconds(NaN)).toBe(10);
+    expect(computeKlingAvatarPollIntervalSeconds(-3)).toBe(10);
+    expect(computeKlingAvatarPollIntervalSeconds(Infinity)).toBe(10);
+  });
+
+  it('total wall-clock with POLL_MAX_ATTEMPTS=80 stays above the 20-min mark', () => {
+    // Sanity check the curve actually gives us enough headroom over
+    // the worst observed Kling runtime. Sum the first 80 intervals.
+    let total = 0;
+    for (let i = 0; i < 80; i++) total += computeKlingAvatarPollIntervalSeconds(i);
+    // ~7 attempts of < 30s + 73 × 30s = roughly 2300s ≈ 38min
+    expect(total).toBeGreaterThan(20 * 60); // > 20 min
+    expect(total).toBeLessThan(60 * 60); // < 60 min (sanity ceiling)
+  });
+});
+
+describe('Polish-19.0.5: poll-timeout taskId preservation (worker source)', () => {
+  it('the timeout branch writes a status=failed creative row carrying kie_task_id + in_flight=true', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    // Pin the recovery-row shape — anything that silently regresses
+    // back to "log and bail" fires here.
+    expect(src).toMatch(/insert-in-flight-creative-/);
+    expect(src).toMatch(/kie_task_id: submitResult\.taskId/);
+    expect(src).toMatch(/in_flight: true/);
+    expect(src).toMatch(/recoverable: true/);
+    expect(src).toMatch(/status: 'failed'/);
+  });
+
+  it('the timeout branch console.logs the taskId + recovery curl line so ops can act manually', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/may still be in flight/);
+    expect(src).toMatch(/recordInfo\?taskId=/);
+  });
+
+  it('POLL_MAX_ATTEMPTS is at least 60 (Polish-19.0.5 floor — anything lower regresses to the pre-fix wall)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    const match = src.match(/POLL_MAX_ATTEMPTS\s*=\s*(\d+)/);
+    expect(match).not.toBeNull();
+    if (match) {
+      expect(Number(match[1])).toBeGreaterThanOrEqual(60);
+    }
   });
 });

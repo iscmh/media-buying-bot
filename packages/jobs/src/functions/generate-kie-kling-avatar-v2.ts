@@ -52,9 +52,36 @@ import {
  *   ≈ $3.67. Scales linearly with target duration.
  */
 
+/**
+ * Polish-19.0.5: poll cadence tuned for a long-tail of slow Kling
+ * runs that occasionally land 6-12 minutes after submit. The previous
+ * 32 × 10s = 5min 20s ceiling let kie.ai finish the generation but
+ * the worker had already given up — the $3.45 Kling cost was paid,
+ * the deliverable was never collected, and the operator saw a fake
+ * "task did not reach terminal state" failure.
+ *
+ * New ceiling: 80 attempts with gentle exponential backoff (10s →
+ * 30s cap). Total wall-clock ≈ 38 minutes — far past every observed
+ * Kling run time and still bounded so a genuinely-dead kie.ai task
+ * doesn't loop forever.
+ *
+ * computeKlingAvatarPollIntervalSeconds() is the pure helper that
+ * drives the loop; exported so the backoff curve is unit-testable.
+ */
 const POLL_WARMUP_SECONDS = 20;
-const POLL_INTERVAL_SECONDS = 10;
-const POLL_MAX_ATTEMPTS = 32; // 32 × 10s = 5min 20s ceiling (per kie.ai's max gen length)
+const POLL_INITIAL_INTERVAL_SECONDS = 10;
+const POLL_MAX_INTERVAL_SECONDS = 30;
+const POLL_BACKOFF_GROWTH = 1.15;
+const POLL_MAX_ATTEMPTS = 80;
+
+export function computeKlingAvatarPollIntervalSeconds(attempt: number): number {
+  if (!Number.isFinite(attempt) || attempt < 0) return POLL_INITIAL_INTERVAL_SECONDS;
+  const raw = POLL_INITIAL_INTERVAL_SECONDS * Math.pow(POLL_BACKOFF_GROWTH, attempt);
+  return Math.min(
+    Math.max(POLL_INITIAL_INTERVAL_SECONDS, Math.ceil(raw)),
+    POLL_MAX_INTERVAL_SECONDS,
+  );
+}
 
 const DEFAULT_TARGET_DURATION = 30;
 const MIN_TARGET_DURATION = 8;
@@ -512,16 +539,67 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
       pollError = poll.failMsg ?? poll.failCode ?? 'kie.ai task failed';
       break;
     }
-    await step.sleep(`kie-kling-wait-${variantIndex}-${attempt}`, `${POLL_INTERVAL_SECONDS}s`);
+    // Polish-19.0.5: gentle exponential backoff so a slow Kling run
+    // doesn't burn early polls when the task can't possibly be ready
+    // yet. Caps at 30s — stays responsive when the result lands
+    // inside a single interval window.
+    await step.sleep(
+      `kie-kling-wait-${variantIndex}-${attempt}`,
+      `${computeKlingAvatarPollIntervalSeconds(attempt)}s`,
+    );
   }
 
   if (!outputUrl) {
+    // Polish-19.0.5: persist the in-flight kie.ai taskId so the
+    // operator can recover the existing task instead of paying for
+    // a fresh submit on retry. Three layers of preservation:
+    //   1. Loud Inngest log with the recordInfo curl line — copy-
+    //      paste recovery for ops.
+    //   2. A status='failed' generatedCreatives row carrying
+    //      kie_task_id + in_flight=true in generationMetadata so
+    //      the /runs/[id] view and any future resume worker can
+    //      find it.
+    //   3. The variant's error string mentions the taskId so it
+    //      surfaces in the job's failure message too.
+    console.log(
+      `[kie-kling-avatar] variant ${variantIndex} timed out after ${POLL_MAX_ATTEMPTS} polls; ` +
+        `kie.ai task ${submitResult.taskId} may still be in flight. ` +
+        `Inspect via: curl -H 'Authorization: Bearer <KIE_AI_KEY>' ` +
+        `'https://api.kie.ai/api/v1/jobs/recordInfo?taskId=${submitResult.taskId}'`,
+    );
+    await step.run(`insert-in-flight-creative-${variantIndex}`, async () => {
+      const db = getDb();
+      await db.insert(schema.generatedCreatives).values({
+        userId,
+        generationJobId: jobId,
+        // Polish-16 Fix 2 convention: empty fileUrl on a failed row.
+        // The kie_task_id in generationMetadata is the real audit signal.
+        fileUrl: '',
+        aspectRatio: '9:16',
+        status: 'failed',
+        format: 'kie_kling_avatar_v2_standard',
+        isClipPart: false,
+        generationMetadata: {
+          variant_index: variantIndex,
+          kie_task_id: submitResult.taskId,
+          in_flight: true,
+          timed_out_after_polls: POLL_MAX_ATTEMPTS,
+          target_duration_seconds: targetDurationSeconds,
+          last_error_message: pollError ?? null,
+          recoverable: true,
+        },
+      });
+    });
     cost += estimateKieKlingAvatarCostUsd(targetDurationSeconds);
     return {
       index: variantIndex,
       ok: false,
       costUsd: cost,
-      error: pollError ?? `kie.ai did not reach a terminal state within ${POLL_MAX_ATTEMPTS} polls`,
+      error:
+        `kie.ai task ${submitResult.taskId} did not reach a terminal state within ${POLL_MAX_ATTEMPTS} polls ` +
+        `(~${Math.round((POLL_MAX_ATTEMPTS * POLL_MAX_INTERVAL_SECONDS) / 60)}min). ` +
+        `Task may still be in flight on kie.ai — taskId saved on the failed creative for recovery. ` +
+        (pollError ? `Last poll error: ${pollError}` : ''),
     };
   }
   cost += estimateKieKlingAvatarCostUsd(targetDurationSeconds);
