@@ -41,6 +41,32 @@ const FILES_API_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 const FILE_POLL_INTERVAL_MS = 1_500;
 const FILE_POLL_TIMEOUT_MS = 120_000;
 
+/**
+ * Polish-19.0.1: explicit output-token cap for vision analysis. Pre-
+ * Polish-19.0.1 we left this unset, which let Gemini pick its silent
+ * default (~8192 tokens). For long-form sources (multi-minute UGC
+ * monologues asking for full transcription + analysis) that default
+ * truncated the response mid-JSON-string and tripped tryParseGeminiJson,
+ * surfacing as a confusing "not parseable as JSON" error.
+ *
+ * 16384 covers ~95% of UGC ad analyses observed in production. When
+ * the cap is hit anyway (finishReason='MAX_TOKENS' or usage within
+ * 95% of cap) callGeminiVision auto-retries once with doubled budget,
+ * capped at GEMINI_VISION_HARD_MAX_OUTPUT_TOKENS (Gemini 2.5 Flash's
+ * documented per-call ceiling).
+ */
+export const GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS = 16_384;
+export const GEMINI_VISION_HARD_MAX_OUTPUT_TOKENS = 65_536;
+/**
+ * Polish-19.0.1: fallback truncation heuristic when finishReason isn't
+ * populated (older response shapes, edge cases). If candidatesTokenCount
+ * is within 95% of the requested cap, treat as truncated — the false-
+ * positive rate is acceptable since the retry just re-runs with a
+ * higher cap, and the false-negative cost is exactly the bug we're
+ * fixing (silent mid-string truncation).
+ */
+const GEMINI_VISION_TRUNCATION_RATIO = 0.95;
+
 interface GeminiContent {
   role?: 'user' | 'model';
   parts: Array<
@@ -70,6 +96,16 @@ export interface GeminiVisionInput {
   videoBase64: string;
   videoMimeType: string;
   generationJobId?: string;
+  /**
+   * Polish-19.0.1: cap on output tokens. Optional; defaults to
+   * GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS (16384). Long UGC sources
+   * (multi-minute monologues with full transcription requests) blew
+   * past the prior implicit ceiling (Gemini's silent default ≈ 8192),
+   * truncated the response mid-JSON-string, and tripped tryParseGeminiJson.
+   * Callers can override; callGeminiVision auto-retries with doubled
+   * budget on truncation up to GEMINI_VISION_HARD_MAX_OUTPUT_TOKENS.
+   */
+  maxOutputTokens?: number;
 }
 
 export interface GeminiVisionResult {
@@ -77,6 +113,13 @@ export interface GeminiVisionResult {
   /** Parsed JSON if Gemini followed the system prompt's "ONLY JSON" rule. */
   json?: unknown;
   rawText?: string;
+  /**
+   * Polish-19.0.1: true when Gemini stopped emitting because it hit
+   * the output-token cap (finishReason='MAX_TOKENS' OR token usage
+   * within 95% of the cap). callGeminiVision uses this to drive its
+   * one-shot retry with doubled cap.
+   */
+  truncated?: boolean;
   costUsd: number;
   latencyMs: number;
   errorMessage?: string;
@@ -105,24 +148,56 @@ export async function callGeminiVision(input: GeminiVisionInput): Promise<Gemini
     };
   }
 
-  if (binarySize <= INLINE_LIMIT_BYTES) {
-    return callGeminiVisionInline(input);
-  }
+  // Polish-19.0.1: clamp the requested cap into the supported range so
+  // an out-of-bounds override doesn't surprise Gemini at the wire layer.
+  const baseCap = clampGeminiOutputTokens(
+    input.maxOutputTokens ?? GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS,
+  );
+  const inputWithCap: GeminiVisionInput = { ...input, maxOutputTokens: baseCap };
+  const first =
+    binarySize <= INLINE_LIMIT_BYTES
+      ? await callGeminiVisionInline(inputWithCap)
+      : await callGeminiVisionViaFiles(inputWithCap);
 
-  return callGeminiVisionViaFiles(input);
+  // Polish-19.0.1: one-shot retry with doubled budget when the first
+  // attempt truncated. Cap stops at GEMINI_VISION_HARD_MAX_OUTPUT_TOKENS
+  // so a degenerate case doesn't keep doubling forever.
+  if (!first.truncated || baseCap >= GEMINI_VISION_HARD_MAX_OUTPUT_TOKENS) {
+    return first;
+  }
+  const retryCap = clampGeminiOutputTokens(baseCap * 2);
+  console.log(
+    `[gemini-vision] response truncated at maxOutputTokens=${baseCap}; ` +
+      `retrying once with doubled cap=${retryCap}`,
+  );
+  const retryInput: GeminiVisionInput = { ...input, maxOutputTokens: retryCap };
+  return binarySize <= INLINE_LIMIT_BYTES
+    ? callGeminiVisionInline(retryInput)
+    : callGeminiVisionViaFiles(retryInput);
+}
+
+/** Polish-19.0.1: clamp into [1, GEMINI_VISION_HARD_MAX_OUTPUT_TOKENS]. */
+export function clampGeminiOutputTokens(raw: number): number {
+  if (!Number.isFinite(raw) || raw <= 0) return GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS;
+  return Math.min(Math.floor(raw), GEMINI_VISION_HARD_MAX_OUTPUT_TOKENS);
 }
 
 /** Path 1: inline base64 (≤ 20 MB). The original Phase 3b implementation. */
 async function callGeminiVisionInline(input: GeminiVisionInput): Promise<GeminiVisionResult> {
   const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
-  const body = buildVisionBody(input.systemPrompt, [
-    {
-      inline_data: {
-        mime_type: input.videoMimeType,
-        data: input.videoBase64,
+  const maxOutputTokens = input.maxOutputTokens ?? GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS;
+  const body = buildVisionBody(
+    input.systemPrompt,
+    [
+      {
+        inline_data: {
+          mime_type: input.videoMimeType,
+          data: input.videoBase64,
+        },
       },
-    },
-  ]);
+    ],
+    maxOutputTokens,
+  );
 
   const result: CallProviderResult<GeminiResponse> = await callProvider<GeminiResponse>({
     userId: input.userId,
@@ -141,12 +216,13 @@ async function callGeminiVisionInline(input: GeminiVisionInput): Promise<GeminiV
       system_prompt_chars: input.systemPrompt.length,
       video_mime: input.videoMimeType,
       video_base64_size_chars: input.videoBase64.length,
+      max_output_tokens: maxOutputTokens,
       path: 'inline',
     },
     generationJobId: input.generationJobId,
   });
 
-  return interpretVisionResponse(result);
+  return interpretVisionResponse(result, maxOutputTokens);
 }
 
 /**
@@ -193,9 +269,12 @@ async function callGeminiVisionViaFiles(input: GeminiVisionInput): Promise<Gemin
     }
 
     const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
-    const body = buildVisionBody(input.systemPrompt, [
-      { file_data: { mime_type: input.videoMimeType, file_uri: fileUri } },
-    ]);
+    const maxOutputTokens = input.maxOutputTokens ?? GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS;
+    const body = buildVisionBody(
+      input.systemPrompt,
+      [{ file_data: { mime_type: input.videoMimeType, file_uri: fileUri } }],
+      maxOutputTokens,
+    );
     const result = await callProvider<GeminiResponse>({
       userId: input.userId,
       provider: 'gemini',
@@ -212,11 +291,12 @@ async function callGeminiVisionViaFiles(input: GeminiVisionInput): Promise<Gemin
         system_prompt_chars: input.systemPrompt.length,
         video_mime: input.videoMimeType,
         file_name: fileName,
+        max_output_tokens: maxOutputTokens,
         path: 'files_api',
       },
       generationJobId: input.generationJobId,
     });
-    return interpretVisionResponse(result);
+    return interpretVisionResponse(result, maxOutputTokens);
   } finally {
     // Always attempt cleanup — Gemini Files quota is per-account and a leaked
     // file lingers for 48h. We don't block the response on the delete result.
@@ -235,6 +315,7 @@ function buildVisionBody(
   videoPart:
     | Array<{ inline_data: { mime_type: string; data: string } }>
     | Array<{ file_data: { mime_type: string; file_uri: string } }>,
+  maxOutputTokens: number,
 ) {
   return {
     systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -242,11 +323,45 @@ function buildVisionBody(
     generationConfig: {
       temperature: 0.4,
       response_mime_type: 'application/json',
+      // Polish-19.0.1: explicit cap. See GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS
+      // for why we no longer leave this implicit.
+      maxOutputTokens,
     },
   };
 }
 
-function interpretVisionResponse(result: CallProviderResult<GeminiResponse>): GeminiVisionResult {
+/**
+ * Polish-19.0.1: pure decision helper — given a Gemini response's
+ * finishReason + token usage + the cap we requested, decide whether
+ * the response was truncated by the cap. Two signals, OR'd:
+ *
+ *   1. finishReason === 'MAX_TOKENS' (authoritative when Gemini sets it)
+ *   2. candidatesTokenCount ≥ cap × GEMINI_VISION_TRUNCATION_RATIO
+ *      (fallback for older response shapes where finishReason isn't
+ *      populated — a false positive just triggers one extra retry)
+ *
+ * Exported so the truncation branches can be unit-tested without
+ * spinning up the whole vision call.
+ */
+export function isGeminiVisionTruncated(input: {
+  finishReason?: string | null;
+  candidatesTokenCount?: number | null;
+  maxOutputTokens: number;
+}): boolean {
+  if (input.finishReason === 'MAX_TOKENS') return true;
+  if (
+    typeof input.candidatesTokenCount === 'number' &&
+    input.candidatesTokenCount >= input.maxOutputTokens * GEMINI_VISION_TRUNCATION_RATIO
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function interpretVisionResponse(
+  result: CallProviderResult<GeminiResponse>,
+  maxOutputTokens: number,
+): GeminiVisionResult {
   if (!result.ok) {
     return {
       ok: false,
@@ -259,24 +374,50 @@ function interpretVisionResponse(result: CallProviderResult<GeminiResponse>): Ge
   const text = extractText(result.data);
   const usage = result.data.usageMetadata ?? {};
   const costUsd = computeGeminiTextCost(usage);
+  const finishReason = result.data.candidates?.[0]?.finishReason ?? null;
+  const truncated = isGeminiVisionTruncated({
+    finishReason,
+    candidatesTokenCount: usage.candidatesTokenCount ?? null,
+    maxOutputTokens,
+  });
 
   if (!text) {
     return {
       ok: false,
       costUsd,
       latencyMs: result.latencyMs,
-      errorMessage: 'Gemini returned no text content',
+      truncated,
+      errorMessage: truncated
+        ? `Gemini hit output-token cap (${maxOutputTokens}t, finishReason=${finishReason ?? 'unset'}) before producing any text. Retry with a higher cap.`
+        : 'Gemini returned no text content',
     };
   }
 
   const parseResult = tryParseGeminiJson(text);
   if (!parseResult.ok) {
+    // Polish-19.0.1: log the FULL response to Inngest so a diagnostic
+    // doesn't get truncated by the parse-error preview. The error
+    // message bubbled to the operator stays bounded; the verbose
+    // diagnostic lives in the Inngest logs.
+    console.log(
+      `[gemini-vision] parse failure: finishReason=${finishReason ?? 'unset'} ` +
+        `tokens=${usage.candidatesTokenCount ?? '?'} / cap=${maxOutputTokens} ` +
+        `truncated=${truncated} text_chars=${text.length}\n` +
+        `--- FULL TEXT ---\n${text}\n--- END FULL TEXT ---`,
+    );
     return {
       ok: false,
       costUsd,
       latencyMs: result.latencyMs,
       rawText: text,
-      errorMessage: parseResult.error,
+      truncated,
+      // Polish-19.0.1: when the parse failure correlates with a
+      // truncated response, prefer the truncation framing — that's
+      // the actionable signal for the operator (raise the cap, or
+      // wait for callGeminiVision's retry to take effect).
+      errorMessage: truncated
+        ? `Gemini response truncated at maxOutputTokens=${maxOutputTokens} (finishReason=${finishReason ?? 'unset'}, ${usage.candidatesTokenCount ?? '?'} tokens emitted). ${parseResult.error}`
+        : parseResult.error,
     };
   }
 
@@ -286,6 +427,7 @@ function interpretVisionResponse(result: CallProviderResult<GeminiResponse>): Ge
     rawText: text,
     costUsd,
     latencyMs: result.latencyMs,
+    truncated,
   };
 }
 
@@ -342,11 +484,17 @@ export function tryParseGeminiJson(
     }
   }
 
+  // Polish-19.0.1: bumped preview from 500 → 2000 chars. The 500-char
+  // cap was truncating the diagnostic itself — a Gemini response that
+  // grew large enough to truncate mid-string was also large enough that
+  // the operator-facing error couldn't show where the JSON broke. 2000
+  // chars usually reaches the failure point; the full response also
+  // lands in Inngest console logs via interpretVisionResponse.
   return {
     ok: false,
     error:
       `Gemini response was not parseable as JSON (tried direct, fenced, brace-bounded, ` +
-      `bracket-bounded). First 500 chars: ${text.slice(0, 500)}`,
+      `bracket-bounded). First 2000 chars: ${text.slice(0, 2000)}`,
   };
 }
 

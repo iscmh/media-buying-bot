@@ -74,20 +74,25 @@ describe('Polish-9.11: tryParseGeminiJson', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error).toMatch(/not parseable as JSON/i);
-      expect(r.error).toMatch(/First 500 chars/);
+      expect(r.error).toMatch(/First 2000 chars/);
       expect(r.error).toContain("I can't analyze that video");
     }
   });
 
   it('malformed truncated JSON → returns error with diagnostic preview', () => {
-    const broken = '{"foo": 1, "bar": "tw' + 'a'.repeat(800);
+    // Polish-19.0.1: preview cap is now 2000 chars (was 500). A 3000-char
+    // input gets truncated; the error includes the prefix plus the
+    // "not parseable" framing, so the total stays well under the message
+    // length we assert below.
+    const broken = '{"foo": 1, "bar": "tw' + 'a'.repeat(3000);
     const r = tryParseGeminiJson(broken);
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.error).toMatch(/not parseable as JSON/i);
-      expect(r.error).toMatch(/First 500 chars/);
-      // Diagnostic preview is capped at 500 chars.
-      expect(r.error.length).toBeLessThan(700);
+      expect(r.error).toMatch(/First 2000 chars/);
+      // Diagnostic preview is capped at 2000 chars; allow ~250 chars of
+      // surrounding error framing.
+      expect(r.error.length).toBeLessThan(2300);
     }
   });
 
