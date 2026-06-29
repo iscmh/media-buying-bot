@@ -116,59 +116,36 @@ describe('Polish-19.0.3: KLING_AVATAR_DEFAULT_PROMPT', () => {
   });
 });
 
-describe('Polish-19.0.7: parseStructuredCharacter', () => {
+describe('Polish-19.0.8: parseStructuredCharacter (JOHN-pattern shape)', () => {
   const VALID_RAW = JSON.stringify({
-    name: 'Linda',
-    age: 62,
+    name: 'John',
+    age: 64,
     nationality: 'American',
-    gender: 'female',
-    archetype: 'Generic suburban grandmother appearance.',
-    hair: {
-      color: 'grey-blonde',
-      length: 'chin-length',
-      cut: 'soft',
-      texture: 'natural',
-      styling: 'slightly messy',
-    },
-    eyes: {
-      color: 'warm brown',
-      asymmetry: 'one eyelid drooping slightly more',
-      crows_feet: 'deep',
-      bags: 'slight',
-    },
-    nose: 'slightly wider than average with a small bump',
-    mouth: 'thin lips, slight downturn',
-    jaw_and_face_shape: 'soft jawline, NOT chiseled',
-    skin_imperfections: {
-      pores: 'visible pores',
-      age_spots: 'age-appropriate',
-      redness: 'slight',
-      capillaries: 'visible',
-      anchor: 'ZERO airbrushing',
-    },
-    clothing: 'cream cardigan over cotton blouse',
-    setting: {
-      room_type: 'a sunlit living room',
-      details: ['beige sofa', 'coffee mug'],
-      lighting: 'natural daylight',
-    },
+    gender: 'male',
+    hair_description: 'Short, neatly side-combed grey hair, slightly thinning at the temples.',
+    face_description: 'Soft jowls just beginning to form. Warm brown eyes with crinkle lines.',
+    body_posture_clothing:
+      'Medium build, slightly rounded shoulders. Wearing a casual olive-green long-sleeved cotton shirt, slightly worn at the collar.',
+    skin_color_for_stubble: 'grey',
+    role_description: 'grandfather',
+    setting_description: 'Sitting on a beige sofa in a sunlit living room.',
   });
 
   it('parses bare JSON', () => {
     const r = parseStructuredCharacter(VALID_RAW);
     expect(r).not.toBeNull();
-    expect(r?.name).toBe('Linda');
-    expect(r?.age).toBe(62);
+    expect(r?.name).toBe('John');
+    expect(r?.age).toBe(64);
   });
 
   it('parses fenced markdown json blocks (Claude default when asked for JSON-only)', () => {
     const fenced = '```json\n' + VALID_RAW + '\n```';
-    expect(parseStructuredCharacter(fenced)?.name).toBe('Linda');
+    expect(parseStructuredCharacter(fenced)?.name).toBe('John');
   });
 
   it('parses JSON wrapped in preamble prose (brace-bounded slice fallback)', () => {
     const wrapped = `Sure, here is the character JSON: ${VALID_RAW}\nLet me know if you need adjustments.`;
-    expect(parseStructuredCharacter(wrapped)?.name).toBe('Linda');
+    expect(parseStructuredCharacter(wrapped)?.name).toBe('John');
   });
 
   it('accepts an already-parsed object (validation-only path)', () => {
@@ -181,10 +158,12 @@ describe('Polish-19.0.7: parseStructuredCharacter', () => {
     expect(parseStructuredCharacter(minusName)).toBeNull();
   });
 
-  it('returns null on missing nested fields', () => {
-    const broken = JSON.parse(VALID_RAW);
-    delete broken.hair.styling;
-    expect(parseStructuredCharacter(broken)).toBeNull();
+  it('returns null when a description field is missing or empty', () => {
+    const noFace = { ...JSON.parse(VALID_RAW), face_description: '' };
+    expect(parseStructuredCharacter(noFace)).toBeNull();
+    const noBody = JSON.parse(VALID_RAW);
+    delete noBody.body_posture_clothing;
+    expect(parseStructuredCharacter(noBody)).toBeNull();
   });
 
   it('returns null on wrong gender enum', () => {
@@ -192,14 +171,24 @@ describe('Polish-19.0.7: parseStructuredCharacter', () => {
     expect(parseStructuredCharacter(bad)).toBeNull();
   });
 
-  it('returns null on non-array setting.details', () => {
-    const bad = JSON.parse(VALID_RAW);
-    bad.setting.details = 'beige sofa, coffee mug';
+  it('returns null on invalid skin_color_for_stubble value', () => {
+    const bad = { ...JSON.parse(VALID_RAW), skin_color_for_stubble: 'rainbow' };
     expect(parseStructuredCharacter(bad)).toBeNull();
   });
 
+  it('accepts skin_color_for_stubble = "none" (women / clean-shaven / kids)', () => {
+    const linda = {
+      ...JSON.parse(VALID_RAW),
+      name: 'Linda',
+      gender: 'female',
+      skin_color_for_stubble: 'none',
+      role_description: 'grandmother',
+    };
+    expect(parseStructuredCharacter(linda)).not.toBeNull();
+  });
+
   it('returns null on non-numeric age', () => {
-    const bad = { ...JSON.parse(VALID_RAW), age: '62' };
+    const bad = { ...JSON.parse(VALID_RAW), age: '64' };
     expect(parseStructuredCharacter(bad)).toBeNull();
   });
 
@@ -211,7 +200,7 @@ describe('Polish-19.0.7: parseStructuredCharacter', () => {
   });
 });
 
-describe('Polish-19.0.7: FALLBACK_STRUCTURED_CHARACTER', () => {
+describe('Polish-19.0.8: FALLBACK_STRUCTURED_CHARACTER (JOHN-pattern shape)', () => {
   it('is a valid StructuredCharacter (passes the parser as-is)', () => {
     // The fallback must itself satisfy the schema — otherwise the
     // worker's "Claude failed → use fallback" path crashes the
@@ -220,14 +209,15 @@ describe('Polish-19.0.7: FALLBACK_STRUCTURED_CHARACTER', () => {
     expect(r).not.toBeNull();
   });
 
-  it('includes the asymmetry / imperfection anchors required for photoreal output', () => {
-    expect(FALLBACK_STRUCTURED_CHARACTER.hair.styling.toLowerCase()).toMatch(
-      /messy|loose|asymmetric/,
+  it('carries the proven lived-in anchors required for photoreal output', () => {
+    // hair_description should reference natural / age-appropriate detail
+    expect(FALLBACK_STRUCTURED_CHARACTER.hair_description.toLowerCase()).toMatch(
+      /thinning|grey|messy|loose|slightly|natural/,
     );
-    expect(FALLBACK_STRUCTURED_CHARACTER.jaw_and_face_shape).toMatch(
-      /NOT chiseled|NOT model-shaped/,
-    );
-    expect(FALLBACK_STRUCTURED_CHARACTER.skin_imperfections.anchor).toMatch(/ZERO airbrushing/i);
+    // body_posture_clothing should carry a worn-clothing or lived-in cue
+    expect(FALLBACK_STRUCTURED_CHARACTER.body_posture_clothing).toMatch(/worn|lived-in|not new/);
+    // role_description should be concrete (not "person" / "everyman")
+    expect(FALLBACK_STRUCTURED_CHARACTER.role_description.length).toBeGreaterThan(0);
   });
 });
 

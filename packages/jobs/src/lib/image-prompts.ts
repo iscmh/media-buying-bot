@@ -59,14 +59,18 @@ export const KLING_AVATAR_ANTI_CELEB_LINE =
   'The character must be a completely fictional, generic everyday person with no resemblance to any public figure (actor, musician, athlete, politician, influencer, etc.). Unremarkable, forgettable face.';
 
 /**
- * Polish-19.0.7: structured character spec consumed by
- * buildKlingAvatarReferencePrompt. The fields below mirror the
- * proven manual prompt pattern that lands actual photoreal iPhone-
- * selfie output from Nano Banana — itemized physical features with
- * deliberate asymmetry / imperfection anchors, ZERO-airbrushing
- * framing, and a specific setting. The pre-Polish-19.0.7 freeform
- * string input let Nano Banana default to stylized 3D-render output
- * because the prompt gave too much interpretive latitude.
+ * Polish-19.0.8: structured character spec rewritten to match the
+ * proven Polish-12.x JOHN pattern — the production-confirmed prompt
+ * shape that reliably lands photoreal Nano Banana output. Polish-
+ * 19.0.7 used an itemized-bullets shape ("- Hair: …\n- Eyes: …\n…")
+ * that read as clinical to the model and still defaulted to 3D-
+ * render output. The JOHN pattern lands "casting-director reference"
+ * framing: three-view character sheet lead, naturalistic prose
+ * blocks describing head / body / clothing as a continuous person
+ * rather than disassembled features, the exact SKIN REALISM MANDATE
+ * phrasing with three explicit ZERO anchors (NOT two), and one of
+ * the anchors is "ZERO AI plastic-skin artifacts" — the directive
+ * that explicitly fights the model's default aesthetic.
  *
  * Required: every field below. A Claude character-description step
  * in the worker produces a JSON payload matching this shape;
@@ -80,127 +84,117 @@ export interface StructuredCharacter {
   nationality: string;
   gender: 'male' | 'female' | 'nonbinary';
   /**
-   * One-line archetype framing (e.g. "Generic suburban grandmother
-   * appearance.") — caps the model's interpretive freedom up front
-   * before the itemized features land.
+   * Naturalistic prose paragraph describing hair (length, color,
+   * styling, thinning, grey, etc). NOT a bullet list. E.g.:
+   * "Short, neatly side-combed grey hair, slightly thinning at the
+   * temples."
    */
-  archetype: string;
-  hair: {
-    color: string;
-    length: string;
-    cut: string;
-    texture: string;
-    /** Must contain "messy" / "loose" / "asymmetric" or equivalent. */
-    styling: string;
-  };
-  eyes: {
-    color: string;
-    /** Required imperfection anchor (e.g. "one eyelid drooping slightly more"). */
-    asymmetry: string;
-    crows_feet: string;
-    bags: string;
-  };
-  /** Nose description with at least one imperfection (width, bump, asymmetry). */
-  nose: string;
-  /** Lip thickness + asymmetry + resting expression. */
-  mouth: string;
-  /** Must explicitly include "NOT chiseled, NOT model-shaped" or equivalent. */
-  jaw_and_face_shape: string;
-  skin_imperfections: {
-    /** Required field — should describe visible pores. */
-    pores: string;
-    age_spots: string;
-    redness: string;
-    capillaries: string;
-    /** Required ZERO-airbrushing anchor (e.g. "ZERO airbrushing"). */
-    anchor: string;
-  };
-  /** Specific items + casual/lived-in framing. */
-  clothing: string;
-  setting: {
-    room_type: string;
-    /** 2-3 specific detail items (e.g. ["beige sofa behind her", "side table with coffee mug"]). */
-    details: string[];
-    lighting: string;
-  };
+  hair_description: string;
+  /**
+   * Naturalistic prose paragraph describing the face — laugh lines,
+   * crow's feet, jowls, age spots, eye color + crinkle lines —
+   * flowing sentences, NOT itemized. E.g.:
+   * "Soft jowls just beginning to form along his jawline, deep laugh
+   * lines bracketing his mouth, scattered age spots across his
+   * cheekbones. Warm brown eyes with genuine crinkle lines from
+   * years of squinting in the sun."
+   */
+  face_description: string;
+  /**
+   * Naturalistic prose paragraph describing build / posture /
+   * clothing as a single lived-in story. Must include posture cue
+   * tied to character context (e.g. "the posture of a man used to
+   * sitting on a sofa") and clothing wear detail ("slightly worn
+   * at the collar — not new, not dirty").
+   */
+  body_posture_clothing: string;
+  /**
+   * Drives the SKIN REALISM MANDATE's stubble line. Use 'none' for
+   * clean-shaven OR characters where stubble doesn't apply
+   * (children, most women) — the stubble sentence is then omitted
+   * entirely. Otherwise this colors the stubble shadow.
+   */
+  skin_color_for_stubble: 'grey' | 'brown' | 'black' | 'blonde' | 'red' | 'none';
+  /**
+   * Concrete role used in the closing identity assertion ("must look
+   * like a real 62-year-old grandfather"). E.g.:
+   * "grandfather", "mother", "retiree", "young professional",
+   * "construction worker", "stay-at-home dad".
+   */
+  role_description: string;
+  /**
+   * Setting description — single paragraph, includes the light
+   * source ("from a large bay window", "from an overhead kitchen
+   * fixture") so the camera/setting close line can reference it.
+   */
+  setting_description: string;
 }
 
 /**
- * Polish-19.0.7: build the Kling Avatar v2 worker's Nano Banana
- * reference prompt from a structured character spec. Composition
- * follows the proven manual prompt pattern: photoreal lead →
- * itemized physical features with asymmetry anchors → setting →
- * ZERO-airbrushing skin block → iPhone-selfie close. The Polish-
- * 11.2 IMAGE_UGC_HARD_DIRECTIVE + Polish-19.0.4 anti-celeb line
- * remain at the tail as anti-text/anti-celeb reinforcement (and
- * for back-compat with the Polish-11.2 test pins that check
- * IMAGE_UGC_HARD_DIRECTIVE's presence in output).
+ * Polish-19.0.8: build the Kling Avatar v2 worker's Nano Banana
+ * reference prompt from the structured character spec. Composition
+ * follows the proven Polish-12.x JOHN pattern:
  *
- * The pre-19.0.7 freeform `characterDescription` signature is gone —
- * any caller passing a string instead of a StructuredCharacter is
- * a type error at the call site. Only the Kling Avatar v2 worker
- * consumed the helper; other Polish-12.x callers use the underlying
- * directives directly, not this composer.
+ *   1. THREE-VIEW LEAD — "Photorealistic three-view character sheet,
+ *      front view, side view, back view…" signals casting-director
+ *      reference, not AI portrait.
+ *   2. HEAD/FACE — naturalistic prose paragraph (hair + face desc).
+ *   3. BODY/POSTURE/CLOTHING — single lived-in story paragraph.
+ *   4. SKIN REALISM MANDATE — exact phrasing with the three explicit
+ *      ZERO anchors ("ZERO beauty filters. ZERO skin smoothing.
+ *      ZERO AI plastic-skin artifacts.") + the closing identity
+ *      assertion ("must look like a real 62-year-old grandfather,
+ *      not a model, not an actor, not an AI-generated character.").
+ *   5. CAMERA/SETTING — single line tying together iPhone framing +
+ *      the supplied setting description.
+ *   6. IMAGE_UGC_HARD_DIRECTIVE + KLING_AVATAR_ANTI_CELEB_LINE —
+ *      preserved at the tail for anti-text + anti-celeb reinforcement.
+ *
+ * The Polish-19.0.7 itemized-bullets composition is gone — only the
+ * Kling Avatar v2 worker consumed the helper, and the bullet shape
+ * was the active quality regression we're fixing here.
  */
 export function buildKlingAvatarReferencePrompt(character: StructuredCharacter): string {
   const pronounSubject =
     character.gender === 'male' ? 'He' : character.gender === 'female' ? 'She' : 'They';
+  const genderNoun =
+    character.gender === 'male' ? 'man' : character.gender === 'female' ? 'woman' : 'person';
 
-  const featureBullets = [
-    `- Hair: ${[
-      character.hair.color,
-      character.hair.length,
-      character.hair.cut,
-      character.hair.texture,
-      character.hair.styling,
-    ]
-      .filter(Boolean)
-      .join(', ')}`,
-    `- Eyes: ${character.eyes.color}, ${character.eyes.asymmetry}, ${character.eyes.crows_feet}, ${character.eyes.bags}`,
-    `- Nose: ${character.nose}`,
-    `- Mouth: ${character.mouth}`,
-    `- Jaw and face shape: ${character.jaw_and_face_shape}`,
-    `- Wearing ${character.clothing}`,
-  ].join('\n');
-
-  const skinImperfections = [
-    character.skin_imperfections.pores,
-    character.skin_imperfections.age_spots,
-    character.skin_imperfections.redness,
-    character.skin_imperfections.capillaries,
-  ]
-    .filter(Boolean)
-    .join(', ');
-
-  const settingDetails = character.setting.details
-    .filter((d) => d && d.trim().length > 0)
-    .join(', ');
-
+  // Block 1 — THREE-VIEW LEAD
   const lead =
-    `PHOTOREALISTIC PHOTOGRAPH. Vertical iPhone selfie of a fictional ${character.age}-year-old ` +
-    `${character.nationality} ${character.gender === 'nonbinary' ? 'person' : character.gender} ` +
-    `named ${character.name}. ${character.archetype}`;
+    `Photorealistic three-view character sheet — front view, side view, back view — of a ` +
+    `${character.age}-year-old ${character.nationality} ${genderNoun} named ${character.name.toUpperCase()}.`;
 
-  const featuresBlock = `PHYSICAL FEATURES (deliberately asymmetric and ordinary):\n${featureBullets}`;
+  // Block 2 — HEAD/FACE (naturalistic, NOT itemized)
+  const headFace = `${character.hair_description} ${character.face_description}`;
 
-  const settingBlock =
-    `${pronounSubject} is in ${character.setting.room_type}` +
-    (settingDetails ? ` — ${settingDetails}` : '') +
-    `. ${character.setting.lighting}.`;
+  // Block 3 — BODY/POSTURE/CLOTHING (single paragraph)
+  const bodyPostureClothing = character.body_posture_clothing;
 
-  const skinBlock =
-    `SKIN REALISM: Real ${character.age}-year-old skin — ${skinImperfections}. ` +
-    `${character.skin_imperfections.anchor}. ZERO airbrushing, ZERO beauty filter, ZERO smoothing.`;
+  // Block 4 — SKIN REALISM MANDATE (the exact proven phrasing)
+  const stubbleLine =
+    character.skin_color_for_stubble === 'none'
+      ? ''
+      : ` Real ${character.skin_color_for_stubble} stubble shadow on upper lip and jaw from one day of missed shaving.`;
+  const skinRealism =
+    `SKIN REALISM MANDATE: Hyper-realistic unedited human skin. ` +
+    `Visible pores, natural sebaceous texture on nose.${stubbleLine} ` +
+    `Natural vellus hair on forearms. ` +
+    `ZERO beauty filters. ZERO skin smoothing. ZERO AI plastic-skin artifacts. ` +
+    `${pronounSubject} must look like a real ${character.age}-year-old ${character.role_description}, ` +
+    `not a model, not an actor, not an AI-generated character.`;
 
-  const close =
-    'Shot on iPhone front camera, 9:16 vertical, natural daylight, slightly shaky handheld feel.';
+  // Block 5 — CAMERA/SETTING (single line)
+  const cameraSetting =
+    `Shot on iPhone front camera, 9:16 vertical, natural daylight, slightly shaky handheld feel. ` +
+    character.setting_description;
 
   return [
     lead,
-    featuresBlock,
-    settingBlock,
-    skinBlock,
-    close,
+    headFace,
+    bodyPostureClothing,
+    skinRealism,
+    cameraSetting,
     IMAGE_UGC_HARD_DIRECTIVE,
     KLING_AVATAR_ANTI_CELEB_LINE,
   ].join('\n\n');

@@ -238,97 +238,52 @@ function validateStructuredCharacter(value: unknown): StructuredCharacter | null
   if (typeof v.age !== 'number' || !Number.isFinite(v.age) || v.age <= 0) return null;
   if (typeof v.nationality !== 'string' || v.nationality.length === 0) return null;
   if (v.gender !== 'male' && v.gender !== 'female' && v.gender !== 'nonbinary') return null;
-  if (typeof v.archetype !== 'string' || v.archetype.length === 0) return null;
-  const hair = v.hair as Record<string, unknown> | undefined;
+  if (typeof v.hair_description !== 'string' || v.hair_description.length === 0) return null;
+  if (typeof v.face_description !== 'string' || v.face_description.length === 0) return null;
+  if (typeof v.body_posture_clothing !== 'string' || v.body_posture_clothing.length === 0)
+    return null;
   if (
-    !hair ||
-    typeof hair.color !== 'string' ||
-    typeof hair.length !== 'string' ||
-    typeof hair.cut !== 'string' ||
-    typeof hair.texture !== 'string' ||
-    typeof hair.styling !== 'string'
+    v.skin_color_for_stubble !== 'grey' &&
+    v.skin_color_for_stubble !== 'brown' &&
+    v.skin_color_for_stubble !== 'black' &&
+    v.skin_color_for_stubble !== 'blonde' &&
+    v.skin_color_for_stubble !== 'red' &&
+    v.skin_color_for_stubble !== 'none'
   )
     return null;
-  const eyes = v.eyes as Record<string, unknown> | undefined;
-  if (
-    !eyes ||
-    typeof eyes.color !== 'string' ||
-    typeof eyes.asymmetry !== 'string' ||
-    typeof eyes.crows_feet !== 'string' ||
-    typeof eyes.bags !== 'string'
-  )
-    return null;
-  if (typeof v.nose !== 'string' || v.nose.length === 0) return null;
-  if (typeof v.mouth !== 'string' || v.mouth.length === 0) return null;
-  if (typeof v.jaw_and_face_shape !== 'string' || v.jaw_and_face_shape.length === 0) return null;
-  const skin = v.skin_imperfections as Record<string, unknown> | undefined;
-  if (
-    !skin ||
-    typeof skin.pores !== 'string' ||
-    typeof skin.age_spots !== 'string' ||
-    typeof skin.redness !== 'string' ||
-    typeof skin.capillaries !== 'string' ||
-    typeof skin.anchor !== 'string'
-  )
-    return null;
-  if (typeof v.clothing !== 'string' || v.clothing.length === 0) return null;
-  const setting = v.setting as Record<string, unknown> | undefined;
-  if (
-    !setting ||
-    typeof setting.room_type !== 'string' ||
-    !Array.isArray(setting.details) ||
-    typeof setting.lighting !== 'string'
-  )
-    return null;
-  if (!setting.details.every((d) => typeof d === 'string')) return null;
+  if (typeof v.role_description !== 'string' || v.role_description.length === 0) return null;
+  if (typeof v.setting_description !== 'string' || v.setting_description.length === 0) return null;
   return value as StructuredCharacter;
 }
 
 /**
- * Polish-19.0.7: fallback synthetic character for the rare case where
- * Claude's character-description step fails or returns malformed JSON.
- * The Nano Banana step would otherwise be wedged — better to ship a
- * generic-but-still-photoreal-anchored reference than fail the variant.
+ * Polish-19.0.8: fallback synthetic character used when Claude's
+ * character step returns malformed JSON. Shaped to the new JOHN
+ * pattern so the helper composes a valid prompt without further
+ * branching. Generic-but-photoreal-anchored — variants don't fail
+ * just because Claude misformatted.
  */
 export const FALLBACK_STRUCTURED_CHARACTER: StructuredCharacter = {
   name: 'Sam',
   age: 42,
   nationality: 'American',
   gender: 'nonbinary',
-  archetype: 'Generic everyday person, no public-figure resemblance.',
-  hair: {
-    color: 'medium brown',
-    length: 'shoulder-length',
-    cut: 'simple no-fuss cut',
-    texture: 'natural waves',
-    styling: 'slightly messy, NOT styled',
-  },
-  eyes: {
-    color: 'warm brown',
-    asymmetry: 'one eye slightly more open than the other',
-    crows_feet: "subtle crow's feet",
-    bags: 'slight under-eye bags',
-  },
-  nose: 'ordinary nose, slightly wider than average, small bump on the bridge',
-  mouth: 'medium-thickness lips, slightly asymmetric mouth, neutral resting expression',
-  jaw_and_face_shape: 'soft jawline, slightly rounded face — NOT chiseled, NOT model-shaped',
-  skin_imperfections: {
-    pores: 'visible pores throughout',
-    age_spots: 'minor age-appropriate spots',
-    redness: 'slight redness across cheekbones',
-    capillaries: 'visible broken capillaries near the nose',
-    anchor: 'ZERO airbrushing',
-  },
-  clothing: 'plain cotton t-shirt and casual sweater, lived-in look',
-  setting: {
-    room_type: 'a sunlit living room',
-    details: [
-      'neutral sofa behind them',
-      'side table with a coffee mug',
-      'window with bright daylight',
-    ],
-    lighting: 'bright natural daylight from a large window',
-  },
+  hair_description:
+    'Short, neatly side-combed medium-brown hair, slightly thinning at the temples.',
+  face_description:
+    "Soft laugh lines bracketing the mouth, faint crow's feet at the corner of the eyes, " +
+    'subtle jowls beginning to form along the jawline, scattered minor age spots across the ' +
+    'cheekbones. Warm brown eyes with genuine crinkle lines from years of squinting in the sun.',
+  body_posture_clothing:
+    'Medium build, slightly rounded shoulders suggesting a life of desk work, not athletic. ' +
+    'Wearing a casual olive-green long-sleeved cotton shirt, slightly worn at the collar — ' +
+    'not new, not dirty. Relaxed posture, leaning very slightly forward, the posture of ' +
+    'someone used to sitting on a sofa and talking to family.',
+  skin_color_for_stubble: 'brown',
+  role_description: 'everyday person',
+  setting_description:
+    'Sitting on a beige sofa in a sunlit living room with a side table holding a coffee mug, ' +
+    'natural daylight pouring in from a large bay window behind the camera.',
 };
 
 export function truncateScriptToCap(text: string, capChars: number): string {
@@ -639,35 +594,50 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
         return { ok: false as const, error: err.message, costUsd: 0 };
       throw err;
     }
+    // Polish-19.0.8: rewritten to match the proven Polish-12.x JOHN
+    // pattern. The previous Polish-19.0.7 itemized-bullets schema
+    // ("hair.color, hair.length, eyes.asymmetry") gave Claude
+    // permission to disassemble the character into traits; Nano
+    // Banana then rendered it as a feature catalog, not a lived-in
+    // person. Naturalistic prose paragraphs — described as a single
+    // continuous human — land photoreal output.
     const characterSystemPrompt =
       `You design hyper-specific fictional UGC ad characters. Output ONLY valid JSON ` +
       `matching the schema below — no markdown fences, no preamble, no trailing prose.\n\n` +
       `REQUIRED SCHEMA:\n` +
       `{\n` +
-      `  "name": string,\n` +
-      `  "age": number,\n` +
+      `  "name": string (single fictional first name; no celebrity references),\n` +
+      `  "age": number (specific number, never a range),\n` +
       `  "nationality": string,\n` +
       `  "gender": "male" | "female" | "nonbinary",\n` +
-      `  "archetype": string (one-line framing, e.g. "Generic suburban grandmother appearance."),\n` +
-      `  "hair": { "color": string, "length": string, "cut": string, "texture": string, "styling": string },\n` +
-      `  "eyes": { "color": string, "asymmetry": string, "crows_feet": string, "bags": string },\n` +
-      `  "nose": string,\n` +
-      `  "mouth": string,\n` +
-      `  "jaw_and_face_shape": string,\n` +
-      `  "skin_imperfections": { "pores": string, "age_spots": string, "redness": string, "capillaries": string, "anchor": string },\n` +
-      `  "clothing": string,\n` +
-      `  "setting": { "room_type": string, "details": string[] (2-3 items), "lighting": string }\n` +
+      `  "hair_description": string (naturalistic prose paragraph, NOT itemized bullets),\n` +
+      `  "face_description": string (naturalistic prose paragraph describing laugh lines, crow's feet, jowls, age spots, eye color + crinkle lines — flowing sentences, NOT itemized),\n` +
+      `  "body_posture_clothing": string (single paragraph telling a lived-in story — build, posture cue tied to character context, clothing with wear detail like "slightly worn at the collar"),\n` +
+      `  "skin_color_for_stubble": "grey" | "brown" | "black" | "blonde" | "red" | "none",\n` +
+      `  "role_description": string (concrete role for the closing identity assertion: "grandfather" / "mother" / "retiree" / "young professional" / "construction worker" / etc.),\n` +
+      `  "setting_description": string (single paragraph; include the light source, e.g. "from a large bay window")\n` +
       `}\n\n` +
       `RULES:\n` +
       `- Every field is required.\n` +
-      `- hair.styling MUST contain "messy" / "loose" / "asymmetric" or equivalent.\n` +
-      `- eyes.asymmetry MUST describe a specific imperfection (e.g. "one eyelid drooping slightly more").\n` +
-      `- nose MUST include at least one imperfection (width, bump, asymmetry).\n` +
-      `- jaw_and_face_shape MUST explicitly include "NOT chiseled" or "NOT model-shaped" or equivalent.\n` +
-      `- skin_imperfections.pores MUST describe visible pores; skin_imperfections.anchor MUST be "ZERO airbrushing" or similar.\n` +
-      `- age MUST be a specific number, never a range.\n` +
-      `- name MUST be a single fictional first name (no celebrity references).\n` +
-      `- Vary the character demographics per variant_index so the N variants don't all look the same.`;
+      `- hair_description, face_description, body_posture_clothing, setting_description MUST be naturalistic prose sentences. NEVER itemized lists or bullet points.\n` +
+      `- Describe the character as a whole continuous person — not a list of traits.\n` +
+      `- Each description must include lived-in / imperfection / age-appropriate anchors (laugh lines, age spots, slightly worn clothing, etc.).\n` +
+      `- Use "none" for skin_color_for_stubble when stubble doesn't apply (clean-shaven characters, most women, children).\n` +
+      `- role_description must be concrete (grandfather, mother, retiree) — not abstract (everyman, person).\n` +
+      `- Vary character demographics per variant_index so the N variants don't all look the same.\n\n` +
+      `FEW-SHOT EXAMPLE (the proven JOHN pattern that lands photoreal output):\n` +
+      `{\n` +
+      `  "name": "John",\n` +
+      `  "age": 64,\n` +
+      `  "nationality": "American",\n` +
+      `  "gender": "male",\n` +
+      `  "hair_description": "Short, neatly side-combed grey hair, slightly thinning at the temples.",\n` +
+      `  "face_description": "Soft jowls just beginning to form along his jawline, deep laugh lines bracketing his mouth, scattered age spots across his cheekbones. Warm brown eyes with genuine crinkle lines from years of squinting in the sun.",\n` +
+      `  "body_posture_clothing": "Medium build, slightly rounded shoulders suggesting a life of desk work, not athletic. Wearing a casual olive-green long-sleeved cotton shirt, slightly worn at the collar — not new, not dirty. Relaxed posture, leaning very slightly forward, the posture of a man used to sitting on a sofa and talking to family.",\n` +
+      `  "skin_color_for_stubble": "grey",\n` +
+      `  "role_description": "grandfather",\n` +
+      `  "setting_description": "Sitting on a beige sofa in a sunlit living room — a side table with a coffee mug to his left, family photos on the wall behind him, natural daylight pouring in from a large bay window."\n` +
+      `}`;
     const characterUserMessage = JSON.stringify({
       source_analysis: jobMetadata ?? {},
       script: scriptResult.script.slice(0, 2000),
