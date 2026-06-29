@@ -87,6 +87,14 @@ export type Events = {
   'generation/kie-kling-avatar-v2.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-19.2: Veo 3.1 Fast pipeline — single-call native-audio
+  // video generation via Gemini Developer API. Replaces Kling Avatar
+  // v2 as the default UGC pipeline; Kling stays as the advanced
+  // option. 19.2 ships ≤8s per variant (Veo's per-call ceiling);
+  // multi-chunk chaining is Polish-19.3.
+  'generation/veo-3-1-fast.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   // Polish-6: Sora 2 single-shot pipeline.
   'generation/sora.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };

@@ -112,6 +112,13 @@ const PRICING = {
   klingOmniStitchUsd: 0.05,
   klingOmniManualPromptUsd: 0.1,
   klingMultiClipManualPromptUsd: 0.1,
+  // Polish-19.2: Veo 3.1 Fast native-audio pipeline. $0.15/sec on
+  // the generated output. 19.2 ships ≤8s per variant (per-call
+  // ceiling); a Polish-19.3 multi-chunk variant will charge
+  // segmentCount × 8 × $0.15. Claude script step kept at $0.05.
+  veoFastUsdPerSecond: 0.15,
+  veoClaudeScriptUsd: 0.05,
+  veoFastMaxSecondsPerCall: 8,
   // Polish-19: kie.ai Kling Avatar v2 (Pro) pipeline. Per-second
   // pricing on the model itself, plus a fixed Claude script ($0.05),
   // a fixed Nano Banana reference frame ($0.05), and a per-char
@@ -150,6 +157,7 @@ export type PipelineType =
   | 'kling_3_omni_multi_segment'
   | 'kie_omni_flash_native'
   | 'kie_kling_avatar_v2_standard'
+  | 'veo_3_1_fast_native_audio'
   | 'nano_banana_static_image';
 
 export interface EstimateInput {
@@ -419,6 +427,24 @@ function estimateByPipeline(
           cost: round4(stitchCount * PRICING.kieOmniFlashStitchUsd),
         });
       }
+      break;
+    }
+    case 'veo_3_1_fast_native_audio': {
+      // Polish-19.2: single-call native-audio video gen via Gemini
+      // Developer API. Cap at the per-call ceiling — multi-chunk
+      // chaining will scale linearly past this in Polish-19.3 and
+      // the form will surface a length-clamp warning when picked.
+      const requested = estimatedDurationSeconds ?? 8;
+      const clampedSeconds = Math.min(PRICING.veoFastMaxSecondsPerCall, Math.max(2, requested));
+      const veoCost = round4(clampedSeconds * PRICING.veoFastUsdPerSecond);
+      breakdown.push({
+        item: `Claude script (${variantCount} × $${PRICING.veoClaudeScriptUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.veoClaudeScriptUsd),
+      });
+      breakdown.push({
+        item: `Veo 3.1 Fast (${clampedSeconds}s × $${PRICING.veoFastUsdPerSecond.toFixed(3)}/sec, ${variantCount} variants)`,
+        cost: round4(variantCount * veoCost),
+      });
       break;
     }
     case 'kie_kling_avatar_v2_standard': {

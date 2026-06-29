@@ -83,8 +83,8 @@ describe('Polish-19: defaultPipeline', () => {
   });
 });
 
-describe('Polish-9.2 / Polish-10 / Polish-12 / Polish-19: ALL_PIPELINES coverage', () => {
-  it('covers all 7 PipelineType values (Polish-19 added kie_kling_avatar_v2_standard)', () => {
+describe('Polish-9.2 / Polish-10 / Polish-12 / Polish-19 / Polish-19.2: ALL_PIPELINES coverage', () => {
+  it('covers all 8 PipelineType values (Polish-19.2 added veo_3_1_fast_native_audio)', () => {
     // If a new PipelineType is added without updating ALL_PIPELINES,
     // this assertion fails at type-check time via the satisfies clause
     // below — and the count check catches a stale list at runtime.
@@ -95,14 +95,15 @@ describe('Polish-9.2 / Polish-10 / Polish-12 / Polish-19: ALL_PIPELINES coverage
       'kling_3_omni_multi_segment',
       'kie_omni_flash_native',
       'kie_kling_avatar_v2_standard',
+      'veo_3_1_fast_native_audio',
       'nano_banana_static_image',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
   });
 });
 
-describe('Polish-19: kie_kling_avatar_v2_standard descriptor', () => {
-  it('routes to the new generation/kie-kling-avatar-v2.requested worker', () => {
+describe('Polish-19: kie_kling_avatar_v2_standard descriptor (demoted in 19.2)', () => {
+  it('routes to the kie-kling-avatar-v2.requested worker', () => {
     const d = describePipeline('kie_kling_avatar_v2_standard');
     expect(d.workerEvent).toBe('generation/kie-kling-avatar-v2.requested');
     expect(d.providerChoice).toBe('kling');
@@ -116,8 +117,27 @@ describe('Polish-19: kie_kling_avatar_v2_standard descriptor', () => {
     );
   });
 
-  it('is the canonical default pipeline (replaces kie_omni_flash_native)', () => {
-    expect(describePipeline('kie_kling_avatar_v2_standard').isDefault).toBe(true);
+  it('is NO LONGER the default after Polish-19.2 (Veo took the slot)', () => {
+    expect(describePipeline('kie_kling_avatar_v2_standard').isDefault).toBeFalsy();
+  });
+});
+
+describe('Polish-19.2: veo_3_1_fast_native_audio descriptor', () => {
+  it('routes to the new generation/veo-3-1-fast.requested worker', () => {
+    const d = describePipeline('veo_3_1_fast_native_audio');
+    expect(d.workerEvent).toBe('generation/veo-3-1-fast.requested');
+    expect(d.providerChoice).toBe('gemini');
+    expect(d.format).toBe('veo_3_1_fast_native_audio');
+  });
+
+  it('requires ONLY claude + gemini (no kie_ai, no elevenlabs — native audio collapses the chain)', () => {
+    const d = describePipeline('veo_3_1_fast_native_audio');
+    expect(new Set(d.requiredProviders)).toEqual(new Set(['claude', 'gemini']));
+  });
+
+  it('is the canonical default pipeline after Polish-19.2', () => {
+    expect(describePipeline('veo_3_1_fast_native_audio').isDefault).toBe(true);
     expect(describePipeline('kie_omni_flash_native').isDefault).toBeFalsy();
+    expect(describePipeline('kie_kling_avatar_v2_standard').isDefault).toBeFalsy();
   });
 });

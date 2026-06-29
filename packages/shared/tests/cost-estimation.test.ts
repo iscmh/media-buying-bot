@@ -345,6 +345,56 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
   });
 });
 
+describe('Polish-19.2: veo_3_1_fast_native_audio cost', () => {
+  // Single-call native-audio pipeline — $0.15/sec on the generated
+  // video, plus a $0.05 Claude script step. 19.2 caps at the 8s
+  // per-call ceiling; multi-chunk in 19.3 will scale linearly.
+
+  it('8s (default) → $0.05 Claude + $1.20 Veo = $1.25 per variant', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'veo_3_1_fast_native_audio',
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.25, 4);
+    expect(r.breakdown.some((b) => /Claude script/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Veo 3\.1 Fast \(8s/.test(b.item))).toBe(true);
+  });
+
+  it('30s request clamps to 8s per call (multi-chunk is Polish-19.3)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'veo_3_1_fast_native_audio',
+      estimatedDurationSeconds: 30,
+    });
+    // Cap kicks in: cost is still $1.25 even when caller asks for 30s.
+    expect(r.estimateUsd).toBeCloseTo(1.25, 4);
+    expect(r.breakdown.some((b) => /\(8s × /.test(b.item))).toBe(true);
+  });
+
+  it('scales linearly with variantCount: 5 × 8s ≈ $6.25', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 5,
+      pipeline: 'veo_3_1_fast_native_audio',
+    });
+    expect(r.estimateUsd).toBeCloseTo(6.25, 4);
+  });
+
+  it('sourceDurationSeconds wins over estimatedDurationSeconds', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'veo_3_1_fast_native_audio',
+      sourceDurationSeconds: 6,
+      estimatedDurationSeconds: 30,
+    });
+    // 6s × $0.15 = $0.90 + $0.05 = $0.95
+    expect(r.estimateUsd).toBeCloseTo(0.95, 4);
+  });
+});
+
 describe('Polish-19: kie_kling_avatar_v2_standard cost', () => {
   // Single-call lipsync — one Kling Avatar v2 (Pro) generation per
   // variant at $0.115/sec, plus fixed Claude + Nano Banana + a

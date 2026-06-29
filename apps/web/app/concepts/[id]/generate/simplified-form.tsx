@@ -104,6 +104,10 @@ export function SimplifiedGenerationForm({
   // can't pick something that'll instantly MissingProviderKeyError.
   const availablePipelines: PipelineType[] = React.useMemo(() => {
     const all: PipelineType[] = [
+      // Polish-19.2: Veo 3.1 Fast is the new default. Kling Avatar
+      // v2 stays available for users who want the image+lipsync
+      // chain. Omni Flash + HeyGen remain advanced options.
+      'veo_3_1_fast_native_audio',
       'kie_kling_avatar_v2_standard',
       'kie_omni_flash_native',
       'heygen_avatar_talking_head',

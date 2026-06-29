@@ -179,6 +179,22 @@ export {
   type KieOmniState,
 } from './kie-omni';
 export {
+  submitVeoVideo,
+  pollVeoOperation,
+  extractVeoOutputUri,
+  translateVeoErrorStatus,
+  estimateVeoCostUsd,
+  clampVeoDurationSeconds,
+  getVeoModelId,
+  VEO_DEFAULT_MODEL_ID,
+  VEO_MAX_SECONDS_PER_CALL,
+  VEO_MIN_SECONDS_PER_CALL,
+  type VeoSubmitInput,
+  type VeoSubmitResult,
+  type VeoPollInput,
+  type VeoPollResult,
+} from './veo';
+export {
   submitKieKlingAvatar,
   pollKieKlingAvatar,
   parseKlingAvatarOutputUrl,

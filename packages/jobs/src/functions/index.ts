@@ -6,6 +6,7 @@ import { generateKlingMultiClipVariants } from './generate-kling-multi-clip-vari
 import { generateKling3OmniMultiSegment } from './generate-kling-3-omni-multi-segment';
 import { generateKieOmniFlashNative } from './generate-kie-omni-flash-native';
 import { generateKieKlingAvatarV2 } from './generate-kie-kling-avatar-v2';
+import { generateVeo31Fast } from './generate-veo-3-1-fast';
 import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
 import { generateStaticVariants } from './generate-static-variants';
@@ -35,8 +36,10 @@ export const functions = [
   generateKling3OmniMultiSegment,
   // Polish-12: kie.ai Gemini Omni Flash native pipeline (opt-in).
   generateKieOmniFlashNative,
-  // Polish-19: kie.ai Kling Avatar v2 pipeline (single-call lipsync, default).
+  // Polish-19: kie.ai Kling Avatar v2 pipeline (single-call lipsync — advanced).
   generateKieKlingAvatarV2,
+  // Polish-19.2: Veo 3.1 Fast native-audio pipeline (new default).
+  generateVeo31Fast,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.
