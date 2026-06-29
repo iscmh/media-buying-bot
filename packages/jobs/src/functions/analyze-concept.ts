@@ -277,10 +277,37 @@ async function loadJobRoutingEvent(
       columns: { format: true, pickedPipeline: true },
     });
     const pipeline = pipelineFromString(row?.pickedPipeline);
-    if (pipeline) return describePipeline(pipeline).workerEvent;
-    if (row?.format === 'cinematic_voiceover') return 'generation/cinematic.requested';
+    if (pipeline) {
+      const workerEvent = describePipeline(pipeline).workerEvent;
+      // Polish-19.2.1: loud dispatch log. Pre-19.2.1 the dispatch
+      // decision was silent — when the Veo worker silently failed to
+      // pick up its event after Polish-19.2, there was no log line
+      // showing what analyze-concept actually sent. With this log, a
+      // stuck job's dispatch decision is visible in Inngest output
+      // alongside the analyze step's other audit lines.
+      console.log(
+        `[analyze-concept] job ${jobId} dispatch: pickedPipeline=${row?.pickedPipeline} → ` +
+          `workerEvent=${workerEvent} (resolved from descriptor)`,
+      );
+      return workerEvent;
+    }
+    if (row?.format === 'cinematic_voiceover') {
+      console.log(
+        `[analyze-concept] job ${jobId} dispatch: format=cinematic_voiceover → ` +
+          `workerEvent=generation/cinematic.requested (legacy Polish-4 path)`,
+      );
+      return 'generation/cinematic.requested';
+    }
+    console.log(
+      `[analyze-concept] job ${jobId} dispatch: no pickedPipeline + format=${row?.format ?? 'null'} → ` +
+        `workerEvent=generation/ugc.requested (default UGC fallback)`,
+    );
     return 'generation/ugc.requested';
-  } catch {
+  } catch (err) {
+    console.log(
+      `[analyze-concept] job ${jobId} dispatch error: ${err instanceof Error ? err.message : String(err)}; ` +
+        `falling back to generation/ugc.requested`,
+    );
     return 'generation/ugc.requested';
   }
 }

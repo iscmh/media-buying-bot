@@ -21,6 +21,36 @@ import { suspiciousActivityMonitor } from './suspicious-activity-monitor';
 import { telegramNotifier } from './telegram-notifier';
 import { tokenExpiryChecker } from './token-expiry-checker';
 
+/**
+ * Polish-19.2.1: explicit registry of every Inngest worker-listener
+ * event in the codebase. The set below is the source of truth — the
+ * coverage test in tests/dispatch-coverage.test.ts asserts every
+ * PipelineType in @mbb/shared's ALL_PIPELINES maps to one of these
+ * via its descriptor.workerEvent.
+ *
+ * Why a hand-maintained set rather than runtime introspection:
+ * Inngest's InngestFunction doesn't expose its trigger config as a
+ * public field, so we'd have to scrape the source files. A
+ * hand-maintained set + a coverage test is more reliable and
+ * surfaces a missing-worker drift in CI before deploy.
+ *
+ * When adding a new generation worker: register its event below AND
+ * the inngest.createFunction listener config inside the worker file.
+ * The CI test catches mismatches.
+ */
+export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
+  'generation/ugc.requested',
+  'generation/cinematic.requested',
+  'generation/kling-multi-clip.requested',
+  'generation/kling-3-omni-multi-segment.requested',
+  'generation/kie-omni-flash-native.requested',
+  'generation/kie-kling-avatar-v2.requested',
+  'generation/veo-3-1-fast.requested',
+  'generation/sora.requested',
+  'generation/nano-banana.requested',
+  'generation/static.requested',
+] as const);
+
 export const functions = [
   // Phase 3a: concept generation pipeline.
   analyzeConcept,
