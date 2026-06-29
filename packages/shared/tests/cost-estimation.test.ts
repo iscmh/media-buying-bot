@@ -345,6 +345,63 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
   });
 });
 
+describe('Polish-19: kie_kling_avatar_v2_standard cost', () => {
+  // Single-call lipsync — one Kling Avatar v2 (Pro) generation per
+  // variant at $0.115/sec, plus fixed Claude + Nano Banana + a
+  // per-char ElevenLabs TTS estimate. No segment splitter, no
+  // chain-frame extraction, no character-registration step.
+
+  it('30s default → $0.05 + $0.05 + ~$0.12 TTS + $3.45 Kling ≈ $3.67 per variant', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_kling_avatar_v2_standard',
+    });
+    // 30s × 13 chars/sec = 390 chars; 390 × $0.30/1k = $0.117 TTS.
+    // Per-variant: 0.05 + 0.05 + 0.117 + 3.45 = $3.667 → round4.
+    expect(r.estimateUsd).toBeCloseTo(3.667, 3);
+    expect(r.breakdown.some((b) => /Kling Avatar v2 Pro \(30s/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Claude script/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Nano Banana reference frame/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /ElevenLabs TTS/.test(b.item))).toBe(true);
+  });
+
+  it('scales linearly with target duration: 60s ≈ $7.11 (Kling doubles to $6.90)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_kling_avatar_v2_standard',
+      estimatedDurationSeconds: 60,
+    });
+    // 60s × 13 = 780 chars × $0.30/1k = $0.234 TTS; Kling 60×$0.115 = $6.90.
+    // 0.05 + 0.05 + 0.234 + 6.90 = $7.234.
+    expect(r.estimateUsd).toBeCloseTo(7.234, 3);
+  });
+
+  it('scales linearly with variantCount: 5 × 30s ≈ $18.34', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 5,
+      pipeline: 'kie_kling_avatar_v2_standard',
+    });
+    // 5 × $3.667 = $18.335.
+    expect(r.estimateUsd).toBeCloseTo(18.335, 3);
+  });
+
+  it('sourceDurationSeconds wins over estimatedDurationSeconds', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'kie_kling_avatar_v2_standard',
+      sourceDurationSeconds: 20,
+      estimatedDurationSeconds: 90,
+    });
+    // 20s wins → Kling 20×$0.115 = $2.30; TTS 20×13×$0.0003 = $0.078.
+    // 0.05 + 0.05 + 0.078 + 2.30 = $2.478.
+    expect(r.estimateUsd).toBeCloseTo(2.478, 3);
+  });
+});
+
 describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native quote', () => {
   // Polish-14.1 lets the form pass the actual detected source-video
   // duration into the estimator so the upfront cost preview matches

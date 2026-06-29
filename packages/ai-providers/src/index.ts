@@ -179,6 +179,20 @@ export {
   type KieOmniState,
 } from './kie-omni';
 export {
+  submitKieKlingAvatar,
+  pollKieKlingAvatar,
+  parseKlingAvatarOutputUrl,
+  translateKieKlingAvatarErrorStatus,
+  estimateKieKlingAvatarCostUsd,
+  getKieKlingAvatarModelId,
+  KIE_KLING_AVATAR_DEFAULT_MODEL,
+  type KieKlingAvatarSubmitInput,
+  type KieKlingAvatarSubmitResult,
+  type KieKlingAvatarPollInput,
+  type KieKlingAvatarPollResult,
+  type KieKlingAvatarState,
+} from './kie-kling-avatar';
+export {
   submitElevenLabsTts,
   getDefaultElevenLabsVoiceId,
   estimateElevenLabsCostUsd,

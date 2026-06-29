@@ -112,6 +112,16 @@ const PRICING = {
   klingOmniStitchUsd: 0.05,
   klingOmniManualPromptUsd: 0.1,
   klingMultiClipManualPromptUsd: 0.1,
+  // Polish-19: kie.ai Kling Avatar v2 (Pro) pipeline. Per-second
+  // pricing on the model itself, plus a fixed Claude script ($0.05),
+  // a fixed Nano Banana reference frame ($0.05), and a per-char
+  // ElevenLabs TTS estimate. Script length defaults to the audio
+  // duration's worth of natural-speech words (≈150 wpm → ~3 chars/sec
+  // when projecting back into chars/sec). Worst case 30s ≈ 400 chars
+  // ≈ $0.12 of ElevenLabs.
+  kieKlingAvatarUsdPerSecond: 0.115,
+  kieKlingAvatarClaudeScriptUsd: 0.05,
+  kieKlingAvatarReferenceFrameUsd: 0.05,
   // Polish-6: Sora 2 single-shot via Kie.ai
   soraPerVariantUsd: 1.5,
   soraPromptUsd: 0.05,
@@ -139,6 +149,7 @@ export type PipelineType =
   | 'kling_3_multi_clip_native_lipsync'
   | 'kling_3_omni_multi_segment'
   | 'kie_omni_flash_native'
+  | 'kie_kling_avatar_v2_standard'
   | 'nano_banana_static_image';
 
 export interface EstimateInput {
@@ -408,6 +419,37 @@ function estimateByPipeline(
           cost: round4(stitchCount * PRICING.kieOmniFlashStitchUsd),
         });
       }
+      break;
+    }
+    case 'kie_kling_avatar_v2_standard': {
+      // Polish-19: single-call lipsync — one Kling generation per
+      // variant, sized to the script's target duration. Defaults
+      // mirror the Omni Flash branch (30s when nothing's specified)
+      // so the same submit path lands consistent estimates.
+      const seconds = estimatedDurationSeconds ?? 30;
+      const klingUsd = round4(seconds * PRICING.kieKlingAvatarUsdPerSecond);
+      // ~150 wpm × ~5 chars/word = ~750 chars/min = ~12.5 chars/sec.
+      // Use 13 to stay slightly above for safety on the TTS estimate.
+      const estimatedScriptChars = seconds * 13;
+      const ttsPerVariant = round4(
+        (estimatedScriptChars / 1000) * 0.3, // $0.30 / 1k chars (ElevenLabs)
+      );
+      breakdown.push({
+        item: `Claude script (${variantCount} × $${PRICING.kieKlingAvatarClaudeScriptUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.kieKlingAvatarClaudeScriptUsd),
+      });
+      breakdown.push({
+        item: `Nano Banana reference frame (${variantCount} × $${PRICING.kieKlingAvatarReferenceFrameUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.kieKlingAvatarReferenceFrameUsd),
+      });
+      breakdown.push({
+        item: `ElevenLabs TTS (~${estimatedScriptChars} chars × $0.30/1k, ${variantCount} variants)`,
+        cost: round4(variantCount * ttsPerVariant),
+      });
+      breakdown.push({
+        item: `Kling Avatar v2 Pro (${seconds}s × $${PRICING.kieKlingAvatarUsdPerSecond.toFixed(3)}/sec, ${variantCount} variants)`,
+        cost: round4(variantCount * klingUsd),
+      });
       break;
     }
     case 'nano_banana_static_image':

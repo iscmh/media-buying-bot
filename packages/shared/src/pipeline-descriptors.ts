@@ -26,6 +26,7 @@ export interface PipelineDescriptor {
     | 'generation/kling-multi-clip.requested'
     | 'generation/kling-3-omni-multi-segment.requested'
     | 'generation/kie-omni-flash-native.requested'
+    | 'generation/kie-kling-avatar-v2.requested'
     | 'generation/sora.requested'
     | 'generation/nano-banana.requested';
   /** providers the user MUST have connected for this pipeline to work. */
@@ -75,12 +76,28 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   },
   kie_omni_flash_native: {
     pipeline: 'kie_omni_flash_native',
-    label: 'UGC ad (Gemini Omni Flash, scales to source length)',
+    label: 'UGC ad (Gemini Omni Flash, experimental, scales to source length)',
     providerChoice: 'kling',
     format: 'kie_omni_flash_native',
     workerEvent: 'generation/kie-omni-flash-native.requested',
     requiredProviders: ['claude', 'gemini', 'kie_ai'],
-    // Default until Polish-19 Commit 1 introduces kie_kling_avatar_v2.
+    // Polish-19: demoted from default in favor of kie_kling_avatar_v2_standard
+    // (single-call lipsync, ~25% lower per-variant cost). Stays available as
+    // an advanced-only pipeline for sources where multi-segment generation
+    // is genuinely a better fit.
+  },
+  // Polish-19: single-call talking-head pipeline. Claude → script,
+  // Nano Banana → reference image, ElevenLabs → TTS audio, kie.ai
+  // Kling Avatar v2 → final lipsynced video. No multi-segment splitter,
+  // no chain-frame extraction, no heavy anti-celeb scrub chain (the
+  // model animates a provided face rather than generating from scratch).
+  kie_kling_avatar_v2_standard: {
+    pipeline: 'kie_kling_avatar_v2_standard',
+    label: 'UGC ad (Kling Avatar v2, native lipsync — recommended)',
+    providerChoice: 'kling',
+    format: 'kie_kling_avatar_v2_standard',
+    workerEvent: 'generation/kie-kling-avatar-v2.requested',
+    requiredProviders: ['claude', 'gemini', 'kie_ai', 'elevenlabs'],
     isDefault: true,
   },
   nano_banana_static_image: {
@@ -124,5 +141,6 @@ export const ALL_PIPELINES: PipelineType[] = [
   'kling_3_omni_multi_segment',
   'kling_3_multi_clip_native_lipsync',
   'kie_omni_flash_native',
+  'kie_kling_avatar_v2_standard',
   'nano_banana_static_image',
 ];

@@ -81,6 +81,12 @@ export type Events = {
   'generation/kie-omni-flash-native.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-19: kie.ai Kling Avatar v2 (Pro) pipeline — image + audio →
+  // lipsynced talking-head MP4 in one call. Replaces Omni Flash as the
+  // default UGC pipeline; Omni Flash stays as the advanced option.
+  'generation/kie-kling-avatar-v2.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   // Polish-6: Sora 2 single-shot pipeline.
   'generation/sora.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
