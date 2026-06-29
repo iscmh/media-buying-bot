@@ -1106,17 +1106,11 @@ export function stripCharacterSheetPattern(text: string): string {
  * clip 0 and continuation prompts so any residual character-sheet
  * language in the source manual gets overridden.
  */
-const UGC_FRAMING = [
-  'Single character, single view, NOT a character sheet, NOT multiple angles, NOT front/back/side views.',
-  'AMATEUR SMARTPHONE SELFIE captured on an iPhone front camera in handheld vertical orientation. NOT professional photography, NOT studio lighting, NOT a stock photo.',
-  'Camera: front-facing iPhone selfie at eye-level. Slight handheld micro-shake. Vertical 9:16 portrait.',
-  'Photographic style: AMATEUR. Lighting is natural ambient indoor or natural daylight — NOT cinematic, NOT studio.',
-  'SKIN: hyper-realistic pores, natural texture, subtle wrinkles, visible blemishes/freckles, NOT smooth, NOT airbrushed, NOT glossy, NOT plastic. Real human skin.',
-  'Hair: natural, slightly imperfect, individual strands visible.',
-  'Eyes: natural with subtle catchlights, NOT over-rendered, NOT symmetric AI eyes.',
-  'Background: slightly out of focus, authentic indoor home, NOT a soundstage.',
-  'ONLY the single character described, in the single scene described.',
-].join(' ');
+// Polish-19.0.4: moved to packages/jobs/src/lib/image-prompts.ts so the
+// Kling Avatar v2 worker can share it. Re-exported below for back-compat
+// with the existing Omni Flash worker import + Polish-11.2 test suite.
+import { IMAGE_UGC_HARD_DIRECTIVE, UGC_FRAMING } from '../lib/image-prompts';
+export { IMAGE_UGC_HARD_DIRECTIVE, UGC_FRAMING };
 
 /**
  * Polish-9.18: SPEECH_PACING is prepended to the Kling prompt for any
@@ -1170,24 +1164,8 @@ export function extractWardrobeFromCharacter(text: string): string {
  * The legacy clip.imagePrompt path is preserved for callers that
  * pre-bake a per-clip image prompt; the UGC framing still wraps it.
  */
-/**
- * Polish-11.2: hard image-side directive prepended to every Nano
- * Banana prompt. Polish-10.5 already locked the Kling video prompt
- * down on captions / b-roll, but the image prompt was still leaking
- * "lower-third" / "caption" / "b-roll" language from the reference
- * deconstruction in Section A / B → Nano Banana baked captions into
- * the first frame → Kling animated the captions across every clip.
- * Verified visually on kling-frame-0 in production.
- *
- * Exported so the test suite can assert on its presence.
- */
-export const IMAGE_UGC_HARD_DIRECTIVE = [
-  'AMATEUR SMARTPHONE SELFIE PHOTO. Single character. Eye-level iPhone front camera shot. Vertical 9:16 portrait.',
-  'PHOTOREALISTIC. Real human skin texture with pores. Natural lighting. NOT studio. NOT cinematic. NOT polished.',
-  'ABSOLUTELY NO TEXT visible anywhere in the image. NO captions. NO subtitles. NO on-screen text. NO title cards. NO lower thirds. NO chyrons. NO text overlays. NO watermarks. NO logos. NO graphics. NO speech bubbles. NO printed text on objects.',
-  'NO B-roll inset. NO picture-in-picture. NO multi-panel layout. NO product close-ups composited in. NO money close-ups. NO phone screenshots superimposed. NO insert shots.',
-  'JUST the single character in the single environment described. Single clean clear photograph. Nothing else in frame.',
-].join(' ');
+// Polish-19.0.4: IMAGE_UGC_HARD_DIRECTIVE moved to ../lib/image-prompts;
+// re-exported at the top of this file for back-compat.
 
 /**
  * Polish-12.6: explicit anti-celebrity steering for Nano Banana. The

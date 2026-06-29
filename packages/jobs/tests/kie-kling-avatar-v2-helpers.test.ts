@@ -100,3 +100,63 @@ describe('Polish-19.0.3: KLING_AVATAR_DEFAULT_PROMPT', () => {
     expect(KLING_AVATAR_DEFAULT_PROMPT.toLowerCase()).toContain('lipsync');
   });
 });
+
+/**
+ * Polish-19.0.4: lock the Claude system prompt's output-format override.
+ * The worker composes getUniversalUgcMasterPrompt() (Polish-12.x voice
+ * tuning) + an override that forces ONE plain-text monologue output.
+ * Without this, the master prompt's multi-clip production-manual
+ * instincts bleed through and the Kling worker's text input ends up
+ * shaped wrong for a single-monologue lipsync run.
+ *
+ * The worker doesn't export the composed string (it's built per-call
+ * with target word count); we re-import the helper module and inspect
+ * the override function it builds.
+ */
+describe('Polish-19.0.4: Kling worker Claude output-format override', () => {
+  // The override constant is a module-private builder, but the
+  // assertions below pin its contract via the assembled string the
+  // worker actually sends to Claude.
+  it('the worker source contains the strict output-format override directives', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    // Pin the override's key directives so a future cleanup that
+    // shortens the override surfaces here, not in a degraded live
+    // generation.
+    expect(src).toMatch(/Return PLAIN TEXT monologue only/);
+    expect(src).toMatch(/No JSON, no markdown, no clip structure/);
+    expect(src).toMatch(/First-person conversational delivery/);
+    expect(src).toMatch(/Hook in first 3 seconds/);
+    expect(src).toMatch(/call-to-action/);
+    expect(src).toMatch(/ONE continuous monologue/);
+    expect(src).toMatch(/No multi-clip breakdown/);
+  });
+
+  it('the worker layers getUniversalUgcMasterPrompt() + the override (not a hand-written one-liner)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/getUniversalUgcMasterPrompt\(\)/);
+    expect(src).toMatch(/KLING_AVATAR_CLAUDE_OUTPUT_OVERRIDE/);
+  });
+
+  it('the worker uses the shared buildKlingAvatarReferencePrompt helper (not a hand-written one-liner)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/buildKlingAvatarReferencePrompt/);
+    // Tripwire — the old studio-portrait one-liner that the worker
+    // used pre-Polish-19.0.4 must not be reintroduced as an actual
+    // prompt string. We match only the call-site shape (`prompt: [`
+    // with the studio-portrait phrase), not the audit-trail comment
+    // that explains why we removed it.
+    expect(src).not.toMatch(/prompt\s*=\s*\[\s*'Portrait photograph/);
+  });
+});

@@ -3,12 +3,14 @@ import {
   callClaude,
   callGeminiImage,
   estimateKieKlingAvatarCostUsd,
+  getUniversalUgcMasterPrompt,
   pollKieKlingAvatar,
   submitElevenLabsTts,
   submitKieKlingAvatar,
 } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
 import { inngest } from '../client';
+import { buildKlingAvatarReferencePrompt } from '../lib/image-prompts';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import {
@@ -96,14 +98,29 @@ export function resolveTargetDuration(jobMetadata: Record<string, unknown> | nul
 }
 
 /**
- * Polish-19: the only line of anti-celeb guidance. Per spec — Kling
- * Avatar v2 animates a provided face, so we don't need to scrub
- * Claude's character description against a celebrity list or strip
- * proper nouns from the scene prompt. Just steer Nano Banana toward
- * an everyman / everywoman portrait.
+ * Polish-19.0.4: output-format override layered on top of the
+ * Universal UGC Master Prompt. The master prompt is tuned for a
+ * structured production manual (Section A character sheet + Section
+ * B scene + N clips with imagePrompt/videoPrompt); Kling Avatar v2
+ * needs ONE continuous plain-text monologue instead. This override
+ * forcibly redirects the output shape without throwing away the
+ * tuned hook/voice/CTA guidance baked into the master prompt.
+ *
+ * The {targetWords} / {targetDurationSeconds} placeholders are
+ * substituted in at call time so the read length tracks the user's
+ * Length picker.
  */
-const NANO_BANANA_GENERIC_FACE_LINE =
-  'fictional everyday person, no resemblance to any public figure.';
+const KLING_AVATAR_CLAUDE_OUTPUT_OVERRIDE = (
+  targetWords: number,
+  targetDurationSeconds: number,
+): string =>
+  `\n\n===== OUTPUT FORMAT OVERRIDE (Polish-19 Kling Avatar v2) =====\n` +
+  `Return PLAIN TEXT monologue only. No JSON, no markdown, no clip structure, no scene labels. ` +
+  `~${targetWords} words at 150wpm pace for a ${targetDurationSeconds}s read. ` +
+  `First-person conversational delivery. Hook in first 3 seconds. ` +
+  `Ends with a clear call-to-action that drives the viewer to act. ` +
+  `No multi-clip breakdown — this is ONE continuous monologue.\n` +
+  `===== END OUTPUT FORMAT OVERRIDE =====`;
 
 /**
  * Polish-19.0.3: kie.ai's Kling Avatar v2 API rejects empty prompts
@@ -274,7 +291,14 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
       throw err;
     }
     const targetWords = Math.round((targetDurationSeconds / 60) * 150);
-    const systemPrompt = `You write short, punchy UGC ad monologues. Output PLAIN TEXT only — no JSON, no markdown, no stage directions, no character names. Target ~${targetWords} words for a ${targetDurationSeconds}s read at 150wpm. Conversational, first-person, ends with a clear call-to-action.`;
+    // Polish-19.0.4: layer the iteratively-tuned UGC Master Prompt
+    // (Polish-12.x voice/hook/CTA guidance) with a strict output-
+    // format override that forces ONE continuous plain-text monologue.
+    // Stops the master prompt's multi-clip production-manual instincts
+    // from bleeding into the Kling worker's single-monologue need.
+    const systemPrompt =
+      getUniversalUgcMasterPrompt() +
+      KLING_AVATAR_CLAUDE_OUTPUT_OVERRIDE(targetWords, targetDurationSeconds);
     const userMessage = JSON.stringify({
       source_analysis: jobMetadata ?? {},
       target_duration_seconds: targetDurationSeconds,
@@ -285,7 +309,11 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
       apiKey: keys.claude!,
       systemPrompt,
       userMessage,
-      maxTokens: 2048,
+      // Polish-19.0.4: bumped 2048 → 8192. Monologue itself stays
+      // small (~75-400 chars for 30-60s reads), but Claude often
+      // emits a few hundred chars of preamble against the master
+      // prompt's voice patterns before settling into the monologue.
+      maxTokens: 8192,
       generationJobId: jobId,
     });
     if (!claude.ok) {
@@ -320,10 +348,16 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
         return { ok: false as const, error: err.message, costUsd: 0 };
       throw err;
     }
-    const prompt = [
-      'Portrait photograph of a single person, head and shoulders, facing camera, neutral expression, soft natural lighting, plain background, photorealistic, 9:16 aspect.',
-      NANO_BANANA_GENERIC_FACE_LINE,
-    ].join(' ');
+    // Polish-19.0.4: reach for the shared Polish-9.x→12.x UGC
+    // realism directives (IMAGE_UGC_HARD_DIRECTIVE + UGC_FRAMING)
+    // via buildKlingAvatarReferencePrompt — the previous one-liner
+    // ("soft natural lighting, plain background") was studio-portrait
+    // language, the opposite of UGC realism. The helper composes
+    // anti-text/anti-broll + amateur-iPhone-selfie framing + a single
+    // anti-celeb line. NO long celebrity exclusion laundry list — per
+    // Commit 1 spec, Kling Avatar animates a provided face so the
+    // heavy Polish-12.6 scrub chain isn't needed.
+    const prompt = buildKlingAvatarReferencePrompt();
     const image = await callGeminiImage({
       userId,
       apiKey: keys.gemini!,
