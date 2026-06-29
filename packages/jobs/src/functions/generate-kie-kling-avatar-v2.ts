@@ -59,6 +59,29 @@ const MIN_TARGET_DURATION = 8;
 const MAX_TARGET_DURATION = 300; // 5min hard ceiling matches kie.ai's docs
 
 /**
+ * Polish-19 Commit 2: read the optional `voice_id` field from the
+ * job's metadata (written by the generation form when the user picks
+ * a non-default voice via VoicePicker). Falls back to undefined so
+ * the ElevenLabs client uses its built-in getDefaultElevenLabsVoiceId
+ * (Rachel) — preserves existing behavior for any job created before
+ * the picker shipped.
+ *
+ * The voice id is a free-form string from the user. We don't validate
+ * it against the curated catalog because (a) the catalog is a small
+ * subset of ElevenLabs' library — users with their own voices might
+ * legitimately pass an id we don't recognize, and (b) if it's invalid
+ * ElevenLabs will return a clear 422 that surfaces via the worker's
+ * existing error path.
+ */
+export function resolveVoiceId(jobMetadata: Record<string, unknown> | null): string | undefined {
+  if (!jobMetadata) return undefined;
+  const raw = jobMetadata['voice_id'];
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
  * Read the source-video duration (when known) off job.metadata and
  * clamp to a sane range. Identical contract to the Omni Flash worker
  * so a future cross-pipeline refactor can collapse them.
@@ -335,6 +358,7 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
       userId,
       apiKey: keys.elevenlabs!,
       text: scriptResult.script,
+      voiceId: resolveVoiceId(jobMetadata),
       generationJobId: jobId,
     });
     if (!tts.ok || !tts.audioBase64) {

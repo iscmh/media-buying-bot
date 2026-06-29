@@ -4,7 +4,10 @@
  * the worker delegates to plain functions.
  */
 import { describe, expect, it } from 'vitest';
-import { resolveTargetDuration } from '../src/functions/generate-kie-kling-avatar-v2';
+import {
+  resolveTargetDuration,
+  resolveVoiceId,
+} from '../src/functions/generate-kie-kling-avatar-v2';
 
 describe('Polish-19: resolveTargetDuration', () => {
   it('defaults to 30s when metadata is null', () => {
@@ -42,5 +45,35 @@ describe('Polish-19: resolveTargetDuration', () => {
     expect(resolveTargetDuration({ source_duration_seconds: 60 })).toBe(60);
     expect(resolveTargetDuration({ source_duration_seconds: 120 })).toBe(120);
     expect(resolveTargetDuration({ source_duration_seconds: 240 })).toBe(240);
+  });
+});
+
+describe('Polish-19 Commit 2: resolveVoiceId', () => {
+  it('returns undefined when metadata is null (worker uses client default)', () => {
+    expect(resolveVoiceId(null)).toBeUndefined();
+  });
+
+  it('returns undefined when voice_id is missing', () => {
+    expect(resolveVoiceId({ other: 'field' })).toBeUndefined();
+  });
+
+  it('returns undefined when voice_id is non-string or empty', () => {
+    expect(resolveVoiceId({ voice_id: 42 })).toBeUndefined();
+    expect(resolveVoiceId({ voice_id: null })).toBeUndefined();
+    expect(resolveVoiceId({ voice_id: '' })).toBeUndefined();
+    expect(resolveVoiceId({ voice_id: '   ' })).toBeUndefined();
+  });
+
+  it('returns the trimmed voice id when present', () => {
+    expect(resolveVoiceId({ voice_id: 'pNInz6obpgDQGcFmaJgB' })).toBe('pNInz6obpgDQGcFmaJgB');
+    expect(resolveVoiceId({ voice_id: '  EXAVITQu4vr4xnSDxMaL  ' })).toBe('EXAVITQu4vr4xnSDxMaL');
+  });
+
+  it('does NOT validate against the curated catalog — passes through unknown ids', () => {
+    // Lets users supply their own custom ElevenLabs voice id; client
+    // surfaces a 422 if it's actually invalid.
+    expect(resolveVoiceId({ voice_id: 'custom_user_voice_id_xyz' })).toBe(
+      'custom_user_voice_id_xyz',
+    );
   });
 });
