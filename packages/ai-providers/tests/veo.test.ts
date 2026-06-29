@@ -38,7 +38,7 @@ function captureFetch(response: { status: number; body: unknown }) {
 }
 
 describe('Polish-19.2: submitVeoVideo body shape', () => {
-  it('POSTs to /v1beta/models/veo-3.1-fast:predictLongRunning by default', async () => {
+  it('POSTs to /v1beta/models/veo-3.1-fast-generate-preview:predictLongRunning by default', async () => {
     const calls = captureFetch({
       status: 200,
       body: { name: 'operations/abc123' },
@@ -52,7 +52,13 @@ describe('Polish-19.2: submitVeoVideo body shape', () => {
     });
     expect(r.ok).toBe(true);
     expect(r.operationName).toBe('operations/abc123');
-    expect(calls[0]!.url).toContain('/v1beta/models/veo-3.1-fast:predictLongRunning');
+    // Polish-19.2.2: the default model id MUST include the
+    // `-generate-preview` suffix while Veo 3.1 is preview. The
+    // pre-19.2.2 'veo-3.1-fast' default returned 404 on first
+    // live call.
+    expect(calls[0]!.url).toContain(
+      '/v1beta/models/veo-3.1-fast-generate-preview:predictLongRunning',
+    );
     const body = JSON.parse(calls[0]!.init!.body as string);
     expect(body.instances[0].prompt).toContain('coffee');
     expect(body.parameters.durationSeconds).toBe(8);
@@ -145,6 +151,32 @@ describe('Polish-19.2: submitVeoVideo body shape', () => {
     const r = await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
     expect(r.ok).toBe(false);
     expect(r.errorMessage).toMatch(/Gemini API key/);
+  });
+});
+
+describe('Polish-19.2.2: VEO_DEFAULT_MODEL_ID regression pin', () => {
+  // Tripwire — when the next person here drops the `-generate-preview`
+  // suffix because "it looks redundant", this fires before deploy.
+  // The suffix is required while Veo 3.1 is preview on the Gemini
+  // Developer API (the pre-19.2.2 default 'veo-3.1-fast' returned 404
+  // because that family identifier doesn't resolve without the suffix).
+  //
+  // When Veo 3.1 graduates from preview (suffix likely dropped), the
+  // assertion below should be updated AND the doc comment in veo.ts
+  // should mention the GA flip date.
+  it('default model id ends with "-generate-preview" (Veo 3.1 family is preview on Developer API)', async () => {
+    const { VEO_DEFAULT_MODEL_ID } = await import('../src/veo');
+    expect(VEO_DEFAULT_MODEL_ID).toMatch(/-generate-preview$/);
+  });
+
+  it('default model id targets the "fast" tier (Polish-19.2 picked Fast for cost reasons)', async () => {
+    const { VEO_DEFAULT_MODEL_ID } = await import('../src/veo');
+    expect(VEO_DEFAULT_MODEL_ID).toContain('fast');
+  });
+
+  it('default model id starts with "veo-3.1" (not earlier Veo families)', async () => {
+    const { VEO_DEFAULT_MODEL_ID } = await import('../src/veo');
+    expect(VEO_DEFAULT_MODEL_ID).toMatch(/^veo-3\.1/);
   });
 });
 

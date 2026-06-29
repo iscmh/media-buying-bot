@@ -47,7 +47,23 @@ const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const SUBMIT_TIMEOUT_MS = 60_000;
 const CHECK_TIMEOUT_MS = 30_000;
 
-export const VEO_DEFAULT_MODEL_ID = 'veo-3.1-fast';
+/**
+ * Polish-19.2.2: corrected default after live 404 surfaced — the
+ * pre-19.2.2 default was 'veo-3.1-fast' which doesn't exist on the
+ * v1beta predictLongRunning endpoint. Confirmed against Google docs
+ * (ai.google.dev/gemini-api/docs/video, 2026-06-22):
+ *
+ *   - Veo 3.1 Standard: veo-3.1-generate-preview
+ *   - Veo 3.1 Fast:     veo-3.1-fast-generate-preview   ← current default
+ *   - Veo 3.1 Lite:     veo-3.1-lite-generate-preview
+ *
+ * The `-generate-preview` suffix is required while these models are
+ * still preview. When the family GAs (suffix likely dropped), flip
+ * VEO_MODEL_ID env var and update this default. The trailing
+ * "-preview" pin in the regression test catches accidental
+ * non-preview defaults until the GA flip is documented.
+ */
+export const VEO_DEFAULT_MODEL_ID = 'veo-3.1-fast-generate-preview';
 
 export function getVeoModelId(): string {
   return process.env.VEO_MODEL_ID?.trim() || VEO_DEFAULT_MODEL_ID;
