@@ -59,27 +59,149 @@ export const KLING_AVATAR_ANTI_CELEB_LINE =
   'The character must be a completely fictional, generic everyday person with no resemblance to any public figure (actor, musician, athlete, politician, influencer, etc.). Unremarkable, forgettable face.';
 
 /**
- * Polish-19.0.4: build the Kling Avatar v2 worker's Nano Banana
- * reference prompt. Composes the Polish-11.2 IMAGE_UGC_HARD_DIRECTIVE
- * (anti-text/captions/b-roll) and the Polish-9.18 UGC_FRAMING
- * (amateur-selfie realism) with a short character anchor and the
- * single-line anti-celeb guidance.
+ * Polish-19.0.7: structured character spec consumed by
+ * buildKlingAvatarReferencePrompt. The fields below mirror the
+ * proven manual prompt pattern that lands actual photoreal iPhone-
+ * selfie output from Nano Banana — itemized physical features with
+ * deliberate asymmetry / imperfection anchors, ZERO-airbrushing
+ * framing, and a specific setting. The pre-Polish-19.0.7 freeform
+ * string input let Nano Banana default to stylized 3D-render output
+ * because the prompt gave too much interpretive latitude.
  *
- * `characterDescription` is optional — when omitted (no Claude-
- * produced character sheet, e.g. the simplified-form path generates
- * a script but no character manual), a generic everyperson stub is
- * used. The output stays photoreal, amateur-iPhone-selfie framed,
- * and free of celebrity resemblance regardless.
+ * Required: every field below. A Claude character-description step
+ * in the worker produces a JSON payload matching this shape;
+ * parseStructuredCharacter (worker-side) validates + returns it.
  */
-export function buildKlingAvatarReferencePrompt(input?: { characterDescription?: string }): string {
-  const character =
-    input?.characterDescription?.trim() ||
-    'A single fictional everyday person, 25-50 years old, casual everyday clothing, neutral facial expression.';
+export interface StructuredCharacter {
+  /** Fictional first name — anchors the model toward a specific person. */
+  name: string;
+  /** Specific number, not a range — Nano Banana renders ranges as averages. */
+  age: number;
+  nationality: string;
+  gender: 'male' | 'female' | 'nonbinary';
+  /**
+   * One-line archetype framing (e.g. "Generic suburban grandmother
+   * appearance.") — caps the model's interpretive freedom up front
+   * before the itemized features land.
+   */
+  archetype: string;
+  hair: {
+    color: string;
+    length: string;
+    cut: string;
+    texture: string;
+    /** Must contain "messy" / "loose" / "asymmetric" or equivalent. */
+    styling: string;
+  };
+  eyes: {
+    color: string;
+    /** Required imperfection anchor (e.g. "one eyelid drooping slightly more"). */
+    asymmetry: string;
+    crows_feet: string;
+    bags: string;
+  };
+  /** Nose description with at least one imperfection (width, bump, asymmetry). */
+  nose: string;
+  /** Lip thickness + asymmetry + resting expression. */
+  mouth: string;
+  /** Must explicitly include "NOT chiseled, NOT model-shaped" or equivalent. */
+  jaw_and_face_shape: string;
+  skin_imperfections: {
+    /** Required field — should describe visible pores. */
+    pores: string;
+    age_spots: string;
+    redness: string;
+    capillaries: string;
+    /** Required ZERO-airbrushing anchor (e.g. "ZERO airbrushing"). */
+    anchor: string;
+  };
+  /** Specific items + casual/lived-in framing. */
+  clothing: string;
+  setting: {
+    room_type: string;
+    /** 2-3 specific detail items (e.g. ["beige sofa behind her", "side table with coffee mug"]). */
+    details: string[];
+    lighting: string;
+  };
+}
+
+/**
+ * Polish-19.0.7: build the Kling Avatar v2 worker's Nano Banana
+ * reference prompt from a structured character spec. Composition
+ * follows the proven manual prompt pattern: photoreal lead →
+ * itemized physical features with asymmetry anchors → setting →
+ * ZERO-airbrushing skin block → iPhone-selfie close. The Polish-
+ * 11.2 IMAGE_UGC_HARD_DIRECTIVE + Polish-19.0.4 anti-celeb line
+ * remain at the tail as anti-text/anti-celeb reinforcement (and
+ * for back-compat with the Polish-11.2 test pins that check
+ * IMAGE_UGC_HARD_DIRECTIVE's presence in output).
+ *
+ * The pre-19.0.7 freeform `characterDescription` signature is gone —
+ * any caller passing a string instead of a StructuredCharacter is
+ * a type error at the call site. Only the Kling Avatar v2 worker
+ * consumed the helper; other Polish-12.x callers use the underlying
+ * directives directly, not this composer.
+ */
+export function buildKlingAvatarReferencePrompt(character: StructuredCharacter): string {
+  const pronounSubject =
+    character.gender === 'male' ? 'He' : character.gender === 'female' ? 'She' : 'They';
+
+  const featureBullets = [
+    `- Hair: ${[
+      character.hair.color,
+      character.hair.length,
+      character.hair.cut,
+      character.hair.texture,
+      character.hair.styling,
+    ]
+      .filter(Boolean)
+      .join(', ')}`,
+    `- Eyes: ${character.eyes.color}, ${character.eyes.asymmetry}, ${character.eyes.crows_feet}, ${character.eyes.bags}`,
+    `- Nose: ${character.nose}`,
+    `- Mouth: ${character.mouth}`,
+    `- Jaw and face shape: ${character.jaw_and_face_shape}`,
+    `- Wearing ${character.clothing}`,
+  ].join('\n');
+
+  const skinImperfections = [
+    character.skin_imperfections.pores,
+    character.skin_imperfections.age_spots,
+    character.skin_imperfections.redness,
+    character.skin_imperfections.capillaries,
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const settingDetails = character.setting.details
+    .filter((d) => d && d.trim().length > 0)
+    .join(', ');
+
+  const lead =
+    `PHOTOREALISTIC PHOTOGRAPH. Vertical iPhone selfie of a fictional ${character.age}-year-old ` +
+    `${character.nationality} ${character.gender === 'nonbinary' ? 'person' : character.gender} ` +
+    `named ${character.name}. ${character.archetype}`;
+
+  const featuresBlock = `PHYSICAL FEATURES (deliberately asymmetric and ordinary):\n${featureBullets}`;
+
+  const settingBlock =
+    `${pronounSubject} is in ${character.setting.room_type}` +
+    (settingDetails ? ` — ${settingDetails}` : '') +
+    `. ${character.setting.lighting}.`;
+
+  const skinBlock =
+    `SKIN REALISM: Real ${character.age}-year-old skin — ${skinImperfections}. ` +
+    `${character.skin_imperfections.anchor}. ZERO airbrushing, ZERO beauty filter, ZERO smoothing.`;
+
+  const close =
+    'Shot on iPhone front camera, 9:16 vertical, natural daylight, slightly shaky handheld feel.';
+
   return [
+    lead,
+    featuresBlock,
+    settingBlock,
+    skinBlock,
+    close,
     IMAGE_UGC_HARD_DIRECTIVE,
-    UGC_FRAMING,
-    `Character: ${character}`,
-    'CRITICAL: ONE single frame, ONE camera angle. NO text, NO captions, NO overlays anywhere in the image. NOT a reference sheet. NOT multiple poses.',
     KLING_AVATAR_ANTI_CELEB_LINE,
   ].join('\n\n');
 }

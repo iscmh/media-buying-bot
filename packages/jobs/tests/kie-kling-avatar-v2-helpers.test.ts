@@ -5,8 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  FALLBACK_STRUCTURED_CHARACTER,
   KLING_AVATAR_DEFAULT_PROMPT,
   computeKlingAvatarPollIntervalSeconds,
+  parseStructuredCharacter,
   resolveTargetDuration,
   resolveVoiceId,
   truncateScriptToCap,
@@ -98,8 +100,134 @@ describe('Polish-19.0.3: KLING_AVATAR_DEFAULT_PROMPT', () => {
     expect(KLING_AVATAR_DEFAULT_PROMPT.length).toBeLessThanOrEqual(5000);
   });
 
-  it('references lipsync so the model is steered toward audio-driven mouth shapes', () => {
-    expect(KLING_AVATAR_DEFAULT_PROMPT.toLowerCase()).toContain('lipsync');
+  it('Polish-19.0.7: anchors the model against 3D-render output with explicit photoreal framing', () => {
+    expect(KLING_AVATAR_DEFAULT_PROMPT).toMatch(/Photorealistic real-person video/);
+    expect(KLING_AVATAR_DEFAULT_PROMPT).toMatch(/real human filmed on a phone/);
+    expect(KLING_AVATAR_DEFAULT_PROMPT).toMatch(/NOT a 3D character/);
+    expect(KLING_AVATAR_DEFAULT_PROMPT).toMatch(/NOT animated/);
+    expect(KLING_AVATAR_DEFAULT_PROMPT).toMatch(/NOT CGI/);
+  });
+
+  it('Polish-19.0.7: instructs preservation of reference-photo realism (no model lean toward stylization)', () => {
+    expect(KLING_AVATAR_DEFAULT_PROMPT).toMatch(
+      /Preserve every detail of the reference photo's realism/,
+    );
+    expect(KLING_AVATAR_DEFAULT_PROMPT).toMatch(/skin texture/);
+  });
+});
+
+describe('Polish-19.0.7: parseStructuredCharacter', () => {
+  const VALID_RAW = JSON.stringify({
+    name: 'Linda',
+    age: 62,
+    nationality: 'American',
+    gender: 'female',
+    archetype: 'Generic suburban grandmother appearance.',
+    hair: {
+      color: 'grey-blonde',
+      length: 'chin-length',
+      cut: 'soft',
+      texture: 'natural',
+      styling: 'slightly messy',
+    },
+    eyes: {
+      color: 'warm brown',
+      asymmetry: 'one eyelid drooping slightly more',
+      crows_feet: 'deep',
+      bags: 'slight',
+    },
+    nose: 'slightly wider than average with a small bump',
+    mouth: 'thin lips, slight downturn',
+    jaw_and_face_shape: 'soft jawline, NOT chiseled',
+    skin_imperfections: {
+      pores: 'visible pores',
+      age_spots: 'age-appropriate',
+      redness: 'slight',
+      capillaries: 'visible',
+      anchor: 'ZERO airbrushing',
+    },
+    clothing: 'cream cardigan over cotton blouse',
+    setting: {
+      room_type: 'a sunlit living room',
+      details: ['beige sofa', 'coffee mug'],
+      lighting: 'natural daylight',
+    },
+  });
+
+  it('parses bare JSON', () => {
+    const r = parseStructuredCharacter(VALID_RAW);
+    expect(r).not.toBeNull();
+    expect(r?.name).toBe('Linda');
+    expect(r?.age).toBe(62);
+  });
+
+  it('parses fenced markdown json blocks (Claude default when asked for JSON-only)', () => {
+    const fenced = '```json\n' + VALID_RAW + '\n```';
+    expect(parseStructuredCharacter(fenced)?.name).toBe('Linda');
+  });
+
+  it('parses JSON wrapped in preamble prose (brace-bounded slice fallback)', () => {
+    const wrapped = `Sure, here is the character JSON: ${VALID_RAW}\nLet me know if you need adjustments.`;
+    expect(parseStructuredCharacter(wrapped)?.name).toBe('Linda');
+  });
+
+  it('accepts an already-parsed object (validation-only path)', () => {
+    const r = parseStructuredCharacter(JSON.parse(VALID_RAW));
+    expect(r).not.toBeNull();
+  });
+
+  it('returns null on missing required top-level fields', () => {
+    const minusName = { ...JSON.parse(VALID_RAW), name: undefined };
+    expect(parseStructuredCharacter(minusName)).toBeNull();
+  });
+
+  it('returns null on missing nested fields', () => {
+    const broken = JSON.parse(VALID_RAW);
+    delete broken.hair.styling;
+    expect(parseStructuredCharacter(broken)).toBeNull();
+  });
+
+  it('returns null on wrong gender enum', () => {
+    const bad = { ...JSON.parse(VALID_RAW), gender: 'martian' };
+    expect(parseStructuredCharacter(bad)).toBeNull();
+  });
+
+  it('returns null on non-array setting.details', () => {
+    const bad = JSON.parse(VALID_RAW);
+    bad.setting.details = 'beige sofa, coffee mug';
+    expect(parseStructuredCharacter(bad)).toBeNull();
+  });
+
+  it('returns null on non-numeric age', () => {
+    const bad = { ...JSON.parse(VALID_RAW), age: '62' };
+    expect(parseStructuredCharacter(bad)).toBeNull();
+  });
+
+  it('returns null on completely malformed input', () => {
+    expect(parseStructuredCharacter('not json at all')).toBeNull();
+    expect(parseStructuredCharacter('')).toBeNull();
+    expect(parseStructuredCharacter(null)).toBeNull();
+    expect(parseStructuredCharacter(undefined)).toBeNull();
+  });
+});
+
+describe('Polish-19.0.7: FALLBACK_STRUCTURED_CHARACTER', () => {
+  it('is a valid StructuredCharacter (passes the parser as-is)', () => {
+    // The fallback must itself satisfy the schema — otherwise the
+    // worker's "Claude failed → use fallback" path crashes the
+    // helper. Critical safety net pin.
+    const r = parseStructuredCharacter(FALLBACK_STRUCTURED_CHARACTER);
+    expect(r).not.toBeNull();
+  });
+
+  it('includes the asymmetry / imperfection anchors required for photoreal output', () => {
+    expect(FALLBACK_STRUCTURED_CHARACTER.hair.styling.toLowerCase()).toMatch(
+      /messy|loose|asymmetric/,
+    );
+    expect(FALLBACK_STRUCTURED_CHARACTER.jaw_and_face_shape).toMatch(
+      /NOT chiseled|NOT model-shaped/,
+    );
+    expect(FALLBACK_STRUCTURED_CHARACTER.skin_imperfections.anchor).toMatch(/ZERO airbrushing/i);
   });
 });
 

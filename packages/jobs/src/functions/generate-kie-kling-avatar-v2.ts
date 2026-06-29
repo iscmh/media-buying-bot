@@ -10,7 +10,7 @@ import {
 } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
 import { inngest } from '../client';
-import { buildKlingAvatarReferencePrompt } from '../lib/image-prompts';
+import { buildKlingAvatarReferencePrompt, type StructuredCharacter } from '../lib/image-prompts';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import {
@@ -186,6 +186,151 @@ const SCRIPT_HARD_CAP_CHARS = 9500;
  *     run-on), hard-cut at `capChars` rather than throw away most
  *     of the script trying to find a sentence boundary.
  */
+/**
+ * Polish-19.0.7: parse the Claude character-description step's JSON
+ * output into a StructuredCharacter. Tolerant to the standard Claude
+ * output variants: bare JSON, fenced ```json blocks, JSON wrapped in
+ * preamble prose. Returns null on any shape mismatch — caller falls
+ * back to a hand-built synthetic character so the variant doesn't
+ * fail just because Claude misformatted.
+ *
+ * The required-fields check is intentionally narrow: we verify the
+ * top-level keys and the nested keys we actually use to compose the
+ * Nano Banana prompt. Extra fields are passed through; missing
+ * fields fail the parse and return null.
+ *
+ * Exported so the parser branches are unit-testable without driving
+ * the whole Inngest function.
+ */
+export function parseStructuredCharacter(raw: string | unknown): StructuredCharacter | null {
+  if (typeof raw !== 'string') {
+    return validateStructuredCharacter(raw);
+  }
+  let candidate = raw.trim();
+  // Strip markdown fences if present.
+  const fenceMatch = candidate.match(/^```(?:json|JSON)?\s*\n?([\s\S]*?)\n?```\s*$/);
+  if (fenceMatch && fenceMatch[1]) {
+    candidate = fenceMatch[1].trim();
+  }
+  // First try direct parse.
+  try {
+    return validateStructuredCharacter(JSON.parse(candidate));
+  } catch {
+    // fall through to brace-bounded slice
+  }
+  // Slice from first { to last } and try again — handles preamble prose.
+  const first = candidate.indexOf('{');
+  const last = candidate.lastIndexOf('}');
+  if (first !== -1 && last > first) {
+    try {
+      return validateStructuredCharacter(JSON.parse(candidate.slice(first, last + 1)));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function validateStructuredCharacter(value: unknown): StructuredCharacter | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  if (typeof v.name !== 'string' || v.name.length === 0) return null;
+  if (typeof v.age !== 'number' || !Number.isFinite(v.age) || v.age <= 0) return null;
+  if (typeof v.nationality !== 'string' || v.nationality.length === 0) return null;
+  if (v.gender !== 'male' && v.gender !== 'female' && v.gender !== 'nonbinary') return null;
+  if (typeof v.archetype !== 'string' || v.archetype.length === 0) return null;
+  const hair = v.hair as Record<string, unknown> | undefined;
+  if (
+    !hair ||
+    typeof hair.color !== 'string' ||
+    typeof hair.length !== 'string' ||
+    typeof hair.cut !== 'string' ||
+    typeof hair.texture !== 'string' ||
+    typeof hair.styling !== 'string'
+  )
+    return null;
+  const eyes = v.eyes as Record<string, unknown> | undefined;
+  if (
+    !eyes ||
+    typeof eyes.color !== 'string' ||
+    typeof eyes.asymmetry !== 'string' ||
+    typeof eyes.crows_feet !== 'string' ||
+    typeof eyes.bags !== 'string'
+  )
+    return null;
+  if (typeof v.nose !== 'string' || v.nose.length === 0) return null;
+  if (typeof v.mouth !== 'string' || v.mouth.length === 0) return null;
+  if (typeof v.jaw_and_face_shape !== 'string' || v.jaw_and_face_shape.length === 0) return null;
+  const skin = v.skin_imperfections as Record<string, unknown> | undefined;
+  if (
+    !skin ||
+    typeof skin.pores !== 'string' ||
+    typeof skin.age_spots !== 'string' ||
+    typeof skin.redness !== 'string' ||
+    typeof skin.capillaries !== 'string' ||
+    typeof skin.anchor !== 'string'
+  )
+    return null;
+  if (typeof v.clothing !== 'string' || v.clothing.length === 0) return null;
+  const setting = v.setting as Record<string, unknown> | undefined;
+  if (
+    !setting ||
+    typeof setting.room_type !== 'string' ||
+    !Array.isArray(setting.details) ||
+    typeof setting.lighting !== 'string'
+  )
+    return null;
+  if (!setting.details.every((d) => typeof d === 'string')) return null;
+  return value as StructuredCharacter;
+}
+
+/**
+ * Polish-19.0.7: fallback synthetic character for the rare case where
+ * Claude's character-description step fails or returns malformed JSON.
+ * The Nano Banana step would otherwise be wedged — better to ship a
+ * generic-but-still-photoreal-anchored reference than fail the variant.
+ */
+export const FALLBACK_STRUCTURED_CHARACTER: StructuredCharacter = {
+  name: 'Sam',
+  age: 42,
+  nationality: 'American',
+  gender: 'nonbinary',
+  archetype: 'Generic everyday person, no public-figure resemblance.',
+  hair: {
+    color: 'medium brown',
+    length: 'shoulder-length',
+    cut: 'simple no-fuss cut',
+    texture: 'natural waves',
+    styling: 'slightly messy, NOT styled',
+  },
+  eyes: {
+    color: 'warm brown',
+    asymmetry: 'one eye slightly more open than the other',
+    crows_feet: "subtle crow's feet",
+    bags: 'slight under-eye bags',
+  },
+  nose: 'ordinary nose, slightly wider than average, small bump on the bridge',
+  mouth: 'medium-thickness lips, slightly asymmetric mouth, neutral resting expression',
+  jaw_and_face_shape: 'soft jawline, slightly rounded face — NOT chiseled, NOT model-shaped',
+  skin_imperfections: {
+    pores: 'visible pores throughout',
+    age_spots: 'minor age-appropriate spots',
+    redness: 'slight redness across cheekbones',
+    capillaries: 'visible broken capillaries near the nose',
+    anchor: 'ZERO airbrushing',
+  },
+  clothing: 'plain cotton t-shirt and casual sweater, lived-in look',
+  setting: {
+    room_type: 'a sunlit living room',
+    details: [
+      'neutral sofa behind them',
+      'side table with a coffee mug',
+      'window with bright daylight',
+    ],
+    lighting: 'bright natural daylight from a large window',
+  },
+};
+
 export function truncateScriptToCap(text: string, capChars: number): string {
   if (text.length <= capChars) return text;
   const sliced = text.slice(0, capChars);
@@ -212,8 +357,19 @@ export function truncateScriptToCap(text: string, capChars: number): string {
  * overrides (e.g. "energetic, fast-paced" vs "calm, measured"). For
  * now the hardcoded default unblocks the pipeline.
  */
+/**
+ * Polish-19.0.7: anchor the Kling Avatar animation against the 3D-
+ * render style it defaults to. The prior one-liner ("natural delivery,
+ * realistic lipsync") didn't push back against the model's CGI
+ * tendency — and since Kling animates whatever face it receives,
+ * any 3D-render lean in the Nano Banana reference cascades straight
+ * into the final video. Lead with "Photorealistic real-person video"
+ * and explicit "NOT a 3D character" framing.
+ */
 export const KLING_AVATAR_DEFAULT_PROMPT =
-  'Natural conversational delivery to camera, subtle expressive movements, realistic lipsync to the provided audio.';
+  'Photorealistic real-person video. The person in the reference image is a real human filmed on a phone, NOT a 3D character, NOT animated, NOT CGI. ' +
+  'Animate them speaking the provided audio with natural human micro-expressions, real eye blinks, subtle head movements. ' +
+  "Preserve every detail of the reference photo's realism — skin texture, lighting, casual phone-camera aesthetic.";
 
 /**
  * Per-variant result. The worker collects N of these into a partial-
@@ -465,6 +621,94 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
     return { index: variantIndex, ok: false, costUsd: cost, error: scriptResult.error };
   }
 
+  // ---- Structured character description --------------------------
+  // Polish-19.0.7: dedicated Claude step that returns a hyper-specific
+  // character spec matching StructuredCharacter. Pre-19.0.7 the Nano
+  // Banana step used an inline generic stub; the freeform input gave
+  // Nano Banana too much interpretive latitude and it defaulted to
+  // stylized 3D-render output. The structured spec — itemized
+  // physical features with asymmetry anchors, ZERO-airbrushing skin
+  // framing — matches the manual prompt pattern that lands actual
+  // photoreal iPhone-selfie output.
+  const characterResult = await step.run(`claude-character-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['claude']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError)
+        return { ok: false as const, error: err.message, costUsd: 0 };
+      throw err;
+    }
+    const characterSystemPrompt =
+      `You design hyper-specific fictional UGC ad characters. Output ONLY valid JSON ` +
+      `matching the schema below — no markdown fences, no preamble, no trailing prose.\n\n` +
+      `REQUIRED SCHEMA:\n` +
+      `{\n` +
+      `  "name": string,\n` +
+      `  "age": number,\n` +
+      `  "nationality": string,\n` +
+      `  "gender": "male" | "female" | "nonbinary",\n` +
+      `  "archetype": string (one-line framing, e.g. "Generic suburban grandmother appearance."),\n` +
+      `  "hair": { "color": string, "length": string, "cut": string, "texture": string, "styling": string },\n` +
+      `  "eyes": { "color": string, "asymmetry": string, "crows_feet": string, "bags": string },\n` +
+      `  "nose": string,\n` +
+      `  "mouth": string,\n` +
+      `  "jaw_and_face_shape": string,\n` +
+      `  "skin_imperfections": { "pores": string, "age_spots": string, "redness": string, "capillaries": string, "anchor": string },\n` +
+      `  "clothing": string,\n` +
+      `  "setting": { "room_type": string, "details": string[] (2-3 items), "lighting": string }\n` +
+      `}\n\n` +
+      `RULES:\n` +
+      `- Every field is required.\n` +
+      `- hair.styling MUST contain "messy" / "loose" / "asymmetric" or equivalent.\n` +
+      `- eyes.asymmetry MUST describe a specific imperfection (e.g. "one eyelid drooping slightly more").\n` +
+      `- nose MUST include at least one imperfection (width, bump, asymmetry).\n` +
+      `- jaw_and_face_shape MUST explicitly include "NOT chiseled" or "NOT model-shaped" or equivalent.\n` +
+      `- skin_imperfections.pores MUST describe visible pores; skin_imperfections.anchor MUST be "ZERO airbrushing" or similar.\n` +
+      `- age MUST be a specific number, never a range.\n` +
+      `- name MUST be a single fictional first name (no celebrity references).\n` +
+      `- Vary the character demographics per variant_index so the N variants don't all look the same.`;
+    const characterUserMessage = JSON.stringify({
+      source_analysis: jobMetadata ?? {},
+      script: scriptResult.script.slice(0, 2000),
+      variant_index: variantIndex,
+      target_duration_seconds: targetDurationSeconds,
+    });
+    const claude = await callClaude({
+      userId,
+      apiKey: keys.claude!,
+      systemPrompt: characterSystemPrompt,
+      userMessage: characterUserMessage,
+      maxTokens: 2048,
+      generationJobId: jobId,
+    });
+    if (!claude.ok) {
+      return {
+        ok: false as const,
+        error: claude.errorMessage ?? 'Claude character-description call failed',
+        costUsd: claude.costUsd,
+      };
+    }
+    const parsed = parseStructuredCharacter(claude.text ?? '');
+    if (!parsed) {
+      console.log(
+        `[kie-kling-avatar] variant ${variantIndex}: character JSON failed to parse; falling back to synthetic character. ` +
+          `Claude returned: ${(claude.text ?? '').slice(0, 500)}`,
+      );
+      return {
+        ok: true as const,
+        character: FALLBACK_STRUCTURED_CHARACTER,
+        costUsd: claude.costUsd,
+      };
+    }
+    return { ok: true as const, character: parsed, costUsd: claude.costUsd };
+  });
+  cost += characterResult.costUsd;
+  if (!characterResult.ok) {
+    return { index: variantIndex, ok: false, costUsd: cost, error: characterResult.error };
+  }
+  const structuredCharacter = characterResult.character;
+
   // ---- Reference image -------------------------------------------
   const refResult = await step.run(`nano-banana-${variantIndex}`, async () => {
     let keys;
@@ -475,16 +719,15 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
         return { ok: false as const, error: err.message, costUsd: 0 };
       throw err;
     }
-    // Polish-19.0.4: reach for the shared Polish-9.x→12.x UGC
-    // realism directives (IMAGE_UGC_HARD_DIRECTIVE + UGC_FRAMING)
-    // via buildKlingAvatarReferencePrompt — the previous one-liner
-    // ("soft natural lighting, plain background") was studio-portrait
-    // language, the opposite of UGC realism. The helper composes
-    // anti-text/anti-broll + amateur-iPhone-selfie framing + a single
-    // anti-celeb line. NO long celebrity exclusion laundry list — per
-    // Commit 1 spec, Kling Avatar animates a provided face so the
-    // heavy Polish-12.6 scrub chain isn't needed.
-    const prompt = buildKlingAvatarReferencePrompt();
+    // Polish-19.0.7: compose the Nano Banana prompt from the
+    // structured character spec produced by the new character step
+    // above. The 5-block structure (photoreal lead → itemized
+    // features → setting → ZERO-airbrushing skin → iPhone-selfie
+    // close) matches the proven manual prompt that lands photoreal
+    // output. Pre-19.0.7 the helper took a freeform string and
+    // defaulted to a generic stub; the new shape gives Nano Banana
+    // far less interpretive latitude.
+    const prompt = buildKlingAvatarReferencePrompt(structuredCharacter);
     const image = await callGeminiImage({
       userId,
       apiKey: keys.gemini!,
