@@ -105,6 +105,15 @@ export async function createGenerationJobAction(
     typeof rawSourceDuration === 'string' && rawSourceDuration.length > 0
       ? clampSourceDuration(Number(rawSourceDuration))
       : null;
+  // Polish-19 Commit 3: optional ElevenLabs voice id from the simplified
+  // form's VoicePicker (Advanced disclosure). When absent the worker
+  // falls back to getDefaultElevenLabsVoiceId() (Rachel). Free-form
+  // string — we don't validate against the curated catalog because
+  // users may pass custom ElevenLabs voice ids; ElevenLabs surfaces 422
+  // for genuinely invalid values via the worker's existing error path.
+  const rawVoiceId = formData.get('voiceId');
+  const voiceId =
+    typeof rawVoiceId === 'string' && rawVoiceId.trim().length > 0 ? rawVoiceId.trim() : null;
 
   if (!conceptId) return { ok: false, errorMessage: 'Missing concept id.' };
   if (!VALID_INTENSITY.has(intensity)) {
@@ -242,12 +251,20 @@ export async function createGenerationJobAction(
       pickedPipeline: pipelineDesc.pipeline,
       // Polish-9: reference creative storage path (auto-detect upload).
       ...(referenceStoragePath ? { referenceCreativeStoragePath: referenceStoragePath } : {}),
-      // Polish-14.1: source video duration persisted on metadata so
-      // the kie_omni_flash_native worker can read it and pass through
-      // as target_duration_seconds to Claude. Worker tolerates a null
-      // metadata column (defaults to 30s).
-      ...(sourceDurationSeconds != null
-        ? { metadata: { source_duration_seconds: sourceDurationSeconds } }
+      // Polish-14.1 + Polish-19 Commit 3: persist optional metadata
+      // fields the worker reads. source_duration_seconds drives the
+      // worker's target duration; voice_id picks the ElevenLabs voice
+      // (Kling Avatar v2 pipeline). Both are nullable — workers tolerate
+      // an absent metadata column and fall back to safe defaults.
+      ...(sourceDurationSeconds != null || voiceId != null
+        ? {
+            metadata: {
+              ...(sourceDurationSeconds != null
+                ? { source_duration_seconds: sourceDurationSeconds }
+                : {}),
+              ...(voiceId != null ? { voice_id: voiceId } : {}),
+            },
+          }
         : {}),
       // Phase 1's enum aiProviderUsed: only populate when UGC + provider is
       // also one of arcads/heygen/creatify. Kie.ai isn't in that enum, so
