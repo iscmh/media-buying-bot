@@ -126,10 +126,16 @@ export async function submitKieKlingAvatar(
   });
 
   if (!result.ok) {
-    // Log full raw response on transport / non-200 HTTP so a wrong
-    // env-override model id surfaces in Inngest logs without a redeploy.
+    // Polish-19.0.3: log the FULL raw response body to console, not just
+    // the translated short message. kie.ai's 5xx error bodies sometimes
+    // carry nested detail (e.g. "prompt is required" returned as plain
+    // text alongside an HTTP 500). Inngest captures stdout so this lands
+    // in the worker's log stream without a code change to add diagnostics.
     console.log(
-      `[kie-kling-avatar] submit transport failure: status=${result.status} err=${result.errorMessage ?? 'unknown'}`,
+      `[kie-kling-avatar] submit transport failure: status=${result.status} ` +
+        `model=${modelId} promptChars=${promptText.length} ` +
+        `imageUrl=${input.imageUrl.slice(0, 80)}... audioUrl=${input.audioUrl.slice(0, 80)}... ` +
+        `err=${result.errorMessage ?? 'unknown'}`,
     );
     return {
       ok: false,
@@ -138,8 +144,11 @@ export async function submitKieKlingAvatar(
     };
   }
   if (result.data.code !== undefined && result.data.code !== 200) {
+    // Polish-19.0.3: dump the full wrapper body — kie.ai sometimes
+    // returns soft failures with `code:200 + data:null` or odd shapes,
+    // and the response wrapper itself carries hints we'd want to see.
     console.log(
-      `[kie-kling-avatar] submit soft failure body: ${JSON.stringify(result.data).slice(0, 1000)}`,
+      `[kie-kling-avatar] submit soft failure: model=${modelId} body=${JSON.stringify(result.data)}`,
     );
     return {
       ok: false,

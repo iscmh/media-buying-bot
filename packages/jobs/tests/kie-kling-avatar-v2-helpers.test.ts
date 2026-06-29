@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  KLING_AVATAR_DEFAULT_PROMPT,
   resolveTargetDuration,
   resolveVoiceId,
 } from '../src/functions/generate-kie-kling-avatar-v2';
@@ -75,5 +76,27 @@ describe('Polish-19 Commit 2: resolveVoiceId', () => {
     expect(resolveVoiceId({ voice_id: 'custom_user_voice_id_xyz' })).toBe(
       'custom_user_voice_id_xyz',
     );
+  });
+});
+
+describe('Polish-19.0.3: KLING_AVATAR_DEFAULT_PROMPT', () => {
+  // Regression pin — kie.ai's Kling Avatar v2 API rejects empty prompts
+  // with HTTP 500 ("prompt is required") despite the public docs
+  // listing empty-string as the default. Anything that would silently
+  // re-introduce the empty default (an over-zealous "this comment looks
+  // redundant" cleanup, an env override, a refactor) fails these
+  // assertions before it ships.
+  it('is a non-empty string', () => {
+    expect(typeof KLING_AVATAR_DEFAULT_PROMPT).toBe('string');
+    expect(KLING_AVATAR_DEFAULT_PROMPT.length).toBeGreaterThan(0);
+    expect(KLING_AVATAR_DEFAULT_PROMPT.trim().length).toBeGreaterThan(0);
+  });
+
+  it("stays within kie.ai's documented 5000-char ceiling for the prompt field", () => {
+    expect(KLING_AVATAR_DEFAULT_PROMPT.length).toBeLessThanOrEqual(5000);
+  });
+
+  it('references lipsync so the model is steered toward audio-driven mouth shapes', () => {
+    expect(KLING_AVATAR_DEFAULT_PROMPT.toLowerCase()).toContain('lipsync');
   });
 });

@@ -106,6 +106,22 @@ const NANO_BANANA_GENERIC_FACE_LINE =
   'fictional everyday person, no resemblance to any public figure.';
 
 /**
+ * Polish-19.0.3: kie.ai's Kling Avatar v2 API rejects empty prompts
+ * with HTTP 500 ("prompt is required") despite the public docs
+ * stating an empty string is the documented default. Pass a generic
+ * delivery-style directive that gives the model loose framing without
+ * fighting the audio-driven lipsync — the model still drives mouth
+ * shapes from audio_url; this prompt only nudges expression and
+ * body language.
+ *
+ * Polish-19.1 will expose this in the Advanced disclosure for per-job
+ * overrides (e.g. "energetic, fast-paced" vs "calm, measured"). For
+ * now the hardcoded default unblocks the pipeline.
+ */
+export const KLING_AVATAR_DEFAULT_PROMPT =
+  'Natural conversational delivery to camera, subtle expressive movements, realistic lipsync to the provided audio.';
+
+/**
  * Per-variant result. The worker collects N of these into a partial-
  * failures array so the job-completion audit captures variant-level
  * success vs failure even when the overall job is "done".
@@ -400,11 +416,15 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
         return { ok: false as const, error: err.message, costUsd: 0 };
       throw err;
     }
+    // Polish-19.0.3: kie.ai rejects empty prompts despite documenting
+    // empty-string as the default. See KLING_AVATAR_DEFAULT_PROMPT
+    // above for the rationale on the chosen string.
     const submit = await submitKieKlingAvatar({
       userId,
       apiKey: keys.kie_ai!,
       imageUrl: imageUploadResult.publicUrl,
       audioUrl: audioUploadResult.publicUrl,
+      prompt: KLING_AVATAR_DEFAULT_PROMPT,
       generationJobId: jobId,
     });
     if (!submit.ok || !submit.taskId) {
