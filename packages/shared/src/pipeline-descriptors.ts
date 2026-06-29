@@ -32,6 +32,12 @@ export interface PipelineDescriptor {
   requiredProviders: Array<
     'heygen' | 'kling' | 'openai' | 'gemini' | 'elevenlabs' | 'claude' | 'kie_ai'
   >;
+  /**
+   * Polish-19: marks the pipeline that callers should pick when the
+   * user hasn't expressed a preference. Exactly one descriptor must
+   * carry `isDefault: true`; defaultPipeline() asserts this.
+   */
+  isDefault?: boolean;
 }
 
 const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
@@ -74,6 +80,8 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     format: 'kie_omni_flash_native',
     workerEvent: 'generation/kie-omni-flash-native.requested',
     requiredProviders: ['claude', 'gemini', 'kie_ai'],
+    // Default until Polish-19 Commit 1 introduces kie_kling_avatar_v2.
+    isDefault: true,
   },
   nano_banana_static_image: {
     pipeline: 'nano_banana_static_image',
@@ -92,6 +100,22 @@ export function describePipeline(pipeline: PipelineType): PipelineDescriptor {
 export function pipelineFromString(value: string | null | undefined): PipelineType | null {
   if (!value) return null;
   return value in DESCRIPTORS ? (value as PipelineType) : null;
+}
+
+/**
+ * Polish-19: the pipeline picked when the user hasn't expressed a
+ * preference. Exactly one descriptor in DESCRIPTORS carries
+ * `isDefault: true` — enforced at module load so a future drift in
+ * the table surfaces loudly on the next boot, not silently at runtime.
+ */
+export function defaultPipeline(): PipelineType {
+  const defaults = Object.values(DESCRIPTORS).filter((d) => d.isDefault);
+  if (defaults.length !== 1) {
+    throw new Error(
+      `pipeline-descriptors: expected exactly 1 default pipeline, found ${defaults.length}`,
+    );
+  }
+  return defaults[0]!.pipeline;
 }
 
 export const ALL_PIPELINES: PipelineType[] = [

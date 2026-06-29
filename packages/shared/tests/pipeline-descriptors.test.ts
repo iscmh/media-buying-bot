@@ -4,7 +4,13 @@
  * analyze-concept worker (fan-out).
  */
 import { describe, expect, it } from 'vitest';
-import { ALL_PIPELINES, describePipeline, pipelineFromString, type PipelineType } from '../src';
+import {
+  ALL_PIPELINES,
+  defaultPipeline,
+  describePipeline,
+  pipelineFromString,
+  type PipelineType,
+} from '../src';
 
 describe('Polish-9.2: describePipeline', () => {
   it('avatar talking head → ugc.requested + heygen', () => {
@@ -61,6 +67,19 @@ describe('Polish-9.2: pipelineFromString', () => {
     expect(pipelineFromString('')).toBeNull();
     expect(pipelineFromString(null)).toBeNull();
     expect(pipelineFromString(undefined)).toBeNull();
+  });
+});
+
+describe('Polish-19: defaultPipeline', () => {
+  it('returns exactly one pipeline (the descriptor marked isDefault)', () => {
+    const d = defaultPipeline();
+    expect(ALL_PIPELINES).toContain(d);
+    expect(describePipeline(d).isDefault).toBe(true);
+  });
+
+  it('only one descriptor is marked default at a time', () => {
+    const defaults = ALL_PIPELINES.filter((p) => describePipeline(p).isDefault);
+    expect(defaults).toHaveLength(1);
   });
 });
 
