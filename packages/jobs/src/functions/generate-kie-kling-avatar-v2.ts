@@ -140,14 +140,64 @@ export function resolveTargetDuration(jobMetadata: Record<string, unknown> | nul
 const KLING_AVATAR_CLAUDE_OUTPUT_OVERRIDE = (
   targetWords: number,
   targetDurationSeconds: number,
-): string =>
-  `\n\n===== OUTPUT FORMAT OVERRIDE (Polish-19 Kling Avatar v2) =====\n` +
-  `Return PLAIN TEXT monologue only. No JSON, no markdown, no clip structure, no scene labels. ` +
-  `~${targetWords} words at 150wpm pace for a ${targetDurationSeconds}s read. ` +
-  `First-person conversational delivery. Hook in first 3 seconds. ` +
-  `Ends with a clear call-to-action that drives the viewer to act. ` +
-  `No multi-clip breakdown — this is ONE continuous monologue.\n` +
-  `===== END OUTPUT FORMAT OVERRIDE =====`;
+): string => {
+  // Polish-19.0.6: tighten the override after first live retry returned
+  // ~2300 words / 11910 chars (over the 10k ElevenLabs TTS cap). The
+  // master prompt is 15,869 chars vs the prior 500-char override —
+  // Claude was weighting the override at <3%. Hard caps + repeated
+  // "MAXIMUM" framing increases the override's authority without
+  // making it longer than necessary.
+  const safetyTarget = Math.max(1, targetWords - 10);
+  return (
+    `\n\n===== CRITICAL OUTPUT FORMAT OVERRIDE (Polish-19 Kling Avatar v2) =====\n` +
+    `Return PLAIN TEXT monologue only. No JSON, no markdown, no clip structure, no scene labels.\n` +
+    `\n` +
+    `HARD WORD LIMIT: ${targetWords} words MAXIMUM. This is enforced — going over breaks the downstream TTS. ` +
+    `Count your words. A UGC ad is short and punchy, not a long-form script. ` +
+    `Aim for ${safetyTarget} words to leave safety margin. ` +
+    `If you can't fit the hook + body + CTA in ${targetWords} words, cut the body.\n` +
+    `\n` +
+    `${targetWords} words = roughly ${targetDurationSeconds}s at 150wpm. ` +
+    `First-person conversational delivery. Hook in first 3 seconds. ` +
+    `Ends with a clear call-to-action that drives the viewer to act. ` +
+    `No multi-clip breakdown — this is ONE continuous monologue.\n` +
+    `===== END OUTPUT FORMAT OVERRIDE =====`
+  );
+};
+
+/**
+ * Polish-19.0.6: pre-flight TTS char cap. ElevenLabs rejects bodies
+ * longer than 10,000 chars per request with HTTP 422. We cap a little
+ * under that so the truncation fallback has breathing room (e.g.
+ * trailing punctuation, trim-to-sentence overhead).
+ */
+const SCRIPT_HARD_CAP_CHARS = 9500;
+
+/**
+ * Polish-19.0.6: truncate an over-cap script to the last complete
+ * sentence under `capChars`. Pure helper — exported for unit tests.
+ *
+ * Returns the input unchanged if already under the cap. When the
+ * input is over the cap:
+ *   - Slice to `capChars`, find the last sentence-ender (. ! ?).
+ *   - If that boundary is past the halfway point of the slice, use
+ *     it — keeps a clean ending.
+ *   - If no boundary lands late enough (Claude wrote one giant
+ *     run-on), hard-cut at `capChars` rather than throw away most
+ *     of the script trying to find a sentence boundary.
+ */
+export function truncateScriptToCap(text: string, capChars: number): string {
+  if (text.length <= capChars) return text;
+  const sliced = text.slice(0, capChars);
+  const lastPeriod = sliced.lastIndexOf('.');
+  const lastBang = sliced.lastIndexOf('!');
+  const lastQuestion = sliced.lastIndexOf('?');
+  const lastEnd = Math.max(lastPeriod, lastBang, lastQuestion);
+  if (lastEnd > Math.floor(capChars / 2)) {
+    return sliced.slice(0, lastEnd + 1).trim();
+  }
+  return sliced.trim();
+}
 
 /**
  * Polish-19.0.3: kie.ai's Kling Avatar v2 API rejects empty prompts
@@ -350,15 +400,65 @@ async function runOneVariant(input: RunOneVariantInput): Promise<KlingAvatarVari
         costUsd: claude.costUsd,
       };
     }
-    const script = (claude.text ?? '').trim();
+    let script = (claude.text ?? '').trim();
+    let totalCost = claude.costUsd;
     if (!script) {
       return {
         ok: false as const,
         error: 'Claude returned an empty script',
-        costUsd: claude.costUsd,
+        costUsd: totalCost,
       };
     }
-    return { ok: true as const, script, costUsd: claude.costUsd };
+
+    // Polish-19.0.6: ElevenLabs TTS hard-caps requests at 10,000 chars
+    // and Claude routinely blows past the override's word target
+    // because the 15,869-char master prompt overwhelms the override's
+    // weight. Retry once with explicit char-count feedback when the
+    // first response is over the cap; fall back to last-sentence
+    // truncation if the retry is still over.
+    if (script.length > SCRIPT_HARD_CAP_CHARS) {
+      console.log(
+        `[kie-kling-avatar] variant ${variantIndex}: Claude returned ${script.length} chars ` +
+          `(over ${SCRIPT_HARD_CAP_CHARS} cap); retrying once with explicit length feedback`,
+      );
+      const retryUserMessage = JSON.stringify({
+        source_analysis: jobMetadata ?? {},
+        target_duration_seconds: targetDurationSeconds,
+        variant_index: variantIndex,
+        previous_attempt_was_too_long_chars: script.length,
+        elevenlabs_tts_hard_cap_chars: 10000,
+        retry_directive:
+          `Your previous response was ${script.length} characters, which exceeds the ` +
+          `10000-character ElevenLabs TTS limit. Rewrite the monologue to fit in ` +
+          `${targetWords} words / under ${SCRIPT_HARD_CAP_CHARS} characters. ` +
+          `Keep the hook + CTA; cut the body. Count your words.`,
+      });
+      const retry = await callClaude({
+        userId,
+        apiKey: keys.claude!,
+        systemPrompt,
+        userMessage: retryUserMessage,
+        maxTokens: 4096,
+        generationJobId: jobId,
+      });
+      totalCost += retry.costUsd;
+      const retryScript = (retry.text ?? '').trim();
+      if (retry.ok && retryScript.length > 0 && retryScript.length <= SCRIPT_HARD_CAP_CHARS) {
+        console.log(
+          `[kie-kling-avatar] variant ${variantIndex}: retry succeeded with ${retryScript.length} chars`,
+        );
+        script = retryScript;
+      } else {
+        const truncated = truncateScriptToCap(script, SCRIPT_HARD_CAP_CHARS);
+        console.log(
+          `[kie-kling-avatar] variant ${variantIndex}: retry returned ${retryScript.length} chars ` +
+            `(retry.ok=${retry.ok}); falling back to truncate-to-last-sentence: ${truncated.length} chars`,
+        );
+        script = truncated;
+      }
+    }
+
+    return { ok: true as const, script, costUsd: totalCost };
   });
   cost += scriptResult.costUsd;
   if (!scriptResult.ok) {

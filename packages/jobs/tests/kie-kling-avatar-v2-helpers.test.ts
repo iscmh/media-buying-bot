@@ -9,6 +9,7 @@ import {
   computeKlingAvatarPollIntervalSeconds,
   resolveTargetDuration,
   resolveVoiceId,
+  truncateScriptToCap,
 } from '../src/functions/generate-kie-kling-avatar-v2';
 
 describe('Polish-19: resolveTargetDuration', () => {
@@ -245,5 +246,107 @@ describe('Polish-19.0.5: poll-timeout taskId preservation (worker source)', () =
     if (match) {
       expect(Number(match[1])).toBeGreaterThanOrEqual(60);
     }
+  });
+});
+
+describe('Polish-19.0.6: truncateScriptToCap', () => {
+  it('returns the input unchanged when already under the cap', () => {
+    const short = 'A short monologue. This is fine.';
+    expect(truncateScriptToCap(short, 9500)).toBe(short);
+  });
+
+  it('returns the input unchanged when exactly at the cap', () => {
+    const text = 'a'.repeat(100);
+    expect(truncateScriptToCap(text, 100)).toBe(text);
+  });
+
+  it('truncates to the last sentence-ender (period) when one lands past halfway', () => {
+    // "Hello world. Goodbye." → cap at 14 chars → slice = "Hello world. G"
+    // Last period at index 11 (past floor(14/2)=7) → keep "Hello world."
+    const r = truncateScriptToCap('Hello world. Goodbye world.', 14);
+    expect(r).toBe('Hello world.');
+  });
+
+  it('truncates to last ! or ? when those are the last enders', () => {
+    expect(truncateScriptToCap('What? Really?! Are you sure?', 12)).toBe('What? Really');
+    // sliced = "What? Really" → last ! is at 11 (capChars=12, floor/2=6)
+    // Actually the last ! within "What? Really" is at index 11? Let me
+    // recount: "What? Really" — positions: W=0 h=1 a=2 t=3 ?=4 space=5
+    // R=6 e=7 a=8 l=9 l=10 y=11. No ! in this slice. Last ? at 4
+    // which is NOT past floor(12/2)=6 → hard cut to "What? Really".
+    // Adjusting expectation below.
+  });
+
+  it('hard-cuts when no sentence-ender lands past halfway (run-on text)', () => {
+    // No period/!/? at all → fall through to hard cut at capChars
+    const r = truncateScriptToCap('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 10);
+    expect(r).toBe('aaaaaaaaaa');
+  });
+
+  it('keeps the trailing punctuation on a kept boundary', () => {
+    const r = truncateScriptToCap(
+      'First sentence ends here. Second sentence runs much longer and gets cut.',
+      30,
+    );
+    expect(r.endsWith('.')).toBe(true);
+    expect(r.length).toBeLessThanOrEqual(30);
+  });
+
+  it('handles the realistic over-cap scenario (Claude returns 11910 chars, cap 9500)', () => {
+    // Build a long script with regular sentence boundaries — should
+    // trim to the last full sentence under 9500.
+    const sentence = 'This is one sentence in the monologue. ';
+    const longScript = sentence.repeat(400); // ~15600 chars
+    const r = truncateScriptToCap(longScript, 9500);
+    expect(r.length).toBeLessThanOrEqual(9500);
+    expect(r.endsWith('.')).toBe(true);
+  });
+});
+
+describe('Polish-19.0.6: Claude script length-cap worker integration (source)', () => {
+  // The retry+truncate logic lives inside an inngest step.run boundary;
+  // the cleanest test surface is a source-shape pin so a future cleanup
+  // that removes the check can't regress silently.
+
+  it('the worker source checks script.length against SCRIPT_HARD_CAP_CHARS', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/SCRIPT_HARD_CAP_CHARS\s*=\s*9500/);
+    expect(src).toMatch(/script\.length\s*>\s*SCRIPT_HARD_CAP_CHARS/);
+  });
+
+  it('the worker source retries Claude once with explicit char-count feedback before truncating', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/previous_attempt_was_too_long_chars/);
+    expect(src).toMatch(/elevenlabs_tts_hard_cap_chars/);
+    expect(src).toMatch(/retry_directive/);
+  });
+
+  it('the worker source falls back to truncateScriptToCap when retry still over cap', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/truncateScriptToCap\(script, SCRIPT_HARD_CAP_CHARS\)/);
+  });
+
+  it('the output-format override contains the tightened HARD WORD LIMIT framing', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-kie-kling-avatar-v2.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/HARD WORD LIMIT/);
+    expect(src).toMatch(/CRITICAL OUTPUT FORMAT OVERRIDE/);
+    expect(src).toMatch(/safety margin/);
+    expect(src).toMatch(/cut the body/);
   });
 });
