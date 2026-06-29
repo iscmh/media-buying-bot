@@ -105,6 +105,41 @@ describe('Polish-19.2: submitVeoVideo body shape', () => {
     expect(body.parameters.audio).toBeUndefined();
   });
 
+  it('Polish-19.2.3: omits personGeneration by default (Developer API rejects "allow_adult")', async () => {
+    // Tripwire — Polish-19.2 hardcoded personGeneration:'allow_adult'
+    // which the Gemini Developer API rejects with "currently not
+    // supported". A future "let me add a sensible default here"
+    // cleanup must NOT reintroduce the field without going through
+    // the VEO_PERSON_GENERATION env override path.
+    captureFetch({ status: 200, body: { name: 'operations/x' } });
+    const { submitVeoVideo } = await import('../src/veo');
+    await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
+    const captured = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1];
+    const body = JSON.parse((captured as RequestInit).body as string);
+    expect(body.parameters.personGeneration).toBeUndefined();
+    expect('personGeneration' in body.parameters).toBe(false);
+  });
+
+  it('Polish-19.2.3: includes personGeneration ONLY when VEO_PERSON_GENERATION env is set', async () => {
+    process.env.VEO_PERSON_GENERATION = 'allow_all';
+    captureFetch({ status: 200, body: { name: 'operations/x' } });
+    const { submitVeoVideo } = await import('../src/veo');
+    await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
+    const captured = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1];
+    const body = JSON.parse((captured as RequestInit).body as string);
+    expect(body.parameters.personGeneration).toBe('allow_all');
+  });
+
+  it('Polish-19.2.3: empty/whitespace VEO_PERSON_GENERATION still omits the field', async () => {
+    process.env.VEO_PERSON_GENERATION = '   ';
+    captureFetch({ status: 200, body: { name: 'operations/x' } });
+    const { submitVeoVideo } = await import('../src/veo');
+    await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
+    const captured = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1];
+    const body = JSON.parse((captured as RequestInit).body as string);
+    expect(body.parameters.personGeneration).toBeUndefined();
+  });
+
   it('explicitly sends audio: false when VEO_AUDIO_ENABLED_BY_DEFAULT=0', async () => {
     process.env.VEO_AUDIO_ENABLED_BY_DEFAULT = '0';
     captureFetch({ status: 200, body: { name: 'operations/x' } });

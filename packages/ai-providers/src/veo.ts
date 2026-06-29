@@ -146,8 +146,23 @@ export async function submitVeoVideo(input: VeoSubmitInput): Promise<VeoSubmitRe
     aspectRatio: input.aspectRatio ?? '9:16',
     durationSeconds: duration,
     sampleCount: 1,
-    personGeneration: 'allow_adult',
   };
+  // Polish-19.2.3: personGeneration removed from defaults. The
+  // hardcoded 'allow_adult' from Polish-19.2 was a Vertex AI default
+  // that the Gemini Developer API explicitly rejects ("allow_adult
+  // for personGeneration is currently not supported"). Google's
+  // ai.google.dev/gemini-api/docs/video reference curls send NO
+  // parameters.personGeneration at all on the Developer API — the
+  // server applies its own default policy.
+  //
+  // Env override hatch: if Google adds Developer-API support for
+  // explicit values ('allow_all' / 'dont_allow' / future variants),
+  // set VEO_PERSON_GENERATION to flip without a code patch. Empty /
+  // unset → omit the field entirely (the working default).
+  const personGenerationOverride = process.env.VEO_PERSON_GENERATION?.trim();
+  if (personGenerationOverride) {
+    parameters.personGeneration = personGenerationOverride;
+  }
   // Veo 3.1 emits audio natively. The explicit toggle is a defensive
   // hatch — if a future preview rev requires an explicit flag, the
   // env override flips it without a code change.
@@ -180,10 +195,20 @@ export async function submitVeoVideo(input: VeoSubmitInput): Promise<VeoSubmitRe
     generatedCreativeId: input.generatedCreativeId,
   });
 
+  // Polish-19.2.3: log the actual parameters block we sent on every
+  // failure path so the next validation rejection ("personGeneration
+  // is currently not supported", etc) shows the EXACT sent body next
+  // to the error message. Pre-19.2.3 the log only had the error
+  // message — diagnosing required reading the chokepoint DB audit
+  // log to see what we sent, which is slow + non-local. Logging
+  // `parameters` (not the full body — the base64 reference image
+  // would balloon the line) is enough for validation diagnosis.
   if (!result.ok) {
     console.log(
       `[veo] submit transport failure: status=${result.status} model=${modelId} ` +
-        `prompt_chars=${input.prompt.length} err=${result.errorMessage ?? 'unknown'}`,
+        `prompt_chars=${input.prompt.length} ` +
+        `parameters=${JSON.stringify(parameters)} ` +
+        `err=${result.errorMessage ?? 'unknown'}`,
     );
     return {
       ok: false,
@@ -193,7 +218,9 @@ export async function submitVeoVideo(input: VeoSubmitInput): Promise<VeoSubmitRe
   }
   if (result.data.error) {
     console.log(
-      `[veo] submit soft failure: model=${modelId} body=${JSON.stringify(result.data).slice(0, 1500)}`,
+      `[veo] submit soft failure: model=${modelId} ` +
+        `parameters=${JSON.stringify(parameters)} ` +
+        `responseBody=${JSON.stringify(result.data).slice(0, 1500)}`,
     );
     return {
       ok: false,
