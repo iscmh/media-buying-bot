@@ -6,6 +6,54 @@
  * for the kie-omni worker decision helpers).
  */
 import type { PipelineType } from '@mbb/shared';
+import { computeVeoSegmentCount } from '@mbb/shared';
+
+/**
+ * Polish-19.3: preset durations for the Veo 3.1 Fast pipeline. Free-
+ * form length entry doesn't make sense for Veo because the worker
+ * chunks output into 8s segments; a 23s pick would generate ~3
+ * segments (24s of output) anyway. Presets map cleanly to segment
+ * counts: 8s/15s/30s/60s → 1/2/4/8 segments respectively.
+ *
+ * Other pipelines (Kling, Omni Flash, HeyGen) keep the free-form
+ * number input — their workers don't chunk and accept arbitrary
+ * durations.
+ */
+export interface VeoLengthPreset {
+  seconds: number;
+  /** Display label shown on the button. */
+  label: string;
+  /** Pre-computed segment count for the button's secondary hint. */
+  segments: number;
+}
+
+export const VEO_LENGTH_PRESETS: VeoLengthPreset[] = [
+  { seconds: 8, label: '8s', segments: computeVeoSegmentCount(8) },
+  { seconds: 15, label: '15s', segments: computeVeoSegmentCount(15) },
+  { seconds: 30, label: '30s', segments: computeVeoSegmentCount(30) },
+  { seconds: 60, label: '60s', segments: computeVeoSegmentCount(60) },
+];
+
+/**
+ * Polish-19.3: snap a free-form length to the nearest Veo preset.
+ * Used when the user switches pipeline back to Veo with an existing
+ * length state — e.g. switching from Kling (30s) → Veo, the value
+ * snaps to the 30s preset rather than landing on a non-preset value.
+ */
+export function snapToVeoPreset(seconds: number): VeoLengthPreset {
+  if (!Number.isFinite(seconds) || seconds <= 0) return VEO_LENGTH_PRESETS[0]!;
+  // Find the closest preset by absolute distance.
+  let closest = VEO_LENGTH_PRESETS[0]!;
+  let closestDelta = Math.abs(closest.seconds - seconds);
+  for (const p of VEO_LENGTH_PRESETS) {
+    const d = Math.abs(p.seconds - seconds);
+    if (d < closestDelta) {
+      closest = p;
+      closestDelta = d;
+    }
+  }
+  return closest;
+}
 
 /** Variant-count picker bounds. Min 1, max enforced server-side. */
 export const SIMPLIFIED_MIN_VARIANTS = 1;

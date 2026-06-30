@@ -113,12 +113,17 @@ const PRICING = {
   klingOmniManualPromptUsd: 0.1,
   klingMultiClipManualPromptUsd: 0.1,
   // Polish-19.2: Veo 3.1 Fast native-audio pipeline. $0.15/sec on
-  // the generated output. 19.2 ships ≤8s per variant (per-call
-  // ceiling); a Polish-19.3 multi-chunk variant will charge
-  // segmentCount × 8 × $0.15. Claude script step kept at $0.05.
+  // the generated output. 19.3 adds multi-chunk chaining: each
+  // 8s segment costs 8 × $0.15 = $1.20, and when segments > 1 a
+  // Replicate ffmpeg-concat step adds a flat ~$0.15. Claude
+  // script step kept at $0.05 (one call returns the full
+  // segments[] array, not N calls).
   veoFastUsdPerSecond: 0.15,
   veoClaudeScriptUsd: 0.05,
   veoFastMaxSecondsPerCall: 8,
+  // Polish-19.3: cost of the Polish-9.12 Replicate ffmpeg-concat
+  // step. Same constant the Omni Flash multi-segment path uses.
+  veoConcatStitchUsd: 0.15,
   // Polish-19: kie.ai Kling Avatar v2 (Pro) pipeline. Per-second
   // pricing on the model itself, plus a fixed Claude script ($0.05),
   // a fixed Nano Banana reference frame ($0.05), and a per-char
@@ -136,6 +141,35 @@ const PRICING = {
   nanoBananaPerVariantUsd: 0.04,
   nanoBananaClaudeUsd: 0.02,
 } as const;
+
+/**
+ * Polish-19.3: Veo 3.1 Fast per-call ceiling. Sourced from the
+ * ai-providers veo client constant via a duplicate here because the
+ * cost-estimation module stays pure (no @mbb/jobs / @mbb/ai-providers
+ * imports — it runs client-side too). Keep these two values in sync.
+ */
+const VEO_SECONDS_PER_SEGMENT = 8;
+/**
+ * Sanity ceiling on segment count for cost estimation. 8 segments =
+ * 64s of dialogue, well past the longest UGC preset (60s) and past
+ * Veo's practical chain-without-drift point. Beyond this, charge as
+ * if 8 segments so the displayed cost remains finite even if a
+ * caller passes a runaway duration.
+ */
+const VEO_MAX_SEGMENTS = 8;
+
+/**
+ * Polish-19.3: how many 8s Veo segments cover the requested duration.
+ * Pure helper exported so the form's cost preview and the worker's
+ * generation loop both round identically. Caller's responsibility to
+ * stop calling with `requested <= 0` (returns 1 segment in that case
+ * as the safest floor).
+ */
+export function computeVeoSegmentCount(requestedSeconds: number): number {
+  if (!Number.isFinite(requestedSeconds) || requestedSeconds <= 0) return 1;
+  const raw = Math.ceil(requestedSeconds / VEO_SECONDS_PER_SEGMENT);
+  return Math.max(1, Math.min(VEO_MAX_SEGMENTS, raw));
+}
 
 export interface CostBreakdownItem {
   item: string;
@@ -430,21 +464,36 @@ function estimateByPipeline(
       break;
     }
     case 'veo_3_1_fast_native_audio': {
-      // Polish-19.2: single-call native-audio video gen via Gemini
-      // Developer API. Cap at the per-call ceiling — multi-chunk
-      // chaining will scale linearly past this in Polish-19.3 and
-      // the form will surface a length-clamp warning when picked.
+      // Polish-19.3: multi-segment Veo. segmentCount = ceil(target/8),
+      // each segment is one 8s Veo call at $0.15/sec = $1.20. When
+      // segments > 1, a Replicate ffmpeg-concat step stitches them
+      // (~$0.15 flat). Claude returns the full segments[] in ONE
+      // call so the script cost stays at the single-variant rate.
+      //
+      // 8s  (1 seg): $0.05 +  1×$1.20             = $1.25
+      // 15s (2 seg): $0.05 +  2×$1.20 + $0.15 = $2.60
+      // 30s (4 seg): $0.05 +  4×$1.20 + $0.15 = $5.00
+      // 60s (8 seg): $0.05 +  8×$1.20 + $0.15 = $9.80
       const requested = estimatedDurationSeconds ?? 8;
-      const clampedSeconds = Math.min(PRICING.veoFastMaxSecondsPerCall, Math.max(2, requested));
-      const veoCost = round4(clampedSeconds * PRICING.veoFastUsdPerSecond);
+      const segmentCount = computeVeoSegmentCount(requested);
+      const totalSegments = variantCount * segmentCount;
+      const perVariantSecondsCharged = segmentCount * PRICING.veoFastMaxSecondsPerCall;
       breakdown.push({
-        item: `Claude script (${variantCount} × $${PRICING.veoClaudeScriptUsd.toFixed(2)})`,
+        item: `Claude segments script (${variantCount} × $${PRICING.veoClaudeScriptUsd.toFixed(2)})`,
         cost: round4(variantCount * PRICING.veoClaudeScriptUsd),
       });
       breakdown.push({
-        item: `Veo 3.1 Fast (${clampedSeconds}s × $${PRICING.veoFastUsdPerSecond.toFixed(3)}/sec, ${variantCount} variants)`,
-        cost: round4(variantCount * veoCost),
+        item:
+          `Veo 3.1 Fast (${totalSegments} segment${totalSegments === 1 ? '' : 's'} × ` +
+          `${PRICING.veoFastMaxSecondsPerCall}s × $${PRICING.veoFastUsdPerSecond.toFixed(3)}/sec)`,
+        cost: round4(variantCount * perVariantSecondsCharged * PRICING.veoFastUsdPerSecond),
       });
+      if (segmentCount > 1) {
+        breakdown.push({
+          item: `Replicate ffmpeg-concat (${variantCount} × $${PRICING.veoConcatStitchUsd.toFixed(2)})`,
+          cost: round4(variantCount * PRICING.veoConcatStitchUsd),
+        });
+      }
       break;
     }
     case 'kie_kling_avatar_v2_standard': {

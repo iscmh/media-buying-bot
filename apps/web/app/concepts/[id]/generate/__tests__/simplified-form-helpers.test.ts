@@ -12,9 +12,11 @@ import {
   SIMPLIFIED_MAX_VARIANTS,
   SIMPLIFIED_MIN_LENGTH_SECONDS,
   SIMPLIFIED_MIN_VARIANTS,
+  VEO_LENGTH_PRESETS,
   buildSubmissionFormData,
   clampLengthSeconds,
   clampVariantCount,
+  snapToVeoPreset,
 } from '../simplified-form-helpers';
 
 describe('Polish-19: clampVariantCount', () => {
@@ -126,5 +128,54 @@ describe('Polish-19: buildSubmissionFormData', () => {
     // A future flip changes both this assertion AND defaultPipeline()
     // simultaneously — the test acts as a tripwire.
     expect(fd.get('pipeline')).toBe(defaultPipeline());
+  });
+});
+
+describe('Polish-19.3: VEO_LENGTH_PRESETS', () => {
+  it('ships exactly four presets covering 8s/15s/30s/60s', () => {
+    expect(VEO_LENGTH_PRESETS.map((p) => p.seconds)).toEqual([8, 15, 30, 60]);
+  });
+
+  it('each preset has a label and a pre-computed segment count', () => {
+    for (const p of VEO_LENGTH_PRESETS) {
+      expect(p.label).toMatch(/s$/);
+      expect(p.segments).toBeGreaterThan(0);
+    }
+  });
+
+  it('segment counts match computeVeoSegmentCount: 1/2/4/8', () => {
+    const segments = VEO_LENGTH_PRESETS.map((p) => p.segments);
+    expect(segments).toEqual([1, 2, 4, 8]);
+  });
+});
+
+describe('Polish-19.3: snapToVeoPreset', () => {
+  it('returns the exact preset when the input matches a preset value', () => {
+    expect(snapToVeoPreset(8).seconds).toBe(8);
+    expect(snapToVeoPreset(15).seconds).toBe(15);
+    expect(snapToVeoPreset(30).seconds).toBe(30);
+    expect(snapToVeoPreset(60).seconds).toBe(60);
+  });
+
+  it('snaps to the closest preset for between-preset values', () => {
+    // closer to 15 than 30
+    expect(snapToVeoPreset(20).seconds).toBe(15);
+    // closer to 30 than 15 (delta: 30-23=7 vs 23-15=8)
+    expect(snapToVeoPreset(23).seconds).toBe(30);
+    // closer to 30 than 60
+    expect(snapToVeoPreset(40).seconds).toBe(30);
+    // closer to 60 than 30
+    expect(snapToVeoPreset(50).seconds).toBe(60);
+  });
+
+  it('clamps below-floor values to the smallest preset (8s)', () => {
+    expect(snapToVeoPreset(0).seconds).toBe(8);
+    expect(snapToVeoPreset(-5).seconds).toBe(8);
+    expect(snapToVeoPreset(NaN).seconds).toBe(8);
+  });
+
+  it('snaps above-ceiling values to the largest preset (60s)', () => {
+    expect(snapToVeoPreset(120).seconds).toBe(60);
+    expect(snapToVeoPreset(9999).seconds).toBe(60);
   });
 });

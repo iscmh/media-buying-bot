@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import {
   buildVeoDownloadHeaders,
   computeVeoPollIntervalSeconds,
+  fallbackToSingleSegment,
+  parseVeoAdSpec,
   resolveVeoTargetDuration,
 } from '../src/functions/generate-veo-3-1-fast';
 
@@ -139,5 +141,119 @@ describe('Polish-19.2.4: buildVeoDownloadHeaders', () => {
     expect(
       buildVeoDownloadHeaders('https://storage.googleapis.com/veo-output/abc.mp4', 'k'),
     ).toBeUndefined();
+  });
+});
+
+describe('Polish-19.3: parseVeoAdSpec', () => {
+  const VALID = JSON.stringify({
+    segments: [
+      { index: 0, prompt: 'First 8s scene with hook dialogue...' },
+      { index: 1, prompt: 'Next 8s with continued story...' },
+    ],
+  });
+
+  it('parses a bare JSON segments[] response', () => {
+    const r = parseVeoAdSpec(VALID);
+    expect(r).not.toBeNull();
+    expect(r?.segments).toHaveLength(2);
+    expect(r?.segments[0]?.prompt).toContain('hook');
+  });
+
+  it('parses fenced ```json blocks (Claude habit)', () => {
+    const fenced = '```json\n' + VALID + '\n```';
+    expect(parseVeoAdSpec(fenced)?.segments).toHaveLength(2);
+  });
+
+  it('parses JSON wrapped in preamble prose (brace-bounded slice fallback)', () => {
+    const wrapped = `Here is the spec: ${VALID}\nLet me know if you need changes.`;
+    expect(parseVeoAdSpec(wrapped)?.segments).toHaveLength(2);
+  });
+
+  it('accepts an already-parsed object (validation-only path)', () => {
+    const r = parseVeoAdSpec(JSON.parse(VALID));
+    expect(r).not.toBeNull();
+  });
+
+  it('infers index from array position when omitted', () => {
+    const noIndices = JSON.stringify({
+      segments: [{ prompt: 'first' }, { prompt: 'second' }, { prompt: 'third' }],
+    });
+    const r = parseVeoAdSpec(noIndices);
+    expect(r?.segments.map((s) => s.index)).toEqual([0, 1, 2]);
+  });
+
+  it('honors explicit index values when Claude supplies them', () => {
+    const explicit = JSON.stringify({
+      segments: [
+        { index: 5, prompt: 'a' },
+        { index: 9, prompt: 'b' },
+      ],
+    });
+    expect(parseVeoAdSpec(explicit)?.segments.map((s) => s.index)).toEqual([5, 9]);
+  });
+
+  it('returns null on empty segments array', () => {
+    expect(parseVeoAdSpec(JSON.stringify({ segments: [] }))).toBeNull();
+  });
+
+  it('returns null when a segment is missing the prompt field', () => {
+    expect(parseVeoAdSpec(JSON.stringify({ segments: [{ index: 0 }] }))).toBeNull();
+  });
+
+  it('returns null when a segment.prompt is empty string', () => {
+    expect(parseVeoAdSpec(JSON.stringify({ segments: [{ prompt: '' }] }))).toBeNull();
+  });
+
+  it('returns null on completely malformed input', () => {
+    expect(parseVeoAdSpec('not json')).toBeNull();
+    expect(parseVeoAdSpec('')).toBeNull();
+    expect(parseVeoAdSpec(null)).toBeNull();
+    expect(parseVeoAdSpec(undefined)).toBeNull();
+    expect(parseVeoAdSpec({ wrongShape: true })).toBeNull();
+  });
+});
+
+describe('Polish-19.3: fallbackToSingleSegment', () => {
+  it('wraps plain text as a single-segment ad spec', () => {
+    const r = fallbackToSingleSegment('Some plain-text ad spec...');
+    expect(r.segments).toHaveLength(1);
+    expect(r.segments[0]?.index).toBe(0);
+    expect(r.segments[0]?.prompt).toBe('Some plain-text ad spec...');
+  });
+
+  it('produces output that round-trips through parseVeoAdSpec validation', () => {
+    const fb = fallbackToSingleSegment('text');
+    const reparsed = parseVeoAdSpec(fb);
+    expect(reparsed).not.toBeNull();
+    expect(reparsed?.segments).toHaveLength(1);
+  });
+});
+
+describe('Polish-19.3: Commit 1 invariant — worker reads segments[0] only', () => {
+  // Source-shape tripwire. Commit 2 lifts this to a fan-out + concat
+  // loop. Until then, the worker MUST only consume segments[0] so
+  // the runtime stays back-compat with Polish-19.2 single-chunk
+  // behavior for 8s picks.
+  it('the submit call uses adSpec.segments[0].prompt (NOT the full segments array joined)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/prompt: adSpec\.segments\[0\]!\.prompt/);
+    // Tripwire — must not regress to a join() pattern that would
+    // cram all segment prompts into one Veo call.
+    expect(src).not.toMatch(/segments\.map[^)]*\)\.join/);
+  });
+
+  it('the worker persists full segments[] + segment_count_generated=1 on the creative row', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/segment_count_requested: segmentCount/);
+    expect(src).toMatch(/segment_count_generated: 1/);
+    expect(src).toMatch(/segments: adSpec\.segments/);
   });
 });

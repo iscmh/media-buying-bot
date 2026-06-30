@@ -31,9 +31,11 @@ import {
   SIMPLIFIED_MAX_VARIANTS,
   SIMPLIFIED_MIN_LENGTH_SECONDS,
   SIMPLIFIED_MIN_VARIANTS,
+  VEO_LENGTH_PRESETS,
   buildSubmissionFormData,
   clampLengthSeconds,
   clampVariantCount,
+  snapToVeoPreset,
 } from './simplified-form-helpers';
 
 interface Props {
@@ -136,6 +138,23 @@ export function SimplifiedGenerationForm({
     }
   }, [availablePipelines, pipeline]);
 
+  // Polish-19.3: when switching INTO Veo, snap the current length to
+  // the nearest preset. Free-form lengths from other pipelines (e.g.
+  // Kling's 30s pick) become the closest Veo preset; the user sees
+  // their previous duration honored as closely as possible.
+  const isVeoPipeline = pipeline === 'veo_3_1_fast_native_audio';
+  React.useEffect(() => {
+    if (isVeoPipeline) {
+      const snapped = snapToVeoPreset(lengthSeconds);
+      if (snapped.seconds !== lengthSeconds) {
+        setLengthSeconds(snapped.seconds);
+      }
+    }
+    // Intentionally only depend on pipeline — re-snapping on every
+    // length change would defeat the user's pick. The hook's deps
+    // array is narrow on purpose.
+  }, [isVeoPipeline]);
+
   function performSubmit() {
     if (overCap) return;
     const formData = buildSubmissionFormData({
@@ -227,20 +246,53 @@ export function SimplifiedGenerationForm({
           <label htmlFor="length-seconds" className="text-fg block text-sm font-medium">
             Length
           </label>
-          <div className="mt-1 flex items-center gap-2">
-            <input
-              id="length-seconds"
-              type="number"
-              min={SIMPLIFIED_MIN_LENGTH_SECONDS}
-              max={SIMPLIFIED_MAX_LENGTH_SECONDS}
-              step={1}
-              value={lengthSeconds}
-              onChange={(e) => setLengthSeconds(clampLengthSeconds(Number(e.target.value)))}
-              disabled={isPending}
-              className="border-input bg-bg-elevated text-fg focus:ring-ring h-9 w-24 rounded-md border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-offset-1"
-            />
-            <span className="text-fg-muted text-sm">seconds each</span>
-          </div>
+          {isVeoPipeline ? (
+            // Polish-19.3: Veo chunks output into 8s segments — preset
+            // buttons map cleanly to segment counts (8/15/30/60s →
+            // 1/2/4/8 segments). Free-form entry doesn't add value
+            // when the underlying granularity is fixed.
+            <div className="mt-1 flex flex-wrap gap-2" role="group" aria-label="Length preset">
+              {VEO_LENGTH_PRESETS.map((preset) => {
+                const active = lengthSeconds === preset.seconds;
+                return (
+                  <button
+                    key={preset.seconds}
+                    type="button"
+                    onClick={() => setLengthSeconds(preset.seconds)}
+                    disabled={isPending}
+                    className={cn(
+                      'flex flex-col items-center rounded-md border px-3 py-1.5 text-sm transition-colors',
+                      active
+                        ? 'border-fg-muted bg-bg-active text-fg'
+                        : 'border-input bg-bg-elevated text-fg-muted hover:bg-bg-hover hover:text-fg',
+                      'disabled:cursor-not-allowed disabled:opacity-60',
+                    )}
+                    aria-pressed={active}
+                  >
+                    <span className="font-medium">{preset.label}</span>
+                    <span className="text-fg-subtle font-mono text-[10px]">
+                      {preset.segments} seg{preset.segments === 1 ? '' : 's'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                id="length-seconds"
+                type="number"
+                min={SIMPLIFIED_MIN_LENGTH_SECONDS}
+                max={SIMPLIFIED_MAX_LENGTH_SECONDS}
+                step={1}
+                value={lengthSeconds}
+                onChange={(e) => setLengthSeconds(clampLengthSeconds(Number(e.target.value)))}
+                disabled={isPending}
+                className="border-input bg-bg-elevated text-fg focus:ring-ring h-9 w-24 rounded-md border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-offset-1"
+              />
+              <span className="text-fg-muted text-sm">seconds each</span>
+            </div>
+          )}
         </div>
       </div>
 
