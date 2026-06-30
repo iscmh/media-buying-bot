@@ -105,23 +105,12 @@ describe('Polish-19.2: submitVeoVideo body shape', () => {
     expect(body.parameters.audio).toBeUndefined();
   });
 
-  it('Polish-19.2.3: omits personGeneration by default (Developer API rejects "allow_adult")', async () => {
-    // Tripwire — Polish-19.2 hardcoded personGeneration:'allow_adult'
-    // which the Gemini Developer API rejects with "currently not
-    // supported". A future "let me add a sensible default here"
-    // cleanup must NOT reintroduce the field without going through
-    // the VEO_PERSON_GENERATION env override path.
-    captureFetch({ status: 200, body: { name: 'operations/x' } });
-    const { submitVeoVideo } = await import('../src/veo');
-    await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
-    const captured = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1];
-    const body = JSON.parse((captured as RequestInit).body as string);
-    expect(body.parameters.personGeneration).toBeUndefined();
-    expect('personGeneration' in body.parameters).toBe(false);
-  });
-
-  it('Polish-19.2.3: includes personGeneration ONLY when VEO_PERSON_GENERATION env is set', async () => {
-    process.env.VEO_PERSON_GENERATION = 'allow_all';
+  it('Polish-19.4: defaults personGeneration to "allow_all" for text-to-video (no reference image)', async () => {
+    // The Polish-19.2.3 "omit entirely" default was a workaround for
+    // the live rejection on 'allow_adult'. Per Google's docs the
+    // Gemini Developer API requires 'allow_all' on text-to-video AND
+    // on Extend — the value matters, not the field. Tripwire so a
+    // future "let me drop this field again" cleanup gets caught.
     captureFetch({ status: 200, body: { name: 'operations/x' } });
     const { submitVeoVideo } = await import('../src/veo');
     await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
@@ -130,14 +119,63 @@ describe('Polish-19.2: submitVeoVideo body shape', () => {
     expect(body.parameters.personGeneration).toBe('allow_all');
   });
 
-  it('Polish-19.2.3: empty/whitespace VEO_PERSON_GENERATION still omits the field', async () => {
+  it('Polish-19.4: defaults personGeneration to "allow_adult" for image-to-video (reference image present)', async () => {
+    // Per docs the image-to-video path requires 'allow_adult', NOT
+    // 'allow_all'. Auto-pick on the presence of a reference image
+    // so the worker doesn't have to know the rule.
+    captureFetch({ status: 200, body: { name: 'operations/x' } });
+    const { submitVeoVideo } = await import('../src/veo');
+    await submitVeoVideo({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'test',
+      referenceImageBase64: 'AAAA',
+      referenceImageMimeType: 'image/png',
+    });
+    const captured = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1];
+    const body = JSON.parse((captured as RequestInit).body as string);
+    expect(body.parameters.personGeneration).toBe('allow_adult');
+  });
+
+  it('Polish-19.4: VEO_PERSON_GENERATION env wins over the auto-picked default', async () => {
+    process.env.VEO_PERSON_GENERATION = 'dont_allow';
+    captureFetch({ status: 200, body: { name: 'operations/x' } });
+    const { submitVeoVideo } = await import('../src/veo');
+    await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
+    const captured = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1];
+    const body = JSON.parse((captured as RequestInit).body as string);
+    expect(body.parameters.personGeneration).toBe('dont_allow');
+  });
+
+  it('Polish-19.4: empty/whitespace VEO_PERSON_GENERATION falls back to the auto default', async () => {
     process.env.VEO_PERSON_GENERATION = '   ';
     captureFetch({ status: 200, body: { name: 'operations/x' } });
     const { submitVeoVideo } = await import('../src/veo');
     await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
     const captured = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1];
     const body = JSON.parse((captured as RequestInit).body as string);
-    expect(body.parameters.personGeneration).toBeUndefined();
+    expect(body.parameters.personGeneration).toBe('allow_all');
+  });
+
+  it('Polish-19.4: omits resolution by default (Google picks) but sends it when requested', async () => {
+    // Default: no resolution field — Google picks per the model tier.
+    captureFetch({ status: 200, body: { name: 'operations/x' } });
+    const { submitVeoVideo } = await import('../src/veo');
+    await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
+    const b1 = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    );
+    expect(b1.parameters.resolution).toBeUndefined();
+
+    // When the worker chains, the base segment must pin 720p.
+    captureFetch({ status: 200, body: { name: 'operations/x2' } });
+    await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test', resolution: '720p' });
+    const b2 = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    );
+    expect(b2.parameters.resolution).toBe('720p');
   });
 
   it('explicitly sends audio: false when VEO_AUDIO_ENABLED_BY_DEFAULT=0', async () => {
@@ -350,5 +388,190 @@ describe('Polish-19.2: clampVeoDurationSeconds', () => {
     expect(clampVeoDurationSeconds(Infinity)).toBe(8);
     expect(clampVeoDurationSeconds(0)).toBe(8);
     expect(clampVeoDurationSeconds(-3)).toBe(8);
+  });
+});
+
+describe('Polish-19.4: submitVeoExtend body shape', () => {
+  const FILES_URI = 'https://generativelanguage.googleapis.com/v1beta/files/seg0xyz';
+
+  it('POSTs to the same predictLongRunning endpoint with the video reference attached', async () => {
+    const calls = captureFetch({ status: 200, body: { name: 'operations/ext-1' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    const r = await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'Continue the scene — same person, same room, next 7s of monologue.',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.operationName).toBe('operations/ext-1');
+    expect(calls[0]!.url).toContain(
+      '/v1beta/models/veo-3.1-fast-generate-preview:predictLongRunning',
+    );
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    // Per Google docs the prior video reference lives in instances[0]
+    // (not parameters). Pinning here so a future "let me move it"
+    // refactor surfaces in tests, not in a production 400.
+    expect(body.instances[0].video).toEqual({ uri: FILES_URI, mimeType: 'video/mp4' });
+    expect(body.instances[0].prompt).toContain('7s');
+  });
+
+  it('always passes durationSeconds=7 (Extend adds 7s of new content, NOT 8s)', async () => {
+    captureFetch({ status: 200, body: { name: 'operations/ext-2' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'segment 1 prompt',
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    );
+    expect(body.parameters.durationSeconds).toBe(7);
+  });
+
+  it('forces resolution="720p" on every Extend (Google rejects 1080p/4k when extending)', async () => {
+    captureFetch({ status: 200, body: { name: 'operations/ext-3' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'segment 1 prompt',
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    );
+    expect(body.parameters.resolution).toBe('720p');
+  });
+
+  it('defaults personGeneration to "allow_all" on Extend (matches text-to-video rule)', async () => {
+    captureFetch({ status: 200, body: { name: 'operations/ext-4' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'segment 1 prompt',
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    );
+    expect(body.parameters.personGeneration).toBe('allow_all');
+  });
+
+  it('honors VEO_PERSON_GENERATION env override (same env hatch as the base submit)', async () => {
+    process.env.VEO_PERSON_GENERATION = 'dont_allow';
+    captureFetch({ status: 200, body: { name: 'operations/ext-5' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'segment 1 prompt',
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    );
+    expect(body.parameters.personGeneration).toBe('dont_allow');
+  });
+
+  it('defaults aspect ratio to 9:16 (matches the worker base call) and honors override', async () => {
+    captureFetch({ status: 200, body: { name: 'operations/ext-6' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'p',
+    });
+    expect(
+      JSON.parse(
+        ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+          .body as string,
+      ).parameters.aspectRatio,
+    ).toBe('9:16');
+
+    captureFetch({ status: 200, body: { name: 'operations/ext-7' } });
+    await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'p',
+      aspectRatio: '16:9',
+    });
+    expect(
+      JSON.parse(
+        ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+          .body as string,
+      ).parameters.aspectRatio,
+    ).toBe('16:9');
+  });
+
+  it('defaults previousVideo.mimeType to "video/mp4" when caller omits it', async () => {
+    captureFetch({ status: 200, body: { name: 'operations/ext-8' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI }, // no mimeType
+      prompt: 'p',
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    );
+    expect(body.instances[0].video.mimeType).toBe('video/mp4');
+  });
+
+  it('translates 400 errors via the same translateVeoErrorStatus path as base submit', async () => {
+    captureFetch({
+      status: 200,
+      body: { error: { code: 400, message: 'resolution must be 720p' } },
+    });
+    const { submitVeoExtend } = await import('../src/veo');
+    const r = await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'p',
+    });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/validation failed/);
+  });
+
+  it('returns the operation name on success (caller polls with pollVeoOperation)', async () => {
+    captureFetch({ status: 200, body: { name: 'operations/the-extend-op' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    const r = await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'p',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.operationName).toBe('operations/the-extend-op');
+  });
+});
+
+describe('Polish-19.4: VEO_EXTEND_* constants', () => {
+  it('VEO_EXTEND_SECONDS_PER_CALL = 7 (per docs, Extend adds 7s not 8s)', async () => {
+    const { VEO_EXTEND_SECONDS_PER_CALL } = await import('../src/veo');
+    expect(VEO_EXTEND_SECONDS_PER_CALL).toBe(7);
+  });
+
+  it('VEO_EXTEND_REQUIRED_RESOLUTION = "720p" (1080p/4k unsupported)', async () => {
+    const { VEO_EXTEND_REQUIRED_RESOLUTION } = await import('../src/veo');
+    expect(VEO_EXTEND_REQUIRED_RESOLUTION).toBe('720p');
+  });
+
+  it('VEO_EXTEND_MAX_CHAIN_CALLS = 20 (Google ceiling; 8 + 7×20 = 148s)', async () => {
+    const { VEO_EXTEND_MAX_CHAIN_CALLS } = await import('../src/veo');
+    expect(VEO_EXTEND_MAX_CHAIN_CALLS).toBe(20);
   });
 });

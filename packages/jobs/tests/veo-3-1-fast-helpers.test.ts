@@ -4,11 +4,12 @@
  * decision helpers the worker delegates to (poll backoff curve,
  * duration resolver) without spinning up Inngest's step harness.
  */
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildVeoDownloadHeaders,
   computeVeoPollIntervalSeconds,
   fallbackToSingleSegment,
+  getVeoChainingMode,
   parseVeoAdSpec,
   resolveAutoVeoDuration,
   resolveVeoTargetDuration,
@@ -411,5 +412,159 @@ describe('Polish-19.3.1: Veo worker switched to resolveAutoVeoDuration (source p
     );
     expect(src).toMatch(/auto-duration resolved/);
     expect(src).toMatch(/autoDuration\.source/);
+  });
+});
+
+describe('Polish-19.4: getVeoChainingMode env reader', () => {
+  const realEnv = process.env;
+  beforeEach(() => {
+    process.env = { ...realEnv };
+    delete process.env.VEO_CHAINING_MODE;
+  });
+  afterEach(() => {
+    process.env = realEnv;
+  });
+
+  it('defaults to "extend" when env var is unset (new Polish-19.4 default)', () => {
+    expect(getVeoChainingMode()).toBe('extend');
+  });
+
+  it('returns "concat" when env is exactly "concat" (operator fallback flip)', () => {
+    process.env.VEO_CHAINING_MODE = 'concat';
+    expect(getVeoChainingMode()).toBe('concat');
+  });
+
+  it('case-insensitive on "concat" (operator typed "CONCAT" in Vercel dashboard)', () => {
+    process.env.VEO_CHAINING_MODE = 'CONCAT';
+    expect(getVeoChainingMode()).toBe('concat');
+    process.env.VEO_CHAINING_MODE = 'Concat';
+    expect(getVeoChainingMode()).toBe('concat');
+  });
+
+  it('treats whitespace + empty as "extend" (defaults-safe)', () => {
+    process.env.VEO_CHAINING_MODE = '   ';
+    expect(getVeoChainingMode()).toBe('extend');
+    process.env.VEO_CHAINING_MODE = '';
+    expect(getVeoChainingMode()).toBe('extend');
+  });
+
+  it('any other value resolves to "extend" (typo-safe)', () => {
+    process.env.VEO_CHAINING_MODE = 'parallel';
+    expect(getVeoChainingMode()).toBe('extend');
+    process.env.VEO_CHAINING_MODE = 'stitch';
+    expect(getVeoChainingMode()).toBe('extend');
+  });
+});
+
+describe('Polish-19.4: worker dispatch + extend chain source shape', () => {
+  // Tripwires for the multi-mode worker. Catches regressions like
+  // "the dispatcher was deleted and concat path runs unconditionally"
+  // before deploy.
+
+  it('runOneVariant dispatches on chain mode (extend vs concat)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/const mode = getVeoChainingMode\(\)/);
+    expect(src).toMatch(/if \(mode === 'extend'\) \{[\s\S]*?runOneVariantExtend\(input\)/);
+    expect(src).toMatch(/return runOneVariantConcat\(input\)/);
+  });
+
+  it('extend runner forces durationSeconds=8 + resolution="720p" on the base segment', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    // The base call MUST be 8s (Google rejects 4s/6s before Extend)
+    // AND 720p (the Extend chain rejects 1080p/4k).
+    expect(src).toMatch(/durationSeconds: VEO_MAX_SECONDS_PER_CALL/);
+    expect(src).toMatch(/resolution: '720p'/);
+  });
+
+  it('extend runner calls submitVeoExtend with the previous video URI for each subsequent segment', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/submitVeoExtend\(/);
+    expect(src).toMatch(/previousVideo: \{ uri: previousVideoUri/);
+    // Tripwire — the chain is SEQUENTIAL (each extend uses the
+    // PREVIOUS operation's URI). A regression that parallelized
+    // would break character continuity. Match the for-loop that
+    // walks segments[1..] and updates chainVideoUri.
+    expect(src).toMatch(/for \(let segIdx = 1; segIdx < adSpec\.segments\.length; segIdx\+\+\)/);
+    expect(src).toMatch(/chainVideoUri = ext\.videoUri/);
+  });
+
+  it('extend runner uploads the FINAL chain video (no concat step)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    // After the chain, the FINAL operation's video URI is uploaded
+    // as the composite. There must be NO call to submitReplicateConcat
+    // inside the extend path (only in the concat path).
+    expect(src).toMatch(/veo-extend-upload-/);
+    expect(src).toMatch(/remoteUrl: chainVideoUri/);
+  });
+
+  it('extend runner writes ONE composite row (no per-segment rows — extend output is cumulative)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/insert-composite-extend-/);
+    expect(src).toMatch(/chaining_mode: 'extend'/);
+    expect(src).toMatch(/resolution: '720p'/);
+    // The extend path must NOT use insert-segment-rows-* (those are
+    // for the concat path where each segment is a discrete chunk).
+    const extendRunnerSrc =
+      src.split('runOneVariantExtend')[1]?.split('runOneVariantConcat')[0] ?? '';
+    expect(extendRunnerSrc).not.toMatch(/insert-segment-rows-/);
+  });
+
+  it('extend runner bills $1.20 base + $1.05 per extend (8s × $0.15 + 7s × $0.15)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    // Bills via estimateVeoCostUsd per call, using the Extend
+    // constants from ai-providers (VEO_MAX_SECONDS_PER_CALL = 8 base,
+    // VEO_EXTEND_SECONDS_PER_CALL = 7 per extend).
+    expect(src).toMatch(/estimateVeoCostUsd\(VEO_MAX_SECONDS_PER_CALL\)/);
+    expect(src).toMatch(/estimateVeoCostUsd\(VEO_EXTEND_SECONDS_PER_CALL\)/);
+  });
+
+  it('output duration on the composite row = 8 + 7 × (N - 1)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    // Pin the exact math written into generationMetadata so a future
+    // "let me just write segments.length * 8" regression fires here.
+    expect(src).toMatch(
+      /VEO_MAX_SECONDS_PER_CALL[\s+]+VEO_EXTEND_SECONDS_PER_CALL \* Math\.max\(0, adSpec\.segments\.length - 1\)/,
+    );
+  });
+
+  it('concat path is preserved verbatim (Polish-19.3 logic kept as fallback)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    // The Polish-19.3 fan-out + stitch path stays alive behind the
+    // chain-mode dispatcher.
+    expect(src).toMatch(/runOneVariantConcat\(/);
+    expect(src).toMatch(/Promise\.all\(\s*adSpec\.segments\.map/);
+    expect(src).toMatch(/runVeoStitch/);
   });
 });

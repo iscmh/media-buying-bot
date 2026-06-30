@@ -204,6 +204,74 @@ export function computeAutoVeoSegmentCount(
   return 8;
 }
 
+/**
+ * Polish-19.4: how many TOTAL Veo calls cover the requested duration
+ * when chain-extending — 1 base call (8s) plus N-1 Extend calls (7s
+ * each). Used by both the cost-estimator (so the form's price matches
+ * what the worker spends) and the worker's chain loop (so the inner
+ * loop knows how many extends to issue).
+ *
+ * Math:
+ *   totalCalls = 1 + ceil((requested - 8) / 7),  floored at 1
+ *
+ * Capped at VEO_EXTEND_MAX_CHAIN_CALLS_FOR_COST = 21 (8 + 7×20 = 148s),
+ * matching the Google-documented Extend chain ceiling (20 extensions
+ * past the base = 21 total calls).
+ */
+const VEO_EXTEND_BASE_SECONDS = 8;
+const VEO_EXTEND_PER_CALL_SECONDS = 7;
+const VEO_EXTEND_MAX_CALLS_FOR_COST = 21; // 1 base + 20 extends
+
+export function computeVeoExtendCalls(requestedSeconds: number): number {
+  if (!Number.isFinite(requestedSeconds) || requestedSeconds <= 0) return 1;
+  if (requestedSeconds <= VEO_EXTEND_BASE_SECONDS) return 1;
+  const extensions = Math.ceil(
+    (requestedSeconds - VEO_EXTEND_BASE_SECONDS) / VEO_EXTEND_PER_CALL_SECONDS,
+  );
+  return Math.max(1, Math.min(VEO_EXTEND_MAX_CALLS_FOR_COST, 1 + extensions));
+}
+
+/**
+ * Polish-19.4: auto-pick the chain-call count from the source video's
+ * duration. Same fallback table as computeAutoVeoSegmentCount but
+ * sized for the Extend math (8 + 7×N) so the form preview matches.
+ *
+ * Source duration range mapping (same UX as the segment-count helper —
+ * we lock the preset durations to 8s/15s/30s/60s to match the
+ * Polish-19.3 preview labels the operator already knows):
+ *   - missing / ≤ 0  → 4 calls (30s output)
+ *   - ≤ 8s          → 1 call  (8s output, no extend)
+ *   - ≤ 15s         → 2 calls (15s output, 1 extend)
+ *   - ≤ 30s         → 4 calls (29s output ≈ 30s preset, 3 extends)
+ *   - > 30s         → 8 calls (50s output, 7 extends)
+ */
+export function computeAutoVeoExtendCalls(
+  sourceDurationSeconds: number | null | undefined,
+): number {
+  if (
+    sourceDurationSeconds == null ||
+    !Number.isFinite(sourceDurationSeconds) ||
+    sourceDurationSeconds <= 0
+  ) {
+    return 4;
+  }
+  if (sourceDurationSeconds <= 8) return 1;
+  if (sourceDurationSeconds <= 15) return 2;
+  if (sourceDurationSeconds <= 30) return 4;
+  return 8;
+}
+
+/**
+ * Polish-19.4: total output duration of an N-call extend chain in
+ * seconds. 1 call → 8s, 2 → 15s, 4 → 29s, 8 → 57s. Exported so the
+ * form preview can show the same number the worker actually emits.
+ */
+export function extendCallsToDurationSeconds(totalCalls: number): number {
+  if (!Number.isFinite(totalCalls) || totalCalls <= 0) return 0;
+  const calls = Math.min(VEO_EXTEND_MAX_CALLS_FOR_COST, Math.max(1, Math.floor(totalCalls)));
+  return VEO_EXTEND_BASE_SECONDS + (calls - 1) * VEO_EXTEND_PER_CALL_SECONDS;
+}
+
 export interface CostBreakdownItem {
   item: string;
   cost: number;
@@ -226,6 +294,15 @@ export type PipelineType =
   | 'kie_kling_avatar_v2_standard'
   | 'veo_3_1_fast_native_audio'
   | 'nano_banana_static_image';
+
+/**
+ * Polish-19.4: Veo chain mode — 'extend' uses Google's native Extend
+ * endpoint (base 8s + 7s × N extends, no concat step); 'concat' uses
+ * Polish-19.3's parallel N×8s submits stitched with the Replicate
+ * ffmpeg-concat helper. Cost math differs (extend chains are cheaper
+ * AND skip the $0.15 stitch). Default is 'extend'.
+ */
+export type VeoChainingMode = 'extend' | 'concat';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -255,6 +332,14 @@ export interface EstimateInput {
    * falls back to estimatedDurationSeconds → 30s default.
    */
   sourceDurationSeconds?: number;
+  /**
+   * Polish-19.4: Veo-specific. Defaults to 'extend' (the new
+   * native-chain pipeline). Server-side callers that have access to
+   * VEO_CHAINING_MODE env can pass the resolved mode here so the
+   * estimated_cost_usd matches what the worker spends. Client-side
+   * callers (the form preview) just default to 'extend'.
+   */
+  veoChainingMode?: VeoChainingMode;
 }
 
 export function estimateGenerationCost(input: EstimateInput): CostEstimate {
@@ -275,6 +360,7 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
       input.pipeline,
       variantCount,
       input.sourceDurationSeconds ?? input.estimatedDurationSeconds,
+      input.veoChainingMode ?? 'extend',
     );
   }
 
@@ -369,7 +455,8 @@ export function labelForProvider(provider: UgcVideoProvider): string {
 function estimateByPipeline(
   pipeline: PipelineType,
   variantCount: number,
-  estimatedDurationSeconds?: number,
+  estimatedDurationSeconds: number | undefined,
+  veoChainingMode: VeoChainingMode = 'extend',
 ): CostEstimate {
   const breakdown: CostBreakdownItem[] = [];
   switch (pipeline) {
@@ -497,35 +584,74 @@ function estimateByPipeline(
       break;
     }
     case 'veo_3_1_fast_native_audio': {
-      // Polish-19.3: multi-segment Veo. segmentCount = ceil(target/8),
-      // each segment is one 8s Veo call at $0.15/sec = $1.20. When
-      // segments > 1, a Replicate ffmpeg-concat step stitches them
-      // (~$0.15 flat). Claude returns the full segments[] in ONE
-      // call so the script cost stays at the single-variant rate.
+      // Polish-19.4: two cost shapes, branched on chaining mode.
       //
-      // 8s  (1 seg): $0.05 +  1×$1.20             = $1.25
-      // 15s (2 seg): $0.05 +  2×$1.20 + $0.15 = $2.60
-      // 30s (4 seg): $0.05 +  4×$1.20 + $0.15 = $5.00
-      // 60s (8 seg): $0.05 +  8×$1.20 + $0.15 = $9.80
-      const requested = estimatedDurationSeconds ?? 8;
-      const segmentCount = computeVeoSegmentCount(requested);
-      const totalSegments = variantCount * segmentCount;
-      const perVariantSecondsCharged = segmentCount * PRICING.veoFastMaxSecondsPerCall;
+      // EXTEND (default): 1 base call (8s, $1.20) + N-1 Extend calls
+      // (7s each, $1.05 each). NO concat step — Extend's output is the
+      // cumulative composite. Claude script $0.05 (one call, full
+      // segments[]).
+      //   8s  (1 call ): $0.05 + $1.20           = $1.25
+      //   15s (2 calls): $0.05 + $1.20 + 1×$1.05 = $2.30
+      //   30s (4 calls): $0.05 + $1.20 + 3×$1.05 = $4.40
+      //   60s (8 calls): $0.05 + $1.20 + 7×$1.05 = $8.60
+      //
+      // CONCAT (Polish-19.3 fallback): N parallel 8s submits, $1.20
+      // each, + $0.15 Replicate ffmpeg-concat. Kept live behind the
+      // VEO_CHAINING_MODE env var so an operator can flip back if
+      // Extend drift surfaces in prod.
+      //   8s  (1 seg):  $0.05 + 1×$1.20             = $1.25
+      //   15s (2 seg):  $0.05 + 2×$1.20 + $0.15 = $2.60
+      //   30s (4 seg):  $0.05 + 4×$1.20 + $0.15 = $5.00
+      //   60s (8 seg):  $0.05 + 8×$1.20 + $0.15 = $9.80
       breakdown.push({
         item: `Claude segments script (${variantCount} × $${PRICING.veoClaudeScriptUsd.toFixed(2)})`,
         cost: round4(variantCount * PRICING.veoClaudeScriptUsd),
       });
-      breakdown.push({
-        item:
-          `Veo 3.1 Fast (${totalSegments} segment${totalSegments === 1 ? '' : 's'} × ` +
-          `${PRICING.veoFastMaxSecondsPerCall}s × $${PRICING.veoFastUsdPerSecond.toFixed(3)}/sec)`,
-        cost: round4(variantCount * perVariantSecondsCharged * PRICING.veoFastUsdPerSecond),
-      });
-      if (segmentCount > 1) {
+      if (veoChainingMode === 'extend') {
+        // Quantize to segment count (same helper the worker uses to
+        // ask Claude for N segments). Each segment becomes one Veo
+        // call: segments[0] is the 8s base, segments[1..] are 7s
+        // extends. So extend-call count = segmentCount - 1.
+        const requested = estimatedDurationSeconds ?? 8;
+        const segmentCount = computeVeoSegmentCount(requested);
+        const extendCallsCount = Math.max(0, segmentCount - 1);
+        const baseCost = round4(
+          variantCount * PRICING.veoFastMaxSecondsPerCall * PRICING.veoFastUsdPerSecond,
+        );
         breakdown.push({
-          item: `Replicate ffmpeg-concat (${variantCount} × $${PRICING.veoConcatStitchUsd.toFixed(2)})`,
-          cost: round4(variantCount * PRICING.veoConcatStitchUsd),
+          item: `Veo 3.1 Fast base segments (${variantCount} × 8s × $${PRICING.veoFastUsdPerSecond.toFixed(3)}/sec)`,
+          cost: baseCost,
         });
+        if (extendCallsCount > 0) {
+          const totalExtendCalls = variantCount * extendCallsCount;
+          const extendCost = round4(
+            totalExtendCalls * VEO_EXTEND_PER_CALL_SECONDS * PRICING.veoFastUsdPerSecond,
+          );
+          breakdown.push({
+            item: `Veo 3.1 Fast extends (${totalExtendCalls} call${
+              totalExtendCalls === 1 ? '' : 's'
+            } × 7s × $${PRICING.veoFastUsdPerSecond.toFixed(3)}/sec)`,
+            cost: extendCost,
+          });
+        }
+      } else {
+        // concat path — Polish-19.3 math, kept live for fallback.
+        const requested = estimatedDurationSeconds ?? 8;
+        const segmentCount = computeVeoSegmentCount(requested);
+        const totalSegments = variantCount * segmentCount;
+        const perVariantSecondsCharged = segmentCount * PRICING.veoFastMaxSecondsPerCall;
+        breakdown.push({
+          item:
+            `Veo 3.1 Fast (${totalSegments} segment${totalSegments === 1 ? '' : 's'} × ` +
+            `${PRICING.veoFastMaxSecondsPerCall}s × $${PRICING.veoFastUsdPerSecond.toFixed(3)}/sec)`,
+          cost: round4(variantCount * perVariantSecondsCharged * PRICING.veoFastUsdPerSecond),
+        });
+        if (segmentCount > 1) {
+          breakdown.push({
+            item: `Replicate ffmpeg-concat (${variantCount} × $${PRICING.veoConcatStitchUsd.toFixed(2)})`,
+            cost: round4(variantCount * PRICING.veoConcatStitchUsd),
+          });
+        }
       }
       break;
     }

@@ -180,6 +180,7 @@ export {
 } from './kie-omni';
 export {
   submitVeoVideo,
+  submitVeoExtend,
   pollVeoOperation,
   extractVeoOutputUri,
   translateVeoErrorStatus,
@@ -189,10 +190,15 @@ export {
   VEO_DEFAULT_MODEL_ID,
   VEO_MAX_SECONDS_PER_CALL,
   VEO_MIN_SECONDS_PER_CALL,
+  VEO_EXTEND_SECONDS_PER_CALL,
+  VEO_EXTEND_REQUIRED_RESOLUTION,
+  VEO_EXTEND_MAX_CHAIN_CALLS,
   type VeoSubmitInput,
   type VeoSubmitResult,
   type VeoPollInput,
   type VeoPollResult,
+  type VeoExtendSubmitInput,
+  type VeoExtendVideoRef,
 } from './veo';
 export {
   submitKieKlingAvatar,

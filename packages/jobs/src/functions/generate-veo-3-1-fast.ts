@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import {
+  VEO_EXTEND_SECONDS_PER_CALL,
   VEO_MAX_SECONDS_PER_CALL,
   callClaude,
   checkReplicateConcat,
@@ -8,6 +9,7 @@ import {
   isVideoConcatEnabled,
   pollVeoOperation,
   submitReplicateConcat,
+  submitVeoExtend,
   submitVeoVideo,
 } from '@mbb/ai-providers';
 import { computeAutoVeoSegmentCount, computeVeoSegmentCount } from '@mbb/shared';
@@ -53,6 +55,24 @@ const POLL_INITIAL_INTERVAL_SECONDS = 8;
 const POLL_MAX_INTERVAL_SECONDS = 25;
 const POLL_BACKOFF_GROWTH = 1.15;
 const POLL_MAX_ATTEMPTS = 60; // ~16-20min ceiling with backoff
+
+/**
+ * Polish-19.4: Veo chain mode. 'extend' (the new default) uses
+ * Google's native Extend endpoint — base 8s + N-1 × 7s extends, with
+ * the final operation's video output BEING the cumulative composite
+ * (no ffmpeg-concat step needed). 'concat' is the Polish-19.3
+ * parallel-N×8s + Replicate-stitch path, kept live behind this env
+ * var so an operator can flip back if Extend drift surfaces.
+ *
+ * Reads VEO_CHAINING_MODE env. Anything other than the literal
+ * string 'concat' resolves to 'extend' (defaults-safe).
+ */
+export type VeoChainingMode = 'extend' | 'concat';
+
+export function getVeoChainingMode(): VeoChainingMode {
+  const raw = process.env.VEO_CHAINING_MODE?.trim().toLowerCase();
+  return raw === 'concat' ? 'concat' : 'extend';
+}
 
 /**
  * Polish-19.2: exponential-backoff poll cadence for Veo's long-
@@ -422,6 +442,22 @@ interface RunOneVariantInput {
 }
 
 async function runOneVariant(input: RunOneVariantInput): Promise<VeoVariantResult> {
+  // Polish-19.4: dispatch on chain mode. 'extend' (new default) chains
+  // via Veo's native Extend endpoint; 'concat' is the Polish-19.3
+  // parallel + Replicate-ffmpeg-concat path, retained as a manual
+  // fallback. Mode is logged once per variant so the operator can
+  // SEE which path fired in Inngest.
+  const mode = getVeoChainingMode();
+  console.log(
+    `[veo-3-1-fast] variant ${input.variantIndex}: chaining mode = ${mode} (env VEO_CHAINING_MODE)`,
+  );
+  if (mode === 'extend') {
+    return runOneVariantExtend(input);
+  }
+  return runOneVariantConcat(input);
+}
+
+async function runOneVariantConcat(input: RunOneVariantInput): Promise<VeoVariantResult> {
   const { step, jobId, userId, variantIndex, durationSeconds, jobMetadata } = input;
   let cost = 0;
 
@@ -669,6 +705,436 @@ async function runOneVariant(input: RunOneVariantInput): Promise<VeoVariantResul
   });
 
   return { index: variantIndex, ok: true, costUsd: cost, fileUrl: compositeUrl };
+}
+
+// =========================================================================
+// Polish-19.4: extend-chain variant runner
+// =========================================================================
+//
+// Sequential chain of N Veo calls — segment 0 via submitVeoVideo
+// (forced to 8s + 720p so the chain's 720p constraint matches), then
+// segments 1..N-1 via submitVeoExtend, each feeding the previous
+// operation's Files API videoUri into the next call's `previousVideo`.
+// The FINAL operation's output IS the cumulative composite — no
+// concat step needed. Persists ONE composite row per variant (no
+// per-segment rows since each extend's output is the cumulative
+// video, not a 7s chunk).
+
+async function runOneVariantExtend(input: RunOneVariantInput): Promise<VeoVariantResult> {
+  const { step, jobId, userId, variantIndex, durationSeconds, jobMetadata } = input;
+  let cost = 0;
+
+  // Same Claude ad-spec call as the concat path. Segment count math
+  // here mirrors the cost-estimator's computeVeoExtendCalls so the
+  // worker spends what the form quoted.
+  const segmentCount = computeVeoSegmentCount(durationSeconds); // structural cap reuse — extend chain bills per call below
+  const adSpecResult = await step.run(`claude-ad-spec-extend-${variantIndex}`, async () =>
+    runClaudeAdSpec({
+      userId,
+      jobId,
+      variantIndex,
+      jobMetadata,
+      segmentCount,
+      durationSeconds,
+    }),
+  );
+  cost += adSpecResult.costUsd;
+  if (!adSpecResult.ok) {
+    return { index: variantIndex, ok: false, costUsd: cost, error: adSpecResult.error };
+  }
+  const adSpec = adSpecResult.adSpec;
+
+  console.log(
+    `[veo-3-1-fast] variant ${variantIndex}: extend chain — base (8s, 720p) + ${Math.max(
+      0,
+      adSpec.segments.length - 1,
+    )} extends (7s each, 720p). Final segment's output is the composite.`,
+  );
+
+  // ---- Base segment (segments[0]) — submitVeoVideo with 8s + 720p ----
+  const base = await runVeoBaseForChain({
+    step,
+    jobId,
+    userId,
+    variantIndex,
+    prompt: adSpec.segments[0]!.prompt,
+  });
+  cost += base.costUsd;
+  if (!base.ok) {
+    return {
+      index: variantIndex,
+      ok: false,
+      costUsd: cost,
+      error: `Extend chain base segment failed: ${base.error}`,
+    };
+  }
+
+  // ---- Extend each subsequent segment, chaining the previous URI ----
+  let chainVideoUri = base.videoUri;
+  let chainOperationName = base.veoOperationName;
+  const operationNames: string[] = [base.veoOperationName];
+  for (let segIdx = 1; segIdx < adSpec.segments.length; segIdx++) {
+    const seg = adSpec.segments[segIdx]!;
+    const ext = await runVeoExtendSegment({
+      step,
+      jobId,
+      userId,
+      variantIndex,
+      segmentIndex: segIdx,
+      previousVideoUri: chainVideoUri,
+      prompt: seg.prompt,
+    });
+    cost += ext.costUsd;
+    if (!ext.ok) {
+      return {
+        index: variantIndex,
+        ok: false,
+        costUsd: cost,
+        error: `Extend segment ${segIdx} failed: ${ext.error}`,
+      };
+    }
+    chainVideoUri = ext.videoUri;
+    chainOperationName = ext.veoOperationName;
+    operationNames.push(ext.veoOperationName);
+  }
+
+  // ---- Upload the FINAL chain video as the composite ----
+  // The final operation's output is already the cumulative composite
+  // (input video + 7s extension = one continuous mp4 per Google's
+  // Extend contract). No concat step.
+  const uploadResult = await step.run(`veo-extend-upload-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['gemini']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError)
+        throw new Error(
+          `Cannot download Veo extend composite for variant ${variantIndex}: ${err.message}. ` +
+            `Gemini key required for the private Files API URI.`,
+        );
+      throw err;
+    }
+    return uploadGeneratedVideoFromUrl({
+      userId,
+      jobId,
+      remoteUrl: chainVideoUri,
+      filename: `veo-${variantIndex}-composite-extend`,
+      fetchHeaders: buildVeoDownloadHeaders(chainVideoUri, keys.gemini!),
+    });
+  });
+
+  await step.run(`insert-composite-extend-${variantIndex}`, async () => {
+    const db = getDb();
+    // Output duration = 8 (base) + 7 × (N-1) (extends).
+    const outputDurationSeconds =
+      VEO_MAX_SECONDS_PER_CALL +
+      VEO_EXTEND_SECONDS_PER_CALL * Math.max(0, adSpec.segments.length - 1);
+    await db.insert(schema.generatedCreatives).values({
+      userId,
+      generationJobId: jobId,
+      fileUrl: uploadResult.publicUrl,
+      aspectRatio: '9:16',
+      status: 'ready_for_review',
+      format: 'veo_3_1_fast_native_audio',
+      isClipPart: false,
+      generationMetadata: {
+        variant_index: variantIndex,
+        chaining_mode: 'extend',
+        duration_seconds: outputDurationSeconds,
+        segment_count_requested: segmentCount,
+        segment_count_generated: adSpec.segments.length,
+        veo_operation_names: operationNames,
+        final_video_uri: chainVideoUri,
+        final_operation_name: chainOperationName,
+        segments: adSpec.segments,
+        resolution: '720p',
+      },
+    });
+  });
+
+  return { index: variantIndex, ok: true, costUsd: cost, fileUrl: uploadResult.publicUrl };
+}
+
+/**
+ * Polish-19.4: factored Claude ad-spec call. Both concat and extend
+ * modes use the SAME prompt + parsing — only the post-Claude
+ * generation path differs. Factored to keep the two modes pinned to
+ * the same script schema (a drift would land mode-specific bugs).
+ */
+async function runClaudeAdSpec(input: {
+  userId: string;
+  jobId: string;
+  variantIndex: number;
+  jobMetadata: Record<string, unknown> | null;
+  segmentCount: number;
+  durationSeconds: number;
+}): Promise<
+  { ok: true; adSpec: VeoAdSpec; costUsd: number } | { ok: false; error: string; costUsd: number }
+> {
+  const { userId, jobId, variantIndex, jobMetadata, segmentCount, durationSeconds } = input;
+  let keys;
+  try {
+    keys = await loadDecryptedKeys(userId, ['claude']);
+  } catch (err) {
+    if (err instanceof MissingProviderKeyError) {
+      return { ok: false, error: err.message, costUsd: 0 };
+    }
+    throw err;
+  }
+  const systemPrompt =
+    `You write Veo 3.1 prompts for short UGC video ads. Output ONLY valid JSON ` +
+    `matching the schema below — no markdown fences, no preamble, no trailing prose.\n\n` +
+    `REQUIRED SCHEMA:\n` +
+    `{\n` +
+    `  "segments": [\n` +
+    `    { "index": 0, "prompt": "Self-contained Veo prompt for the first 8s..." },\n` +
+    `    { "index": 1, "prompt": "Continuation Veo prompt for the next 7s..." }\n` +
+    `    // ... one entry per segment; segments[0] is 8s, segments[1..] are 7s each\n` +
+    `  ]\n` +
+    `}\n\n` +
+    `STRUCTURE PER segment.prompt:\n` +
+    `1. Visual scene (who, where, lighting, framing — UGC iPhone selfie style, NOT studio, NOT cinematic).\n` +
+    `2. Spoken dialogue in quotes.\n` +
+    `3. Ambient sound cues.\n\n` +
+    `HARD CONSTRAINTS (apply to every segment):\n` +
+    `- segments[0] covers exactly 8s; segments[1..] cover 7s each. Dialogue must FIT at natural pace (~150wpm = ~17-20 words).\n` +
+    `- Single character, single scene, single camera angle — consistent across all segments.\n` +
+    `- Photoreal amateur smartphone selfie aesthetic. NOT a 3D character, NOT animated, NOT CGI.\n` +
+    `- Character is a fictional everyperson with no resemblance to any public figure.\n` +
+    `- No on-screen text, no captions, no graphics, no watermarks.\n\n` +
+    `MULTI-SEGMENT RULES (only when segments.length > 1):\n` +
+    `- segments[0] hooks the viewer in the first second.\n` +
+    `- Middle segments deepen the story / build the pitch.\n` +
+    `- The FINAL segment ends with a clear call-to-action.\n` +
+    `- Maintain character + setting continuity across segments (same person, same outfit, same room).\n\n` +
+    `THIS REQUEST: return EXACTLY ${segmentCount} segment${segmentCount === 1 ? '' : 's'} ` +
+    `for a ${durationSeconds}s ad.`;
+  const userMessage = JSON.stringify({
+    source_analysis: jobMetadata ?? {},
+    target_duration_seconds: durationSeconds,
+    target_segment_count: segmentCount,
+    variant_index: variantIndex,
+  });
+  const claude = await callClaude({
+    userId,
+    apiKey: keys.claude!,
+    systemPrompt,
+    userMessage,
+    maxTokens: 8192,
+    generationJobId: jobId,
+  });
+  if (!claude.ok) {
+    return {
+      ok: false,
+      error: claude.errorMessage ?? 'Claude ad-spec call failed',
+      costUsd: claude.costUsd,
+    };
+  }
+  const rawText = (claude.text ?? '').trim();
+  if (!rawText) {
+    return { ok: false, error: 'Claude returned an empty ad spec', costUsd: claude.costUsd };
+  }
+  const parsed = parseVeoAdSpec(rawText);
+  if (parsed) {
+    return { ok: true, adSpec: parsed, costUsd: claude.costUsd };
+  }
+  console.log(
+    `[veo-3-1-fast] variant ${variantIndex}: segments[] JSON failed to parse; ` +
+      `falling back to single-segment wrap. Claude returned: ${rawText.slice(0, 500)}`,
+  );
+  return { ok: true, adSpec: fallbackToSingleSegment(rawText), costUsd: claude.costUsd };
+}
+
+/**
+ * Polish-19.4: base segment for the extend chain. Forces 8s
+ * duration + 720p resolution so the chain's 720p-only constraint
+ * matches the source. Same submit → poll → return-videoUri pattern as
+ * runOneSegment but does NOT upload (the cumulative video is uploaded
+ * once at the end of the chain).
+ */
+async function runVeoBaseForChain(input: {
+  step: Parameters<Parameters<typeof inngest.createFunction>[2]>[0]['step'];
+  jobId: string;
+  userId: string;
+  variantIndex: number;
+  prompt: string;
+}): Promise<
+  | { ok: true; videoUri: string; veoOperationName: string; costUsd: number }
+  | { ok: false; error: string; costUsd: number }
+> {
+  const { step, jobId, userId, variantIndex, prompt } = input;
+  const segLabel = `${variantIndex}-base`;
+
+  const submitResult = await step.run(`veo-submit-${segLabel}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['gemini']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+    const submit = await submitVeoVideo({
+      userId,
+      apiKey: keys.gemini!,
+      prompt,
+      durationSeconds: VEO_MAX_SECONDS_PER_CALL, // base call is exactly 8s
+      aspectRatio: '9:16',
+      resolution: '720p', // required for the Extend chain
+      generationJobId: jobId,
+    });
+    if (!submit.ok || !submit.operationName) {
+      return {
+        ok: false as const,
+        error: submit.errorMessage ?? 'Veo base predictLongRunning failed',
+      };
+    }
+    return { ok: true as const, operationName: submit.operationName };
+  });
+  if (!submitResult.ok) {
+    return { ok: false, error: submitResult.error, costUsd: 0 };
+  }
+
+  const poll = await pollVeoUntilDone({
+    step,
+    jobId,
+    userId,
+    operationName: submitResult.operationName,
+    label: segLabel,
+  });
+  const cost = estimateVeoCostUsd(VEO_MAX_SECONDS_PER_CALL);
+  if (!poll.ok) {
+    return { ok: false, costUsd: cost, error: poll.error };
+  }
+  return {
+    ok: true,
+    videoUri: poll.videoUri,
+    veoOperationName: submitResult.operationName,
+    costUsd: cost,
+  };
+}
+
+/**
+ * Polish-19.4: one Extend segment in the chain. Same submit → poll
+ * pattern but uses submitVeoExtend with the previous segment's video
+ * URI as input. Each Extend bills 7s of generation.
+ */
+async function runVeoExtendSegment(input: {
+  step: Parameters<Parameters<typeof inngest.createFunction>[2]>[0]['step'];
+  jobId: string;
+  userId: string;
+  variantIndex: number;
+  segmentIndex: number;
+  previousVideoUri: string;
+  prompt: string;
+}): Promise<
+  | { ok: true; videoUri: string; veoOperationName: string; costUsd: number }
+  | { ok: false; error: string; costUsd: number }
+> {
+  const { step, jobId, userId, variantIndex, segmentIndex, previousVideoUri, prompt } = input;
+  const segLabel = `${variantIndex}-ext${segmentIndex}`;
+
+  const submitResult = await step.run(`veo-extend-submit-${segLabel}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['gemini']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+    const submit = await submitVeoExtend({
+      userId,
+      apiKey: keys.gemini!,
+      previousVideo: { uri: previousVideoUri, mimeType: 'video/mp4' },
+      prompt,
+      aspectRatio: '9:16',
+      generationJobId: jobId,
+    });
+    if (!submit.ok || !submit.operationName) {
+      return {
+        ok: false as const,
+        error: submit.errorMessage ?? 'Veo Extend predictLongRunning failed',
+      };
+    }
+    return { ok: true as const, operationName: submit.operationName };
+  });
+  if (!submitResult.ok) {
+    return { ok: false, error: submitResult.error, costUsd: 0 };
+  }
+
+  const poll = await pollVeoUntilDone({
+    step,
+    jobId,
+    userId,
+    operationName: submitResult.operationName,
+    label: segLabel,
+  });
+  const cost = estimateVeoCostUsd(VEO_EXTEND_SECONDS_PER_CALL);
+  if (!poll.ok) {
+    return { ok: false, costUsd: cost, error: poll.error };
+  }
+  return {
+    ok: true,
+    videoUri: poll.videoUri,
+    veoOperationName: submitResult.operationName,
+    costUsd: cost,
+  };
+}
+
+/**
+ * Polish-19.4: shared poll loop for both base + extend submits in
+ * the chain. Same warmup + exponential-backoff curve as Polish-19.3
+ * runOneSegment's poll loop, factored so the two callers stay in
+ * lockstep. Step name prefix differs per caller via `label`.
+ */
+async function pollVeoUntilDone(input: {
+  step: Parameters<Parameters<typeof inngest.createFunction>[2]>[0]['step'];
+  jobId: string;
+  userId: string;
+  operationName: string;
+  label: string;
+}): Promise<{ ok: true; videoUri: string } | { ok: false; error: string }> {
+  const { step, jobId, userId, operationName, label } = input;
+  await step.sleep(`veo-warmup-${label}`, `${POLL_WARMUP_SECONDS}s`);
+  let pollError: string | undefined;
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    const poll = await step.run(`veo-poll-${label}-${attempt}`, async () => {
+      let keys;
+      try {
+        keys = await loadDecryptedKeys(userId, ['gemini']);
+      } catch (err) {
+        if (err instanceof MissingProviderKeyError)
+          return { ok: false as const, error: err.message };
+        throw err;
+      }
+      return pollVeoOperation({
+        userId,
+        apiKey: keys.gemini!,
+        operationName,
+        generationJobId: jobId,
+      });
+    });
+    if (!('done' in poll) && 'error' in poll) {
+      pollError = poll.error;
+      break;
+    }
+    if (!poll.ok) {
+      pollError = poll.errorMessage ?? 'Veo poll failed';
+      break;
+    }
+    if (poll.done) {
+      if (poll.videoUri) return { ok: true, videoUri: poll.videoUri };
+      pollError = poll.failMessage ?? 'Veo done without a video URI';
+      break;
+    }
+    await step.sleep(`veo-wait-${label}-${attempt}`, `${computeVeoPollIntervalSeconds(attempt)}s`);
+  }
+  return {
+    ok: false,
+    error:
+      `Veo operation ${operationName} (${label}) did not reach terminal state within ` +
+      `${POLL_MAX_ATTEMPTS} polls.` +
+      (pollError ? ` Last error: ${pollError}` : ''),
+  };
 }
 
 // =========================================================================

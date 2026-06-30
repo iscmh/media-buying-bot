@@ -85,6 +85,18 @@ export function estimateVeoCostUsd(durationSeconds: number): number {
 export const VEO_MAX_SECONDS_PER_CALL = 8;
 export const VEO_MIN_SECONDS_PER_CALL = 2;
 
+/**
+ * Polish-19.4: Veo Extend constants per Google docs:
+ *   - Base call when chain-extending MUST be exactly 8 seconds.
+ *   - Each Extend adds 7s of new content (NOT 8s — the segment math
+ *     uses 8 + (N-1) × 7).
+ *   - Resolution MUST be 720p in the Extend chain (1080p/4k unsupported).
+ *   - Max 20 extensions per chain (148s total).
+ */
+export const VEO_EXTEND_SECONDS_PER_CALL = 7;
+export const VEO_EXTEND_REQUIRED_RESOLUTION = '720p';
+export const VEO_EXTEND_MAX_CHAIN_CALLS = 20;
+
 export function clampVeoDurationSeconds(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) return VEO_MAX_SECONDS_PER_CALL;
   return Math.min(
@@ -104,6 +116,14 @@ export interface VeoSubmitInput {
   /** Optional reference image (base64) for image-to-video mode. Unused in 19.2. */
   referenceImageBase64?: string;
   referenceImageMimeType?: string;
+  /**
+   * Polish-19.4: optional resolution override. Default behavior (omit
+   * field) lets Google pick — the Developer API has been seen returning
+   * 1080p without it being requested. When chain-extending (the worker
+   * passes '720p'), the base segment MUST be 720p so the Extend chain's
+   * 720p-only constraint matches the source resolution.
+   */
+  resolution?: '720p' | '1080p';
   generationJobId?: string;
   generatedCreativeId?: string;
 }
@@ -147,22 +167,27 @@ export async function submitVeoVideo(input: VeoSubmitInput): Promise<VeoSubmitRe
     durationSeconds: duration,
     sampleCount: 1,
   };
-  // Polish-19.2.3: personGeneration removed from defaults. The
-  // hardcoded 'allow_adult' from Polish-19.2 was a Vertex AI default
-  // that the Gemini Developer API explicitly rejects ("allow_adult
-  // for personGeneration is currently not supported"). Google's
-  // ai.google.dev/gemini-api/docs/video reference curls send NO
-  // parameters.personGeneration at all on the Developer API — the
-  // server applies its own default policy.
-  //
-  // Env override hatch: if Google adds Developer-API support for
-  // explicit values ('allow_all' / 'dont_allow' / future variants),
-  // set VEO_PERSON_GENERATION to flip without a code patch. Empty /
-  // unset → omit the field entirely (the working default).
-  const personGenerationOverride = process.env.VEO_PERSON_GENERATION?.trim();
-  if (personGenerationOverride) {
-    parameters.personGeneration = personGenerationOverride;
+  // Polish-19.4: explicit resolution required when chain-extending
+  // (Extend only supports 720p). Other callers omit and let Google
+  // pick the default for the model tier.
+  if (input.resolution) {
+    parameters.resolution = input.resolution;
   }
+  // Polish-19.4: personGeneration RE-ADDED with default 'allow_all'.
+  // Polish-19.2.3 dropped it entirely after a live rejection on
+  // 'allow_adult' for text-to-video — turns out the rejection was
+  // specific to the value, not the field. Per Google's docs the
+  // Gemini Developer API requires:
+  //   - 'allow_all'   for text-to-video AND Extend chains
+  //   - 'allow_adult' for image-to-video / reference-image inputs
+  // The submit path here is text-to-video (when no reference image)
+  // OR image-to-video (when input.referenceImageBase64 is set).
+  // Auto-pick based on which mode the caller invoked; the env var
+  // still overrides everything if a future preview rev changes the
+  // accepted vocab.
+  const personGenerationDefault = instanceBase.image ? 'allow_adult' : 'allow_all';
+  const personGenerationOverride = process.env.VEO_PERSON_GENERATION?.trim();
+  parameters.personGeneration = personGenerationOverride || personGenerationDefault;
   // Veo 3.1 emits audio natively. The explicit toggle is a defensive
   // hatch — if a future preview rev requires an explicit flag, the
   // env override flips it without a code change.
@@ -188,6 +213,7 @@ export async function submitVeoVideo(input: VeoSubmitInput): Promise<VeoSubmitRe
       prompt_chars: input.prompt.length,
       duration_seconds: duration,
       aspect_ratio: parameters.aspectRatio,
+      resolution: parameters.resolution ?? '(default)',
       reference_image_present: !!instanceBase.image,
       audio_default: audioEnabledByDefault,
     },
@@ -358,6 +384,181 @@ export function extractVeoOutputUri(raw: unknown): string | undefined {
   const gemB = r.response?.predictResponse?.videos?.[0]?.uri;
   if (typeof gemB === 'string' && gemB.length > 0) return gemB;
   return undefined;
+}
+
+// =========================================================================
+// Polish-19.4: Veo Extend — chain a prior generation forward 7s at a time
+// =========================================================================
+//
+// CONTRACT (verified against Google's docs, June 2026):
+//   - Endpoint: same predictLongRunning on veo-3.1-fast-generate-preview.
+//   - The instance carries a `video` field pointing at the prior
+//     generation's Files API URI:
+//         instances[0].video = { uri, mimeType: 'video/mp4' }
+//     The prompt describes ONLY the new 7s of content.
+//   - durationSeconds in parameters MUST be 7 (NOT 8 — that's the base
+//     call's max). The Extend adds exactly 7 seconds of fresh content
+//     onto the input video.
+//   - resolution MUST be '720p' (1080p/4k unsupported on Extend).
+//   - personGeneration: 'allow_all' (same as text-to-video).
+//   - Output: the operation completes with ONE continuous mp4 = the
+//     input video + the 7s extension. The worker uses that output URI
+//     as the input for the NEXT Extend call to chain.
+//
+// CONSEQUENCE FOR THE WORKER:
+//   - After N extends, the final operation's output IS the cumulative
+//     composite — no ffmpeg-concat step needed.
+//   - Files API URIs have a 2-day TTL but the TTL RESETS when the URI
+//     is referenced for Extend, so a chain stays valid as long as
+//     extends happen within 2 days of each other.
+
+/** Polish-19.4: shape of the video reference passed back into Extend. */
+export interface VeoExtendVideoRef {
+  /** Files API URI from a previous Veo generation. */
+  uri: string;
+  /** Always 'video/mp4' for Veo outputs; pinned for the request body. */
+  mimeType?: string;
+}
+
+export interface VeoExtendSubmitInput {
+  userId: string;
+  apiKey: string;
+  /** Reference to the previous generation's output video. */
+  previousVideo: VeoExtendVideoRef;
+  /** Self-contained prompt describing the NEW 7s of content. */
+  prompt: string;
+  /** Defaults to '9:16'. Must match the base call's aspect ratio. */
+  aspectRatio?: '16:9' | '9:16' | '1:1';
+  generationJobId?: string;
+  generatedCreativeId?: string;
+}
+
+/**
+ * Polish-19.4: submit a Veo Extend call. Returns the long-running
+ * operation name; the caller polls with `pollVeoOperation`. Same
+ * downstream poll/extract path as the base submit.
+ *
+ * The first live extend call console.logs the FULL request body
+ * shape so the next maintainer can see whether the `video` field
+ * actually belongs in `instances[0]` (assumed) or `parameters`
+ * (alternate Google docs phrasing — both have been seen across
+ * Veo / Vertex AI revs). If a 400 lands, the log tells us which
+ * shape to flip to without a redeploy.
+ */
+export async function submitVeoExtend(input: VeoExtendSubmitInput): Promise<VeoSubmitResult> {
+  const modelId = getVeoModelId();
+  const url = `${GEMINI_BASE}/models/${encodeURIComponent(modelId)}:predictLongRunning`;
+
+  // Per docs: Extend always adds exactly VEO_EXTEND_SECONDS_PER_CALL
+  // (7s) of new content. Pass it explicitly so a future Google rev
+  // that requires the field present sees a valid value rather than
+  // silently doing 4s/8s.
+  const extension = VEO_EXTEND_SECONDS_PER_CALL;
+
+  // Polish-19.4: personGeneration MUST be 'allow_all' for Extend per
+  // Google docs (same as text-to-video). Env override hatch retained
+  // so an operator can flip it without redeploying if Google adds
+  // more values to the vocab.
+  const personGenerationOverride = process.env.VEO_PERSON_GENERATION?.trim();
+  const personGeneration = personGenerationOverride || 'allow_all';
+
+  const videoRef = {
+    uri: input.previousVideo.uri,
+    mimeType: input.previousVideo.mimeType ?? 'video/mp4',
+  };
+
+  const instance: Record<string, unknown> = {
+    prompt: input.prompt,
+    video: videoRef,
+  };
+  const parameters: Record<string, unknown> = {
+    aspectRatio: input.aspectRatio ?? '9:16',
+    durationSeconds: extension,
+    sampleCount: 1,
+    resolution: VEO_EXTEND_REQUIRED_RESOLUTION,
+    personGeneration,
+  };
+
+  const body = { instances: [instance], parameters };
+
+  // First-call diagnostic: log the FULL request body (not just the
+  // summary) so the first live extend either confirms the
+  // instances[0].video placement OR shows us the exact rejection
+  // message + body next to it. Once we've seen it work in prod,
+  // this can be downgraded.
+  console.log(
+    `[veo-extend] submit attempt: model=${modelId} ` +
+      `prev_uri=${videoRef.uri} prev_mime=${videoRef.mimeType} ` +
+      `prompt_chars=${input.prompt.length} ` +
+      `parameters=${JSON.stringify(parameters)}`,
+  );
+
+  const result = await callProvider<VeoSubmitResponseShape>({
+    userId: input.userId,
+    provider: 'gemini',
+    url,
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': input.apiKey,
+      'content-type': 'application/json',
+    },
+    body,
+    timeoutMs: SUBMIT_TIMEOUT_MS,
+    requestBodyForLog: {
+      model: modelId,
+      mode: 'extend',
+      prompt_chars: input.prompt.length,
+      duration_seconds: extension,
+      aspect_ratio: parameters.aspectRatio,
+      resolution: parameters.resolution,
+      person_generation: personGeneration,
+      previous_video_uri: videoRef.uri,
+    },
+    generationJobId: input.generationJobId,
+    generatedCreativeId: input.generatedCreativeId,
+  });
+
+  if (!result.ok) {
+    console.log(
+      `[veo-extend] submit transport failure: status=${result.status} model=${modelId} ` +
+        `prev_uri=${videoRef.uri} ` +
+        `parameters=${JSON.stringify(parameters)} ` +
+        `err=${result.errorMessage ?? 'unknown'}`,
+    );
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateVeoErrorStatus(result.status, result.errorMessage),
+    };
+  }
+  if (result.data.error) {
+    console.log(
+      `[veo-extend] submit soft failure: model=${modelId} ` +
+        `prev_uri=${videoRef.uri} ` +
+        `parameters=${JSON.stringify(parameters)} ` +
+        `responseBody=${JSON.stringify(result.data).slice(0, 1500)}`,
+    );
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateVeoErrorStatus(result.data.error.code, result.data.error.message),
+    };
+  }
+  if (!result.data.name) {
+    console.log(
+      `[veo-extend] submit succeeded but missing operation name; body=${JSON.stringify(result.data).slice(0, 1500)}`,
+    );
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: 'Veo Extend predictLongRunning response missing operation name',
+    };
+  }
+  console.log(
+    `[veo-extend] submit ok: operation=${result.data.name} model=${modelId} ` +
+      `prev_uri=${videoRef.uri}`,
+  );
+  return { ok: true, operationName: result.data.name, latencyMs: result.latencyMs };
 }
 
 /**

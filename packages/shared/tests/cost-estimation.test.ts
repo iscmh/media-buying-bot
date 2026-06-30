@@ -345,17 +345,16 @@ describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () =>
   });
 });
 
-describe('Polish-19.3: veo_3_1_fast_native_audio multi-segment cost', () => {
-  // Per-segment cost = 8s × $0.15 = $1.20.
-  // Claude $0.05 (one call returns the full segments[] array).
-  // Concat stitch $0.15 when segments > 1.
+describe('Polish-19.4: veo_3_1_fast_native_audio extend-mode cost (default)', () => {
+  // Default chaining mode is 'extend' as of Polish-19.4. Math:
+  //   base 8s ($1.20) + (N-1) × 7s extends ($1.05 each) + $0.05 Claude.
   //
-  //   8s (1 seg): $0.05 + 1×$1.20             = $1.25
-  //  15s (2 seg): $0.05 + 2×$1.20 + $0.15 = $2.60
-  //  30s (4 seg): $0.05 + 4×$1.20 + $0.15 = $5.00
-  //  60s (8 seg): $0.05 + 8×$1.20 + $0.15 = $9.80
+  //   8s  (1 call ): $0.05 + $1.20             = $1.25
+  //   15s (2 calls): $0.05 + $1.20 + 1×$1.05   = $2.30
+  //   30s (4 calls): $0.05 + $1.20 + 3×$1.05   = $4.40
+  //   60s (8 calls): $0.05 + $1.20 + 7×$1.05   = $8.60
 
-  it('8s default (1 segment, no stitch) → $1.25 per variant', () => {
+  it('8s default (1 call, no extends) → $1.25 per variant', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
@@ -363,53 +362,55 @@ describe('Polish-19.3: veo_3_1_fast_native_audio multi-segment cost', () => {
     });
     expect(r.estimateUsd).toBeCloseTo(1.25, 4);
     expect(r.breakdown.some((b) => /Claude segments script/.test(b.item))).toBe(true);
-    expect(r.breakdown.some((b) => /1 segment × 8s/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /base segments/.test(b.item))).toBe(true);
+    // No extend line when N=1.
+    expect(r.breakdown.some((b) => /extends/.test(b.item))).toBe(false);
+    // No concat line in extend mode, ever.
     expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(false);
   });
 
-  it('15s preset (2 segments + stitch) → $2.60 per variant', () => {
+  it('15s preset (2 calls: 1 base + 1 extend) → $2.30 per variant', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'veo_3_1_fast_native_audio',
       estimatedDurationSeconds: 15,
     });
-    expect(r.estimateUsd).toBeCloseTo(2.6, 4);
-    expect(r.breakdown.some((b) => /2 segments × 8s/.test(b.item))).toBe(true);
-    expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(true);
+    expect(r.estimateUsd).toBeCloseTo(2.3, 4);
+    expect(r.breakdown.some((b) => /1 call × 7s/.test(b.item))).toBe(true);
   });
 
-  it('30s preset (4 segments + stitch) → $5.00 per variant', () => {
+  it('30s preset (4 calls: 1 base + 3 extends) → $4.40 per variant', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'veo_3_1_fast_native_audio',
       estimatedDurationSeconds: 30,
     });
-    expect(r.estimateUsd).toBeCloseTo(5.0, 4);
-    expect(r.breakdown.some((b) => /4 segments × 8s/.test(b.item))).toBe(true);
+    expect(r.estimateUsd).toBeCloseTo(4.4, 4);
+    expect(r.breakdown.some((b) => /3 calls × 7s/.test(b.item))).toBe(true);
   });
 
-  it('60s preset (8 segments + stitch) → $9.80 per variant', () => {
+  it('60s preset (8 calls: 1 base + 7 extends) → $8.60 per variant', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'veo_3_1_fast_native_audio',
       estimatedDurationSeconds: 60,
     });
-    expect(r.estimateUsd).toBeCloseTo(9.8, 4);
-    expect(r.breakdown.some((b) => /8 segments × 8s/.test(b.item))).toBe(true);
+    expect(r.estimateUsd).toBeCloseTo(8.6, 4);
+    expect(r.breakdown.some((b) => /7 calls × 7s/.test(b.item))).toBe(true);
   });
 
-  it('scales linearly with variantCount: 5 × 30s ≈ $25.00', () => {
+  it('scales linearly with variantCount: 5 × 30s ≈ $22.00', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 5,
       pipeline: 'veo_3_1_fast_native_audio',
       estimatedDurationSeconds: 30,
     });
-    // 5 × ($0.05 + 4×$1.20 + $0.15) = 5 × $5.00 = $25.00
-    expect(r.estimateUsd).toBeCloseTo(25.0, 4);
+    // 5 × $4.40 = $22.00
+    expect(r.estimateUsd).toBeCloseTo(22.0, 4);
   });
 
   it('sourceDurationSeconds wins over estimatedDurationSeconds', () => {
@@ -417,21 +418,63 @@ describe('Polish-19.3: veo_3_1_fast_native_audio multi-segment cost', () => {
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'veo_3_1_fast_native_audio',
-      sourceDurationSeconds: 6, // → 1 segment (ceil(6/8) = 1)
-      estimatedDurationSeconds: 30, // would be 4 segments, ignored
+      sourceDurationSeconds: 6, // → 1 call (no extends)
+      estimatedDurationSeconds: 30, // would be 4 calls, ignored
     });
-    // 1 seg, no stitch → $1.25
+    // 1 call → $1.25
     expect(r.estimateUsd).toBeCloseTo(1.25, 4);
   });
 
-  it('beyond 60s clamps to 8-segment ceiling (sanity bound, not a UX preset)', () => {
+  it('beyond 60s clamps to 8-segment cost cap (1 base + 7 extends, $8.60)', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
       pipeline: 'veo_3_1_fast_native_audio',
       estimatedDurationSeconds: 600, // runaway value
     });
-    // Clamped to 8 segments → $9.80 even for absurd inputs.
+    // Cost-estimator quantizes via computeVeoSegmentCount which caps
+    // at 8 segments (sanity bound on the form's upfront price). The
+    // worker honors the same cap so the cost ceiling is real.
+    expect(r.estimateUsd).toBeCloseTo(8.6, 4);
+  });
+});
+
+describe('Polish-19.4: veo_3_1_fast_native_audio concat-mode cost (env-flip fallback)', () => {
+  // Polish-19.3 math, kept live as a manual fallback path the worker
+  // selects when VEO_CHAINING_MODE=concat. Same pricing as before the
+  // 19.4 default flip.
+
+  it('8s, concat mode → $1.25 per variant (no stitch on N=1)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'veo_3_1_fast_native_audio',
+      veoChainingMode: 'concat',
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.25, 4);
+    expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(false);
+  });
+
+  it('30s, concat mode → $5.00 per variant (4 × $1.20 + $0.15 stitch + $0.05 Claude)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'veo_3_1_fast_native_audio',
+      estimatedDurationSeconds: 30,
+      veoChainingMode: 'concat',
+    });
+    expect(r.estimateUsd).toBeCloseTo(5.0, 4);
+    expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(true);
+  });
+
+  it('60s, concat mode → $9.80 per variant', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'veo_3_1_fast_native_audio',
+      estimatedDurationSeconds: 60,
+      veoChainingMode: 'concat',
+    });
     expect(r.estimateUsd).toBeCloseTo(9.8, 4);
   });
 });
