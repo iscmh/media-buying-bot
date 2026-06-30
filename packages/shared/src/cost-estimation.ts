@@ -171,6 +171,39 @@ export function computeVeoSegmentCount(requestedSeconds: number): number {
   return Math.max(1, Math.min(VEO_MAX_SEGMENTS, raw));
 }
 
+/**
+ * Polish-19.3.1: auto-segment-count from source video duration.
+ * Distinct from computeVeoSegmentCount (which is a strict ceil/8)
+ * because the simplified form removed its length picker — the
+ * worker now picks an output length automatically based on the
+ * source ad's duration, rounded up to the nearest power-of-2
+ * segment count for cleaner UX (1/2/4/8 segments → 8s/16s/32s/64s
+ * output). Missing source → 4 segments (30s) as the sensible UGC
+ * default.
+ *
+ * Source duration range mapping:
+ *   - missing / 0 / NaN → 4 segments (default 30s output)
+ *   - ≤ 8s             → 1 segment  (single 8s clip)
+ *   - ≤ 16s            → 2 segments (16s output)
+ *   - ≤ 32s            → 4 segments (32s output)
+ *   - > 32s            → 8 segments (capped at 64s output)
+ */
+export function computeAutoVeoSegmentCount(
+  sourceDurationSeconds: number | null | undefined,
+): number {
+  if (
+    sourceDurationSeconds == null ||
+    !Number.isFinite(sourceDurationSeconds) ||
+    sourceDurationSeconds <= 0
+  ) {
+    return 4;
+  }
+  if (sourceDurationSeconds <= 8) return 1;
+  if (sourceDurationSeconds <= 16) return 2;
+  if (sourceDurationSeconds <= 32) return 4;
+  return 8;
+}
+
 export interface CostBreakdownItem {
   item: string;
   cost: number;

@@ -10,7 +10,7 @@ import {
   submitReplicateConcat,
   submitVeoVideo,
 } from '@mbb/ai-providers';
-import { computeVeoSegmentCount } from '@mbb/shared';
+import { computeAutoVeoSegmentCount, computeVeoSegmentCount } from '@mbb/shared';
 import { getDb, schema } from '@mbb/db';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
@@ -80,6 +80,68 @@ const MIN_TARGET_DURATION = 2;
  * clamped and the worker logs the clamp loudly so the operator
  * sees what they got.
  */
+/**
+ * Polish-19.3.1: auto-resolve the variant's segment count from the
+ * source video's duration. Fallback chain (first hit wins):
+ *
+ *   1. job.metadata.analysis.video_duration_seconds — what
+ *      analyze-concept's Gemini Vision step captured. Future-
+ *      proofing: vision doesn't currently emit this field, but the
+ *      Polish-19.3.1 store-analysis merge writes the vision payload
+ *      under `metadata.analysis.*` so when vision adds the field
+ *      this path lights up without a worker change.
+ *   2. job.metadata.source_duration_seconds — the legacy Polish-14.1
+ *      path. Action handler writes this when the form provides a
+ *      length picker value (Advanced form, or the old simplified
+ *      form before Polish-19.3.1 removed the picker).
+ *   3. Default → 30s (4 segments) per computeAutoVeoSegmentCount's
+ *      "missing source" branch. Sensible UGC default.
+ *
+ * Returns the chosen total duration (segments × 8s) + the resolved
+ * segment count + the source we hit. Source label is logged so
+ * operators can see which path fired per variant.
+ */
+export function resolveAutoVeoDuration(jobMetadata: Record<string, unknown> | null): {
+  segmentCount: number;
+  durationSeconds: number;
+  source: 'analysis' | 'form' | 'default';
+  sourceDurationSeconds: number | null;
+} {
+  if (jobMetadata) {
+    const analysis = jobMetadata['analysis'];
+    if (analysis && typeof analysis === 'object') {
+      const a = analysis as Record<string, unknown>;
+      const visionDuration = a['video_duration_seconds'];
+      if (typeof visionDuration === 'number' && visionDuration > 0) {
+        const segmentCount = computeAutoVeoSegmentCount(visionDuration);
+        return {
+          segmentCount,
+          durationSeconds: segmentCount * VEO_MAX_SECONDS_PER_CALL,
+          source: 'analysis',
+          sourceDurationSeconds: visionDuration,
+        };
+      }
+    }
+    const formPersisted = jobMetadata['source_duration_seconds'];
+    if (typeof formPersisted === 'number' && formPersisted > 0) {
+      const segmentCount = computeAutoVeoSegmentCount(formPersisted);
+      return {
+        segmentCount,
+        durationSeconds: segmentCount * VEO_MAX_SECONDS_PER_CALL,
+        source: 'form',
+        sourceDurationSeconds: formPersisted,
+      };
+    }
+  }
+  const segmentCount = computeAutoVeoSegmentCount(null);
+  return {
+    segmentCount,
+    durationSeconds: segmentCount * VEO_MAX_SECONDS_PER_CALL,
+    source: 'default',
+    sourceDurationSeconds: null,
+  };
+}
+
 export function resolveVeoTargetDuration(jobMetadata: Record<string, unknown> | null): {
   durationSeconds: number;
   clamped: boolean;
@@ -262,15 +324,24 @@ export const generateVeo31Fast = inngest.createFunction(
     });
 
     const variantCount = Math.max(1, job.variantCount ?? 1);
-    const { durationSeconds, clamped, requestedSeconds } = resolveVeoTargetDuration(
+    // Polish-19.3.1: switch from resolveVeoTargetDuration (per-call
+    // clamp, designed for the pre-19.3 single-segment path) to
+    // resolveAutoVeoDuration (fallback chain → segments-per-variant).
+    // The fallback-chain log line surfaces which source the duration
+    // came from per job so the operator can SEE whether the form's
+    // length picker, the Vision analysis, or the 30s default fired.
+    const autoDuration = resolveAutoVeoDuration(
       (job.metadata ?? null) as Record<string, unknown> | null,
     );
-    if (clamped) {
-      console.log(
-        `[veo-3-1-fast] job ${jobId}: requested ${requestedSeconds}s clamped to ` +
-          `${durationSeconds}s (Veo per-call ceiling). Multi-chunk chaining lands in Polish-19.3.`,
-      );
-    }
+    const durationSeconds = autoDuration.durationSeconds;
+    console.log(
+      `[veo-3-1-fast] job ${jobId}: auto-duration resolved → ${durationSeconds}s ` +
+        `(${autoDuration.segmentCount} segment${autoDuration.segmentCount === 1 ? '' : 's'}) ` +
+        `via ${autoDuration.source}` +
+        (autoDuration.sourceDurationSeconds != null
+          ? ` from source ${autoDuration.sourceDurationSeconds}s`
+          : ' (no source duration available)'),
+    );
 
     if (mode === 'mock') {
       await step.sleep('mock-render', '2s');

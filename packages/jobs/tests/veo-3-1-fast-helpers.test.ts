@@ -10,6 +10,7 @@ import {
   computeVeoPollIntervalSeconds,
   fallbackToSingleSegment,
   parseVeoAdSpec,
+  resolveAutoVeoDuration,
   resolveVeoTargetDuration,
 } from '../src/functions/generate-veo-3-1-fast';
 
@@ -316,5 +317,99 @@ describe('Polish-19.3 Commit 2 — fan-out + stitch source shape', () => {
     // single-input concat).
     expect(src).toMatch(/let compositeUrl = segmentUrls\[0\]!/);
     expect(src).toMatch(/let stitched = false/);
+  });
+});
+
+describe('Polish-19.3.1: resolveAutoVeoDuration — fallback chain', () => {
+  it('null metadata → default source (4 segments / 32s)', () => {
+    const r = resolveAutoVeoDuration(null);
+    expect(r.source).toBe('default');
+    expect(r.segmentCount).toBe(4);
+    expect(r.durationSeconds).toBe(32);
+    expect(r.sourceDurationSeconds).toBeNull();
+  });
+
+  it('empty metadata object → default source', () => {
+    const r = resolveAutoVeoDuration({});
+    expect(r.source).toBe('default');
+    expect(r.segmentCount).toBe(4);
+  });
+
+  it('analysis.video_duration_seconds wins when present (vision-derived)', () => {
+    const r = resolveAutoVeoDuration({
+      analysis: { video_duration_seconds: 12 },
+      source_duration_seconds: 30, // would normally fire; analysis wins
+    });
+    expect(r.source).toBe('analysis');
+    expect(r.sourceDurationSeconds).toBe(12);
+    expect(r.segmentCount).toBe(2); // 9-16s range → 2 segments
+    expect(r.durationSeconds).toBe(16);
+  });
+
+  it('source_duration_seconds fires when analysis is missing (form-set legacy path)', () => {
+    const r = resolveAutoVeoDuration({ source_duration_seconds: 25 });
+    expect(r.source).toBe('form');
+    expect(r.sourceDurationSeconds).toBe(25);
+    expect(r.segmentCount).toBe(4); // 17-32s → 4 segments
+    expect(r.durationSeconds).toBe(32);
+  });
+
+  it('ignores analysis when video_duration_seconds is missing / non-numeric', () => {
+    const r = resolveAutoVeoDuration({
+      analysis: { script_transcription: 'something else' },
+      source_duration_seconds: 10,
+    });
+    expect(r.source).toBe('form');
+    expect(r.segmentCount).toBe(2);
+  });
+
+  it('ignores form value when zero / negative / non-numeric', () => {
+    expect(resolveAutoVeoDuration({ source_duration_seconds: 0 }).source).toBe('default');
+    expect(resolveAutoVeoDuration({ source_duration_seconds: -5 }).source).toBe('default');
+    expect(resolveAutoVeoDuration({ source_duration_seconds: 'twelve' }).source).toBe('default');
+  });
+
+  it('returned durationSeconds is always segmentCount × 8 (worker-billable)', () => {
+    expect(
+      resolveAutoVeoDuration({ analysis: { video_duration_seconds: 5 } }).durationSeconds,
+    ).toBe(8);
+    expect(
+      resolveAutoVeoDuration({ analysis: { video_duration_seconds: 14 } }).durationSeconds,
+    ).toBe(16);
+    expect(
+      resolveAutoVeoDuration({ analysis: { video_duration_seconds: 30 } }).durationSeconds,
+    ).toBe(32);
+    expect(
+      resolveAutoVeoDuration({ analysis: { video_duration_seconds: 50 } }).durationSeconds,
+    ).toBe(64);
+  });
+});
+
+describe('Polish-19.3.1: Veo worker switched to resolveAutoVeoDuration (source pin)', () => {
+  it('worker live path uses resolveAutoVeoDuration (not the old resolveVeoTargetDuration)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    // The variant-loop call site must use the auto resolver. The
+    // old resolveVeoTargetDuration export stays for back-compat /
+    // tests but should NOT be called from the live worker path.
+    expect(src).toMatch(/resolveAutoVeoDuration\(/);
+    // Tripwire — the live-path call to resolveVeoTargetDuration
+    // (the pre-19.3.1 single-segment per-call clamp) must be gone.
+    // Match the specific call inside the worker createFunction
+    // closure, NOT the export declaration line.
+    expect(src).not.toMatch(/= resolveVeoTargetDuration\(/);
+  });
+
+  it('worker logs the fallback-chain source per job for diagnosability', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/auto-duration resolved/);
+    expect(src).toMatch(/autoDuration\.source/);
   });
 });

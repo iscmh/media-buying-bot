@@ -81,7 +81,10 @@ describe('Polish-19: buildSubmissionFormData', () => {
     const fd = buildSubmissionFormData({
       conceptId: 'concept_abc',
       state: {
-        pipeline: defaultPipeline(),
+        // Polish-19.3.1: pin a NON-Veo pipeline so this baseline test
+        // still asserts sourceDurationSeconds is sent. Veo-specific
+        // omit behavior has its own test below.
+        pipeline: 'kie_kling_avatar_v2_standard',
         voiceId: '21m00Tcm4TlvDq8ikWAM',
         variantCount: 5,
         lengthSeconds: 30,
@@ -93,7 +96,7 @@ describe('Polish-19: buildSubmissionFormData', () => {
     expect(fd.get('conceptId')).toBe('concept_abc');
     expect(fd.get('intensity')).toBe('medium'); // hardcoded; not user-facing
     expect(fd.get('mode')).toBe('live');
-    expect(fd.get('pipeline')).toBe(defaultPipeline());
+    expect(fd.get('pipeline')).toBe('kie_kling_avatar_v2_standard');
     expect(fd.get('voiceId')).toBe('21m00Tcm4TlvDq8ikWAM');
     expect(fd.get('variantCount')).toBe('5');
     // Polish-14.1 legacy name — semantically IS the target duration.
@@ -128,6 +131,32 @@ describe('Polish-19: buildSubmissionFormData', () => {
     // A future flip changes both this assertion AND defaultPipeline()
     // simultaneously — the test acts as a tripwire.
     expect(fd.get('pipeline')).toBe(defaultPipeline());
+  });
+
+  it('Polish-19.3.1: OMITS sourceDurationSeconds when pipeline=veo (worker auto-resolves)', () => {
+    const fd = buildSubmissionFormData({
+      conceptId: 'c',
+      state: {
+        pipeline: 'veo_3_1_fast_native_audio',
+        voiceId: 'v',
+        variantCount: 5,
+        lengthSeconds: 30, // would normally be sent; veo omits
+      },
+    });
+    expect(fd.has('sourceDurationSeconds')).toBe(false);
+  });
+
+  it('Polish-19.3.1: STILL sends sourceDurationSeconds for non-Veo pipelines (Kling/Omni/HeyGen)', () => {
+    const fd = buildSubmissionFormData({
+      conceptId: 'c',
+      state: {
+        pipeline: 'kie_kling_avatar_v2_standard',
+        voiceId: 'v',
+        variantCount: 5,
+        lengthSeconds: 30,
+      },
+    });
+    expect(fd.get('sourceDurationSeconds')).toBe('30');
   });
 });
 

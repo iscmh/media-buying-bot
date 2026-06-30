@@ -31,11 +31,9 @@ import {
   SIMPLIFIED_MAX_VARIANTS,
   SIMPLIFIED_MIN_LENGTH_SECONDS,
   SIMPLIFIED_MIN_VARIANTS,
-  VEO_LENGTH_PRESETS,
   buildSubmissionFormData,
   clampLengthSeconds,
   clampVariantCount,
-  snapToVeoPreset,
 } from './simplified-form-helpers';
 
 interface Props {
@@ -90,13 +88,21 @@ export function SimplifiedGenerationForm({
   const [isPending, startTransition] = React.useTransition();
 
   // Polish-19: estimator runs on every state change so the displayed
-  // cost is what we submit. Wire sourceDurationSeconds = user's length
-  // pick so the estimate matches the worker's actual target duration.
+  // cost is what we submit.
+  // Polish-19.3.1: for Veo the form no longer surfaces a length
+  // picker — the worker auto-resolves duration from the analyze
+  // step + 30s default fallback. The cost preview uses
+  // detectedSourceSeconds when known (page passes it in once
+  // analyze-concept completes), otherwise the same 30s default the
+  // worker would land on. For non-Veo pipelines the length picker
+  // stays visible and feeds the preview.
+  const isVeoPipeline = pipeline === 'veo_3_1_fast_native_audio';
+  const previewDurationSeconds = isVeoPipeline ? (detectedSourceSeconds ?? 30) : lengthSeconds;
   const estimate = estimateGenerationCost({
     conceptType: 'ugc',
     variantCount,
     pipeline,
-    sourceDurationSeconds: lengthSeconds,
+    sourceDurationSeconds: previewDurationSeconds,
   });
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
@@ -138,22 +144,10 @@ export function SimplifiedGenerationForm({
     }
   }, [availablePipelines, pipeline]);
 
-  // Polish-19.3: when switching INTO Veo, snap the current length to
-  // the nearest preset. Free-form lengths from other pipelines (e.g.
-  // Kling's 30s pick) become the closest Veo preset; the user sees
-  // their previous duration honored as closely as possible.
-  const isVeoPipeline = pipeline === 'veo_3_1_fast_native_audio';
-  React.useEffect(() => {
-    if (isVeoPipeline) {
-      const snapped = snapToVeoPreset(lengthSeconds);
-      if (snapped.seconds !== lengthSeconds) {
-        setLengthSeconds(snapped.seconds);
-      }
-    }
-    // Intentionally only depend on pipeline — re-snapping on every
-    // length change would defeat the user's pick. The hook's deps
-    // array is narrow on purpose.
-  }, [isVeoPipeline]);
+  // Polish-19.3.1: Veo no longer surfaces a length picker so the
+  // snap-on-pipeline-switch from 19.3 Commit 1 isn't needed anymore.
+  // For non-Veo pipelines the length picker stays free-form and the
+  // user's existing value is honored on switch.
 
   function performSubmit() {
     if (overCap) return;
@@ -242,42 +236,16 @@ export function SimplifiedGenerationForm({
           </div>
         </div>
 
-        <div>
-          <label htmlFor="length-seconds" className="text-fg block text-sm font-medium">
-            Length
-          </label>
-          {isVeoPipeline ? (
-            // Polish-19.3: Veo chunks output into 8s segments — preset
-            // buttons map cleanly to segment counts (8/15/30/60s →
-            // 1/2/4/8 segments). Free-form entry doesn't add value
-            // when the underlying granularity is fixed.
-            <div className="mt-1 flex flex-wrap gap-2" role="group" aria-label="Length preset">
-              {VEO_LENGTH_PRESETS.map((preset) => {
-                const active = lengthSeconds === preset.seconds;
-                return (
-                  <button
-                    key={preset.seconds}
-                    type="button"
-                    onClick={() => setLengthSeconds(preset.seconds)}
-                    disabled={isPending}
-                    className={cn(
-                      'flex flex-col items-center rounded-md border px-3 py-1.5 text-sm transition-colors',
-                      active
-                        ? 'border-fg-muted bg-bg-active text-fg'
-                        : 'border-input bg-bg-elevated text-fg-muted hover:bg-bg-hover hover:text-fg',
-                      'disabled:cursor-not-allowed disabled:opacity-60',
-                    )}
-                    aria-pressed={active}
-                  >
-                    <span className="font-medium">{preset.label}</span>
-                    <span className="text-fg-subtle font-mono text-[10px]">
-                      {preset.segments} seg{preset.segments === 1 ? '' : 's'}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
+        {/* Polish-19.3.1: Veo no longer shows a Length picker — the
+            worker auto-resolves output duration from the source
+            video's analyze-concept output (with a 30s default). For
+            other pipelines (Kling, Omni Flash, HeyGen) the free-form
+            length input stays. */}
+        {!isVeoPipeline && (
+          <div>
+            <label htmlFor="length-seconds" className="text-fg block text-sm font-medium">
+              Length
+            </label>
             <div className="mt-1 flex items-center gap-2">
               <input
                 id="length-seconds"
@@ -292,8 +260,20 @@ export function SimplifiedGenerationForm({
               />
               <span className="text-fg-muted text-sm">seconds each</span>
             </div>
-          )}
-        </div>
+          </div>
+        )}
+        {isVeoPipeline && (
+          <div>
+            <p className="text-fg block text-sm font-medium">Length</p>
+            <p className="text-fg-muted mt-1 text-xs">
+              Auto-set from source video
+              {detectedSourceSeconds != null
+                ? ` (${detectedSourceSeconds}s detected)`
+                : ' (30s default until analyzed)'}
+              . Override in the Advanced form below.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Cost estimate */}

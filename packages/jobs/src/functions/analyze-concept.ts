@@ -65,11 +65,35 @@ export const analyzeConcept = inngest.createFunction(
     if (mode === 'mock') {
       await step.sleep('mock-vision-latency', '3s');
       await step.run('store-mock-analysis', async () => {
+        // Polish-19.3.1 hotfix: MERGE with existing metadata instead
+        // of overwriting. Pre-19.3.1 destructively replaced the
+        // metadata blob — erasing the action handler's
+        // source_duration_seconds + voice_id fields (Polish-14.1 +
+        // Polish-19 Commit 3 persistence). Veo / Kling workers then
+        // read metadata, found no length / voice, fell back to
+        // defaults, and silently produced wrong-length output
+        // (the "30s preset → 8s output" symptom from the user's
+        // 197af259 job).
+        //
+        // Spread order: vision-at-root first (Polish-12 back-compat),
+        // form-written fields override (user-picked beats AI-estimated
+        // when names collide). Vision is also nested under `.analysis`
+        // for the Polish-19.3.1 fallback-chain lookup.
         const db = getDb();
+        const existing = await db.query.generationJobs.findFirst({
+          where: eq(schema.generationJobs.id, jobId),
+          columns: { metadata: true },
+        });
+        const prior = (existing?.metadata as Record<string, unknown> | null) ?? {};
         await db
           .update(schema.generationJobs)
           .set({
-            metadata: { ...MOCK_METADATA, analyzed_at: new Date().toISOString() },
+            metadata: {
+              ...MOCK_METADATA,
+              ...prior,
+              analysis: MOCK_METADATA,
+              analyzed_at: new Date().toISOString(),
+            },
           })
           .where(eq(schema.generationJobs.id, jobId));
       });
@@ -206,12 +230,26 @@ export const analyzeConcept = inngest.createFunction(
     }
 
     await step.run('store-analysis', async () => {
+      // Polish-19.3.1 hotfix: merge instead of overwrite. See the
+      // mock-path comment for the bug history. Spread order: vision
+      // at root (Polish-12 back-compat), form fields override
+      // (user-picked beats AI-estimated). Vision is also nested
+      // under `.analysis` so the Veo worker's fallback chain can
+      // read job.metadata.analysis.video_duration_seconds without
+      // worrying about root-level shape drift.
       const db = getDb();
+      const existing = await db.query.generationJobs.findFirst({
+        where: eq(schema.generationJobs.id, jobId),
+        columns: { metadata: true },
+      });
+      const prior = (existing?.metadata as Record<string, unknown> | null) ?? {};
       await db
         .update(schema.generationJobs)
         .set({
           metadata: {
             ...visionResult.analysis,
+            ...prior,
+            analysis: visionResult.analysis,
             _live: true,
             analyzed_at: new Date().toISOString(),
           },

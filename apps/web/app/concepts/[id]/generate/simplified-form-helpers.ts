@@ -119,6 +119,14 @@ export function buildSubmissionFormData(input: {
   fd.set('pipeline', input.state.pipeline);
   fd.set('voiceId', input.state.voiceId);
   fd.set('variantCount', String(input.state.variantCount));
-  fd.set('sourceDurationSeconds', String(input.state.lengthSeconds));
+  // Polish-19.3.1: the simplified form no longer surfaces a length
+  // picker for Veo — the worker auto-resolves duration via its
+  // fallback chain (analysis.video_duration_seconds → form
+  // source_duration_seconds → 30s default). For Veo we OMIT the
+  // FormData field entirely so the worker falls through to the
+  // auto path; other pipelines still pass the form-state length.
+  if (input.state.pipeline !== 'veo_3_1_fast_native_audio') {
+    fd.set('sourceDurationSeconds', String(input.state.lengthSeconds));
+  }
   return fd;
 }
