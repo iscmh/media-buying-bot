@@ -97,6 +97,54 @@ export const VEO_EXTEND_SECONDS_PER_CALL = 7;
 export const VEO_EXTEND_REQUIRED_RESOLUTION = '720p';
 export const VEO_EXTEND_MAX_CHAIN_CALLS = 20;
 
+/**
+ * Polish-19.4.1: Veo's accepted range for the durationSeconds param
+ * on the EXTEND endpoint is [4, 8] per the live error message
+ * ("Please provide a value between 4 and 8, inclusive"). Narrower
+ * than VEO_MIN_SECONDS_PER_CALL=2 (which is the base-submit floor).
+ * Kept here, NOT exported as a public constant, because it's only
+ * used by the env-override parser below.
+ */
+const VEO_EXTEND_API_MIN_SECONDS = 4;
+const VEO_EXTEND_API_MAX_SECONDS = VEO_MAX_SECONDS_PER_CALL; // 8
+
+/**
+ * Polish-19.4.1: parser for VEO_EXTEND_DURATION_SECONDS env override.
+ * Default behavior (returns null) is to OMIT the durationSeconds
+ * field from extend requests — Veo's Developer API rejects the 7s
+ * value Google's docs implied was the param, so the safest default
+ * is to let Veo apply its server-side default.
+ *
+ * Env values:
+ *   - unset / empty / whitespace → null (omit field, Option A)
+ *   - integer in [4, 8] → that integer (Option B fallback, typically '8')
+ *   - any other value → null + warning log (defensive)
+ *
+ * Exported so the parsing logic is unit-testable independently of
+ * a full submitVeoExtend call.
+ */
+export function parseExtendDurationOverride(raw: string | undefined): number | null {
+  const trimmed = raw?.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || !Number.isInteger(n)) {
+    console.log(
+      `[veo-extend] ignoring VEO_EXTEND_DURATION_SECONDS=${JSON.stringify(raw)} — ` +
+        `not a finite integer; falling back to omit-field default.`,
+    );
+    return null;
+  }
+  if (n < VEO_EXTEND_API_MIN_SECONDS || n > VEO_EXTEND_API_MAX_SECONDS) {
+    console.log(
+      `[veo-extend] ignoring VEO_EXTEND_DURATION_SECONDS=${n} — outside Veo's ` +
+        `accepted [${VEO_EXTEND_API_MIN_SECONDS}, ${VEO_EXTEND_API_MAX_SECONDS}] range ` +
+        `for the extend endpoint; falling back to omit-field default.`,
+    );
+    return null;
+  }
+  return n;
+}
+
 export function clampVeoDurationSeconds(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) return VEO_MAX_SECONDS_PER_CALL;
   return Math.min(
@@ -449,11 +497,22 @@ export async function submitVeoExtend(input: VeoExtendSubmitInput): Promise<VeoS
   const modelId = getVeoModelId();
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(modelId)}:predictLongRunning`;
 
-  // Per docs: Extend always adds exactly VEO_EXTEND_SECONDS_PER_CALL
-  // (7s) of new content. Pass it explicitly so a future Google rev
-  // that requires the field present sees a valid value rather than
-  // silently doing 4s/8s.
-  const extension = VEO_EXTEND_SECONDS_PER_CALL;
+  // Polish-19.4.1: HOTFIX — `durationSeconds: 7` rejects with
+  // "value out of bound. Please provide a value between 4 and 8,
+  // inclusive." The "7 seconds per extend" framing in Google's docs
+  // is the OUTPUT increment Veo produces, NOT a parameter value the
+  // client passes. Default behavior: OMIT the field entirely so
+  // Veo applies its server-side default for Extend (~7s).
+  //
+  // Env-override hatch (Option B fallback): if a future Google rev
+  // requires the field present, set VEO_EXTEND_DURATION_SECONDS to
+  // a value in [4, 8] (the API-accepted range) and we'll send it.
+  // Typical fallback value is '8' (max valid) — extend bills the
+  // 7s output increment regardless of which valid value we pass.
+  // Unset / whitespace / out-of-range → omit (Option A, the default).
+  const extendDurationOverride = parseExtendDurationOverride(
+    process.env.VEO_EXTEND_DURATION_SECONDS,
+  );
 
   // Polish-19.4: personGeneration MUST be 'allow_all' for Extend per
   // Google docs (same as text-to-video). Env override hatch retained
@@ -473,24 +532,29 @@ export async function submitVeoExtend(input: VeoExtendSubmitInput): Promise<VeoS
   };
   const parameters: Record<string, unknown> = {
     aspectRatio: input.aspectRatio ?? '9:16',
-    durationSeconds: extension,
     sampleCount: 1,
     resolution: VEO_EXTEND_REQUIRED_RESOLUTION,
     personGeneration,
   };
+  if (extendDurationOverride !== null) {
+    parameters.durationSeconds = extendDurationOverride;
+  }
 
   const body = { instances: [instance], parameters };
 
-  // First-call diagnostic: log the FULL request body (not just the
-  // summary) so the first live extend either confirms the
-  // instances[0].video placement OR shows us the exact rejection
-  // message + body next to it. Once we've seen it work in prod,
-  // this can be downgraded.
+  // Polish-19.4.1: loud-log the FULL body (not just the summary) so
+  // each live extend confirms — in Inngest — that resolution='720p'
+  // and personGeneration='allow_all' actually made it onto the wire,
+  // and whether the optional durationSeconds is present. Pre-19.4.1
+  // the rejection on durationSeconds=7 wasn't visible without DB
+  // audit-log spelunking because the summary already pre-stringified.
   console.log(
     `[veo-extend] submit attempt: model=${modelId} ` +
       `prev_uri=${videoRef.uri} prev_mime=${videoRef.mimeType} ` +
       `prompt_chars=${input.prompt.length} ` +
-      `parameters=${JSON.stringify(parameters)}`,
+      `duration_override=${extendDurationOverride ?? '(omitted — Option A)'} ` +
+      `parameters=${JSON.stringify(parameters)} ` +
+      `instance_keys=${JSON.stringify(Object.keys(instance))}`,
   );
 
   const result = await callProvider<VeoSubmitResponseShape>({
@@ -508,7 +572,7 @@ export async function submitVeoExtend(input: VeoExtendSubmitInput): Promise<VeoS
       model: modelId,
       mode: 'extend',
       prompt_chars: input.prompt.length,
-      duration_seconds: extension,
+      duration_seconds_param: extendDurationOverride ?? '(omitted)',
       aspect_ratio: parameters.aspectRatio,
       resolution: parameters.resolution,
       person_generation: personGeneration,

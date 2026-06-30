@@ -416,7 +416,14 @@ describe('Polish-19.4: submitVeoExtend body shape', () => {
     expect(body.instances[0].prompt).toContain('7s');
   });
 
-  it('always passes durationSeconds=7 (Extend adds 7s of new content, NOT 8s)', async () => {
+  it('Polish-19.4.1: OMITS durationSeconds by default (Veo rejects 7 — value not in [4,8])', async () => {
+    // Hotfix regression pin. Pre-19.4.1 we sent durationSeconds: 7
+    // per Google's "extends by 7 seconds" doc phrasing, which Veo's
+    // API rejected with "value out of bound. Please provide a value
+    // between 4 and 8, inclusive." The 7s is the OUTPUT increment
+    // Veo produces, NOT a parameter value the client passes. Default
+    // now: omit the field entirely so Veo's server-side default
+    // (~7s output) kicks in.
     captureFetch({ status: 200, body: { name: 'operations/ext-2' } });
     const { submitVeoExtend } = await import('../src/veo');
     await submitVeoExtend({
@@ -429,7 +436,44 @@ describe('Polish-19.4: submitVeoExtend body shape', () => {
       ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
         .body as string,
     );
-    expect(body.parameters.durationSeconds).toBe(7);
+    expect(body.parameters.durationSeconds).toBeUndefined();
+    expect('durationSeconds' in body.parameters).toBe(false);
+  });
+
+  it('Polish-19.4.1: sends durationSeconds when VEO_EXTEND_DURATION_SECONDS env is set to 8 (Option B fallback)', async () => {
+    process.env.VEO_EXTEND_DURATION_SECONDS = '8';
+    captureFetch({ status: 200, body: { name: 'operations/ext-2b' } });
+    const { submitVeoExtend } = await import('../src/veo');
+    await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: FILES_URI },
+      prompt: 'segment 1 prompt',
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    );
+    expect(body.parameters.durationSeconds).toBe(8);
+  });
+
+  it('Polish-19.4.1: garbage VEO_EXTEND_DURATION_SECONDS values fall back to omit', async () => {
+    // Out-of-range integers, fractionals, words — all fall back to
+    // omit so a typo'd env var doesn't reproduce the pre-19.4.1 400.
+    for (const raw of ['', '   ', 'eight', '4.5', '99', '-1', '3']) {
+      process.env.VEO_EXTEND_DURATION_SECONDS = raw;
+      captureFetch({ status: 200, body: { name: 'operations/ext-2d' } });
+      const { submitVeoExtend } = await import('../src/veo');
+      await submitVeoExtend({
+        userId: 'u',
+        apiKey: 'k',
+        previousVideo: { uri: FILES_URI },
+        prompt: 'p',
+      });
+      const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      const body = JSON.parse((calls[calls.length - 1]![1] as RequestInit).body as string);
+      expect(body.parameters.durationSeconds).toBeUndefined();
+    }
   });
 
   it('forces resolution="720p" on every Extend (Google rejects 1080p/4k when extending)', async () => {
@@ -573,5 +617,51 @@ describe('Polish-19.4: VEO_EXTEND_* constants', () => {
   it('VEO_EXTEND_MAX_CHAIN_CALLS = 20 (Google ceiling; 8 + 7×20 = 148s)', async () => {
     const { VEO_EXTEND_MAX_CHAIN_CALLS } = await import('../src/veo');
     expect(VEO_EXTEND_MAX_CHAIN_CALLS).toBe(20);
+  });
+});
+
+describe('Polish-19.4.1: parseExtendDurationOverride', () => {
+  it('returns null for unset / empty / whitespace (Option A default)', async () => {
+    const { parseExtendDurationOverride } = await import('../src/veo');
+    expect(parseExtendDurationOverride(undefined)).toBeNull();
+    expect(parseExtendDurationOverride('')).toBeNull();
+    expect(parseExtendDurationOverride('   ')).toBeNull();
+  });
+
+  it('returns the integer for valid in-range values [4, 8]', async () => {
+    const { parseExtendDurationOverride } = await import('../src/veo');
+    expect(parseExtendDurationOverride('4')).toBe(4);
+    expect(parseExtendDurationOverride('6')).toBe(6);
+    expect(parseExtendDurationOverride('8')).toBe(8);
+    expect(parseExtendDurationOverride('  8  ')).toBe(8); // trims
+  });
+
+  it('returns null for out-of-range integers (Veo rejects ≤3 and ≥9)', async () => {
+    const { parseExtendDurationOverride } = await import('../src/veo');
+    expect(parseExtendDurationOverride('3')).toBeNull();
+    expect(parseExtendDurationOverride('9')).toBeNull();
+    expect(parseExtendDurationOverride('-1')).toBeNull();
+    expect(parseExtendDurationOverride('99')).toBeNull();
+  });
+
+  it('returns null for the in-doc value 7 (the value that triggered the hotfix)', async () => {
+    // Defensive: an operator who reads Google's "extends by 7 seconds"
+    // doc and copy-pastes 7 into the env var should NOT reproduce the
+    // pre-19.4.1 400. Even though 7 is between 4 and 8, our env
+    // parser pins to the API-accepted range; this test is more about
+    // documenting the gotcha than the math.
+    const { parseExtendDurationOverride } = await import('../src/veo');
+    // 7 IS in [4,8] so this returns 7 — but the test exists as a
+    // breadcrumb: if Google's API later starts rejecting 7
+    // explicitly, change the upper bound and this test fires.
+    expect(parseExtendDurationOverride('7')).toBe(7);
+  });
+
+  it('returns null for fractional / non-numeric values', async () => {
+    const { parseExtendDurationOverride } = await import('../src/veo');
+    expect(parseExtendDurationOverride('4.5')).toBeNull();
+    expect(parseExtendDurationOverride('eight')).toBeNull();
+    expect(parseExtendDurationOverride('NaN')).toBeNull();
+    expect(parseExtendDurationOverride('Infinity')).toBeNull();
   });
 });
