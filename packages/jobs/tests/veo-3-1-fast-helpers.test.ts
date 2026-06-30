@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  buildVeoDownloadHeaders,
   computeVeoPollIntervalSeconds,
   resolveVeoTargetDuration,
 } from '../src/functions/generate-veo-3-1-fast';
@@ -80,5 +81,63 @@ describe('Polish-19.2: resolveVeoTargetDuration', () => {
   it('reports clamped=false when the request is exactly at the cap', () => {
     const r = resolveVeoTargetDuration({ source_duration_seconds: 8 });
     expect(r.clamped).toBe(false);
+  });
+});
+
+describe('Polish-19.2.4: buildVeoDownloadHeaders', () => {
+  // Veo's output URI on the Gemini Developer API is a private Files
+  // API URL that 403s without the x-goog-api-key header. Public CDN
+  // URIs (kie.ai, Replicate, Supabase) must NOT receive the unrelated
+  // Gemini key.
+
+  it('attaches x-goog-api-key for generativelanguage.googleapis.com URIs', () => {
+    const headers = buildVeoDownloadHeaders(
+      'https://generativelanguage.googleapis.com/v1beta/files/2kpilk04g35q:download?alt=media',
+      'test-api-key-abc',
+    );
+    expect(headers).toEqual({ 'x-goog-api-key': 'test-api-key-abc' });
+  });
+
+  it('does NOT attach the key for kie.ai CDN URIs (Kling Avatar v2 path)', () => {
+    expect(
+      buildVeoDownloadHeaders(
+        'https://file.aiquickdraw.com/custom-page/akr/section-images/output.mp4',
+        'test-api-key-abc',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('does NOT attach the key for Replicate delivery URIs (Polish-9.12 path)', () => {
+    expect(
+      buildVeoDownloadHeaders('https://replicate.delivery/abc/output.mp4', 'test-api-key-abc'),
+    ).toBeUndefined();
+  });
+
+  it('does NOT attach the key for Supabase Storage URIs (already in our bucket)', () => {
+    expect(
+      buildVeoDownloadHeaders(
+        'https://xxxx.supabase.co/storage/v1/object/public/generated-creatives/u/job/file.mp4',
+        'test-api-key-abc',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('handles case-insensitive host match (defensive against URL normalization)', () => {
+    const headers = buildVeoDownloadHeaders(
+      'https://GenerativeLanguage.GoogleAPIs.com/v1beta/files/abc',
+      'k',
+    );
+    expect(headers).toEqual({ 'x-goog-api-key': 'k' });
+  });
+
+  it('returns undefined for empty / malformed URLs', () => {
+    expect(buildVeoDownloadHeaders('', 'k')).toBeUndefined();
+    expect(buildVeoDownloadHeaders('not-a-url', 'k')).toBeUndefined();
+  });
+
+  it('does NOT match Vertex AI storage hosts (different auth flow, gs:// or signed URLs)', () => {
+    expect(
+      buildVeoDownloadHeaders('https://storage.googleapis.com/veo-output/abc.mp4', 'k'),
+    ).toBeUndefined();
   });
 });

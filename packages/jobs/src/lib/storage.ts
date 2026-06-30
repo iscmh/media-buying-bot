@@ -118,6 +118,14 @@ export async function downloadGeneratedImageAsBase64(input: {
  * and re-upload to the user-scoped generated-creatives bucket so the
  * deliverable has a durable URL that won't expire when the upstream
  * model provider rotates its hosting. Returns the path + public URL.
+ *
+ * Polish-19.2.4: added `fetchHeaders` for providers whose output URIs
+ * require auth (Veo 3.1 returns a generativelanguage.googleapis.com
+ * Files API URL that 403s without the same x-goog-api-key the submit
+ * call used). The helper stays provider-agnostic — caller decides
+ * which headers to attach. Once the file lands in Supabase Storage
+ * the public URL is permanent; this is the only moment the upstream
+ * key matters.
  */
 export async function uploadGeneratedVideoFromUrl(input: {
   userId: string;
@@ -125,13 +133,15 @@ export async function uploadGeneratedVideoFromUrl(input: {
   remoteUrl: string;
   filename?: string;
   maxBytes?: number;
+  /** Headers forwarded to the upstream GET. Use for Files-API-style private URIs. */
+  fetchHeaders?: Record<string, string>;
 }): Promise<{ path: string; publicUrl: string; sizeBytes: number }> {
   const supabase = getServiceRoleSupabase();
   const stem = input.filename ?? 'output';
   const path = `${input.userId}/generated/${input.jobId}/${stem}.mp4`;
   let res: Response;
   try {
-    res = await fetch(input.remoteUrl);
+    res = await fetch(input.remoteUrl, { headers: input.fetchHeaders });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Remote video fetch failed for ${input.remoteUrl}: ${msg}`);

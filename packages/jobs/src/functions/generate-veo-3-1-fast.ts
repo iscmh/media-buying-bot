@@ -105,6 +105,38 @@ export function resolveVeoTargetDuration(jobMetadata: Record<string, unknown> | 
   };
 }
 
+/**
+ * Polish-19.2.4: Veo's output URI on the Gemini Developer API is a
+ * private Files API URL (generativelanguage.googleapis.com/v1beta/
+ * files/...) that 403s without the same x-goog-api-key the submit
+ * call used. Other providers' URIs (kie.ai CDN, Replicate delivery,
+ * future Vertex AI gs:// URIs handled separately) are public — those
+ * downloads must NOT carry the Gemini key.
+ *
+ * Pure helper exported so the domain match is unit-testable. Returns
+ * the headers map to forward to the upstream fetch, or undefined
+ * when the URL doesn't need auth.
+ */
+export function buildVeoDownloadHeaders(
+  remoteUrl: string,
+  geminiApiKey: string,
+): Record<string, string> | undefined {
+  if (!remoteUrl) return undefined;
+  let host: string;
+  try {
+    host = new URL(remoteUrl).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+  // Only attach the Gemini key on the Files API domain — public CDN
+  // URLs (kie.ai, Replicate, Supabase) must NOT receive an unrelated
+  // auth header.
+  if (host === 'generativelanguage.googleapis.com') {
+    return { 'x-goog-api-key': geminiApiKey };
+  }
+  return undefined;
+}
+
 interface VeoVariantResult {
   index: number;
   ok: boolean;
@@ -414,12 +446,30 @@ async function runOneVariant(input: RunOneVariantInput): Promise<VeoVariantResul
   }
 
   // ---- Re-upload final mp4 -------------------------------------
+  // Polish-19.2.4: Veo's output URI on the Developer API is a
+  // private Files API URL. Re-load the Gemini key inside the step
+  // and forward x-goog-api-key on the download fetch so the 403
+  // path is closed. The Inngest step boundary means the key
+  // reference doesn't cross step boundaries — same defense-in-depth
+  // as every other key-using step in this worker.
   const uploadResult = await step.run(`upload-video-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['gemini']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError)
+        throw new Error(
+          `Cannot download Veo output ${videoUri!}: ${err.message}. ` +
+            `The Gemini key is required because Veo's URI is on the private Files API domain.`,
+        );
+      throw err;
+    }
     return uploadGeneratedVideoFromUrl({
       userId,
       jobId,
       remoteUrl: videoUri!,
       filename: `veo-${variantIndex}`,
+      fetchHeaders: buildVeoDownloadHeaders(videoUri!, keys.gemini!),
     });
   });
 
