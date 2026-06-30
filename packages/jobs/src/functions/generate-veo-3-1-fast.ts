@@ -2,9 +2,12 @@ import { eq } from 'drizzle-orm';
 import {
   VEO_MAX_SECONDS_PER_CALL,
   callClaude,
+  checkReplicateConcat,
   clampVeoDurationSeconds,
   estimateVeoCostUsd,
+  isVideoConcatEnabled,
   pollVeoOperation,
+  submitReplicateConcat,
   submitVeoVideo,
 } from '@mbb/ai-providers';
 import { computeVeoSegmentCount } from '@mbb/shared';
@@ -446,20 +449,203 @@ async function runOneVariant(input: RunOneVariantInput): Promise<VeoVariantResul
     return { index: variantIndex, ok: false, costUsd: cost, error: adSpecResult.error };
   }
   const adSpec = adSpecResult.adSpec;
-  // Polish-19.3 Commit 1: log the structural intent vs the actual
-  // runtime so the operator can SEE the Commit 1 gap (segments[]
-  // generated, but only segments[0] consumed). The under-delivery
-  // for non-8s picks is acknowledged temporary — Commit 2 lifts it.
-  if (adSpec.segments.length > 1) {
-    console.log(
-      `[veo-3-1-fast] variant ${variantIndex}: Claude returned ${adSpec.segments.length} segments ` +
-        `for ${durationSeconds}s ad. Polish-19.3 Commit 1 only runs segments[0] (8s output). ` +
-        `Full segments[] persisted on the creative row for Commit 2 to consume.`,
-    );
+  // Polish-19.3 Commit 2: fan out all segments[] in parallel via
+  // Promise.all, then stitch with the Polish-9.12 Replicate ffmpeg-
+  // concat helper. For single-segment (8s) the worker still does
+  // one submit → poll → upload chain and writes a composite row
+  // identical to Polish-19.2's output (no stitch step, no per-
+  // segment rows). For N>1 the worker writes per-segment rows
+  // (isClipPart: true, format='..._segment') AND a composite row
+  // (isClipPart: false, format='veo_3_1_fast_native_audio'). The
+  // /runs/[id] grid filters on isClipPart to show one card per
+  // variant by default; ops can inspect per-segment by drilling in.
+
+  console.log(
+    `[veo-3-1-fast] variant ${variantIndex}: fanning out ${adSpec.segments.length} segment(s) ` +
+      `for ${durationSeconds}s ad. ${
+        adSpec.segments.length > 1 ? 'Will stitch via Replicate ffmpeg-concat after all land.' : ''
+      }`,
+  );
+
+  // Multi-segment guard: if N>1, stitching is required. If the
+  // operator hasn't set REPLICATE_VIDEO_CONCAT_MODEL_ID, fail
+  // upfront with a clear message rather than burning Veo cost on
+  // segments we'll have no way to stitch.
+  if (adSpec.segments.length > 1 && !isVideoConcatEnabled()) {
+    return {
+      index: variantIndex,
+      ok: false,
+      costUsd: cost,
+      error:
+        `Polish-19.3 multi-segment Veo requires REPLICATE_VIDEO_CONCAT_MODEL_ID env to be set ` +
+        `(Replicate ffmpeg-concat model slug). 8s/single-segment Veo works without it; ` +
+        `15s/30s/60s presets need the env. Set on Vercel + redeploy, or pick 8s preset.`,
+    };
   }
 
-  // ---- Submit Veo (Polish-19.3 Commit 1: segments[0] only) ------
-  const submitResult = await step.run(`veo-submit-${variantIndex}`, async () => {
+  // ---- Generate each segment in parallel -----------------------
+  const segmentResults = await Promise.all(
+    adSpec.segments.map((seg: VeoAdSegment) =>
+      runOneSegment({
+        step,
+        jobId,
+        userId,
+        variantIndex,
+        segmentIndex: seg.index,
+        segmentPrompt: seg.prompt,
+      }),
+    ),
+  );
+  // Sum per-segment cost regardless of pass/fail (Veo charges on
+  // submit-to-success and we conservatively bill).
+  for (const s of segmentResults) cost += s.costUsd;
+
+  const allOk = segmentResults.every((s) => s.ok);
+  if (!allOk) {
+    // Persist per-segment rows for the successes + record the
+    // first failure on the variant. Operator gets the partial
+    // success URLs + a clear failure message for the broken one(s).
+    const firstFailure = segmentResults.find((s) => !s.ok);
+    console.log(
+      `[veo-3-1-fast] variant ${variantIndex}: ${
+        segmentResults.filter((s) => s.ok).length
+      }/${segmentResults.length} segments succeeded; aborting before stitch. ` +
+        `First failure: ${firstFailure?.error ?? 'unknown'}`,
+    );
+    return {
+      index: variantIndex,
+      ok: false,
+      costUsd: cost,
+      error: `Segment ${firstFailure?.segmentIndex ?? '?'} failed: ${firstFailure?.error ?? 'unknown'}`,
+    };
+  }
+
+  // All segments good — collect the URLs in segment-index order.
+  const successSegments = [...segmentResults]
+    .filter((s): s is SegmentSuccess => s.ok)
+    .sort((a, b) => a.segmentIndex - b.segmentIndex);
+  const segmentUrls = successSegments.map((s) => s.publicUrl);
+
+  // ---- Stitch when N > 1 ---------------------------------------
+  let compositeUrl = segmentUrls[0]!;
+  let stitched = false;
+  if (successSegments.length > 1) {
+    const stitchResult = await runVeoStitch({
+      step,
+      segmentUrls,
+      userId,
+      jobId,
+      variantIndex,
+    });
+    cost += stitchResult.costUsd;
+    if (!stitchResult.ok) {
+      return {
+        index: variantIndex,
+        ok: false,
+        costUsd: cost,
+        error: `Stitch failed: ${stitchResult.error}`,
+      };
+    }
+    compositeUrl = stitchResult.publicUrl;
+    stitched = true;
+  }
+
+  // ---- Persist per-segment rows (when N > 1) + composite row ---
+  if (successSegments.length > 1) {
+    await step.run(`insert-segment-rows-${variantIndex}`, async () => {
+      const db = getDb();
+      const rows = successSegments.map((s) => ({
+        userId,
+        generationJobId: jobId,
+        fileUrl: s.publicUrl,
+        aspectRatio: '9:16' as const,
+        status: 'ready_for_review' as const,
+        format: 'veo_3_1_fast_native_audio_segment',
+        clipIndex: s.segmentIndex,
+        isClipPart: true,
+        generationMetadata: {
+          variant_index: variantIndex,
+          segment_index: s.segmentIndex,
+          veo_operation_name: s.veoOperationName,
+          duration_seconds: VEO_MAX_SECONDS_PER_CALL,
+          prompt_chars: s.promptChars,
+        },
+      }));
+      await db.insert(schema.generatedCreatives).values(rows);
+    });
+  }
+  await step.run(`insert-composite-${variantIndex}`, async () => {
+    const db = getDb();
+    await db.insert(schema.generatedCreatives).values({
+      userId,
+      generationJobId: jobId,
+      fileUrl: compositeUrl,
+      aspectRatio: '9:16',
+      status: 'ready_for_review',
+      format: 'veo_3_1_fast_native_audio',
+      isClipPart: false,
+      generationMetadata: {
+        variant_index: variantIndex,
+        duration_seconds: successSegments.length * VEO_MAX_SECONDS_PER_CALL,
+        segment_count_requested: segmentCount,
+        segment_count_generated: successSegments.length,
+        segment_urls: segmentUrls,
+        veo_operation_names: successSegments.map((s) => s.veoOperationName),
+        segments: adSpec.segments,
+        stitched,
+      },
+    });
+  });
+
+  return { index: variantIndex, ok: true, costUsd: cost, fileUrl: compositeUrl };
+}
+
+// =========================================================================
+// Polish-19.3 Commit 2: per-segment runner + stitch helper
+// =========================================================================
+
+interface SegmentSuccess {
+  ok: true;
+  segmentIndex: number;
+  videoUri: string;
+  publicUrl: string;
+  veoOperationName: string;
+  promptChars: number;
+  costUsd: number;
+}
+interface SegmentFailure {
+  ok: false;
+  segmentIndex: number;
+  error: string;
+  costUsd: number;
+  veoOperationName?: string;
+}
+type SegmentResult = SegmentSuccess | SegmentFailure;
+
+/**
+ * Polish-19.3 Commit 2: one 8s Veo segment — submit → poll → download.
+ * Identical step structure to the pre-19.3 single-segment runner but
+ * step names suffixed with `-${segmentIndex}` so all N parallel
+ * segments live cleanly in Inngest's durable execution tree.
+ *
+ * Veo charges on submit-to-success, so the cost is added either way
+ * (poll-timeout-but-Veo-finished case is the same gap we documented
+ * in Polish-19.0.5 for Kling — recoverable via the persisted
+ * veo_operation_name on the failed segment row).
+ */
+async function runOneSegment(input: {
+  step: Parameters<Parameters<typeof inngest.createFunction>[2]>[0]['step'];
+  jobId: string;
+  userId: string;
+  variantIndex: number;
+  segmentIndex: number;
+  segmentPrompt: string;
+}): Promise<SegmentResult> {
+  const { step, jobId, userId, variantIndex, segmentIndex, segmentPrompt } = input;
+  const segLabel = `${variantIndex}-${segmentIndex}`;
+  let cost = 0;
+
+  const submitResult = await step.run(`veo-submit-${segLabel}`, async () => {
     let keys;
     try {
       keys = await loadDecryptedKeys(userId, ['gemini']);
@@ -470,8 +656,8 @@ async function runOneVariant(input: RunOneVariantInput): Promise<VeoVariantResul
     const submit = await submitVeoVideo({
       userId,
       apiKey: keys.gemini!,
-      prompt: adSpec.segments[0]!.prompt,
-      durationSeconds,
+      prompt: segmentPrompt,
+      durationSeconds: VEO_MAX_SECONDS_PER_CALL,
       aspectRatio: '9:16',
       generationJobId: jobId,
     });
@@ -484,15 +670,14 @@ async function runOneVariant(input: RunOneVariantInput): Promise<VeoVariantResul
     return { ok: true as const, operationName: submit.operationName };
   });
   if (!submitResult.ok) {
-    return { index: variantIndex, ok: false, costUsd: cost, error: submitResult.error };
+    return { ok: false, segmentIndex, costUsd: cost, error: submitResult.error };
   }
 
-  // ---- Poll Veo operation --------------------------------------
-  await step.sleep(`veo-warmup-${variantIndex}`, `${POLL_WARMUP_SECONDS}s`);
+  await step.sleep(`veo-warmup-${segLabel}`, `${POLL_WARMUP_SECONDS}s`);
   let videoUri: string | undefined;
   let pollError: string | undefined;
   for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
-    const poll = await step.run(`veo-poll-${variantIndex}-${attempt}`, async () => {
+    const poll = await step.run(`veo-poll-${segLabel}-${attempt}`, async () => {
       let keys;
       try {
         keys = await loadDecryptedKeys(userId, ['gemini']);
@@ -525,71 +710,39 @@ async function runOneVariant(input: RunOneVariantInput): Promise<VeoVariantResul
       break;
     }
     await step.sleep(
-      `veo-wait-${variantIndex}-${attempt}`,
+      `veo-wait-${segLabel}-${attempt}`,
       `${computeVeoPollIntervalSeconds(attempt)}s`,
     );
   }
 
-  // Veo charges on submit-to-success — bill the clamped seconds
-  // either way, the operator can dispute via the audit log if Veo
-  // refunds genuine failures.
-  cost += estimateVeoCostUsd(durationSeconds);
+  cost += estimateVeoCostUsd(VEO_MAX_SECONDS_PER_CALL);
 
   if (!videoUri) {
     console.log(
-      `[veo-3-1-fast] variant ${variantIndex} timed out / failed after ${POLL_MAX_ATTEMPTS} polls. ` +
+      `[veo-3-1-fast] segment ${segLabel} timed out / failed after ${POLL_MAX_ATTEMPTS} polls. ` +
         `operation=${submitResult.operationName} last_error=${pollError ?? 'unset'}`,
     );
-    // Persist the in-flight operation name for manual recovery
-    // (same Polish-19.0.5 pattern as Kling).
-    await step.run(`veo-insert-in-flight-${variantIndex}`, async () => {
-      const db = getDb();
-      await db.insert(schema.generatedCreatives).values({
-        userId,
-        generationJobId: jobId,
-        fileUrl: '',
-        aspectRatio: '9:16',
-        status: 'failed',
-        format: 'veo_3_1_fast_native_audio',
-        isClipPart: false,
-        generationMetadata: {
-          variant_index: variantIndex,
-          veo_operation_name: submitResult.operationName,
-          in_flight: true,
-          timed_out_after_polls: POLL_MAX_ATTEMPTS,
-          duration_seconds: durationSeconds,
-          last_error_message: pollError ?? null,
-          recoverable: true,
-        },
-      });
-    });
     return {
-      index: variantIndex,
       ok: false,
+      segmentIndex,
       costUsd: cost,
+      veoOperationName: submitResult.operationName,
       error:
-        `Veo operation ${submitResult.operationName} did not reach a terminal state within ` +
-        `${POLL_MAX_ATTEMPTS} polls. Operation name saved on the failed creative for recovery. ` +
-        (pollError ? `Last poll error: ${pollError}` : ''),
+        `Veo operation ${submitResult.operationName} (segment ${segmentIndex}) did not reach ` +
+        `terminal state within ${POLL_MAX_ATTEMPTS} polls. ` +
+        (pollError ? `Last error: ${pollError}` : ''),
     };
   }
 
-  // ---- Re-upload final mp4 -------------------------------------
-  // Polish-19.2.4: Veo's output URI on the Developer API is a
-  // private Files API URL. Re-load the Gemini key inside the step
-  // and forward x-goog-api-key on the download fetch so the 403
-  // path is closed. The Inngest step boundary means the key
-  // reference doesn't cross step boundaries — same defense-in-depth
-  // as every other key-using step in this worker.
-  const uploadResult = await step.run(`upload-video-${variantIndex}`, async () => {
+  const uploadResult = await step.run(`upload-video-${segLabel}`, async () => {
     let keys;
     try {
       keys = await loadDecryptedKeys(userId, ['gemini']);
     } catch (err) {
       if (err instanceof MissingProviderKeyError)
         throw new Error(
-          `Cannot download Veo output ${videoUri!}: ${err.message}. ` +
-            `The Gemini key is required because Veo's URI is on the private Files API domain.`,
+          `Cannot download Veo segment ${segLabel} output: ${err.message}. ` +
+            `Gemini key required for the private Files API URI.`,
         );
       throw err;
     }
@@ -597,38 +750,125 @@ async function runOneVariant(input: RunOneVariantInput): Promise<VeoVariantResul
       userId,
       jobId,
       remoteUrl: videoUri!,
-      filename: `veo-${variantIndex}`,
+      filename: `veo-${variantIndex}-seg-${segmentIndex}`,
       fetchHeaders: buildVeoDownloadHeaders(videoUri!, keys.gemini!),
     });
   });
 
-  // ---- Persist generated_creatives row -------------------------
-  await step.run(`insert-creative-${variantIndex}`, async () => {
-    const db = getDb();
-    await db.insert(schema.generatedCreatives).values({
+  return {
+    ok: true,
+    segmentIndex,
+    videoUri,
+    publicUrl: uploadResult.publicUrl,
+    veoOperationName: submitResult.operationName,
+    promptChars: segmentPrompt.length,
+    costUsd: cost,
+  };
+}
+
+const STITCH_POLL_INTERVAL_SECONDS = 8;
+const STITCH_POLL_MAX_ATTEMPTS = 45; // ~6 min ceiling
+
+/**
+ * Polish-19.3 Commit 2: clone of generate-kie-omni-flash-native's
+ * runOmniStitch — submit Replicate ffmpeg-concat, poll until ready,
+ * re-upload the stitched mp4 to Supabase Storage for a durable URL.
+ *
+ * Uses the existing `kling` BYOK key (load-keys.ts has the Polish-9.3
+ * fallback that resolves `kling` from a `replicate` connection row
+ * too, so either key works). REPLICATE_VIDEO_CONCAT_MODEL_ID must be
+ * set for this to fire — the caller checked isVideoConcatEnabled()
+ * upstream before any Veo cost was burned on multi-segment.
+ */
+async function runVeoStitch(input: {
+  step: Parameters<Parameters<typeof inngest.createFunction>[2]>[0]['step'];
+  segmentUrls: string[];
+  userId: string;
+  jobId: string;
+  variantIndex: number;
+}): Promise<
+  { ok: true; publicUrl: string; costUsd: number } | { ok: false; error: string; costUsd: number }
+> {
+  const { step, segmentUrls, userId, jobId, variantIndex } = input;
+
+  const submit = await step.run(`veo-stitch-submit-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['kling']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+    return submitReplicateConcat({
       userId,
+      apiKey: keys.kling!,
+      videoUrls: segmentUrls,
       generationJobId: jobId,
-      fileUrl: uploadResult.publicUrl,
-      aspectRatio: '9:16',
-      status: 'ready_for_review',
-      format: 'veo_3_1_fast_native_audio',
-      isClipPart: false,
-      generationMetadata: {
-        variant_index: variantIndex,
-        duration_seconds: durationSeconds,
-        veo_operation_name: submitResult.operationName,
-        // Polish-19.3 Commit 1: persist full segments[] for Commit 2.
-        // Commit 1 only consumed segments[0] — the remaining entries
-        // are pre-generated Claude output waiting for the parallel
-        // worker pass to materialize as additional 8s clips +
-        // ffmpeg-concat stitch.
-        segment_count_requested: segmentCount,
-        segment_count_generated: 1,
-        segments: adSpec.segments,
-        ad_spec_chars: adSpec.segments[0]!.prompt.length,
-      },
     });
   });
+  if (!submit.ok || !('predictionId' in submit) || !submit.predictionId) {
+    const err =
+      'errorMessage' in submit
+        ? submit.errorMessage
+        : 'error' in submit
+          ? submit.error
+          : 'stitch submit failed';
+    return { ok: false, costUsd: 0, error: err ?? 'stitch submit failed' };
+  }
+  const predictionId = submit.predictionId;
 
-  return { index: variantIndex, ok: true, costUsd: cost, fileUrl: uploadResult.publicUrl };
+  let stitchedUrl: string | undefined;
+  let stitchCost = 0;
+  let stitchError: string | undefined;
+  for (let attempt = 0; attempt < STITCH_POLL_MAX_ATTEMPTS; attempt++) {
+    await step.sleep(
+      `veo-stitch-wait-${variantIndex}-${attempt}`,
+      `${STITCH_POLL_INTERVAL_SECONDS}s`,
+    );
+    const tick = await step.run(`veo-stitch-poll-${variantIndex}-${attempt}`, async () => {
+      const keys = await loadDecryptedKeys(userId, ['kling']);
+      return checkReplicateConcat({
+        userId,
+        apiKey: keys.kling!,
+        predictionId,
+        generationJobId: jobId,
+      });
+    });
+    if (tick.status === 'completed') {
+      stitchedUrl = tick.videoUrl;
+      stitchCost = tick.costUsd;
+      break;
+    }
+    if (tick.status === 'failed') {
+      stitchError = tick.errorMessage ?? 'stitch failed';
+      break;
+    }
+  }
+  if (!stitchedUrl) {
+    return {
+      ok: false,
+      costUsd: stitchCost,
+      error: stitchError ?? `Stitch timed out after ${STITCH_POLL_MAX_ATTEMPTS} polls`,
+    };
+  }
+
+  const upload = await step.run(`veo-stitch-upload-${variantIndex}`, async () => {
+    try {
+      const u = await uploadGeneratedVideoFromUrl({
+        userId,
+        jobId,
+        remoteUrl: stitchedUrl!,
+        filename: `veo-${variantIndex}-composite`,
+      });
+      return { ok: true as const, publicUrl: u.publicUrl };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false as const, error: msg };
+    }
+  });
+  // If the stitched-output re-upload fails, fall back to the
+  // Replicate-delivery URL — it works for at least 24h while the
+  // operator investigates.
+  const publicUrl = upload.ok ? upload.publicUrl : stitchedUrl;
+  return { ok: true, publicUrl, costUsd: stitchCost };
 }

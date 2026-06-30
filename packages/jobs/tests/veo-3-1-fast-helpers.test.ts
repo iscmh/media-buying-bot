@@ -229,31 +229,92 @@ describe('Polish-19.3: fallbackToSingleSegment', () => {
   });
 });
 
-describe('Polish-19.3: Commit 1 invariant — worker reads segments[0] only', () => {
-  // Source-shape tripwire. Commit 2 lifts this to a fan-out + concat
-  // loop. Until then, the worker MUST only consume segments[0] so
-  // the runtime stays back-compat with Polish-19.2 single-chunk
-  // behavior for 8s picks.
-  it('the submit call uses adSpec.segments[0].prompt (NOT the full segments array joined)', async () => {
+describe('Polish-19.3 Commit 2 — fan-out + stitch source shape', () => {
+  // Source-shape tripwires for the multi-segment path. Catches
+  // regressions like "future cleanup collapses parallel runs back
+  // to sequential" or "stitch step gets dropped" before deploy.
+
+  it('the worker fans out segments[] in parallel via Promise.all + runOneSegment', async () => {
     const fs = await import('node:fs/promises');
     const src = await fs.readFile(
       new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
       'utf8',
     );
-    expect(src).toMatch(/prompt: adSpec\.segments\[0\]!\.prompt/);
-    // Tripwire — must not regress to a join() pattern that would
-    // cram all segment prompts into one Veo call.
-    expect(src).not.toMatch(/segments\.map[^)]*\)\.join/);
+    expect(src).toMatch(/Promise\.all\(\s*adSpec\.segments\.map/);
+    expect(src).toMatch(/runOneSegment\(/);
+    // Tripwire — must NOT regress to a sequential for-loop over
+    // segments which would N× the wall-clock.
+    expect(src).not.toMatch(/for\s*\(const\s+seg\s+of\s+adSpec\.segments\)/);
   });
 
-  it('the worker persists full segments[] + segment_count_generated=1 on the creative row', async () => {
+  it('the multi-segment guard fails fast when REPLICATE_VIDEO_CONCAT_MODEL_ID is unset', async () => {
     const fs = await import('node:fs/promises');
     const src = await fs.readFile(
       new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
       'utf8',
     );
-    expect(src).toMatch(/segment_count_requested: segmentCount/);
-    expect(src).toMatch(/segment_count_generated: 1/);
-    expect(src).toMatch(/segments: adSpec\.segments/);
+    expect(src).toMatch(/adSpec\.segments\.length > 1 && !isVideoConcatEnabled\(\)/);
+    expect(src).toMatch(/REPLICATE_VIDEO_CONCAT_MODEL_ID/);
+  });
+
+  it('the worker calls runVeoStitch only when successSegments.length > 1', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/if \(successSegments\.length > 1\) \{[\s\S]*?runVeoStitch/);
+  });
+
+  it('per-segment rows use isClipPart=true + format _segment + clipIndex', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/insert-segment-rows-/);
+    expect(src).toMatch(/format: 'veo_3_1_fast_native_audio_segment'/);
+    expect(src).toMatch(/clipIndex: s\.segmentIndex/);
+    expect(src).toMatch(/isClipPart: true/);
+  });
+
+  it('composite row uses isClipPart=false + the canonical pipeline format', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/insert-composite-/);
+    expect(src).toMatch(/isClipPart: false/);
+    expect(src).toMatch(/format: 'veo_3_1_fast_native_audio'/);
+    // Composite's metadata must record actual segments_generated (not
+    // requested) so the operator sees real coverage in the audit log.
+    expect(src).toMatch(/segment_count_generated: successSegments\.length/);
+  });
+
+  it('runVeoStitch uses the kling BYOK key + Polish-9.12 submitReplicateConcat helper', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    expect(src).toMatch(/loadDecryptedKeys\(userId, \['kling'\]\)/);
+    expect(src).toMatch(/submitReplicateConcat/);
+    expect(src).toMatch(/checkReplicateConcat/);
+  });
+
+  it('8s single-segment path still bypasses stitch (back-compat with Polish-19.2)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    // The `compositeUrl = segmentUrls[0]!` default + the
+    // conditional stitch means single-segment runs write the
+    // segment URL directly as the composite. Tripwire against
+    // a regression that would always stitch (would 422 on a
+    // single-input concat).
+    expect(src).toMatch(/let compositeUrl = segmentUrls\[0\]!/);
+    expect(src).toMatch(/let stitched = false/);
   });
 });
