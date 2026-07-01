@@ -297,11 +297,6 @@ async function loadJobRoutingEvent(
   jobId: string,
 ): Promise<
   | 'generation/ugc.requested'
-  | 'generation/cinematic.requested'
-  | 'generation/kling-multi-clip.requested'
-  | 'generation/kling-3-omni-multi-segment.requested'
-  | 'generation/kie-omni-flash-native.requested'
-  | 'generation/kie-kling-avatar-v2.requested'
   | 'generation/sora.requested'
   | 'generation/nano-banana.requested'
   | 'generation/video-variant.requested'
@@ -343,13 +338,6 @@ async function loadJobRoutingEvent(
           `workerEvent=${workerEvent} (resolved from descriptor)`,
       );
       return workerEvent;
-    }
-    if (row?.format === 'cinematic_voiceover') {
-      console.log(
-        `[analyze-concept] job ${jobId} dispatch: format=cinematic_voiceover → ` +
-          `workerEvent=generation/cinematic.requested (legacy Polish-4 path)`,
-      );
-      return 'generation/cinematic.requested';
     }
     console.log(
       `[analyze-concept] job ${jobId} dispatch: no pickedPipeline + format=${row?.format ?? 'null'} → ` +

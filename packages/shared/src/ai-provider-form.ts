@@ -27,11 +27,9 @@ const HEYGEN_KEY_PATTERN = /^[A-Za-z0-9_=-]{20,256}$/;
 // Polish-8: new providers.
 const REPLICATE_KEY_PATTERN = /^r8_[A-Za-z0-9]{32,128}$/;
 const OPENAI_KEY_PATTERN = /^sk-[A-Za-z0-9_-]{20,256}$/;
-const ELEVENLABS_KEY_PATTERN = /^(sk_|xi-)[A-Za-z0-9_-]{20,256}$/;
-
 export const AiProviderKeyInputSchema = z
   .object({
-    provider: z.enum(['arcads', 'heygen', 'creatify', 'replicate', 'openai', 'elevenlabs']),
+    provider: z.enum(['arcads', 'heygen', 'creatify', 'replicate', 'openai']),
     apiKey: z.string().trim().min(1, 'Paste your API key.'),
   })
   .superRefine((value, ctx) => {
@@ -58,10 +56,6 @@ export const AiProviderKeyInputSchema = z
       case 'openai':
         pattern = OPENAI_KEY_PATTERN;
         hint = 'OpenAI keys start with sk- followed by 20+ chars.';
-        break;
-      case 'elevenlabs':
-        pattern = ELEVENLABS_KEY_PATTERN;
-        hint = 'ElevenLabs keys start with sk_ or xi- followed by 20+ chars.';
         break;
     }
     if (!pattern.test(value.apiKey)) {
@@ -134,13 +128,6 @@ export const AI_PROVIDER_META: Record<
     apiDocsUrl: 'https://platform.openai.com/docs/api-reference',
     verificationMethod: 'api',
   },
-  elevenlabs: {
-    label: 'ElevenLabs',
-    description: 'Optional / legacy — Polish-4 cinematic voiceover (deprecated path).',
-    pricingUrl: 'https://elevenlabs.io/pricing',
-    apiDocsUrl: 'https://elevenlabs.io/docs/api-reference',
-    verificationMethod: 'api',
-  },
 };
 
 /**
@@ -153,9 +140,4 @@ export const AI_PROVIDER_META: Record<
 // not ai_provider_connections — the underlying ai_provider enum doesn't
 // include 'gemini' because Gemini is a tool provider in the data model.
 // The connect cards exposed here are the ones that map to ai_provider_connections rows.
-export const CONNECTABLE_AI_PROVIDERS: AIProviderName[] = [
-  'heygen',
-  'replicate',
-  'openai',
-  'elevenlabs',
-];
+export const CONNECTABLE_AI_PROVIDERS: AIProviderName[] = ['heygen', 'replicate', 'openai'];

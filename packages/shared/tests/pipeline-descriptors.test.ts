@@ -1,7 +1,10 @@
 /**
- * Polish-9.2: pin the pipeline-to-event-name mapping so the routing
- * is consistent between the web app (job creation) and the
- * analyze-concept worker (fan-out).
+ * Polish-9.2 → Polish-20 Commit 4: pins the pipeline-to-event-name
+ * mapping so routing stays consistent between the web app (job
+ * creation) and analyze-concept (fan-out). Post-Commit-4 the
+ * PipelineType enum is trimmed to the three legacy survivors
+ * (HeyGen / Sora / Nano Banana); the new UGC video flow is
+ * descriptor-driven via video-models.ts and NOT part of this table.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -12,8 +15,8 @@ import {
   type PipelineType,
 } from '../src';
 
-describe('Polish-9.2: describePipeline', () => {
-  it('avatar talking head → ugc.requested + heygen', () => {
+describe('Polish-20 Commit 4: describePipeline surviving legacy descriptors', () => {
+  it('HeyGen avatar talking head → ugc.requested', () => {
     const d = describePipeline('heygen_avatar_talking_head');
     expect(d.workerEvent).toBe('generation/ugc.requested');
     expect(d.providerChoice).toBe('heygen');
@@ -21,22 +24,14 @@ describe('Polish-9.2: describePipeline', () => {
     expect(d.requiredProviders).toEqual(['heygen']);
   });
 
-  it('sora single shot → sora.requested + openai', () => {
+  it('Sora single shot → sora.requested', () => {
     const d = describePipeline('sora_2_single_shot');
     expect(d.workerEvent).toBe('generation/sora.requested');
     expect(d.providerChoice).toBe('openai');
     expect(d.requiredProviders).toEqual(['openai']);
   });
 
-  it('kling multi-clip → kling-multi-clip.requested + kling', () => {
-    const d = describePipeline('kling_3_multi_clip_native_lipsync');
-    expect(d.workerEvent).toBe('generation/kling-multi-clip.requested');
-    expect(d.providerChoice).toBe('kling');
-    expect(d.format).toBe('kling_3_multi_clip');
-    expect(d.requiredProviders).toEqual(['kling']);
-  });
-
-  it('nano banana → nano-banana.requested + gemini', () => {
+  it('Nano Banana → nano-banana.requested', () => {
     const d = describePipeline('nano_banana_static_image');
     expect(d.workerEvent).toBe('generation/nano-banana.requested');
     expect(d.providerChoice).toBe('gemini');
@@ -55,65 +50,41 @@ describe('Polish-9.2: describePipeline', () => {
   });
 });
 
-describe('Polish-9.2: pipelineFromString', () => {
+describe('Polish-20 Commit 4: pipelineFromString round-trip', () => {
   it('round-trips each known pipeline', () => {
     for (const p of ALL_PIPELINES) {
       expect(pipelineFromString(p)).toBe(p);
     }
   });
 
-  it('returns null for unknown strings', () => {
+  it('returns null for unknown strings + deleted pipelines', () => {
     expect(pipelineFromString('martian_holograms')).toBeNull();
     expect(pipelineFromString('')).toBeNull();
     expect(pipelineFromString(null)).toBeNull();
     expect(pipelineFromString(undefined)).toBeNull();
+    // Post-Commit-4 the four legacy Kling/Omni pipelines no longer
+    // parse — the enum is gone.
+    expect(pipelineFromString('kling_3_multi_clip_native_lipsync')).toBeNull();
+    expect(pipelineFromString('kling_3_omni_multi_segment')).toBeNull();
+    expect(pipelineFromString('kie_omni_flash_native')).toBeNull();
+    expect(pipelineFromString('kie_kling_avatar_v2_standard')).toBeNull();
+    expect(pipelineFromString('veo_3_1_fast_native_audio')).toBeNull();
   });
 });
 
-describe('Polish-19: defaultPipeline', () => {
-  it('returns exactly one pipeline (the descriptor marked isDefault)', () => {
-    const d = defaultPipeline();
-    expect(ALL_PIPELINES).toContain(d);
-    expect(describePipeline(d).isDefault).toBe(true);
-  });
-
-  it('only one descriptor is marked default at a time', () => {
-    const defaults = ALL_PIPELINES.filter((p) => describePipeline(p).isDefault);
-    expect(defaults).toHaveLength(1);
+describe('Polish-20 Commit 4: defaultPipeline throws — no pipeline-level default', () => {
+  it('throws with a clear "use ModelProviderConfig" message', () => {
+    expect(() => defaultPipeline()).toThrow(/ModelProviderConfig/);
   });
 });
 
-describe('Polish-20 Commit 3: ALL_PIPELINES coverage post-Veo removal', () => {
-  it('covers the remaining 7 PipelineType values (Veo deleted in Commit 3)', () => {
+describe('Polish-20 Commit 4: ALL_PIPELINES coverage post-legacy-purge', () => {
+  it('covers exactly the 3 legacy survivors (HeyGen / Sora / Nano Banana)', () => {
     const expected: PipelineType[] = [
       'heygen_avatar_talking_head',
       'sora_2_single_shot',
-      'kling_3_multi_clip_native_lipsync',
-      'kling_3_omni_multi_segment',
-      'kie_omni_flash_native',
-      'kie_kling_avatar_v2_standard',
       'nano_banana_static_image',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
-  });
-});
-
-describe('Polish-20 Commit 3: kie_kling_avatar_v2_standard is the temporary legacy default', () => {
-  it('routes to the kie-kling-avatar-v2.requested worker', () => {
-    const d = describePipeline('kie_kling_avatar_v2_standard');
-    expect(d.workerEvent).toBe('generation/kie-kling-avatar-v2.requested');
-    expect(d.providerChoice).toBe('kling');
-    expect(d.format).toBe('kie_kling_avatar_v2_standard');
-  });
-
-  it('requires the 4 providers the worker actually calls', () => {
-    const d = describePipeline('kie_kling_avatar_v2_standard');
-    expect(new Set(d.requiredProviders)).toEqual(
-      new Set(['claude', 'gemini', 'kie_ai', 'elevenlabs']),
-    );
-  });
-
-  it('carries isDefault=true — the form calls defaultPipeline() as a legacy signal until Commit 4', () => {
-    expect(describePipeline('kie_kling_avatar_v2_standard').isDefault).toBe(true);
   });
 });

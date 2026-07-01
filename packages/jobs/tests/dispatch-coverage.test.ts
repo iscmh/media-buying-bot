@@ -61,7 +61,6 @@ describe('Polish-19.2.1: dispatch coverage between PipelineType and registered w
     // intentionally-non-pipeline-routed legacy events, surface it.
     const knownNonPipelineEvents = new Set([
       'generation/static.requested', // routed by sendGenerationJobEvent when conceptType=static
-      'generation/cinematic.requested', // legacy Polish-4 format-based path
       'generation/ugc.requested', // default fallback in analyze-concept
       // Polish-20 Commit 2: unified video-variant worker. Not driven by
       // a legacy PipelineType descriptor — routed on metadata.model_id
@@ -89,15 +88,14 @@ describe('Polish-19.2.1: dispatch coverage between PipelineType and registered w
     expect(orphanRegistered).toEqual([]);
   });
 
-  it('Polish-19 Kling Avatar pipeline still dispatches correctly (regression pin)', () => {
-    const kling = describePipeline('kie_kling_avatar_v2_standard');
-    expect(kling.workerEvent).toBe('generation/kie-kling-avatar-v2.requested');
-    expect(REGISTERED.has(kling.workerEvent)).toBe(true);
-  });
-
-  it('Polish-12 Omni Flash pipeline still dispatches correctly (regression pin)', () => {
-    const omni = describePipeline('kie_omni_flash_native');
-    expect(omni.workerEvent).toBe('generation/kie-omni-flash-native.requested');
-    expect(REGISTERED.has(omni.workerEvent)).toBe(true);
+  it('Polish-20 Commit 4: surviving legacy pipelines still dispatch (HeyGen / Sora / Nano Banana)', () => {
+    for (const p of [
+      'heygen_avatar_talking_head',
+      'sora_2_single_shot',
+      'nano_banana_static_image',
+    ] as const) {
+      const d = describePipeline(p);
+      expect(REGISTERED.has(d.workerEvent)).toBe(true);
+    }
   });
 });

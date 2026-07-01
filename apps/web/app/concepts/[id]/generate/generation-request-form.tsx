@@ -499,7 +499,7 @@ export function GenerationRequestForm({
         </Button>
       </div>
 
-      {conceptType === 'ugc' && !heygenReady && !connectedProviders.kling.connected && (
+      {conceptType === 'ugc' && !heygenReady && !connectedProviders.openai.connected && (
         <p className="text-xs text-[color:var(--accent-negative)]">
           Connect at least one provider on{' '}
           <a className="underline-offset-4 hover:underline" href="/connections/ai-provider">
@@ -618,10 +618,8 @@ function providerReadyForPipeline(pipeline: PipelineType, conns: ConnectedProvid
   const required = describePipeline(pipeline).requiredProviders;
   for (const r of required) {
     if (r === 'heygen' && !conns.heygen.connected) return false;
-    if (r === 'kling' && !conns.kling.connected) return false;
     if (r === 'openai' && !conns.openai.connected) return false;
     if (r === 'gemini' && !conns.gemini.connected) return false;
-    if (r === 'elevenlabs' && !conns.elevenlabs.connected) return false;
     // Polish-12: kie.ai + Claude land here. Both live in
     // tool_connections (paste API key at /connections/tools).
     if (r === 'claude' && !conns.claude.connected) return false;

@@ -95,39 +95,7 @@ describe('Polish-9.6: Gemini image timeout configuration', () => {
   });
 });
 
-describe('Polish-9.6: Kling submit/check timeouts', () => {
-  it('submit honors REPLICATE_SUBMIT_TIMEOUT_MS env override', async () => {
-    process.env.REPLICATE_SUBMIT_TIMEOUT_MS = '99999';
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(JSON.stringify({ id: 'pred_abc' }), { status: 201 }),
-      ) as typeof globalThis.fetch;
-    const { submitKlingVideo } = await import('../src/kling');
-    const r = await submitKlingVideo({
-      userId: 'u',
-      apiKey: 'k',
-      prompt: 'p',
-    });
-    expect(r.ok).toBe(true);
-  });
-
-  it('check honors REPLICATE_CHECK_TIMEOUT_MS env override', async () => {
-    process.env.REPLICATE_CHECK_TIMEOUT_MS = '99999';
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify({ id: 'pred', status: 'succeeded', output: 'https://x/y.mp4' }),
-          { status: 200 },
-        ),
-      ) as typeof globalThis.fetch;
-    const { checkKlingPrediction } = await import('../src/kling');
-    const r = await checkKlingPrediction({
-      userId: 'u',
-      apiKey: 'k',
-      predictionId: 'p',
-    });
-    expect(r.status).toBe('completed');
-  });
-});
+// Polish-20 Commit 4: Kling submit/check timeout tests removed with
+// the legacy Kling client. Replicate concat / lipsync clients still
+// honor REPLICATE_SUBMIT_TIMEOUT_MS + REPLICATE_CHECK_TIMEOUT_MS —
+// coverage lives in their dedicated test files.

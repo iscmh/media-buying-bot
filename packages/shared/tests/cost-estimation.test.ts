@@ -103,48 +103,7 @@ describe('MAX_VARIANTS_PER_JOB constant', () => {
   });
 });
 
-describe('Polish-4: cinematic_voiceover cost path', () => {
-  it('skips Sora prompt refinement + uses Kling+TTS+prompt-build line items', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      provider: 'heygen',
-      format: 'cinematic_voiceover',
-    });
-    // vision $0.10 + prompt-build $0.01 + Kling $0.35 + TTS $0.06 = $0.52
-    // (Polish-9.17: Kling per-clip bumped $0.30 → $0.35 on kling-v2.6.)
-    expect(r.estimateUsd).toBeCloseTo(0.52, 4);
-    const items = r.breakdown.map((b) => b.item);
-    expect(items.some((i) => i.includes('Kling'))).toBe(true);
-    expect(items.some((i) => i.includes('ElevenLabs'))).toBe(true);
-    expect(items.some((i) => i.includes('Cinematic prompt'))).toBe(true);
-    expect(items.some((i) => i.includes('Sora') || i.includes('HeyGen'))).toBe(false);
-  });
-
-  it('10 cinematic variants ≈ vision $0.10 + prompts $0.10 + kling $3.50 + tts $0.60 = $4.30', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 10,
-      provider: 'heygen',
-      format: 'cinematic_voiceover',
-    });
-    expect(r.estimateUsd).toBeCloseTo(4.3, 4);
-  });
-
-  it('kling_3_multi_clip: 1 variant = manual $0.10 + 16 clips × $0.35 + TTS $0.06 + lipsync $1.00 = $6.76', () => {
-    // Polish-11: ElevenLabs voiceover + Replicate lipsync layers
-    // bumped per-variant from $5.70 to ≈$6.76.
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kling_3_multi_clip_native_lipsync',
-    });
-    expect(r.estimateUsd).toBeCloseTo(6.76, 4);
-    expect(r.breakdown.some((b) => b.item.includes('Kling'))).toBe(true);
-    expect(r.breakdown.some((b) => b.item.includes('ElevenLabs'))).toBe(true);
-    expect(r.breakdown.some((b) => b.item.includes('Lipsync'))).toBe(true);
-  });
-
+describe('Polish-20 Commit 4: surviving legacy-pipeline cost paths', () => {
   it('sora_2_single_shot: 3 variants = prompts $0.15 + videos $4.50 = $4.65', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
@@ -179,16 +138,7 @@ describe('Polish-4: cinematic_voiceover cost path', () => {
   });
 });
 
-describe('Polish-9.4: pipeline-only call sites (no provider)', () => {
-  it('ugc + pipeline=kling_3 + no provider → kling-multi-clip price (~$6.76 after Polish-11)', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kling_3_multi_clip_native_lipsync',
-    });
-    expect(r.estimateUsd).toBeCloseTo(6.76, 4);
-  });
-
+describe('Polish-9.4 → Polish-20 Commit 4: pipeline-only call sites (no provider)', () => {
   it('ugc + pipeline=sora_2 + no provider → Sora price ($1.55)', () => {
     const r = estimateGenerationCost({
       conceptType: 'ugc',
@@ -221,243 +171,6 @@ describe('Polish-9.4: pipeline-only call sites (no provider)', () => {
     expect(() => estimateGenerationCost({ conceptType: 'ugc', variantCount: 1 })).toThrow(
       /UGC cost estimate requires a provider/,
     );
-  });
-});
-
-describe('Polish-12.1: kie_omni_flash_native cost scales with segment count', () => {
-  it('≤10s → 1 segment, no stitch: $0.05 + $0.05 + $0.90 = $1.00', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      estimatedDurationSeconds: 10,
-    });
-    // Polish-12.4: +$0.15 character registration → $1.15 total.
-    expect(r.estimateUsd).toBeCloseTo(1.17, 4);
-    expect(r.breakdown.some((b) => /1 segment\b/.test(b.item))).toBe(true);
-    expect(r.breakdown.some((b) => /stitching/.test(b.item))).toBe(false);
-    expect(r.breakdown.some((b) => /character registration/i.test(b.item))).toBe(true);
-  });
-
-  it('≤20s → 2 segments + stitch: $0.05 + $0.05 + $1.80 + $0.05 = $1.95', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      estimatedDurationSeconds: 20,
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 1 frame extract → $2.12.
-    expect(r.estimateUsd).toBeCloseTo(2.1201, 4);
-    expect(r.breakdown.some((b) => /2 segments\b/.test(b.item))).toBe(true);
-    expect(r.breakdown.some((b) => /idan054 video stitching/.test(b.item))).toBe(true);
-    expect(r.breakdown.some((b) => /Chain-continuity frame extracts/.test(b.item))).toBe(true);
-  });
-
-  it('>20s → 3 segments + stitch: $0.05 + $0.05 + $2.70 + $0.05 = $2.85', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      estimatedDurationSeconds: 30,
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 2 frame extracts → $3.04.
-    expect(r.estimateUsd).toBeCloseTo(3.0202, 4);
-    expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
-  });
-
-  it('estimatedDurationSeconds omitted → worst-case 3 segments + stitch ($2.85)', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 2 frame extracts → $3.04.
-    expect(r.estimateUsd).toBeCloseTo(3.0202, 4);
-    expect(r.breakdown.some((b) => /3 segments\b/.test(b.item))).toBe(true);
-  });
-});
-
-describe('Polish-14: kie_omni_flash_native cost scales linearly past 30s', () => {
-  // Polish-14 removed the 3-segment cap. Cost now scales linearly
-  // with duration via ceil(seconds / 10), bounded by the worker's
-  // sanity ceiling of 30 segments (5 minutes). Existing ≤30s cases
-  // stay unchanged (back-compat with Polish-12.1.x tests above).
-
-  it('60s → 6 segments: $0.05 + $0.05 + $5.40 + $0.05 = $5.55', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      estimatedDurationSeconds: 60,
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 5 frame extracts → $5.80.
-    expect(r.estimateUsd).toBeCloseTo(5.7205, 4);
-    expect(r.breakdown.some((b) => /6 segments\b/.test(b.item))).toBe(true);
-  });
-
-  it('90s → 9 segments: $0.05 + $0.05 + $8.10 + $0.05 = $8.25', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      estimatedDurationSeconds: 90,
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 8 frame extracts → $8.56.
-    expect(r.estimateUsd).toBeCloseTo(8.4208, 4);
-    expect(r.breakdown.some((b) => /9 segments\b/.test(b.item))).toBe(true);
-  });
-
-  it('120s → 12 segments: $0.05 + $0.05 + $10.80 + $0.05 = $10.95', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      estimatedDurationSeconds: 120,
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 11 frame extracts → $11.32.
-    expect(r.estimateUsd).toBeCloseTo(11.1211, 4);
-    expect(r.breakdown.some((b) => /12 segments\b/.test(b.item))).toBe(true);
-  });
-
-  it('600s (10 min) → caps at 30 segments: $0.05 + $0.05 + $27.00 + $0.05 = $27.15', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      estimatedDurationSeconds: 600,
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 29 frame extracts → $27.88.
-    expect(r.estimateUsd).toBeCloseTo(27.3229, 4);
-    expect(r.breakdown.some((b) => /30 segments\b/.test(b.item))).toBe(true);
-  });
-
-  it('boundary: 31s → 4 segments (ceil(31/10) = 4)', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      estimatedDurationSeconds: 31,
-    });
-    // Polish-12.4 + 12.5. Total $0.05 + $0.05 + $0.15 + 4 × $0.90
-    // + $0.05 stitch + 3 × $0.02 frame extract = $3.96.
-    expect(r.estimateUsd).toBeCloseTo(3.9203, 4);
-    expect(r.breakdown.some((b) => /4 segments\b/.test(b.item))).toBe(true);
-  });
-});
-
-// Polish-20 Commit 3: Veo pipeline deleted entirely. Cost math + tests
-// for the descriptor-driven video-model branch live in the
-// "Polish-20: estimateByVideoModel branch" block below.
-
-describe('Polish-19: kie_kling_avatar_v2_standard cost', () => {
-  // Single-call lipsync — one Kling Avatar v2 (Pro) generation per
-  // variant at $0.115/sec, plus fixed Claude + Nano Banana + a
-  // per-char ElevenLabs TTS estimate. No segment splitter, no
-  // chain-frame extraction, no character-registration step.
-
-  it('30s default → $0.05 + $0.05 + ~$0.12 TTS + $3.45 Kling ≈ $3.67 per variant', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_kling_avatar_v2_standard',
-    });
-    // 30s × 13 chars/sec = 390 chars; 390 × $0.30/1k = $0.117 TTS.
-    // Per-variant: 0.05 + 0.05 + 0.117 + 3.45 = $3.667 → round4.
-    expect(r.estimateUsd).toBeCloseTo(3.667, 3);
-    expect(r.breakdown.some((b) => /Kling Avatar v2 Pro \(30s/.test(b.item))).toBe(true);
-    expect(r.breakdown.some((b) => /Claude script/.test(b.item))).toBe(true);
-    expect(r.breakdown.some((b) => /Nano Banana reference frame/.test(b.item))).toBe(true);
-    expect(r.breakdown.some((b) => /ElevenLabs TTS/.test(b.item))).toBe(true);
-  });
-
-  it('scales linearly with target duration: 60s ≈ $7.11 (Kling doubles to $6.90)', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_kling_avatar_v2_standard',
-      estimatedDurationSeconds: 60,
-    });
-    // 60s × 13 = 780 chars × $0.30/1k = $0.234 TTS; Kling 60×$0.115 = $6.90.
-    // 0.05 + 0.05 + 0.234 + 6.90 = $7.234.
-    expect(r.estimateUsd).toBeCloseTo(7.234, 3);
-  });
-
-  it('scales linearly with variantCount: 5 × 30s ≈ $18.34', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 5,
-      pipeline: 'kie_kling_avatar_v2_standard',
-    });
-    // 5 × $3.667 = $18.335.
-    expect(r.estimateUsd).toBeCloseTo(18.335, 3);
-  });
-
-  it('sourceDurationSeconds wins over estimatedDurationSeconds', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_kling_avatar_v2_standard',
-      sourceDurationSeconds: 20,
-      estimatedDurationSeconds: 90,
-    });
-    // 20s wins → Kling 20×$0.115 = $2.30; TTS 20×13×$0.0003 = $0.078.
-    // 0.05 + 0.05 + 0.078 + 2.30 = $2.478.
-    expect(r.estimateUsd).toBeCloseTo(2.478, 3);
-  });
-});
-
-describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native quote', () => {
-  // Polish-14.1 lets the form pass the actual detected source-video
-  // duration into the estimator so the upfront cost preview matches
-  // what the worker will generate. sourceDurationSeconds wins over
-  // estimatedDurationSeconds when both are present; back-compat is
-  // preserved when neither is supplied.
-
-  it('sourceDurationSeconds=18 → 2 segments → $1.95', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      sourceDurationSeconds: 18,
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 1 frame extract → $2.12.
-    expect(r.estimateUsd).toBeCloseTo(2.1201, 4);
-    expect(r.breakdown.some((b) => /2 segments\b/.test(b.item))).toBe(true);
-  });
-
-  it('sourceDurationSeconds=60 → 6 segments → $5.55', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      sourceDurationSeconds: 60,
-    });
-    // Polish-12.4 +$0.15 char + Polish-12.5 +$0.02 × 5 frame extracts → $5.80.
-    expect(r.estimateUsd).toBeCloseTo(5.7205, 4);
-    expect(r.breakdown.some((b) => /6 segments\b/.test(b.item))).toBe(true);
-  });
-
-  it('sourceDurationSeconds wins over estimatedDurationSeconds when both passed', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-      sourceDurationSeconds: 18,
-      estimatedDurationSeconds: 90, // would imply 9 segments
-    });
-    // Source wins → 2 segments → $1.95 + $0.15 character + $0.02
-    // chain-frame-extract = $2.12.
-    expect(r.estimateUsd).toBeCloseTo(2.1201, 4);
-  });
-
-  it('back-compat: neither source nor estimated supplied → 30s default → $3.04 (post-12.5)', () => {
-    const r = estimateGenerationCost({
-      conceptType: 'ugc',
-      variantCount: 1,
-      pipeline: 'kie_omni_flash_native',
-    });
-    // Polish-12.5: 3 segments → 2 frame extracts → $3.00 + $0.04 = $3.04.
-    expect(r.estimateUsd).toBeCloseTo(3.0202, 4);
   });
 });
 
@@ -585,11 +298,11 @@ describe('Polish-20: estimateByVideoModel branch (descriptor-driven)', () => {
   it('videoModelId wins over legacy `pipeline` field when both are set', () => {
     // If videoModelId routes correctly, we get the Kling 30s = $3.20;
     // if the legacy pipeline branch fired instead, the number would
-    // differ (kie_kling_avatar_v2_standard hits its own cost formula).
+    // differ (heygen_avatar_talking_head hits its own cost formula).
     const r = estimateGenerationCost({
       conceptType: 'ugc',
       variantCount: 1,
-      pipeline: 'kie_kling_avatar_v2_standard',
+      pipeline: 'heygen_avatar_talking_head',
       videoModelId: 'kling_3_standard',
       sourceDurationSeconds: 30,
     });

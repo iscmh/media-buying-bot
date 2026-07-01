@@ -15,11 +15,9 @@
 export interface FailoverReadyState {
   /** User has an active heygen connection. */
   heygen: boolean;
-  /** User has BOTH kling + elevenlabs (cinematic_voiceover needs both). */
-  klingAndElevenLabs: boolean;
 }
 
-export type CreativeFormat = 'avatar_talking_head' | 'cinematic_voiceover';
+export type CreativeFormat = 'avatar_talking_head';
 
 export interface FailoverDecision {
   /** null when no fallback is possible (no alternate providers connected). */
@@ -28,41 +26,29 @@ export interface FailoverDecision {
   reason: string;
 }
 
+/**
+ * Polish-20 Commit 4: cinematic_voiceover format retired with the
+ * ElevenLabs deletion. Avatar-talking-head failure now has no
+ * fallback route; the worker marks failed + notifies the operator.
+ * Kept as a no-op decision helper so the generate-ugc-variants
+ * caller doesn't need a code-shape change.
+ */
 export function pickFailoverFormat(
   currentFormat: string,
-  ready: FailoverReadyState,
+  _ready: FailoverReadyState,
 ): FailoverDecision {
-  if (currentFormat === 'cinematic_voiceover') {
-    if (ready.heygen) {
-      return {
-        fallback: 'avatar_talking_head',
-        reason: 'kling_failed_falling_back_to_heygen',
-      };
-    }
-    return { fallback: null, reason: 'kling_failed_no_heygen_fallback' };
-  }
-  if (currentFormat === 'avatar_talking_head') {
-    if (ready.klingAndElevenLabs) {
-      return {
-        fallback: 'cinematic_voiceover',
-        reason: 'heygen_failed_falling_back_to_kling',
-      };
-    }
-    return { fallback: null, reason: 'heygen_failed_no_cinematic_fallback' };
-  }
-  return { fallback: null, reason: `unknown_format:${currentFormat}` };
+  return {
+    fallback: null,
+    reason: `no_fallback_available_after_polish_20:${currentFormat}`,
+  };
 }
 
 /**
  * Format the Inngest event name a failover decision dispatches to.
- * Centralized so the mapping doesn't drift across workers.
+ * Polish-20 Commit 4: only ugc.requested survives.
  */
-export function failoverEventName(
-  fallback: CreativeFormat,
-): 'generation/cinematic.requested' | 'generation/ugc.requested' {
-  return fallback === 'cinematic_voiceover'
-    ? 'generation/cinematic.requested'
-    : 'generation/ugc.requested';
+export function failoverEventName(_fallback: CreativeFormat): 'generation/ugc.requested' {
+  return 'generation/ugc.requested';
 }
 
 /**

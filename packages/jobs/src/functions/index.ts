@@ -1,11 +1,6 @@
 import { analyzeConcept } from './analyze-concept';
 import { dailySummaryGenerator } from './daily-summary-generator';
 import { manualDailySummary } from './manual-daily-summary';
-import { generateCinematicVariants } from './generate-cinematic-variants';
-import { generateKlingMultiClipVariants } from './generate-kling-multi-clip-variants';
-import { generateKling3OmniMultiSegment } from './generate-kling-3-omni-multi-segment';
-import { generateKieOmniFlashNative } from './generate-kie-omni-flash-native';
-import { generateKieKlingAvatarV2 } from './generate-kie-kling-avatar-v2';
 import { generateVideoVariant } from './generate-video-variant';
 import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
@@ -40,11 +35,6 @@ import { tokenExpiryChecker } from './token-expiry-checker';
  */
 export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   'generation/ugc.requested',
-  'generation/cinematic.requested',
-  'generation/kling-multi-clip.requested',
-  'generation/kling-3-omni-multi-segment.requested',
-  'generation/kie-omni-flash-native.requested',
-  'generation/kie-kling-avatar-v2.requested',
   'generation/sora.requested',
   'generation/nano-banana.requested',
   'generation/static.requested',
@@ -60,18 +50,10 @@ export const functions = [
   analyzeConcept,
   generateStaticVariants,
   generateUgcVariants,
-  // Polish-4: cinematic voiceover format (Kling 2.5 + ElevenLabs) — deprecated, kept as fallback.
-  generateCinematicVariants,
-  // Polish-6: new pipelines.
-  generateKlingMultiClipVariants,
+  // Polish-6: legacy Sora + Nano Banana pipelines (kept for the
+  // non-UGC-video paths that survived the Polish-20 legacy purge).
   generateSoraVariants,
   generateStaticImageVariants,
-  // Polish-10: Kling 3.0 Omni multi-segment (default Kling pipeline).
-  generateKling3OmniMultiSegment,
-  // Polish-12: kie.ai Gemini Omni Flash native pipeline (opt-in).
-  generateKieOmniFlashNative,
-  // Polish-19: kie.ai Kling Avatar v2 pipeline (single-call lipsync — advanced).
-  generateKieKlingAvatarV2,
   // Polish-20: unified descriptor-driven video-variant worker
   // (Seedance 1.5 Pro / Kling 3.0 Standard / Seedance 2).
   generateVideoVariant,

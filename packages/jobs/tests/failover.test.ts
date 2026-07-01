@@ -1,12 +1,9 @@
 /**
- * Polish-4: pure failover decision tree. Locks the branches:
- *   cinematic_voiceover + heygen connected      → fallback heygen
- *   cinematic_voiceover + heygen NOT connected  → no fallback
- *   avatar_talking_head + kling+11labs ready    → fallback cinematic
- *   avatar_talking_head + cinematic incomplete  → no fallback
- *   unknown format                              → no fallback
+ * Polish-4 → Polish-20 Commit 4: failover decision tree tests.
  *
- * Plus event-name mapping + Telegram message shape.
+ * Post-Commit-4 the cinematic_voiceover path is gone with the
+ * ElevenLabs deletion, so `pickFailoverFormat` returns null for
+ * every call. The tests here just pin that reality.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -15,75 +12,32 @@ import {
   pickFailoverFormat,
 } from '../src/lib/failover';
 
-describe('Polish-4: pickFailoverFormat', () => {
-  it('cinematic_voiceover with heygen connected → fall back to avatar', () => {
-    const d = pickFailoverFormat('cinematic_voiceover', {
-      heygen: true,
-      klingAndElevenLabs: true,
-    });
-    expect(d.fallback).toBe('avatar_talking_head');
-    expect(d.reason).toMatch(/kling_failed/);
+describe('Polish-20 Commit 4: pickFailoverFormat has no fallback path', () => {
+  it('returns null for any input format (cinematic path retired)', () => {
+    for (const format of ['avatar_talking_head', 'cinematic_voiceover', 'unknown']) {
+      const r = pickFailoverFormat(format, { heygen: true });
+      expect(r.fallback).toBeNull();
+      expect(r.reason).toMatch(/no_fallback_available/);
+    }
   });
 
-  it('cinematic_voiceover with NO heygen → no fallback', () => {
-    const d = pickFailoverFormat('cinematic_voiceover', {
-      heygen: false,
-      klingAndElevenLabs: true,
-    });
-    expect(d.fallback).toBeNull();
-    expect(d.reason).toMatch(/no_heygen_fallback/);
-  });
-
-  it('avatar_talking_head with kling+11labs connected → fall back to cinematic', () => {
-    const d = pickFailoverFormat('avatar_talking_head', {
-      heygen: true,
-      klingAndElevenLabs: true,
-    });
-    expect(d.fallback).toBe('cinematic_voiceover');
-    expect(d.reason).toMatch(/heygen_failed/);
-  });
-
-  it('avatar_talking_head with only kling (no elevenlabs) → no fallback', () => {
-    const d = pickFailoverFormat('avatar_talking_head', {
-      heygen: true,
-      klingAndElevenLabs: false,
-    });
-    expect(d.fallback).toBeNull();
-    expect(d.reason).toMatch(/no_cinematic_fallback/);
-  });
-
-  it('avatar_talking_head with neither alternative → no fallback', () => {
-    const d = pickFailoverFormat('avatar_talking_head', {
-      heygen: true,
-      klingAndElevenLabs: false,
-    });
-    expect(d.fallback).toBeNull();
-  });
-
-  it('unknown format → no fallback + diagnostic reason', () => {
-    const d = pickFailoverFormat('martian_holograms', {
-      heygen: true,
-      klingAndElevenLabs: true,
-    });
-    expect(d.fallback).toBeNull();
-    expect(d.reason).toMatch(/unknown_format/);
+  it('reason string includes the current format for the operator to trace', () => {
+    const r = pickFailoverFormat('avatar_talking_head', { heygen: false });
+    expect(r.reason).toContain('avatar_talking_head');
   });
 });
 
-describe('Polish-4: failoverEventName', () => {
-  it('maps avatar_talking_head to ugc.requested', () => {
+describe('Polish-20 Commit 4: failoverEventName only routes to ugc.requested', () => {
+  it('returns generation/ugc.requested regardless of fallback shape', () => {
     expect(failoverEventName('avatar_talking_head')).toBe('generation/ugc.requested');
-  });
-  it('maps cinematic_voiceover to cinematic.requested', () => {
-    expect(failoverEventName('cinematic_voiceover')).toBe('generation/cinematic.requested');
   });
 });
 
 describe('Polish-4: buildAllProvidersFailedMessage', () => {
-  it('embeds the job link + points at /connections/ai-provider', () => {
-    const m = buildAllProvidersFailedMessage('job_xyz');
-    expect(m).toMatch(/\/runs\/job_xyz/);
-    expect(m).toMatch(/\/connections\/ai-provider/);
-    expect(m).toMatch(/All connected providers failed/i);
+  it('includes the job id + a run URL for the operator to click', () => {
+    const msg = buildAllProvidersFailedMessage('job_abc');
+    expect(msg).toContain('job_abc');
+    expect(msg).toContain('/runs/job_abc');
+    expect(msg).toContain('/connections/ai-provider');
   });
 });

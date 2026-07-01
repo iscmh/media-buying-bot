@@ -9,10 +9,11 @@ import { ProviderCard } from './provider-card';
 export const metadata = { title: 'AI providers' };
 
 /**
- * Polish-8: multi-provider connections page. One card per provider
- * the user can connect (HeyGen, Replicate, Gemini, OpenAI, ElevenLabs).
- * Arcads + Creatify cards removed — legacy DB rows still exist but
- * the UI no longer surfaces them.
+ * Polish-8 → Polish-20 Commit 4: multi-provider connections page.
+ * Cards for HeyGen / Replicate / OpenAI — the providers the
+ * surviving pipelines still consult. Arcads + Creatify +
+ * ElevenLabs cards removed; legacy DB rows still exist but the UI
+ * no longer surfaces them.
  */
 export default async function ConnectAIProviderPage() {
   const { userId } = await requireOnboardingComplete();

@@ -1,8 +1,11 @@
 /**
- * Polish-9.3: pure mapper from ai_provider_connections rows to the
- * ConnectedProviders shape. The critical invariant is the kling↔replicate
- * mapping — the Polish-8 UI ships a "Replicate" card, the Polish-6
- * backend expects a 'kling' capability flag. Either DB row fills it.
+ * Polish-9.3 → Polish-20 Commit 4: pure mapper from
+ * ai_provider_connections + tool_connections rows to the
+ * ConnectedProviders shape.
+ *
+ * Post-Commit-4 the shape covers only providers the surviving
+ * pipelines still need (heygen / openai / gemini / claude / kie_ai).
+ * kling + elevenlabs slots gone with the legacy pipeline deletions.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -13,44 +16,7 @@ import {
 
 const NO_TOOLS = new Set<string>();
 
-describe('Polish-9.3: buildConnectedProviders kling↔replicate mapping', () => {
-  it('only kling row → kling.connected=true (legacy path)', () => {
-    const rows: AiProviderRow[] = [{ provider: 'kling', tier: null }];
-    const r = buildConnectedProviders(rows, NO_TOOLS);
-    expect(r.kling.connected).toBe(true);
-  });
-
-  it('only replicate row → kling.connected=true (Polish-8 UI card)', () => {
-    const rows: AiProviderRow[] = [{ provider: 'replicate', tier: null }];
-    const r = buildConnectedProviders(rows, NO_TOOLS);
-    expect(r.kling.connected).toBe(true);
-  });
-
-  it('both rows present → kling.connected=true, no crash', () => {
-    const rows: AiProviderRow[] = [
-      { provider: 'kling', tier: null },
-      { provider: 'replicate', tier: null },
-    ];
-    const r = buildConnectedProviders(rows, NO_TOOLS);
-    expect(r.kling.connected).toBe(true);
-  });
-
-  it('neither row → kling.connected=false', () => {
-    const r = buildConnectedProviders([], NO_TOOLS);
-    expect(r.kling.connected).toBe(false);
-  });
-
-  it('arcads/creatify alone does NOT fill the kling slot', () => {
-    const rows: AiProviderRow[] = [
-      { provider: 'arcads', tier: null },
-      { provider: 'creatify', tier: null },
-    ];
-    const r = buildConnectedProviders(rows, NO_TOOLS);
-    expect(r.kling.connected).toBe(false);
-  });
-});
-
-describe('Polish-9.3: other provider slots unaffected', () => {
+describe('Polish-20 Commit 4: buildConnectedProviders surviving slots', () => {
   it('heygen row populates tier', () => {
     const rows: AiProviderRow[] = [{ provider: 'heygen', tier: 'premium' }];
     const r = buildConnectedProviders(rows, NO_TOOLS);
@@ -65,13 +31,9 @@ describe('Polish-9.3: other provider slots unaffected', () => {
     expect(r.heygen.tier).toBeNull();
   });
 
-  it('elevenlabs / openai mapped from ai rows', () => {
-    const rows: AiProviderRow[] = [
-      { provider: 'elevenlabs', tier: null },
-      { provider: 'openai', tier: null },
-    ];
+  it('openai mapped from ai row', () => {
+    const rows: AiProviderRow[] = [{ provider: 'openai', tier: null }];
     const r = buildConnectedProviders(rows, NO_TOOLS);
-    expect(r.elevenlabs.connected).toBe(true);
     expect(r.openai.connected).toBe(true);
   });
 
@@ -80,37 +42,30 @@ describe('Polish-9.3: other provider slots unaffected', () => {
     expect(r.gemini.connected).toBe(true);
   });
 
-  it('all-disconnected default', () => {
-    const r = buildConnectedProviders([], NO_TOOLS);
-    expect(r).toEqual({
-      heygen: { connected: false, tier: null },
-      kling: { connected: false },
-      elevenlabs: { connected: false },
-      openai: { connected: false },
-      gemini: { connected: false },
-      // Polish-12: claude + kie_ai tool slots added.
-      claude: { connected: false },
-      kie_ai: { connected: false },
-    });
-  });
-
-  it('Polish-12: claude + kie_ai slots fill from tool_connections', () => {
+  it('claude + kie_ai slots fill from tool_connections (Polish-12 pattern retained)', () => {
     const r = buildConnectedProviders([], new Set(['claude', 'kie_ai']));
     expect(r.claude.connected).toBe(true);
     expect(r.kie_ai.connected).toBe(true);
     expect(r.gemini.connected).toBe(false);
   });
+
+  it('all-disconnected default shape', () => {
+    const r = buildConnectedProviders([], NO_TOOLS);
+    expect(r).toEqual({
+      heygen: { connected: false, tier: null },
+      openai: { connected: false },
+      gemini: { connected: false },
+      claude: { connected: false },
+      kie_ai: { connected: false },
+    });
+    // Legacy slots removed by Commit 4:
+    expect((r as unknown as Record<string, unknown>).kling).toBeUndefined();
+    expect((r as unknown as Record<string, unknown>).elevenlabs).toBeUndefined();
+  });
 });
 
-describe('Polish-9.3: AI_PROVIDER_QUERY_LIST', () => {
-  it('includes both kling and replicate so the loader picks up either row', () => {
-    expect(AI_PROVIDER_QUERY_LIST).toContain('kling');
-    expect(AI_PROVIDER_QUERY_LIST).toContain('replicate');
-  });
-
-  it('covers every provider the form picker cares about', () => {
-    for (const p of ['heygen', 'kling', 'replicate', 'elevenlabs', 'openai']) {
-      expect(AI_PROVIDER_QUERY_LIST).toContain(p);
-    }
+describe('Polish-20 Commit 4: AI_PROVIDER_QUERY_LIST', () => {
+  it('covers only the ai_provider_connections enum values the surviving pipelines consult', () => {
+    expect(new Set(AI_PROVIDER_QUERY_LIST)).toEqual(new Set(['heygen', 'openai']));
   });
 });

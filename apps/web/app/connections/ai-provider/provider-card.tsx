@@ -247,21 +247,6 @@ function KeyHint({ provider }: { provider: AIProviderName }) {
           . Starts with <code className="font-mono">sk-</code>.
         </p>
       );
-    case 'elevenlabs':
-      return (
-        <p className="text-fg-muted text-xs">
-          Get a key at{' '}
-          <a
-            href="https://elevenlabs.io"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-fg underline"
-          >
-            elevenlabs.io
-          </a>{' '}
-          → profile settings. Optional — legacy cinematic voiceover only.
-        </p>
-      );
     default:
       return null;
   }

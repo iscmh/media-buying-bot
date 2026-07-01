@@ -1,19 +1,29 @@
 import type { PipelineType } from './cost-estimation';
 
 /**
- * Polish-9.2: canonical mapping from a Polish-6 PipelineType to the
- * job-row columns (providerChoice, format), the Inngest event name the
- * matching worker listens for, and a human label.
+ * Polish-9.2 → Polish-20 Commit 4: canonical mapping from PipelineType
+ * to the job-row columns (providerChoice, format), the Inngest event
+ * name the matching worker listens for, and a human label.
  *
- * Pure — used by the web app on submit AND by analyze-concept on
- * fan-out so the routing is consistent on both sides of the queue.
+ * After Commit 4 the enum covers only three surviving legacy paths:
+ *   - HeyGen avatar talking head (`generation/ugc.requested`)
+ *   - Sora 2 single shot         (`generation/sora.requested`)
+ *   - Nano Banana static image   (`generation/nano-banana.requested`)
+ *
+ * The Polish-20 UGC video flow does NOT go through this table — it's
+ * driven by the ModelProviderConfig descriptor in video-models.ts
+ * and dispatched to `generation/video-variant.requested`. No
+ * PipelineType member represents the new flow; there is no
+ * pipeline-level default anymore (the form requires the user to pick
+ * a model via the mandatory picker), so `defaultPipeline()` throws
+ * when called.
  */
 export interface PipelineDescriptor {
   pipeline: PipelineType;
   /** label rendered in the form + job-review header */
   label: string;
   /** providerChoice column written on generation_jobs */
-  providerChoice: 'heygen' | 'kling' | 'openai' | 'gemini';
+  providerChoice: 'heygen' | 'openai' | 'gemini';
   /** format column written on generation_jobs */
   format: string;
   /**
@@ -23,22 +33,10 @@ export interface PipelineDescriptor {
    */
   workerEvent:
     | 'generation/ugc.requested'
-    | 'generation/kling-multi-clip.requested'
-    | 'generation/kling-3-omni-multi-segment.requested'
-    | 'generation/kie-omni-flash-native.requested'
-    | 'generation/kie-kling-avatar-v2.requested'
     | 'generation/sora.requested'
     | 'generation/nano-banana.requested';
   /** providers the user MUST have connected for this pipeline to work. */
-  requiredProviders: Array<
-    'heygen' | 'kling' | 'openai' | 'gemini' | 'elevenlabs' | 'claude' | 'kie_ai'
-  >;
-  /**
-   * Polish-19: marks the pipeline that callers should pick when the
-   * user hasn't expressed a preference. Exactly one descriptor must
-   * carry `isDefault: true`; defaultPipeline() asserts this.
-   */
-  isDefault?: boolean;
+  requiredProviders: Array<'heygen' | 'openai' | 'gemini' | 'claude' | 'kie_ai'>;
 }
 
 const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
@@ -57,48 +55,6 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     format: 'sora_single_shot',
     workerEvent: 'generation/sora.requested',
     requiredProviders: ['openai'],
-  },
-  kling_3_multi_clip_native_lipsync: {
-    pipeline: 'kling_3_multi_clip_native_lipsync',
-    label: 'UGC ad (Kling multi-clip with reference chain)',
-    providerChoice: 'kling',
-    format: 'kling_3_multi_clip',
-    workerEvent: 'generation/kling-multi-clip.requested',
-    requiredProviders: ['kling'],
-  },
-  kling_3_omni_multi_segment: {
-    pipeline: 'kling_3_omni_multi_segment',
-    label: 'Experimental: Kling 3.0 Omni 30s (mixed quality)',
-    providerChoice: 'kling',
-    format: 'kling_3_omni_multi_segment',
-    workerEvent: 'generation/kling-3-omni-multi-segment.requested',
-    requiredProviders: ['kling', 'gemini'],
-  },
-  kie_omni_flash_native: {
-    pipeline: 'kie_omni_flash_native',
-    label: 'UGC ad (Gemini Omni Flash, experimental, scales to source length)',
-    providerChoice: 'kling',
-    format: 'kie_omni_flash_native',
-    workerEvent: 'generation/kie-omni-flash-native.requested',
-    requiredProviders: ['claude', 'gemini', 'kie_ai'],
-    // Polish-19: demoted from default in favor of kie_kling_avatar_v2_standard
-    // (single-call lipsync, ~25% lower per-variant cost). Stays available as
-    // an advanced-only pipeline for sources where multi-segment generation
-    // is genuinely a better fit.
-  },
-  // Polish-19 → Polish-20: Kling Avatar v2 (image + audio + lipsync).
-  // Retained through Polish-20 Commit 3 as the legacy default —
-  // Commit 4 deletes this and every other legacy pipeline once the
-  // unified generate-video-variant worker is fully proven. The form's
-  // `defaultPipeline()` call resolves here until then.
-  kie_kling_avatar_v2_standard: {
-    pipeline: 'kie_kling_avatar_v2_standard',
-    label: 'UGC ad (Kling Avatar v2, image + lipsync — legacy)',
-    providerChoice: 'kling',
-    format: 'kie_kling_avatar_v2_standard',
-    workerEvent: 'generation/kie-kling-avatar-v2.requested',
-    requiredProviders: ['claude', 'gemini', 'kie_ai', 'elevenlabs'],
-    isDefault: true,
   },
   nano_banana_static_image: {
     pipeline: 'nano_banana_static_image',
@@ -120,27 +76,27 @@ export function pipelineFromString(value: string | null | undefined): PipelineTy
 }
 
 /**
- * Polish-19: the pipeline picked when the user hasn't expressed a
- * preference. Exactly one descriptor in DESCRIPTORS carries
- * `isDefault: true` — enforced at module load so a future drift in
- * the table surfaces loudly on the next boot, not silently at runtime.
+ * Polish-20 Commit 4: NO PIPELINE-LEVEL DEFAULT.
+ *
+ * The new UGC video flow doesn't use PipelineType — it routes through
+ * ModelProviderConfig via the simplified form's mandatory model
+ * picker. The remaining PipelineType members (heygen / sora / nano-
+ * banana) each serve a distinct concept type (avatar / video / static
+ * image) and the caller always picks one explicitly. Calling
+ * `defaultPipeline()` throws so a caller who forgot to migrate off
+ * this signal surfaces the drift immediately.
  */
 export function defaultPipeline(): PipelineType {
-  const defaults = Object.values(DESCRIPTORS).filter((d) => d.isDefault);
-  if (defaults.length !== 1) {
-    throw new Error(
-      `pipeline-descriptors: expected exactly 1 default pipeline, found ${defaults.length}`,
-    );
-  }
-  return defaults[0]!.pipeline;
+  throw new Error(
+    'defaultPipeline() has no default after Polish-20 Commit 4. UGC video uses ' +
+      'ModelProviderConfig (see @mbb/shared video-models.ts) via the simplified ' +
+      "form's mandatory model picker; non-UGC callers must pick a specific " +
+      'PipelineType explicitly (heygen / sora / nano-banana).',
+  );
 }
 
 export const ALL_PIPELINES: PipelineType[] = [
   'heygen_avatar_talking_head',
   'sora_2_single_shot',
-  'kling_3_omni_multi_segment',
-  'kling_3_multi_clip_native_lipsync',
-  'kie_omni_flash_native',
-  'kie_kling_avatar_v2_standard',
   'nano_banana_static_image',
 ];

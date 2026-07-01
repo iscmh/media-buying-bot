@@ -1,6 +1,11 @@
 /**
- * Polish-6 item 2: pipeline router tests. Every combo of detected
- * format × provider availability, plus the override path.
+ * Polish-6 item 2 → Polish-20 Commit 4: pipeline router tests for the
+ * surviving legacy pipelines (HeyGen / Sora / Nano Banana).
+ *
+ * Kling multi-clip was removed in Commit 4; multi_scene_with_edits
+ * now falls back through the same simple_ai_ugc branch (Sora or
+ * HeyGen), and any override to the deleted Kling pipeline is a
+ * compile-time error via the tightened Pipeline enum.
  */
 import { describe, expect, it } from 'vitest';
 import { pickPipeline, type UserConnections } from '../src/pipeline-router';
@@ -8,20 +13,16 @@ import { pickPipeline, type UserConnections } from '../src/pipeline-router';
 const ALL_CONNECTED: UserConnections = {
   heygen: { connected: true, tier: 'premium' },
   openai: { connected: true },
-  kling: { connected: true },
-  elevenlabs: { connected: true },
   gemini: { connected: true },
 };
 
 const NONE_CONNECTED: UserConnections = {
   heygen: { connected: false },
   openai: { connected: false },
-  kling: { connected: false },
-  elevenlabs: { connected: false },
   gemini: { connected: false },
 };
 
-describe('Polish-6: pickPipeline', () => {
+describe('Polish-20 Commit 4: pickPipeline surviving routes', () => {
   // === static_image_ad ===
   it('static_image_ad + gemini connected → nano_banana', () => {
     const r = pickPipeline({ format: 'static_image_ad' }, ALL_CONNECTED);
@@ -67,18 +68,10 @@ describe('Polish-6: pickPipeline', () => {
     if (r.ok) expect(r.pipeline).toBe('sora_2_single_shot');
   });
 
-  it('simple_ai_ugc + only kling → kling as last resort', () => {
-    const r = pickPipeline(
-      { format: 'simple_ai_ugc' },
-      { ...NONE_CONNECTED, kling: { connected: true } },
-    );
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.pipeline).toBe('kling_3_multi_clip_native_lipsync');
-  });
-
-  it('simple_ai_ugc + nothing connected → error', () => {
+  it('simple_ai_ugc + nothing connected → error nudges toward simplified form', () => {
     const r = pickPipeline({ format: 'simple_ai_ugc' }, NONE_CONNECTED);
     expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errorMessage).toMatch(/Seedance|simplified form/);
   });
 
   // === ai_ugc_with_captions ===
@@ -95,10 +88,11 @@ describe('Polish-6: pickPipeline', () => {
   });
 
   // === multi_scene_with_edits ===
-  it('multi_scene_with_edits + kling → kling (preferred)', () => {
+  it('multi_scene_with_edits + heygen connected → heygen (Kling multi-clip deleted; falls through to simple UGC branch)', () => {
     const r = pickPipeline({ format: 'multi_scene_with_edits' }, ALL_CONNECTED);
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.pipeline).toBe('kling_3_multi_clip_native_lipsync');
+    // ALL_CONNECTED without preferSora prefers HeyGen over Sora.
+    if (r.ok) expect(r.pipeline).toBe('heygen_avatar_talking_head');
   });
 
   it('multi_scene_with_edits + only openai → sora', () => {
@@ -110,15 +104,6 @@ describe('Polish-6: pickPipeline', () => {
     if (r.ok) expect(r.pipeline).toBe('sora_2_single_shot');
   });
 
-  it('multi_scene_with_edits + only heygen → heygen fallback', () => {
-    const r = pickPipeline(
-      { format: 'multi_scene_with_edits' },
-      { ...NONE_CONNECTED, heygen: { connected: true, tier: 'premium' } },
-    );
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.pipeline).toBe('heygen_avatar_talking_head');
-  });
-
   it('multi_scene_with_edits + nothing → error', () => {
     const r = pickPipeline({ format: 'multi_scene_with_edits' }, NONE_CONNECTED);
     expect(r.ok).toBe(false);
@@ -127,10 +112,10 @@ describe('Polish-6: pickPipeline', () => {
   // === override ===
   it('override pipeline takes precedence over detection', () => {
     const r = pickPipeline({ format: 'simple_ai_ugc' }, ALL_CONNECTED, {
-      overridePipeline: 'kling_3_multi_clip_native_lipsync',
+      overridePipeline: 'sora_2_single_shot',
     });
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.pipeline).toBe('kling_3_multi_clip_native_lipsync');
+    if (r.ok) expect(r.pipeline).toBe('sora_2_single_shot');
   });
 
   it('override fails when required provider not connected', () => {

@@ -23,8 +23,12 @@ import { logAiProviderApiCall } from '@mbb/db';
  * partial successes without crashing the whole function.
  */
 
-// Polish-4: + kling (cinematic video via Replicate), replicate (generic
-// Replicate calls), elevenlabs (TTS voiceover paired with Kling).
+// Polish-20 Commit 4: elevenlabs removed with the legacy pipelines
+// that used it. The 'kling' name is retained because it's the label
+// under which the Replicate BYOK key is stored (tool_connections
+// records) — the shared Replicate helpers (concat / lipsync / audio-
+// trim / frame-extract) still tag their chokepoint audit rows with
+// it. Do NOT rename this without a schema migration.
 export type ProviderName =
   | 'gemini'
   | 'claude'
@@ -34,7 +38,6 @@ export type ProviderName =
   | 'creatify'
   | 'kling'
   | 'replicate'
-  | 'elevenlabs'
   | 'openai';
 
 export interface CallProviderInput {

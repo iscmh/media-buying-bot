@@ -27,9 +27,10 @@ import {
 
 export type ConceptType = 'static' | 'ugc';
 export type UgcVideoProvider = 'kie_ai' | 'heygen' | 'arcads';
-// Polish-4: creative format. avatar_talking_head=HeyGen avatar mode;
-// cinematic_voiceover=Kling 2.5 cinematic clips + ElevenLabs TTS.
-export type CreativeFormat = 'avatar_talking_head' | 'cinematic_voiceover';
+// Polish-20 Commit 4: cinematic_voiceover format retired with the
+// legacy Kling + ElevenLabs pipeline. avatar_talking_head is the
+// only remaining format enum member (HeyGen avatar mode).
+export type CreativeFormat = 'avatar_talking_head';
 
 /**
  * Per-output prices in USD. Keep in sync with the comments in
@@ -53,86 +54,6 @@ const PRICING = {
     arcads: 0.5,
   } satisfies Record<UgcVideoProvider, number>,
 
-  // Polish-4: cinematic_voiceover format costs. Polish-9.17: bumped
-  // Kling per-clip from $0.30 (kling-v2.5-turbo-pro) to $0.35
-  // (kling-v2.6, the audio-capable model). ElevenLabs TTS ≈
-  // $0.005-0.02 per ad-length script (~200 chars/variant by default).
-  // Cinematic prompt builder adds a small Claude call (~$0.01).
-  cinematicKlingPerVariantUsd: 0.35,
-  cinematicTtsPerVariantUsd: 0.06, // 200 chars × $0.30/1k chars
-  cinematicPromptBuildPerVariantUsd: 0.01,
-
-  // Polish-6 / Polish-9.17: Kling 2.6 multi-clip (16 clips per
-  // variant, $0.35/clip on kwaivgi/kling-v2.6).
-  klingMultiClipClipsPerVariant: 16,
-  klingMultiClipPerClipUsd: 0.35,
-
-  // Polish-11: continuous TTS + lipsync layer added to the multi-clip
-  // pipeline. ElevenLabs cost is ~200 chars per variant at $0.30/1k
-  // chars = $0.06; lipsync cost on Replicate varies by model
-  // (~$0.50-1.50 per ~30s output). Both are env-tunable on the
-  // ai-providers clients.
-  klingMultiClipTtsPerVariantUsd: 0.06,
-  klingMultiClipLipsyncPerVariantUsd: 1.0,
-
-  // Polish-12: kie.ai Gemini Omni Flash native pipeline. One 10s
-  // 1080p generation = $0.90 (Nov 2026 kie.ai pricing) + $0.05 Nano
-  // Banana reference frame. Collapses the Polish-11 multi-clip +
-  // ElevenLabs + lipsync stack into a single API call.
-  kieOmniFlashPerVariantUsd: 0.9,
-  kieOmniFlashReferenceFrameUsd: 0.05,
-  kieOmniFlashManualPromptUsd: 0.05,
-  // Polish-12.1: when 2+ segments, the existing Polish-9.12 idan054
-  // ffmpeg-concat path stitches them.
-  kieOmniFlashStitchUsd: 0.05,
-  // Polish-12.4 / Polish-16: kie.ai character/create endpoint cost.
-  // The docs page for the endpoint doesn't publish pricing. Initial
-  // $0.15 placeholder hasn't been reconciled against actual dashboard
-  // deductions in production yet; Polish-16 leaves it in place pending
-  // a real billing data point.
-  kieOmniFlashCharacterCreateUsd: 0.15,
-  // Polish-12.8 v2 / Polish-16: anti-celebrity pre-validation overhead.
-  // Reconciled from production observation — typical happy-path
-  // generation lands a clean face on attempt 1 or 2 (~4 Gemini Vision
-  // calls × ~$0.005 each = $0.02 expected case). The earlier $0.10
-  // placeholder over-quoted by ~5x. The face-validation flow stays
-  // bounded at MAX_NANO_BANANA_VALIDATION_ATTEMPTS=8, so the worst
-  // case is still small absolute dollars.
-  kieOmniFlashFaceValidationUsd: 0.02,
-  // Polish-12.5 / Polish-16: per-chain-link frame extraction via the
-  // Replicate ffmpeg-style utility model. Charged on N-1 segments.
-  // Reconciled from the lucataco/frame-extractor model's published
-  // pricing — the initial $0.02 placeholder was ~200× the actual
-  // ~$0.0001 per call. Override via REPLICATE_FRAME_EXTRACT_COST_USD
-  // env to track a different picked model's rate.
-  kieOmniFlashFrameExtractUsd: 0.0001,
-
-  // Polish-10 / Polish-10.1: Kling 3.0 Omni multi-segment pipeline.
-  // Default mode dropped pro→standard for cheaper iteration (720p is
-  // indistinguishable from 1080p on phone viewers for 9:16 UGC).
-  //   2 segments × 15s × $0.224/sec (standard + audio) = $6.72 of Kling
-  //   + ~$0.05 Nano Banana reference frame
-  //   + ~$0.05 stitch crossfade
-  //   + ~$0.10 production manual (Claude)
-  //   ≈ $6.92 per variant (was ~$8.50 in pro). Pro pricing still
-  // available on the kling-omni client for explicit overrides.
-  klingOmniSegmentsPerVariant: 2,
-  klingOmniSegmentDurationSec: 15,
-  klingOmniPerSegmentUsd: 3.36, // standard mode: 0.224 × 15
-  klingOmniReferenceFrameUsd: 0.05,
-  klingOmniStitchUsd: 0.05,
-  klingOmniManualPromptUsd: 0.1,
-  klingMultiClipManualPromptUsd: 0.1,
-  // Polish-19: kie.ai Kling Avatar v2 (Pro) pipeline. Per-second
-  // pricing on the model itself, plus a fixed Claude script ($0.05),
-  // a fixed Nano Banana reference frame ($0.05), and a per-char
-  // ElevenLabs TTS estimate. Script length defaults to the audio
-  // duration's worth of natural-speech words (≈150 wpm → ~3 chars/sec
-  // when projecting back into chars/sec). Worst case 30s ≈ 400 chars
-  // ≈ $0.12 of ElevenLabs.
-  kieKlingAvatarUsdPerSecond: 0.115,
-  kieKlingAvatarClaudeScriptUsd: 0.05,
-  kieKlingAvatarReferenceFrameUsd: 0.05,
   // Polish-6: Sora 2 single-shot via Kie.ai
   soraPerVariantUsd: 1.5,
   soraPromptUsd: 0.05,
@@ -157,10 +78,6 @@ export interface CostEstimate {
 export type PipelineType =
   | 'heygen_avatar_talking_head'
   | 'sora_2_single_shot'
-  | 'kling_3_multi_clip_native_lipsync'
-  | 'kling_3_omni_multi_segment'
-  | 'kie_omni_flash_native'
-  | 'kie_kling_avatar_v2_standard'
   | 'nano_banana_static_image';
 
 export interface EstimateInput {
@@ -168,19 +85,15 @@ export interface EstimateInput {
   variantCount: number;
   /** UGC-only. Ignored for static. */
   provider?: UgcVideoProvider;
-  /**
-   * Polish-4: when format='cinematic_voiceover' the UGC pipeline uses
-   * Kling + ElevenLabs instead of HeyGen, with different per-variant
-   * costs. Defaults to 'avatar_talking_head' if omitted.
-   */
+  /** Retained enum member: 'avatar_talking_head' (HeyGen). */
   format?: CreativeFormat;
   /** Polish-6: pipeline-level cost. Overrides format + provider when set. */
   pipeline?: PipelineType;
   /**
-   * Polish-12.1: target dialogue duration in seconds, used by the
-   * kie_omni_flash_native branch to size segment count (1 / 2 / 3).
-   * When omitted that branch defaults to the worst case (3 segments)
-   * so the upfront estimate never under-quotes the variant.
+   * Polish-12.1: target dialogue duration in seconds. Passed through
+   * to the descriptor-driven estimateByVideoModel path when
+   * videoModelId is set; ignored by the surviving legacy branches
+   * (heygen / sora / nano-banana all have flat per-variant pricing).
    */
   estimatedDurationSeconds?: number;
   /**
@@ -253,26 +166,6 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
       item: 'Reference analysis (one-shot)',
       cost: PRICING.staticReferenceAnalysisUsd,
     });
-  } else if (input.format === 'cinematic_voiceover') {
-    // Polish-4: Kling + ElevenLabs + cinematic prompt builder. No HeyGen
-    // avatar selection, no Sora prompt refinement — Claude builds the
-    // visual prompt directly from the script.
-    breakdown.push({
-      item: 'Vision analysis (one-shot)',
-      cost: PRICING.ugcVisionAnalysisUsd,
-    });
-    breakdown.push({
-      item: `Cinematic prompt build (${variantCount} × $${PRICING.cinematicPromptBuildPerVariantUsd.toFixed(2)})`,
-      cost: round4(variantCount * PRICING.cinematicPromptBuildPerVariantUsd),
-    });
-    breakdown.push({
-      item: `Kling 2.6 video (${variantCount} × $${PRICING.cinematicKlingPerVariantUsd.toFixed(2)})`,
-      cost: round4(variantCount * PRICING.cinematicKlingPerVariantUsd),
-    });
-    breakdown.push({
-      item: `ElevenLabs voiceover (${variantCount} × $${PRICING.cinematicTtsPerVariantUsd.toFixed(2)})`,
-      cost: round4(variantCount * PRICING.cinematicTtsPerVariantUsd),
-    });
   } else {
     // Polish-9.4: throw only when BOTH provider AND pipeline are missing.
     // The pipeline branch up top already returned, so reaching here with
@@ -331,7 +224,7 @@ export function labelForProvider(provider: UgcVideoProvider): string {
 function estimateByPipeline(
   pipeline: PipelineType,
   variantCount: number,
-  estimatedDurationSeconds: number | undefined,
+  _estimatedDurationSeconds: number | undefined,
 ): CostEstimate {
   const breakdown: CostBreakdownItem[] = [];
   switch (pipeline) {
@@ -358,137 +251,6 @@ function estimateByPipeline(
         cost: round4(variantCount * PRICING.soraPerVariantUsd),
       });
       break;
-    case 'kling_3_multi_clip_native_lipsync': {
-      const clips = PRICING.klingMultiClipClipsPerVariant;
-      const totalClips = variantCount * clips;
-      breakdown.push({
-        item: 'Production manual (Claude)',
-        cost: PRICING.klingMultiClipManualPromptUsd,
-      });
-      breakdown.push({
-        item: `Kling 2.6 clips (${totalClips} clips × $${PRICING.klingMultiClipPerClipUsd.toFixed(2)})`,
-        cost: round4(totalClips * PRICING.klingMultiClipPerClipUsd),
-      });
-      // Polish-11: continuous TTS + lipsync layer. Estimates are
-      // rough (~200 char dialogue per variant × $0.30/1k chars + a
-      // single lipsync pass on the stitched composite); env override
-      // tunes both costs at runtime.
-      breakdown.push({
-        item: `ElevenLabs voiceover (${variantCount} × $${PRICING.klingMultiClipTtsPerVariantUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.klingMultiClipTtsPerVariantUsd),
-      });
-      breakdown.push({
-        item: `Lipsync (${variantCount} × $${PRICING.klingMultiClipLipsyncPerVariantUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.klingMultiClipLipsyncPerVariantUsd),
-      });
-      break;
-    }
-    case 'kling_3_omni_multi_segment': {
-      const segmentsPerVariant = PRICING.klingOmniSegmentsPerVariant;
-      const totalSegments = variantCount * segmentsPerVariant;
-      breakdown.push({
-        item: 'Production manual (Claude)',
-        cost: round4(variantCount * PRICING.klingOmniManualPromptUsd),
-      });
-      breakdown.push({
-        item: `Reference frames (${variantCount} × $${PRICING.klingOmniReferenceFrameUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.klingOmniReferenceFrameUsd),
-      });
-      breakdown.push({
-        item: `Kling 3.0 Omni segments (standard, ${totalSegments} × $${PRICING.klingOmniPerSegmentUsd.toFixed(2)})`,
-        cost: round4(totalSegments * PRICING.klingOmniPerSegmentUsd),
-      });
-      breakdown.push({
-        item: `Crossfade stitch (${variantCount} × $${PRICING.klingOmniStitchUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.klingOmniStitchUsd),
-      });
-      break;
-    }
-    case 'kie_omni_flash_native': {
-      // Polish-12.1 / Polish-14: cost scales linearly with segment
-      // count via ceiling-divide (1 segment per 10s of dialogue),
-      // capped at the worker's sanity ceiling of 30 segments (5 min).
-      // When estimatedDurationSeconds is omitted the form quotes
-      // 30s up front (3 segments) — the most common UGC length and
-      // matches the legacy quote for back-compat.
-      const seconds = estimatedDurationSeconds ?? 30;
-      const segmentCount = Math.min(Math.max(1, Math.ceil(seconds / 10)), 30);
-      const totalSegments = variantCount * segmentCount;
-      const stitchCount = segmentCount >= 2 ? variantCount : 0;
-      breakdown.push({
-        item: `Production manual (Claude, ${variantCount} × $${PRICING.kieOmniFlashManualPromptUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.kieOmniFlashManualPromptUsd),
-      });
-      breakdown.push({
-        item: `Reference frames (${variantCount} × $${PRICING.kieOmniFlashReferenceFrameUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.kieOmniFlashReferenceFrameUsd),
-      });
-      // Polish-12.8 v2: anti-celeb face pre-screen overhead. Bills
-      // even when the validator skips on a clean first attempt; the
-      // averaging across retries makes this a stable estimate.
-      breakdown.push({
-        item: `Face validation (anti-celeb pre-screen) (${variantCount} × $${PRICING.kieOmniFlashFaceValidationUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.kieOmniFlashFaceValidationUsd),
-      });
-      // Polish-12.4: kie.ai character registration. One per variant.
-      breakdown.push({
-        item: `kie.ai character registration (${variantCount} × $${PRICING.kieOmniFlashCharacterCreateUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.kieOmniFlashCharacterCreateUsd),
-      });
-      breakdown.push({
-        item: `Gemini Omni Flash (${totalSegments} segment${
-          totalSegments === 1 ? '' : 's'
-        } × $${PRICING.kieOmniFlashPerVariantUsd.toFixed(2)})`,
-        cost: round4(totalSegments * PRICING.kieOmniFlashPerVariantUsd),
-      });
-      // Polish-12.5: frame extraction for chain continuity. N-1 per
-      // variant — the final segment's last frame is never extracted.
-      const frameExtractCount = variantCount * Math.max(0, segmentCount - 1);
-      if (frameExtractCount > 0) {
-        breakdown.push({
-          item: `Chain-continuity frame extracts (${frameExtractCount} × $${PRICING.kieOmniFlashFrameExtractUsd.toFixed(2)})`,
-          cost: round4(frameExtractCount * PRICING.kieOmniFlashFrameExtractUsd),
-        });
-      }
-      if (stitchCount > 0) {
-        breakdown.push({
-          item: `idan054 video stitching (${stitchCount} × $${PRICING.kieOmniFlashStitchUsd.toFixed(2)})`,
-          cost: round4(stitchCount * PRICING.kieOmniFlashStitchUsd),
-        });
-      }
-      break;
-    }
-    case 'kie_kling_avatar_v2_standard': {
-      // Polish-19: single-call lipsync — one Kling generation per
-      // variant, sized to the script's target duration. Defaults
-      // mirror the Omni Flash branch (30s when nothing's specified)
-      // so the same submit path lands consistent estimates.
-      const seconds = estimatedDurationSeconds ?? 30;
-      const klingUsd = round4(seconds * PRICING.kieKlingAvatarUsdPerSecond);
-      // ~150 wpm × ~5 chars/word = ~750 chars/min = ~12.5 chars/sec.
-      // Use 13 to stay slightly above for safety on the TTS estimate.
-      const estimatedScriptChars = seconds * 13;
-      const ttsPerVariant = round4(
-        (estimatedScriptChars / 1000) * 0.3, // $0.30 / 1k chars (ElevenLabs)
-      );
-      breakdown.push({
-        item: `Claude script (${variantCount} × $${PRICING.kieKlingAvatarClaudeScriptUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.kieKlingAvatarClaudeScriptUsd),
-      });
-      breakdown.push({
-        item: `Nano Banana reference frame (${variantCount} × $${PRICING.kieKlingAvatarReferenceFrameUsd.toFixed(2)})`,
-        cost: round4(variantCount * PRICING.kieKlingAvatarReferenceFrameUsd),
-      });
-      breakdown.push({
-        item: `ElevenLabs TTS (~${estimatedScriptChars} chars × $0.30/1k, ${variantCount} variants)`,
-        cost: round4(variantCount * ttsPerVariant),
-      });
-      breakdown.push({
-        item: `Kling Avatar v2 Pro (${seconds}s × $${PRICING.kieKlingAvatarUsdPerSecond.toFixed(3)}/sec, ${variantCount} variants)`,
-        cost: round4(variantCount * klingUsd),
-      });
-      break;
-    }
     case 'nano_banana_static_image':
       breakdown.push({
         item: `Claude descriptions (${variantCount} × $${PRICING.nanoBananaClaudeUsd.toFixed(2)})`,

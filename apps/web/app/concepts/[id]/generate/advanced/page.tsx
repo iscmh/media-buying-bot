@@ -6,7 +6,7 @@ import { AppShell } from '@/components/shell/app-shell';
 import { PageHeader } from '@/components/shell/page-header';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
-import { loadConnectedProviders, loadKieAiBalance } from '../actions';
+import { loadConnectedProviders } from '../actions';
 import { GenerationRequestForm } from '../generation-request-form';
 
 export const metadata = { title: 'Generate variants (advanced) — Ads Bot' };
@@ -60,7 +60,6 @@ export default async function GenerateAdvancedPage({ params }: Props) {
     columns: { liveGenerationAcknowledgedAt: true },
   });
   const connectedProviders = await loadConnectedProviders(userId);
-  const kieBalance = await loadKieAiBalance(userId);
 
   return (
     <AppShell
@@ -87,7 +86,6 @@ export default async function GenerateAdvancedPage({ params }: Props) {
         capUsd={capCheck.capUsd}
         liveAcknowledged={!!settings?.liveGenerationAcknowledgedAt}
         connectedProviders={connectedProviders}
-        kieBalance={kieBalance}
         sourceVideoUrl={sourceVideoUrl}
       />
     </AppShell>

@@ -4,7 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2 } from 'lucide-react';
-import { DEFAULT_ELEVENLABS_VOICE_ID, defaultPipeline, estimateGenerationCost } from '@mbb/shared';
+import { estimateGenerationCost } from '@mbb/shared';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -128,12 +128,6 @@ export function SimplifiedGenerationForm({
     if (overCap || !canSubmit) return;
     const formData = buildSubmissionFormData({
       conceptId,
-      // Polish-20 Commit 1 legacy compat: keep the pipeline + voiceId
-      // writes on the FormData so the pre-Commit-2 dispatch still
-      // routes to a working worker. Commit 2 flips analyze-concept to
-      // route on modelId and these become vestigial.
-      legacyPipeline: defaultPipeline(),
-      legacyVoiceId: DEFAULT_ELEVENLABS_VOICE_ID,
       state,
     });
     startTransition(async () => {

@@ -7,18 +7,13 @@ export type UUID = string;
 
 export type ConnectionMethod = 'byok' | 'oauth';
 
-// Polish-8: kling/replicate/tavus/elevenlabs/openai added to the
-// underlying ai_provider enum across Polish-4/6. The UI cards expose
-// the ones we actually integrate with; arcads/creatify remain in the
-// type so the legacy DB rows still type-check. Gemini lives in
-// tool_provider (see /connections/tools), not ai_provider.
-export type AIProviderName =
-  | 'arcads'
-  | 'heygen'
-  | 'creatify'
-  | 'replicate'
-  | 'openai'
-  | 'elevenlabs';
+// Polish-20 Commit 4: elevenlabs removed alongside the legacy Kling
+// pipelines that used it. The underlying pg enum in @mbb/db still
+// carries 'elevenlabs' for stale DB rows — this application-level
+// union just stops surfacing it. arcads / creatify stay for legacy
+// DB rows. Gemini + Claude + Kie.ai live in tool_provider (see
+// /connections/tools), not ai_provider.
+export type AIProviderName = 'arcads' | 'heygen' | 'creatify' | 'replicate' | 'openai';
 
 export type CampaignObjective = 'CBO' | 'ABO';
 

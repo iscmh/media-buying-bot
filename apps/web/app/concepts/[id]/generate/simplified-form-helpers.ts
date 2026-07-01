@@ -1,16 +1,13 @@
 /**
- * Polish-19 Commit 3 → Polish-20 Commit 1: pure helpers for the
+ * Polish-19 Commit 3 → Polish-20 Commit 4: pure helpers for the
  * simplified generation form.
  *
- * Polish-20 shift: the form now picks a (model, provider) pair from
- * the packages/shared/src/video-models.ts descriptor layer instead
- * of a PipelineType. Legacy `pipeline` field is retained on the
- * FormData shape so the existing action handler still routes to a
- * worker during the architectural transition — Commit 2 flips
- * dispatch to the new unified worker, Commits 3-4 remove the legacy
- * pipelines entirely.
+ * Post-Polish-20: the form picks a (model, provider) pair from
+ * packages/shared/src/video-models.ts. The legacy `pipeline` +
+ * `voiceId` fields on the FormData shape are gone; the action
+ * handler dispatches purely on modelId + providerId written to
+ * job.metadata.
  */
-import type { PipelineType } from '@mbb/shared';
 import {
   computeSegmentCountForModel,
   formatModelCostHintPerVariant,
@@ -106,35 +103,23 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
 /**
  * Build the FormData payload the simplified form submits.
  *
- * Polish-20 Commit 1 additive shape:
- *   - Everything the existing createGenerationJobAction reads
- *     (conceptId, pipeline, variantCount, sourceDurationSeconds,
- *     intensity=medium, mode=live, voiceId).
- *   - NEW fields: modelId, providerId, sourceDurationSeconds always
- *     sent (worker's Polish-19.3.1 fallback chain honors it).
- *   - `pipeline` is set to a stable legacy value so the existing
- *     analyze-concept dispatch keeps working during Commit 1. Commit 2
- *     flips analyze-concept to route on modelId instead and this
- *     field becomes vestigial before being removed in Commit 3.
+ * Polish-20 Commit 4 clean shape:
+ *   - conceptId, variantCount, sourceDurationSeconds
+ *   - modelId + providerId — the canonical routing signals
+ *   - intensity=medium + mode=live still hardcoded because the
+ *     action handler validates them, but the values are constants
+ *     the simplified form never surfaces
  */
 export function buildSubmissionFormData(input: {
   conceptId: string;
-  legacyPipeline: PipelineType;
-  legacyVoiceId: string;
   state: SimplifiedFormState;
 }): FormData {
   const fd = new FormData();
   fd.set('conceptId', input.conceptId);
   fd.set('intensity', 'medium');
   fd.set('mode', 'live');
-  // Polish-20 Commit 1 legacy compat: keep pipeline + voiceId writes
-  // so the pre-Commit 2 dispatch still routes to a working worker.
-  fd.set('pipeline', input.legacyPipeline);
-  fd.set('voiceId', input.legacyVoiceId);
   fd.set('variantCount', String(input.state.variantCount));
   fd.set('sourceDurationSeconds', String(input.state.durationSeconds));
-  // Polish-20 NEW: descriptor-driven fields. Commit 2 makes these the
-  // canonical routing signal.
   if (input.state.modelId) fd.set('modelId', input.state.modelId);
   if (input.state.providerId) fd.set('providerId', input.state.providerId);
   return fd;

@@ -43,14 +43,13 @@ export async function loadFailoverReadyState(userId: string): Promise<FailoverRe
       eq(schema.aiProviderConnections.userId, userId),
       eq(schema.aiProviderConnections.status, 'active'),
       isNull(schema.aiProviderConnections.deletedAt),
-      inArray(schema.aiProviderConnections.provider, ['heygen', 'kling', 'elevenlabs']),
+      inArray(schema.aiProviderConnections.provider, ['heygen']),
     ),
     columns: { provider: true },
   });
   const present = new Set(rows.map((r) => r.provider));
   return {
     heygen: present.has('heygen'),
-    klingAndElevenLabs: present.has('kling') && present.has('elevenlabs'),
   };
 }
 

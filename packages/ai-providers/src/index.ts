@@ -6,7 +6,6 @@ export { CreatifyProvider } from './creatify';
 // Polish-8: verify-only providers for the BYOK connect cards.
 export { ReplicateProvider } from './replicate';
 export { OpenAIProvider } from './openai-provider';
-export { ElevenLabsProvider } from './elevenlabs-provider';
 
 // Phase 3b: real provider clients used by the Inngest generation jobs.
 // These bypass the Phase 1 `AIProvider` interface (which was scoped to
@@ -85,22 +84,6 @@ export {
   type CallProviderResult,
 } from './chokepoint';
 
-// Polish-4: Kling cinematic video via Replicate + ElevenLabs TTS for
-// the cinematic_voiceover creative format.
-export {
-  submitKlingVideo,
-  checkKlingPrediction,
-  classifyKlingError,
-  getKlingModelId,
-  isAudioCapableKlingModel,
-  estimateKlingClipCostUsd,
-  type KlingSubmitInput,
-  type KlingSubmitResult,
-  type KlingCheckInput,
-  type KlingCheckResult,
-  type KlingErrorCategory,
-  type KlingPredictionStatus,
-} from './kling';
 export {
   submitReplicateConcat,
   checkReplicateConcat,
@@ -122,21 +105,6 @@ export {
   type CheckFrameExtractResult,
 } from './replicate-frame-extract';
 export {
-  submitKlingOmni,
-  checkKlingOmni,
-  getKlingOmniRawModelId,
-  isKlingOmniEnabled,
-  estimateKlingOmniSegmentCostUsd,
-  KLING_OMNI_NEGATIVE_PROMPT,
-  type KlingOmniMode,
-  type KlingOmniShot,
-  type KlingOmniSubmitInput,
-  type KlingOmniSubmitResult,
-  type KlingOmniCheckInput,
-  type KlingOmniCheckResult,
-  type KlingOmniPredictionStatus,
-} from './kling-omni';
-export {
   submitAudioTrim,
   checkAudioTrim,
   getAudioTrimModelId,
@@ -157,28 +125,6 @@ export {
   type CheckLipsyncResult,
 } from './replicate-lipsync';
 export {
-  submitKieOmniVideo,
-  pollKieOmniTask,
-  createKieOmniCharacter,
-  getKieAiBalance,
-  estimateKieOmniGenerationCostUsd,
-  parseResultJsonOutputUrl,
-  translateKieErrorStatus,
-  KIE_OMNI_VIDEO_MODEL,
-  type KieOmniSubmitInput,
-  type KieOmniSubmitResult,
-  type KieOmniPollInput,
-  type KieOmniPollResult,
-  type KieCharacterCreateInput,
-  type KieCharacterCreateResult,
-  type KieCreditBalanceInput,
-  type KieCreditBalanceResult,
-  type KieOmniDuration,
-  type KieOmniAspectRatio,
-  type KieOmniResolution,
-  type KieOmniState,
-} from './kie-omni';
-export {
   submitKieVideo,
   pollKieVideo,
   parseResultJsonOutputUrl as parseKieVideoResultJson,
@@ -197,28 +143,6 @@ export {
   type KieVideoPollResult,
   type KieVideoState,
 } from './kie-video';
-export {
-  submitKieKlingAvatar,
-  pollKieKlingAvatar,
-  parseKlingAvatarOutputUrl,
-  translateKieKlingAvatarErrorStatus,
-  estimateKieKlingAvatarCostUsd,
-  getKieKlingAvatarModelId,
-  KIE_KLING_AVATAR_DEFAULT_MODEL,
-  type KieKlingAvatarSubmitInput,
-  type KieKlingAvatarSubmitResult,
-  type KieKlingAvatarPollInput,
-  type KieKlingAvatarPollResult,
-  type KieKlingAvatarState,
-} from './kie-kling-avatar';
-export {
-  submitElevenLabsTts,
-  getDefaultElevenLabsVoiceId,
-  estimateElevenLabsCostUsd,
-  estimateVoiceoverVariantCostUsd,
-  type ElevenLabsTtsInput,
-  type ElevenLabsTtsResult,
-} from './elevenlabs';
 
 // Polish-6: vision detection + Whisper transcription for auto-format.
 export {

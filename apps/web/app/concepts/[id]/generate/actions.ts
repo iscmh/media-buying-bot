@@ -105,19 +105,9 @@ export async function createGenerationJobAction(
     typeof rawSourceDuration === 'string' && rawSourceDuration.length > 0
       ? clampSourceDuration(Number(rawSourceDuration))
       : null;
-  // Polish-19 Commit 3: optional ElevenLabs voice id from the simplified
-  // form's VoicePicker (Advanced disclosure). When absent the worker
-  // falls back to getDefaultElevenLabsVoiceId() (Rachel). Free-form
-  // string — we don't validate against the curated catalog because
-  // users may pass custom ElevenLabs voice ids; ElevenLabs surfaces 422
-  // for genuinely invalid values via the worker's existing error path.
-  const rawVoiceId = formData.get('voiceId');
-  const voiceId =
-    typeof rawVoiceId === 'string' && rawVoiceId.trim().length > 0 ? rawVoiceId.trim() : null;
-  // Polish-20 Commit 1: descriptor-driven model + provider selection.
-  // Persisted on job.metadata alongside the legacy pipeline / voice_id
-  // fields — Commit 2 flips the worker dispatch to read from these,
-  // Commit 3+4 remove the legacy metadata paths.
+  // Polish-20 Commit 4: descriptor-driven model + provider selection
+  // is the ONLY UGC video routing signal. Voice id / legacy pipeline
+  // metadata deleted with the ElevenLabs + Kling Avatar v2 removal.
   const rawModelId = formData.get('modelId');
   const modelId =
     typeof rawModelId === 'string' && rawModelId.trim().length > 0 ? rawModelId.trim() : null;
@@ -263,20 +253,17 @@ export async function createGenerationJobAction(
       pickedPipeline: pipelineDesc.pipeline,
       // Polish-9: reference creative storage path (auto-detect upload).
       ...(referenceStoragePath ? { referenceCreativeStoragePath: referenceStoragePath } : {}),
-      // Polish-14.1 + Polish-19 Commit 3 + Polish-20 Commit 1: persist
-      // optional metadata fields the worker reads. source_duration_seconds
-      // drives the worker's target duration; voice_id picks the
-      // ElevenLabs voice (legacy Kling Avatar v2 pipeline); model_id +
-      // provider_id are the new descriptor-driven routing signals
-      // Commit 2 will dispatch on. All fields are nullable — workers
+      // Polish-14.1 + Polish-20 Commit 4: persist descriptor-driven
+      // routing signals + source duration. The video-variant worker
+      // reads model_id + provider_id to look up ModelProviderConfig
+      // and dispatches accordingly. All fields nullable — workers
       // tolerate absent columns and fall back to safe defaults.
-      ...(sourceDurationSeconds != null || voiceId != null || modelId != null || providerId != null
+      ...(sourceDurationSeconds != null || modelId != null || providerId != null
         ? {
             metadata: {
               ...(sourceDurationSeconds != null
                 ? { source_duration_seconds: sourceDurationSeconds }
                 : {}),
-              ...(voiceId != null ? { voice_id: voiceId } : {}),
               ...(modelId != null ? { model_id: modelId } : {}),
               ...(providerId != null ? { provider_id: providerId } : {}),
             },
@@ -336,49 +323,11 @@ export async function createGenerationJobAction(
  * 'replicate' enum value but Replicate is the host for Kling 3.0 in
  * our architecture). See buildConnectedProviders for the mapping.
  */
-/**
- * Polish-16 Fix 1: pre-flight kie.ai credit balance check for the
- * generate page. Returns the raw credit count so the form can
- * display it alongside the dollar estimate. kie.ai's credit-to-USD
- * ratio depends on the account's billing plan and isn't published
- * programmatically, so we don't try to convert.
- *
- * Returns `{ ok: false }` cleanly when:
- *   - the user has no kie_ai key connected (silent skip — the form
- *     shows no balance notice for non-kie pipelines)
- *   - the kie.ai API errors (the form shows a warning)
- *
- * Cheap call. Doesn't bill the operator.
- */
-export interface KieBalanceResult {
-  ok: boolean;
-  credits?: number;
-  errorMessage?: string;
-}
-
-export async function loadKieAiBalance(userId: string): Promise<KieBalanceResult> {
-  const db = getDb();
-  const toolRow = await db.query.toolConnections.findFirst({
-    where: and(
-      eq(schema.toolConnections.userId, userId),
-      eq(schema.toolConnections.provider, 'kie_ai'),
-      eq(schema.toolConnections.status, 'active'),
-      isNull(schema.toolConnections.deletedAt),
-    ),
-    columns: { apiKeyEncrypted: true },
-  });
-  if (!toolRow?.apiKeyEncrypted) {
-    return { ok: false, errorMessage: 'kie_ai not connected' };
-  }
-  const apiKey = await decryptSecret(toolRow.apiKeyEncrypted);
-  const { getKieAiBalance } = await import('@mbb/ai-providers');
-  const balance = await getKieAiBalance({ userId, apiKey });
-  return {
-    ok: balance.ok,
-    credits: balance.credits,
-    errorMessage: balance.errorMessage,
-  };
-}
+// Polish-20 Commit 4: loadKieAiBalance + KieBalanceResult deleted
+// alongside the kie-omni client that exposed getKieAiBalance. The
+// Polish-16 Fix 1 kie.ai pre-flight balance check may return in a
+// Polish-21 form iteration once we have a stable public endpoint;
+// for now the operator sees only the dollar-cost estimate.
 
 export async function loadConnectedProviders(userId: string): Promise<ConnectedProviders> {
   const db = getDb();
@@ -549,8 +498,6 @@ export async function detectAndRouteFromStoragePath(
   const pipelineConnections: PipelineUserConnections = {
     heygen: { connected: providers.heygen.connected, tier: providers.heygen.tier },
     openai: { connected: providers.openai.connected },
-    kling: { connected: providers.kling.connected },
-    elevenlabs: { connected: providers.elevenlabs.connected },
     gemini: { connected: providers.gemini.connected },
   };
   const routeResult = pickPipeline(

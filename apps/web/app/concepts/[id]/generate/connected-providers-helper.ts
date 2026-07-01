@@ -1,23 +1,28 @@
 /**
- * Polish-9.3: pure mapper from raw connection rows to the
- * ConnectedProviders shape the form picker consumes.
+ * Polish-9.3 → Polish-20 Commit 4: pure mapper from raw connection
+ * rows to the ConnectedProviders shape the form picker consumes.
  *
- * Extracted so vitest can cover the kling↔replicate mapping without
- * mocking Supabase + Drizzle. The Polish-8 UI ships a "Replicate"
- * card (correct — Replicate hosts Kling 3.0), but the Polish-6
- * backend assumed a 'kling' provider. This helper treats either DB
- * row as filling the kling capability slot.
+ * Post-Commit-4 the shape is trimmed to the providers the surviving
+ * pipelines still need:
+ *   - heygen (HeyGen avatar pipeline)
+ *   - openai (Sora 2)
+ *   - gemini + claude + kie_ai (video-variant worker + static image)
+ *
+ * elevenlabs deleted with the ElevenLabs client. `kling` deleted with
+ * the four Kling-family pipelines — the kie.ai video worker uses the
+ * `kie_ai` credential instead. The `kling` label survives inside
+ * chokepoint.ProviderName because Replicate's shared helpers
+ * (concat / lipsync / audio-trim / frame-extract) still tag their
+ * BYOK audit rows with it, but that's a chokepoint-only concern —
+ * the form no longer surfaces a Kling capability.
  */
 
 export interface ConnectedProviders {
   heygen: { connected: boolean; tier: 'free' | 'pro' | 'premium' | null };
-  kling: { connected: boolean };
-  elevenlabs: { connected: boolean };
   openai: { connected: boolean };
   gemini: { connected: boolean };
-  // Polish-12: Claude + kie.ai needed for the Gemini Omni Flash
-  // pipeline. Both live in tool_connections (not ai_provider_
-  // connections) — toolProviders is the auth source for them.
+  // Polish-12: Claude + kie.ai in tool_connections (not
+  // ai_provider_connections) — toolProviders is the auth source.
   claude: { connected: boolean };
   kie_ai: { connected: boolean };
 }
@@ -27,25 +32,16 @@ export interface AiProviderRow {
   tier: string | null;
 }
 
-/**
- * Polish-9.3: kling capability fills from EITHER a 'kling' DB row
- * (legacy Polish-4 path) OR a 'replicate' DB row (Polish-8 UI card).
- * Replicate is the API endpoint for Kling in our architecture; the
- * abstraction the form picker uses is 'kling'.
- */
 export function buildConnectedProviders(
   aiRows: AiProviderRow[],
   toolProviders: ReadonlySet<string>,
 ): ConnectedProviders {
   const byAi = new Map<string, AiProviderRow>(aiRows.map((r) => [r.provider, r]));
-  const klingRow = byAi.get('kling') ?? byAi.get('replicate');
   return {
     heygen: {
       connected: byAi.has('heygen'),
       tier: (byAi.get('heygen')?.tier as 'free' | 'pro' | 'premium' | null | undefined) ?? null,
     },
-    kling: { connected: !!klingRow },
-    elevenlabs: { connected: byAi.has('elevenlabs') },
     openai: { connected: byAi.has('openai') },
     gemini: { connected: toolProviders.has('gemini') },
     claude: { connected: toolProviders.has('claude') },
@@ -54,13 +50,7 @@ export function buildConnectedProviders(
 }
 
 /**
- * Polish-9.3: the ai_provider DB enum values the loader queries for.
- * Includes 'replicate' so the Polish-8 UI card's row gets picked up.
+ * ai_provider DB enum values the loader queries for. Only the
+ * providers the surviving pipelines still consult are listed.
  */
-export const AI_PROVIDER_QUERY_LIST = [
-  'heygen',
-  'kling',
-  'replicate',
-  'elevenlabs',
-  'openai',
-] as const;
+export const AI_PROVIDER_QUERY_LIST = ['heygen', 'openai'] as const;

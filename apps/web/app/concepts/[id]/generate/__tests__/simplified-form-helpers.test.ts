@@ -4,7 +4,6 @@
  * FormData submission shape.
  */
 import { describe, expect, it } from 'vitest';
-import { defaultPipeline } from '@mbb/shared';
 import {
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
@@ -92,12 +91,10 @@ describe('Polish-20: isRecommendedTier — accent flag for the middle card', () 
   });
 });
 
-describe('Polish-20: buildSubmissionFormData', () => {
-  it('emits the FormData keys createGenerationJobAction reads (legacy compat + new fields)', () => {
+describe('Polish-20 Commit 4: buildSubmissionFormData clean shape', () => {
+  it('emits ONLY the descriptor-driven fields the action handler reads', () => {
     const fd = buildSubmissionFormData({
       conceptId: 'concept_abc',
-      legacyPipeline: defaultPipeline(),
-      legacyVoiceId: '21m00Tcm4TlvDq8ikWAM',
       state: {
         modelId: 'kling_3_standard',
         providerId: 'kie_ai',
@@ -105,30 +102,21 @@ describe('Polish-20: buildSubmissionFormData', () => {
         durationSeconds: 30,
       },
     });
-    // Legacy compat (Polish-20 Commit 1 keeps these so pre-Commit-2
-    // dispatch still routes to a working worker):
     expect(fd.get('conceptId')).toBe('concept_abc');
-    expect(fd.get('intensity')).toBe('medium'); // hardcoded; simplified form hides picker
+    expect(fd.get('intensity')).toBe('medium');
     expect(fd.get('mode')).toBe('live');
-    expect(fd.get('pipeline')).toBe(defaultPipeline());
-    expect(fd.get('voiceId')).toBe('21m00Tcm4TlvDq8ikWAM');
     expect(fd.get('variantCount')).toBe('5');
-    // Polish-14.1 legacy name — worker's target duration.
     expect(fd.get('sourceDurationSeconds')).toBe('30');
-    // Polish-20 NEW: descriptor-driven routing signals.
     expect(fd.get('modelId')).toBe('kling_3_standard');
     expect(fd.get('providerId')).toBe('kie_ai');
+    // Legacy fields must NOT appear post-Commit-4.
+    expect(fd.has('pipeline')).toBe(false);
+    expect(fd.has('voiceId')).toBe(false);
   });
 
   it('OMITS modelId + providerId when the state fields are null (defense-in-depth)', () => {
-    // Should never happen in practice — canSubmitState blocks submit
-    // when modelId is null — but defensively the builder skips the
-    // field rather than writing 'null' string values the action
-    // handler would parse.
     const fd = buildSubmissionFormData({
       conceptId: 'c',
-      legacyPipeline: defaultPipeline(),
-      legacyVoiceId: 'v',
       state: {
         modelId: null,
         providerId: null,
@@ -140,11 +128,9 @@ describe('Polish-20: buildSubmissionFormData', () => {
     expect(fd.has('providerId')).toBe(false);
   });
 
-  it('always sends sourceDurationSeconds (worker Polish-19.3.1 fallback chain honors it)', () => {
+  it('always sends sourceDurationSeconds', () => {
     const fd = buildSubmissionFormData({
       conceptId: 'c',
-      legacyPipeline: defaultPipeline(),
-      legacyVoiceId: 'v',
       state: {
         modelId: 'seedance_1_5_pro',
         providerId: 'kie_ai',
@@ -158,8 +144,6 @@ describe('Polish-20: buildSubmissionFormData', () => {
   it('intensity + mode are always hardcoded (simplified form does not expose either)', () => {
     const fd = buildSubmissionFormData({
       conceptId: 'c',
-      legacyPipeline: defaultPipeline(),
-      legacyVoiceId: 'v',
       state: {
         modelId: 'seedance_2',
         providerId: 'kie_ai',

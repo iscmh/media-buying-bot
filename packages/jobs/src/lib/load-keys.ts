@@ -17,10 +17,11 @@ export interface DecryptedKeys {
   heygen?: string;
   arcads?: string;
   creatify?: string;
-  // Polish-4: Kling cinematic video via Replicate + ElevenLabs TTS for
-  // the cinematic_voiceover creative format.
+  // Polish-20 Commit 4: `kling` retained as a slot only because the
+  // Replicate shared helpers (concat / lipsync / audio-trim / frame-
+  // extract) tag their BYOK lookups with it — the video-variant
+  // worker's stitch step reads this slot to find the Replicate key.
   kling?: string;
-  elevenlabs?: string;
   // Polish-6: OpenAI key (Whisper transcription + Sora 2 generation).
   openai?: string;
 }
@@ -75,8 +76,8 @@ async function fetchCiphertext(userId: string, provider: ProviderKey): Promise<s
     return row?.apiKeyEncrypted ?? null;
   }
 
-  // heygen / arcads / creatify / kling / elevenlabs / openai all live
-  // in ai_provider_connections.
+  // heygen / arcads / creatify / kling / openai all live in
+  // ai_provider_connections.
   //
   // Polish-9.3: when the worker asks for 'kling' the user might have
   // connected the key under the Polish-8 'Replicate' UI card, which

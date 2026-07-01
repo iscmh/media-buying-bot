@@ -60,33 +60,6 @@ export type Events = {
   'generation/ugc.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
-  // Polish-4: cinematic_voiceover format — TTS audio (ElevenLabs) +
-  // Kling 2.5 video. analyze fans out to either ugc.requested or
-  // cinematic.requested based on generation_jobs.format.
-  'generation/cinematic.requested': {
-    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
-  };
-  // Polish-6: Kling 3.0 multi-clip native lipsync pipeline.
-  'generation/kling-multi-clip.requested': {
-    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
-  };
-  // Polish-10: Kling 3.0 Omni multi-segment pipeline (replaces the
-  // legacy multi-clip pipeline as the default for Kling-routed jobs).
-  'generation/kling-3-omni-multi-segment.requested': {
-    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
-  };
-  // Polish-12: kie.ai Gemini Omni Flash native pipeline. Opt-in via
-  // Override Dialog — single API call replacing the Polish-11
-  // multi-clip + ElevenLabs + lipsync stack.
-  'generation/kie-omni-flash-native.requested': {
-    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
-  };
-  // Polish-19: kie.ai Kling Avatar v2 (Pro) pipeline — image + audio →
-  // lipsynced talking-head MP4 in one call. Replaces Omni Flash as the
-  // default UGC pipeline; Omni Flash stays as the advanced option.
-  'generation/kie-kling-avatar-v2.requested': {
-    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
-  };
   // Polish-20: unified video-variant worker — reads model_id +
   // provider_id from job.metadata and dispatches through the
   // descriptor-driven kie-video client (Seedance 1.5 Pro / Kling 3.0
