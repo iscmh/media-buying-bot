@@ -7,6 +7,7 @@ import { generateKling3OmniMultiSegment } from './generate-kling-3-omni-multi-se
 import { generateKieOmniFlashNative } from './generate-kie-omni-flash-native';
 import { generateKieKlingAvatarV2 } from './generate-kie-kling-avatar-v2';
 import { generateVeo31Fast } from './generate-veo-3-1-fast';
+import { generateVideoVariant } from './generate-video-variant';
 import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
 import { generateStaticVariants } from './generate-static-variants';
@@ -49,6 +50,11 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   'generation/sora.requested',
   'generation/nano-banana.requested',
   'generation/static.requested',
+  // Polish-20 Commit 2: unified video-variant worker (Seedance 1.5 Pro /
+  // Kling 3.0 Standard / Seedance 2 / etc.). Reads model_id +
+  // provider_id from job.metadata and dispatches through the
+  // descriptor-driven kie-video client.
+  'generation/video-variant.requested',
 ] as const);
 
 export const functions = [
@@ -70,6 +76,8 @@ export const functions = [
   generateKieKlingAvatarV2,
   // Polish-19.2: Veo 3.1 Fast native-audio pipeline (new default).
   generateVeo31Fast,
+  // Polish-20 Commit 2: unified descriptor-driven video-variant worker.
+  generateVideoVariant,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

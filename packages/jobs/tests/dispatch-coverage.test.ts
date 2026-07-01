@@ -63,6 +63,10 @@ describe('Polish-19.2.1: dispatch coverage between PipelineType and registered w
       'generation/static.requested', // routed by sendGenerationJobEvent when conceptType=static
       'generation/cinematic.requested', // legacy Polish-4 format-based path
       'generation/ugc.requested', // default fallback in analyze-concept
+      // Polish-20 Commit 2: unified video-variant worker. Not driven by
+      // a legacy PipelineType descriptor — routed on metadata.model_id
+      // in analyze-concept dispatch.
+      'generation/video-variant.requested',
     ]);
     const allDescriptorEvents: ReadonlySet<string> = new Set<string>(
       ALL_PIPELINES.map((p) => describePipeline(p).workerEvent),

@@ -205,6 +205,25 @@ export {
   type VeoExtendVideoRef,
 } from './veo';
 export {
+  submitKieVideo,
+  pollKieVideo,
+  parseResultJsonOutputUrl as parseKieVideoResultJson,
+  translateKieVideoErrorStatus,
+  getKieVideoModelIdOverride,
+  detectKieVideoRateLimit,
+  computeKieVideoRateLimitBackoffMs,
+  getKieVideoRateLimitMaxRetries,
+  KIE_VIDEO_DEFAULT_RATE_LIMIT_MAX_RETRIES,
+  __setKieVideoSleepImplForTests,
+  __restoreKieVideoSleepImplForTests,
+  __resetKieVideoFirstCallLogForTests,
+  type KieVideoSubmitInput,
+  type KieVideoSubmitResult,
+  type KieVideoPollInput,
+  type KieVideoPollResult,
+  type KieVideoState,
+} from './kie-video';
+export {
   submitKieKlingAvatar,
   pollKieKlingAvatar,
   parseKlingAvatarOutputUrl,

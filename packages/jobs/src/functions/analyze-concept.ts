@@ -307,13 +307,31 @@ async function loadJobRoutingEvent(
   | 'generation/veo-3-1-fast.requested'
   | 'generation/sora.requested'
   | 'generation/nano-banana.requested'
+  | 'generation/video-variant.requested'
 > {
   try {
     const db = getDb();
     const row = await db.query.generationJobs.findFirst({
       where: eq(schema.generationJobs.id, jobId),
-      columns: { format: true, pickedPipeline: true },
+      columns: { format: true, pickedPipeline: true, metadata: true },
     });
+    // Polish-20 Commit 2: descriptor-driven routing wins over the
+    // legacy pickedPipeline field. When metadata.model_id is set the
+    // form used the new picker → dispatch to the unified
+    // generate-video-variant worker, which reads model_id + provider_id
+    // out of metadata to look up the ModelProviderConfig.
+    const metadataObj = (row?.metadata ?? null) as Record<string, unknown> | null;
+    const modelIdFromMetadata =
+      metadataObj && typeof metadataObj['model_id'] === 'string'
+        ? (metadataObj['model_id'] as string)
+        : null;
+    if (modelIdFromMetadata) {
+      console.log(
+        `[analyze-concept] job ${jobId} dispatch: model_id=${modelIdFromMetadata} → ` +
+          `workerEvent=generation/video-variant.requested (Polish-20 unified worker)`,
+      );
+      return 'generation/video-variant.requested';
+    }
     const pipeline = pipelineFromString(row?.pickedPipeline);
     if (pipeline) {
       const workerEvent = describePipeline(pipeline).workerEvent;
