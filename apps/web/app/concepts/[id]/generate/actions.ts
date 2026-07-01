@@ -131,13 +131,24 @@ export async function createGenerationJobAction(
     };
   }
 
-  // Polish-9.2: format + providerChoice derive from the pipeline
-  // descriptor. Falls back to HeyGen avatar talking head when no
-  // pipeline was sent (legacy concepts without auto-detect run).
+  // Polish-9.2 → Polish-20.0.2 hotfix: format + providerChoice derive
+  // from the pipeline descriptor when a pipeline is explicitly sent.
+  // When the simplified form submits WITHOUT a pipeline field (the
+  // Polish-20.0.1+ default) AND a modelId IS present, we intentionally
+  // leave pickedPipeline null — the video-variant worker routes off
+  // metadata.model_id via analyze-concept's dispatch. The pre-fix
+  // fallback to HeyGen wrote pickedPipeline='heygen_avatar_talking_head'
+  // even when the operator had picked a Seedance/Kling model, which
+  // opened a routing hole: if analyze-concept's metadata read hit any
+  // edge case, dispatch fell through to the HeyGen worker instead of
+  // the video-variant worker (Polish-20.0.2 production diagnostic on
+  // job 84fee5b7).
   const pipelineDesc = detectedPipeline
     ? describePipeline(detectedPipeline)
-    : describePipeline('heygen_avatar_talking_head');
-  const format = pipelineDesc.format;
+    : modelId != null
+      ? null // Polish-20 modelId path — pipeline stays null; dispatch reads metadata.
+      : describePipeline('heygen_avatar_talking_head');
+  const format = pipelineDesc?.format ?? null;
 
   const supabase = await getSupabaseServerClient();
   const {
@@ -159,36 +170,33 @@ export async function createGenerationJobAction(
   }
   const contentType = concept.contentType as ConceptType;
 
-  // Polish-9.2: pickedProvider follows the pipeline descriptor for UGC.
-  // For static concepts the pipeline drives provider too (nano_banana →
-  // gemini). VALID_UGC_PROVIDERS legacy check preserved for stale callers
-  // that still POST a literal `provider` value.
+  // Polish-9.2 → Polish-20.0.2: pickedProvider follows the pipeline
+  // descriptor for UGC when a pipeline is picked; when only modelId
+  // is set (the Polish-20 default UGC path), the video-variant worker
+  // reads provider_id off metadata — there's no legacy pickedProvider
+  // to write here.
   let pickedProvider: UgcVideoProvider | undefined;
-  if (contentType === 'ugc') {
+  if (contentType === 'ugc' && pipelineDesc) {
     if (pipelineDesc.providerChoice === 'heygen') {
       pickedProvider = 'heygen';
     } else if (provider && VALID_UGC_PROVIDERS.has(provider as UgcVideoProvider)) {
       pickedProvider = provider as UgcVideoProvider;
     } else {
-      // sora / kling / gemini paths aren't in VALID_UGC_PROVIDERS
-      // (they're newer than that enum); leave provider undefined and let
-      // the descriptor's providerChoice drive the job row.
       pickedProvider = undefined;
     }
   }
 
   // Estimate cost server-side (don't trust the client's display).
-  // Polish-9.4: pass the canonical pipeline alongside provider so
-  // estimateGenerationCost takes the descriptor-driven branch when
-  // the pipeline isn't HeyGen (pickedProvider is undefined for kling/
-  // sora/gemini paths after Polish-9.2).
+  // Polish-20.0.2: when modelId is present, route through the
+  // descriptor-driven video-model branch (matches the form's preview
+  // card). Otherwise fall through to the legacy pipeline branch.
   const estimate = estimateGenerationCost({
     conceptType: contentType,
     variantCount,
     provider: pickedProvider,
-    pipeline: pipelineDesc.pipeline,
-    // Polish-14.1: match the form's displayed quote — source duration
-    // drives segment count for kie_omni_flash_native.
+    ...(pipelineDesc ? { pipeline: pipelineDesc.pipeline } : {}),
+    ...(modelId != null ? { videoModelId: modelId as never } : {}),
+    ...(providerId != null ? { videoProviderId: providerId as never } : {}),
     sourceDurationSeconds: sourceDurationSeconds ?? undefined,
   });
 
@@ -239,18 +247,23 @@ export async function createGenerationJobAction(
       variantCount,
       providerChoice:
         pickedProvider ??
-        pipelineDesc.providerChoice ??
+        pipelineDesc?.providerChoice ??
         (contentType === 'static' ? 'gemini+claude' : null),
       estimatedCostUsd: estimate.estimateUsd.toFixed(4),
       mode,
       status: 'queued',
-      // Polish-4: creative format persisted at job-creation time. The
-      // analyze-concept worker reads this to fan out to either the
-      // ugc.requested (HeyGen) or cinematic.requested (Kling) worker.
-      format,
-      // Polish-9.2: persist the canonical Polish-6 pipeline value. Drives
-      // analyze-concept's fan-out routing.
-      pickedPipeline: pipelineDesc.pipeline,
+      // Polish-4 → Polish-20.0.2: format persisted at job-creation
+      // time for the LEGACY pipeline survivors (heygen / sora /
+      // nano-banana). When only modelId is set, we OMIT this field
+      // so the column default ('avatar_talking_head') lands but the
+      // video-variant worker doesn't read format anyway.
+      ...(format != null ? { format } : {}),
+      // Polish-9.2 → Polish-20.0.2: pickedPipeline persisted for
+      // legacy dispatch. Left null when only modelId is set so
+      // analyze-concept's dispatch can't accidentally fall through
+      // to a wrong worker (the pre-20.0.2 forced HeyGen fallback
+      // caused this on job 84fee5b7).
+      pickedPipeline: pipelineDesc?.pipeline ?? null,
       // Polish-9: reference creative storage path (auto-detect upload).
       ...(referenceStoragePath ? { referenceCreativeStoragePath: referenceStoragePath } : {}),
       // Polish-14.1 + Polish-20 Commit 4: persist descriptor-driven
@@ -291,11 +304,16 @@ export async function createGenerationJobAction(
       content_type: contentType,
       intensity,
       variant_count: variantCount,
-      provider_choice: pickedProvider ?? pipelineDesc.providerChoice,
-      pipeline: pipelineDesc.pipeline,
+      provider_choice: pickedProvider ?? pipelineDesc?.providerChoice ?? null,
+      pipeline: pipelineDesc?.pipeline ?? null,
+      // Polish-20.0.2: audit-log the descriptor-driven routing signals
+      // alongside the legacy pipeline/format so a future dispatch
+      // regression is traceable via the audit trail.
+      model_id: modelId,
+      provider_id: providerId,
       estimated_cost_usd: estimate.estimateUsd,
       mode,
-      format,
+      format: format ?? null,
       _meta: await auditMetaFromHeaders(),
     },
   });

@@ -17,6 +17,7 @@ import {
   type VideoProviderId,
 } from '@mbb/shared';
 import { getDb, schema } from '@mbb/db';
+import { extractMetadataObject } from './analyze-concept';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
@@ -237,7 +238,9 @@ export const generateVideoVariant = inngest.createFunction(
       return { jobId, mode, generated: 0 };
     }
 
-    const jobMetadata = (job.metadata ?? null) as Record<string, unknown> | null;
+    // Polish-20.0.2: use the shared defensive extractor so a
+    // postgres-js jsonb-as-string edge case can't miss model_id.
+    const jobMetadata = extractMetadataObject(job.metadata ?? null);
     const modelId =
       jobMetadata && typeof jobMetadata['model_id'] === 'string'
         ? (jobMetadata['model_id'] as VideoModelId)

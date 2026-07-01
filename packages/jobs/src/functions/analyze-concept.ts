@@ -284,14 +284,29 @@ export const analyzeConcept = inngest.createFunction(
 );
 
 /**
- * Polish-9.2: read the Polish-6 picked_pipeline + Polish-4 format columns
- * and return the canonical worker event name to dispatch. Precedence:
- *   1. picked_pipeline set → use the descriptor's workerEvent.
- *   2. format = 'cinematic_voiceover' → legacy Polish-4 cinematic worker.
- *   3. otherwise → default UGC (HeyGen) worker.
+ * Polish-9.2 → Polish-20.0.2 hotfix: dispatch precedence.
+ *   1. job.metadata.model_id set → generation/video-variant.requested
+ *      (Polish-20 unified worker — reads model_id + provider_id from
+ *      metadata to look up ModelProviderConfig)
+ *   2. picked_pipeline set → descriptor's workerEvent (legacy survivors:
+ *      heygen / sora / nano-banana)
+ *   3. otherwise → default UGC (HeyGen) fallback so the job doesn't
+ *      stall
  *
  * Returns 'generation/ugc.requested' on any error so the job doesn't
  * stall — the default worker exists for every user.
+ *
+ * Polish-20.0.2 hardening:
+ *   - Reads metadata via extractMetadataObject() which handles both
+ *     the expected object shape AND a JSON-string shape (defensive
+ *     against postgres-js driver edge cases where jsonb rarely comes
+ *     back as text)
+ *   - Loud-logs the actual keys present on metadata + the metadata
+ *     shape so a future misdispatch is diagnosable without a repro
+ *   - When metadata.model_id is set but provider_id is missing,
+ *     STILL dispatches to video-variant — the worker's fail-fast
+ *     path surfaces a clear "Missing provider_id" error rather than
+ *     silently routing to the wrong worker
  */
 async function loadJobRoutingEvent(
   jobId: string,
@@ -307,19 +322,34 @@ async function loadJobRoutingEvent(
       where: eq(schema.generationJobs.id, jobId),
       columns: { format: true, pickedPipeline: true, metadata: true },
     });
-    // Polish-20 Commit 2: descriptor-driven routing wins over the
-    // legacy pickedPipeline field. When metadata.model_id is set the
-    // form used the new picker → dispatch to the unified
-    // generate-video-variant worker, which reads model_id + provider_id
-    // out of metadata to look up the ModelProviderConfig.
-    const metadataObj = (row?.metadata ?? null) as Record<string, unknown> | null;
+    const metadataObj = extractMetadataObject(row?.metadata ?? null);
     const modelIdFromMetadata =
       metadataObj && typeof metadataObj['model_id'] === 'string'
         ? (metadataObj['model_id'] as string)
         : null;
+    const providerIdFromMetadata =
+      metadataObj && typeof metadataObj['provider_id'] === 'string'
+        ? (metadataObj['provider_id'] as string)
+        : null;
+
+    // Polish-20.0.2 diagnostic: always log the actual metadata shape
+    // the dispatch is seeing. A production dispatch bug on job
+    // 84fee5b7 was hard to diagnose because the dispatch decision
+    // logged only its resolved branch, not what it read from metadata.
+    console.log(
+      `[analyze-concept] job ${jobId} dispatch inputs: ` +
+        `pickedPipeline=${row?.pickedPipeline ?? 'null'} ` +
+        `format=${row?.format ?? 'null'} ` +
+        `metadata_shape=${describeMetadataShape(row?.metadata ?? null)} ` +
+        `metadata_keys=${metadataObj ? JSON.stringify(Object.keys(metadataObj)) : '(none)'} ` +
+        `metadata.model_id=${modelIdFromMetadata ?? 'null'} ` +
+        `metadata.provider_id=${providerIdFromMetadata ?? 'null'}`,
+    );
+
     if (modelIdFromMetadata) {
       console.log(
-        `[analyze-concept] job ${jobId} dispatch: model_id=${modelIdFromMetadata} → ` +
+        `[analyze-concept] job ${jobId} dispatch: model_id=${modelIdFromMetadata} ` +
+          `provider_id=${providerIdFromMetadata ?? 'null'} → ` +
           `workerEvent=generation/video-variant.requested (Polish-20 unified worker)`,
       );
       return 'generation/video-variant.requested';
@@ -327,12 +357,6 @@ async function loadJobRoutingEvent(
     const pipeline = pipelineFromString(row?.pickedPipeline);
     if (pipeline) {
       const workerEvent = describePipeline(pipeline).workerEvent;
-      // Polish-19.2.1: loud dispatch log. Pre-19.2.1 the dispatch
-      // decision was silent — when a worker silently failed to pick
-      // up its event, there was no log line showing what
-      // analyze-concept actually sent. With this log, a stuck job's
-      // dispatch decision is visible in Inngest output alongside
-      // the analyze step's other audit lines.
       console.log(
         `[analyze-concept] job ${jobId} dispatch: pickedPipeline=${row?.pickedPipeline} → ` +
           `workerEvent=${workerEvent} (resolved from descriptor)`,
@@ -340,7 +364,7 @@ async function loadJobRoutingEvent(
       return workerEvent;
     }
     console.log(
-      `[analyze-concept] job ${jobId} dispatch: no pickedPipeline + format=${row?.format ?? 'null'} → ` +
+      `[analyze-concept] job ${jobId} dispatch: no pickedPipeline + no metadata.model_id → ` +
         `workerEvent=generation/ugc.requested (default UGC fallback)`,
     );
     return 'generation/ugc.requested';
@@ -351,4 +375,36 @@ async function loadJobRoutingEvent(
     );
     return 'generation/ugc.requested';
   }
+}
+
+/**
+ * Polish-20.0.2: defensive metadata shape handling. postgres-js
+ * normally returns jsonb as parsed objects, but this helper handles
+ * the edge case where the value comes back as a JSON string (driver
+ * config drift, connection-pool serializer flip, etc.). Falls back
+ * to null on any unexpected shape.
+ */
+export function extractMetadataObject(raw: unknown): Record<string, unknown> | null {
+  if (raw == null) return null;
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // fall through to null
+    }
+  }
+  return null;
+}
+
+function describeMetadataShape(raw: unknown): string {
+  if (raw == null) return 'null';
+  if (Array.isArray(raw)) return 'array';
+  if (typeof raw === 'object') return 'object';
+  return typeof raw;
 }

@@ -443,3 +443,131 @@ describe('Polish-20 Commit 5: three-model happy-path config lookup', () => {
     }
   });
 });
+
+describe('Polish-20.0.2 hotfix: extractMetadataObject', () => {
+  // Defensive metadata shape handling — postgres-js normally returns
+  // jsonb as parsed objects, but this helper handles the edge case
+  // where the value comes back as a JSON string. The pre-20.0.2
+  // dispatch bug on job 84fee5b7 was consistent with either a stale
+  // deploy OR a driver-edge-case where jsonb came back as string;
+  // the extractor closes both classes of failure.
+
+  it('passes through a plain object', async () => {
+    const { extractMetadataObject } = await import('../src/functions/analyze-concept');
+    const input = { model_id: 'seedance_1_5_pro', provider_id: 'kie_ai' };
+    expect(extractMetadataObject(input)).toEqual(input);
+  });
+
+  it('parses a JSON string (postgres-js driver edge case)', async () => {
+    const { extractMetadataObject } = await import('../src/functions/analyze-concept');
+    const raw = '{"model_id":"seedance_1_5_pro","provider_id":"kie_ai"}';
+    const r = extractMetadataObject(raw);
+    expect(r).not.toBeNull();
+    expect(r?.model_id).toBe('seedance_1_5_pro');
+    expect(r?.provider_id).toBe('kie_ai');
+  });
+
+  it('returns null for null / undefined', async () => {
+    const { extractMetadataObject } = await import('../src/functions/analyze-concept');
+    expect(extractMetadataObject(null)).toBeNull();
+    expect(extractMetadataObject(undefined)).toBeNull();
+  });
+
+  it('returns null for arrays (defensive — metadata is expected to be an object)', async () => {
+    const { extractMetadataObject } = await import('../src/functions/analyze-concept');
+    expect(extractMetadataObject([])).toBeNull();
+    expect(extractMetadataObject(['seedance_1_5_pro'])).toBeNull();
+  });
+
+  it('returns null for a JSON string that parses to a non-object (number / string / array)', async () => {
+    const { extractMetadataObject } = await import('../src/functions/analyze-concept');
+    expect(extractMetadataObject('42')).toBeNull();
+    expect(extractMetadataObject('"just a string"')).toBeNull();
+    expect(extractMetadataObject('[1,2,3]')).toBeNull();
+  });
+
+  it('returns null for malformed JSON strings (never throws)', async () => {
+    const { extractMetadataObject } = await import('../src/functions/analyze-concept');
+    expect(extractMetadataObject('not json')).toBeNull();
+    expect(extractMetadataObject('{unterminated')).toBeNull();
+    expect(extractMetadataObject('')).toBeNull();
+  });
+
+  it('returns null for other primitive types (numbers / booleans)', async () => {
+    const { extractMetadataObject } = await import('../src/functions/analyze-concept');
+    expect(extractMetadataObject(42)).toBeNull();
+    expect(extractMetadataObject(true)).toBeNull();
+    expect(extractMetadataObject(false)).toBeNull();
+  });
+});
+
+describe('Polish-20.0.2 hotfix: analyze-concept dispatch precedence tripwires', () => {
+  // Source-shape tripwires against the dispatch function. Direct
+  // integration tests of loadJobRoutingEvent require spinning up
+  // Drizzle + Postgres; these string-shape pins catch the specific
+  // regression that hit production on job 84fee5b7 (dispatch fell
+  // through to pickedPipeline even though metadata.model_id was set)
+  // at CI time.
+
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(new URL('../src/functions/analyze-concept.ts', import.meta.url), 'utf8');
+  };
+
+  it('metadata.model_id branch appears BEFORE the pickedPipeline branch', async () => {
+    const src = await readSrc();
+    // Locate the "if (modelIdFromMetadata)" block and the
+    // "const pipeline = pipelineFromString" block within
+    // loadJobRoutingEvent and pin ordering. A regression that
+    // reorders these would drop back to the 20.0.2 production bug.
+    const modelIdBranchIdx = src.indexOf('if (modelIdFromMetadata)');
+    const pickedPipelineBranchIdx = src.indexOf(
+      'const pipeline = pipelineFromString(row?.pickedPipeline)',
+    );
+    expect(modelIdBranchIdx).toBeGreaterThan(-1);
+    expect(pickedPipelineBranchIdx).toBeGreaterThan(-1);
+    expect(modelIdBranchIdx).toBeLessThan(pickedPipelineBranchIdx);
+  });
+
+  it('metadata.model_id branch returns generation/video-variant.requested', async () => {
+    const src = await readSrc();
+    expect(src).toMatch(
+      /if \(modelIdFromMetadata\)[\s\S]{0,400}return 'generation\/video-variant\.requested'/,
+    );
+  });
+
+  it('metadata is read via the defensive extractMetadataObject helper (NOT a raw cast)', async () => {
+    const src = await readSrc();
+    // Regression against reverting to the pre-20.0.2 cast pattern
+    // `(row?.metadata ?? null) as Record<string, unknown> | null`
+    // which was unsafe against the postgres-js jsonb-as-string edge
+    // case.
+    expect(src).toMatch(/extractMetadataObject\(row\?\.metadata \?\? null\)/);
+  });
+
+  it('dispatch diagnostic log includes metadata shape + keys + model_id + provider_id', async () => {
+    const src = await readSrc();
+    // The Polish-20.0.2 verbose dispatch log is the operator's
+    // primary tool for diagnosing future misdispatches. Pin every
+    // field it needs to surface.
+    expect(src).toMatch(/dispatch inputs/);
+    expect(src).toMatch(/metadata_shape=/);
+    expect(src).toMatch(/metadata_keys=/);
+    expect(src).toMatch(/metadata\.model_id=/);
+    expect(src).toMatch(/metadata\.provider_id=/);
+  });
+
+  it('generation/video-variant.requested still routes through the video-variant worker', async () => {
+    const fs = await import('node:fs/promises');
+    const registrySrc = await fs.readFile(
+      new URL('../src/functions/index.ts', import.meta.url),
+      'utf8',
+    );
+    // Both the Set entry AND the worker import must survive so the
+    // dispatch we route to is actually listened for. Commit 3's
+    // dispatch-coverage cleanup dropped 4 legacy events but the
+    // video-variant registration MUST stay.
+    expect(registrySrc).toMatch(/'generation\/video-variant\.requested'/);
+    expect(registrySrc).toMatch(/generateVideoVariant/);
+  });
+});
