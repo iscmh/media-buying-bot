@@ -4,8 +4,8 @@
  * to a workerEvent that's actually in the REGISTERED set in
  * functions/index.ts.
  *
- * The Polish-19.2 release shipped a Veo pipeline + worker correctly
- * wired in code, but the Veo worker silently failed to pick up its
+ * The Polish-19.2 release shipped a new pipeline + worker correctly
+ * wired in code, but the worker silently failed to pick up its
  * event on first live test — likely an Inngest function-sync gap
  * post-deploy. The user diagnosed it as a missing dispatch case;
  * the dispatch in analyze-concept WAS correct, but the operational
@@ -87,16 +87,6 @@ describe('Polish-19.2.1: dispatch coverage between PipelineType and registered w
       );
     }
     expect(orphanRegistered).toEqual([]);
-  });
-
-  it('Polish-19.2 Veo pipeline specifically dispatches to its registered worker', () => {
-    // Explicit single-pipeline pin for the regression that motivated
-    // this test file — if anyone removes the Veo entry from
-    // REGISTERED_GENERATION_WORKER_EVENTS without removing the
-    // pipeline, this fails first.
-    const veo = describePipeline('veo_3_1_fast_native_audio');
-    expect(veo.workerEvent).toBe('generation/veo-3-1-fast.requested');
-    expect(REGISTERED.has(veo.workerEvent)).toBe(true);
   });
 
   it('Polish-19 Kling Avatar pipeline still dispatches correctly (regression pin)', () => {

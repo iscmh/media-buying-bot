@@ -23,29 +23,23 @@ import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import { uploadGeneratedVideoFromUrl } from '../lib/storage';
 
 /**
- * Polish-20 Commit 2: unified video-variant worker.
+ * Polish-20: unified video-variant worker.
  *
- * Replaces the Polish-19.2/19.3/19.4 Veo worker and the Polish-19
- * Kling Avatar v2 worker with ONE codepath that reads
- * job.metadata.model_id + job.metadata.provider_id, looks up the
- * ModelProviderConfig via the shared descriptor layer, then
- * generates via the config-driven kie-video client.
+ * ONE codepath that reads job.metadata.model_id +
+ * job.metadata.provider_id, looks up the ModelProviderConfig via the
+ * shared descriptor layer, then generates via the config-driven
+ * kie-video client.
  *
  * Per variant:
  *   1. Claude → segments[] ad spec (per-model word-count calibrated).
  *   2. For each segment: submitKieVideo → pollKieVideo (parallel via
  *      Promise.all) using the model's ModelProviderConfig.
- *   3. If segmentCount > 1: Replicate ffmpeg-concat stitch (Polish-19.3
- *      infrastructure).
+ *   3. If segmentCount > 1: Replicate ffmpeg-concat stitch.
  *   4. Upload composite → write generated_creatives row.
  *
- * Reuses Polish-19.4.2 prompt engineering (word-count calibration,
- * source_script_verbatim preservation, sound_texture, speaker
- * attribution) — word count adapts to the picked model's per-call
- * duration.
- *
- * NOT deleted yet: Veo worker, Kling Avatar v2, Kling Multi Clip,
- * Omni Flash. Commits 3-4 delete them once this worker is live.
+ * Prompt-engineering: word-count calibration matched to the model's
+ * per-call duration + source_script_verbatim preservation +
+ * sound_texture field + speaker attribution.
  */
 
 const POLL_WARMUP_SECONDS = 15;
@@ -55,9 +49,8 @@ const POLL_BACKOFF_GROWTH = 1.15;
 const POLL_MAX_ATTEMPTS = 80; // ~15-25min ceiling — kie.ai runs are typically 30-120s
 
 /**
- * Polish-20 (adapted from Polish-19.2 Veo worker): exponential-
- * backoff poll cadence. Same curve — responsive at start, bounded
- * at 25s for stuck operations.
+ * Polish-20: exponential-backoff poll cadence — responsive at start,
+ * bounded at 25s for stuck operations.
  */
 export function computeVideoPollIntervalSeconds(attempt: number): number {
   if (!Number.isFinite(attempt) || attempt < 0) return POLL_INITIAL_INTERVAL_SECONDS;
@@ -69,14 +62,13 @@ export function computeVideoPollIntervalSeconds(attempt: number): number {
 }
 
 /**
- * Polish-20 (Polish-19.3.1 pattern): auto-resolve target duration
- * from the fallback chain:
+ * Polish-20: auto-resolve target duration from the fallback chain:
  *   1. metadata.analysis.video_duration_seconds  (vision-derived)
  *   2. metadata.source_duration_seconds          (form-picked)
  *   3. 30s default
  *
  * Segment count is derived from the RESOLVED duration + the picked
- * model's per-call cap — not hardcoded to 8s like the Veo path was.
+ * model's per-call cap.
  */
 export function resolveAutoVideoDuration(
   jobMetadata: Record<string, unknown> | null,
@@ -115,10 +107,9 @@ export function resolveAutoVideoDuration(
 }
 
 /**
- * Polish-20 Commit 2: per-model word-count calibration for the
- * Claude ad-spec prompt. Polish-19.4.2 used Veo's 8s hardcoded
- * (22-28 words); each model here has a different segment size so
- * the calibration needs to scale with model.maxSingleCallSeconds.
+ * Polish-20: per-model word-count calibration for the Claude
+ * ad-spec prompt. Each model has a different segment size so the
+ * calibration scales with model.maxSingleCallSeconds.
  *
  * Math: ~170wpm natural yapping pace, so `secondsPerCall × 170/60`
  * words per segment, ±10% window.

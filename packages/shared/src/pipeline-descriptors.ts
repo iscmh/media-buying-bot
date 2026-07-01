@@ -27,7 +27,6 @@ export interface PipelineDescriptor {
     | 'generation/kling-3-omni-multi-segment.requested'
     | 'generation/kie-omni-flash-native.requested'
     | 'generation/kie-kling-avatar-v2.requested'
-    | 'generation/veo-3-1-fast.requested'
     | 'generation/sora.requested'
     | 'generation/nano-banana.requested';
   /** providers the user MUST have connected for this pipeline to work. */
@@ -87,31 +86,18 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     // an advanced-only pipeline for sources where multi-segment generation
     // is genuinely a better fit.
   },
-  // Polish-19: Kling Avatar v2 (image + audio + lipsync). Demoted
-  // from default in Polish-19.2 to make room for Veo 3.1 Fast (which
-  // emits dialogue+ambient+SFX natively in one call). Kling stays
-  // available as the "advanced" pipeline; the Kling worker + tests
-  // + 19.0.x hotfixes remain functional.
+  // Polish-19 → Polish-20: Kling Avatar v2 (image + audio + lipsync).
+  // Retained through Polish-20 Commit 3 as the legacy default —
+  // Commit 4 deletes this and every other legacy pipeline once the
+  // unified generate-video-variant worker is fully proven. The form's
+  // `defaultPipeline()` call resolves here until then.
   kie_kling_avatar_v2_standard: {
     pipeline: 'kie_kling_avatar_v2_standard',
-    label: 'UGC ad (Kling Avatar v2, image + lipsync — advanced)',
+    label: 'UGC ad (Kling Avatar v2, image + lipsync — legacy)',
     providerChoice: 'kling',
     format: 'kie_kling_avatar_v2_standard',
     workerEvent: 'generation/kie-kling-avatar-v2.requested',
     requiredProviders: ['claude', 'gemini', 'kie_ai', 'elevenlabs'],
-  },
-  // Polish-19.2: Veo 3.1 Fast single-call native-audio pipeline.
-  // Claude → script + scene description, Veo → one shot with
-  // dialogue + ambient + SFX baked in. No separate TTS, no lipsync
-  // step, no reference image step. 19.2 ships ≤8s per variant
-  // (Veo's per-call ceiling); multi-chunk chaining is Polish-19.3.
-  veo_3_1_fast_native_audio: {
-    pipeline: 'veo_3_1_fast_native_audio',
-    label: 'UGC ad (Veo 3.1 Fast, native audio — recommended)',
-    providerChoice: 'gemini',
-    format: 'veo_3_1_fast_native_audio',
-    workerEvent: 'generation/veo-3-1-fast.requested',
-    requiredProviders: ['claude', 'gemini'],
     isDefault: true,
   },
   nano_banana_static_image: {
@@ -156,6 +142,5 @@ export const ALL_PIPELINES: PipelineType[] = [
   'kling_3_multi_clip_native_lipsync',
   'kie_omni_flash_native',
   'kie_kling_avatar_v2_standard',
-  'veo_3_1_fast_native_audio',
   'nano_banana_static_image',
 ];

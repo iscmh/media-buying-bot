@@ -120,9 +120,7 @@ export async function downloadGeneratedImageAsBase64(input: {
  * model provider rotates its hosting. Returns the path + public URL.
  *
  * Polish-19.2.4: added `fetchHeaders` for providers whose output URIs
- * require auth (Veo 3.1 returns a generativelanguage.googleapis.com
- * Files API URL that 403s without the same x-goog-api-key the submit
- * call used). The helper stays provider-agnostic — caller decides
+ * require auth. The helper stays provider-agnostic — caller decides
  * which headers to attach. Once the file lands in Supabase Storage
  * the public URL is permanent; this is the only moment the upstream
  * key matters.

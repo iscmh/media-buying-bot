@@ -394,10 +394,10 @@ export function translateKieVideoErrorStatus(
 }
 
 /**
- * Polish-20: env override for the config's `modelParam` string —
- * mirror of the Polish-19.2.2 VEO_MODEL_ID hatch. If kie.ai revs a
- * model identifier, the operator flips the env without a redeploy.
- * Env var name: KIE_MODEL_ID_OVERRIDE_<UPPER_SNAKE_MODEL_ID>.
+ * Polish-20: env override for the config's `modelParam` string. If
+ * kie.ai revs a model identifier, the operator flips the env
+ * without a redeploy. Env var name:
+ * KIE_MODEL_ID_OVERRIDE_<UPPER_SNAKE_MODEL_ID>.
  *
  * e.g. KIE_MODEL_ID_OVERRIDE_BYTEDANCE_SEEDANCE_1_5_PRO='bytedance/seedance-pro-v2'
  */

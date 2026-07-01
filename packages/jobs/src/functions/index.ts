@@ -6,7 +6,6 @@ import { generateKlingMultiClipVariants } from './generate-kling-multi-clip-vari
 import { generateKling3OmniMultiSegment } from './generate-kling-3-omni-multi-segment';
 import { generateKieOmniFlashNative } from './generate-kie-omni-flash-native';
 import { generateKieKlingAvatarV2 } from './generate-kie-kling-avatar-v2';
-import { generateVeo31Fast } from './generate-veo-3-1-fast';
 import { generateVideoVariant } from './generate-video-variant';
 import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
@@ -46,11 +45,10 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   'generation/kling-3-omni-multi-segment.requested',
   'generation/kie-omni-flash-native.requested',
   'generation/kie-kling-avatar-v2.requested',
-  'generation/veo-3-1-fast.requested',
   'generation/sora.requested',
   'generation/nano-banana.requested',
   'generation/static.requested',
-  // Polish-20 Commit 2: unified video-variant worker (Seedance 1.5 Pro /
+  // Polish-20: unified video-variant worker (Seedance 1.5 Pro /
   // Kling 3.0 Standard / Seedance 2 / etc.). Reads model_id +
   // provider_id from job.metadata and dispatches through the
   // descriptor-driven kie-video client.
@@ -74,9 +72,8 @@ export const functions = [
   generateKieOmniFlashNative,
   // Polish-19: kie.ai Kling Avatar v2 pipeline (single-call lipsync — advanced).
   generateKieKlingAvatarV2,
-  // Polish-19.2: Veo 3.1 Fast native-audio pipeline (new default).
-  generateVeo31Fast,
-  // Polish-20 Commit 2: unified descriptor-driven video-variant worker.
+  // Polish-20: unified descriptor-driven video-variant worker
+  // (Seedance 1.5 Pro / Kling 3.0 Standard / Seedance 2).
   generateVideoVariant,
   // Phase 4 launch.
   metaAdLauncher,

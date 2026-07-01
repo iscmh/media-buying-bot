@@ -68,12 +68,10 @@ export const analyzeConcept = inngest.createFunction(
         // Polish-19.3.1 hotfix: MERGE with existing metadata instead
         // of overwriting. Pre-19.3.1 destructively replaced the
         // metadata blob — erasing the action handler's
-        // source_duration_seconds + voice_id fields (Polish-14.1 +
-        // Polish-19 Commit 3 persistence). Veo / Kling workers then
-        // read metadata, found no length / voice, fell back to
-        // defaults, and silently produced wrong-length output
-        // (the "30s preset → 8s output" symptom from the user's
-        // 197af259 job).
+        // source_duration_seconds + voice_id + model_id fields.
+        // Downstream workers then read metadata, found no length /
+        // model, fell back to defaults, and silently produced
+        // wrong-length output.
         //
         // Spread order: vision-at-root first (Polish-12 back-compat),
         // form-written fields override (user-picked beats AI-estimated
@@ -234,9 +232,9 @@ export const analyzeConcept = inngest.createFunction(
       // mock-path comment for the bug history. Spread order: vision
       // at root (Polish-12 back-compat), form fields override
       // (user-picked beats AI-estimated). Vision is also nested
-      // under `.analysis` so the Veo worker's fallback chain can
-      // read job.metadata.analysis.video_duration_seconds without
-      // worrying about root-level shape drift.
+      // under `.analysis` so the video-variant worker's fallback
+      // chain can read job.metadata.analysis.video_duration_seconds
+      // without worrying about root-level shape drift.
       const db = getDb();
       const existing = await db.query.generationJobs.findFirst({
         where: eq(schema.generationJobs.id, jobId),
@@ -304,7 +302,6 @@ async function loadJobRoutingEvent(
   | 'generation/kling-3-omni-multi-segment.requested'
   | 'generation/kie-omni-flash-native.requested'
   | 'generation/kie-kling-avatar-v2.requested'
-  | 'generation/veo-3-1-fast.requested'
   | 'generation/sora.requested'
   | 'generation/nano-banana.requested'
   | 'generation/video-variant.requested'
@@ -336,11 +333,11 @@ async function loadJobRoutingEvent(
     if (pipeline) {
       const workerEvent = describePipeline(pipeline).workerEvent;
       // Polish-19.2.1: loud dispatch log. Pre-19.2.1 the dispatch
-      // decision was silent — when the Veo worker silently failed to
-      // pick up its event after Polish-19.2, there was no log line
-      // showing what analyze-concept actually sent. With this log, a
-      // stuck job's dispatch decision is visible in Inngest output
-      // alongside the analyze step's other audit lines.
+      // decision was silent — when a worker silently failed to pick
+      // up its event, there was no log line showing what
+      // analyze-concept actually sent. With this log, a stuck job's
+      // dispatch decision is visible in Inngest output alongside
+      // the analyze step's other audit lines.
       console.log(
         `[analyze-concept] job ${jobId} dispatch: pickedPipeline=${row?.pickedPipeline} → ` +
           `workerEvent=${workerEvent} (resolved from descriptor)`,
