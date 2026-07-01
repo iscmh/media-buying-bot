@@ -75,6 +75,34 @@ export function getVeoChainingMode(): VeoChainingMode {
 }
 
 /**
+ * Polish-19.4.3: milliseconds to step.sleep between sequential
+ * extend calls in a chain. Default 2500ms — short enough that a
+ * 30s ad chain adds ~7.5s wall-clock, long enough to stay well
+ * under Veo's 50 RPM baseline (1200ms would be the theoretical
+ * floor; 2500ms gives headroom for other users on the same
+ * project).
+ *
+ * Set to '0' to disable the pause entirely (regression path if a
+ * future Veo tier removes rate limits or the retry loop proves
+ * enough on its own).
+ */
+export const VEO_EXTEND_INTER_CALL_DELAY_MS_DEFAULT = 2500;
+
+export function getVeoExtendInterCallDelayMs(): number {
+  const raw = process.env.VEO_EXTEND_INTER_CALL_DELAY_MS?.trim();
+  if (!raw) return VEO_EXTEND_INTER_CALL_DELAY_MS_DEFAULT;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) {
+    console.log(
+      `[veo-3-1-fast] ignoring VEO_EXTEND_INTER_CALL_DELAY_MS=${JSON.stringify(raw)} — ` +
+        `not a non-negative number; falling back to default (${VEO_EXTEND_INTER_CALL_DELAY_MS_DEFAULT}ms).`,
+    );
+    return VEO_EXTEND_INTER_CALL_DELAY_MS_DEFAULT;
+  }
+  return Math.floor(n);
+}
+
+/**
  * Polish-19.2: exponential-backoff poll cadence for Veo's long-
  * running operations. Veo runs are typically 30-90s; the curve
  * stays responsive for fast finishes and bounds wall-clock for
@@ -817,7 +845,16 @@ async function runOneVariantExtend(input: RunOneVariantInput): Promise<VeoVarian
   let chainVideoUri = base.videoUri;
   let chainOperationName = base.veoOperationName;
   const operationNames: string[] = [base.veoOperationName];
+  // Polish-19.4.3: inter-call delay between extends. Sequential
+  // chain fires calls back-to-back which can trip Veo's 50 RPM
+  // baseline under load — a short breather in between reduces
+  // the odds of the retry loop having to kick in. Env-tunable
+  // via VEO_EXTEND_INTER_CALL_DELAY_MS (default 2500ms).
+  const interCallDelayMs = getVeoExtendInterCallDelayMs();
   for (let segIdx = 1; segIdx < adSpec.segments.length; segIdx++) {
+    if (interCallDelayMs > 0) {
+      await step.sleep(`veo-extend-pause-${variantIndex}-${segIdx}`, `${interCallDelayMs}ms`);
+    }
     const seg = adSpec.segments[segIdx]!;
     const ext = await runVeoExtendSegment({
       step,

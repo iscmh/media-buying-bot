@@ -98,6 +98,147 @@ export const VEO_EXTEND_REQUIRED_RESOLUTION = '720p';
 export const VEO_EXTEND_MAX_CHAIN_CALLS = 20;
 
 /**
+ * Polish-19.4.3: default retry count for transient Veo rate-limit
+ * responses. Veo 3.1 Fast on the Gemini Developer API has a 50 RPM
+ * baseline that a sequential Extend chain can trip under load. Env
+ * override VEO_RATE_LIMIT_MAX_RETRIES tunes without a redeploy.
+ *
+ * 5 retries with the [10, 20, 40, 60, 60]s backoff curve = ~190s
+ * (~3.2 min) of retry headroom per call, well under Veo's typical
+ * rate-limit reset window.
+ */
+export const VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES = 5;
+
+/**
+ * Polish-19.4.3: [10, 20, 40, 60, 60]s exponential backoff, capped
+ * at 60s. Pure function — exported so the curve is unit-testable
+ * without spinning up the retry loop.
+ */
+export function computeVeoRateLimitBackoffMs(attempt: number): number {
+  if (!Number.isFinite(attempt) || attempt < 0) return 10_000;
+  const raw = 10_000 * Math.pow(2, attempt);
+  return Math.min(60_000, raw);
+}
+
+export function getVeoRateLimitMaxRetries(): number {
+  const raw = process.env.VEO_RATE_LIMIT_MAX_RETRIES?.trim();
+  if (!raw) return VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+    console.log(
+      `[veo] ignoring VEO_RATE_LIMIT_MAX_RETRIES=${JSON.stringify(raw)} — ` +
+        `not a non-negative integer; falling back to default (${VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES}).`,
+    );
+    return VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES;
+  }
+  return n;
+}
+
+/**
+ * Polish-19.4.3: pure detector for Veo rate-limit responses.
+ * Handles three surface forms:
+ *   1. HTTP 429 status
+ *   2. Google's RESOURCE_EXHAUSTED error status / code 8
+ *   3. Substring match "rate limit" / "quota exceeded" (defensive
+ *      for messages Google may add without status alignment)
+ *
+ * Returns true → retry with backoff. Exported for unit testing.
+ */
+export function detectVeoRateLimit(
+  status: number | undefined,
+  errorMessage: string | undefined,
+  errorCode?: number | string,
+): boolean {
+  if (status === 429) return true;
+  if (typeof errorCode === 'number' && errorCode === 8) return true; // Google gRPC RESOURCE_EXHAUSTED
+  if (typeof errorCode === 'string' && errorCode.toUpperCase() === 'RESOURCE_EXHAUSTED')
+    return true;
+  if (typeof errorMessage === 'string') {
+    const lower = errorMessage.toLowerCase();
+    if (lower.includes('rate limit')) return true;
+    if (lower.includes('quota exceeded')) return true;
+    if (lower.includes('resource_exhausted')) return true;
+  }
+  return false;
+}
+
+/**
+ * Polish-19.4.3: retry-with-backoff wrapper around a single Veo
+ * submit attempt. Detects rate limits from the returned
+ * VeoSubmitResult's errorMessage (which submitVeoVideoOnce /
+ * submitVeoExtendOnce populate via translateVeoErrorStatus — 429
+ * transport failures + code-8 RESOURCE_EXHAUSTED body errors both
+ * carry substring markers detectVeoRateLimit recognizes).
+ *
+ * Non-rate-limit failures (validation 400, auth 401/403, model 404,
+ * upstream 5xx) return immediately — no retry. Rate-limit exhaustion
+ * surfaces a rewritten errorMessage that includes the retry count +
+ * total wait time so operators see "hit after 5 retries over 190s"
+ * not just "rate limit hit".
+ */
+async function retryVeoSubmit<T extends VeoSubmitResult>(
+  label: 'submit' | 'extend',
+  makeCall: () => Promise<T>,
+): Promise<T> {
+  const maxRetries = getVeoRateLimitMaxRetries();
+  let last: T | undefined;
+  let totalWaitMs = 0;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const r = await makeCall();
+    if (r.ok) return r;
+    const rateLimited = detectVeoRateLimit(undefined, r.errorMessage);
+    if (!rateLimited) return r; // hard failure — return immediately
+    last = r;
+    if (attempt === maxRetries) break; // exhausted
+    const backoffMs = computeVeoRateLimitBackoffMs(attempt);
+    totalWaitMs += backoffMs;
+    console.log(
+      `[veo-${label}] rate-limit hit on attempt ${attempt + 1}/${maxRetries + 1}, ` +
+        `backing off ${Math.round(backoffMs / 1000)}s before retry ` +
+        `(err: ${r.errorMessage ?? 'unknown'})`,
+    );
+    await sleep(backoffMs);
+  }
+  const totalWaitSec = Math.round(totalWaitMs / 1000);
+  const lastMsg = last?.errorMessage ?? 'unknown';
+  return {
+    ...(last as T),
+    ok: false,
+    errorMessage:
+      `Veo rate limit hit after ${maxRetries + 1} attempts over ~${totalWaitSec}s. ` +
+      `Last error: ${lastMsg}. Consider raising VEO_RATE_LIMIT_MAX_RETRIES ` +
+      `or reducing concurrent variants.`,
+  };
+}
+
+/**
+ * Polish-19.4.3: single-place sleep so the retry loop is testable.
+ * Uses a swappable module-level impl (mutable via __setSleepImplForTests
+ * below) so tests can no-op the backoff without fighting fake timers
+ * across async fetch mocks.
+ */
+let sleepImpl: (ms: number) => Promise<void> = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+export function sleep(ms: number): Promise<void> {
+  return sleepImpl(ms);
+}
+
+/**
+ * TEST-ONLY: swap the sleep impl (typically to a no-op) so
+ * retry-loop tests don't burn wall-clock on real 10/20/40/60s
+ * backoffs. Callers should restore in afterEach via
+ * __restoreSleepImplForTests.
+ */
+export function __setSleepImplForTests(fn: (ms: number) => Promise<void>): void {
+  sleepImpl = fn;
+}
+
+export function __restoreSleepImplForTests(): void {
+  sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Polish-19.4.1: Veo's accepted range for the durationSeconds param
  * on the EXTEND endpoint is [4, 8] per the live error message
  * ("Please provide a value between 4 and 8, inclusive"). Narrower
@@ -195,8 +336,17 @@ interface VeoSubmitResponseShape {
  * Logs the FULL response on failure so the first live drift surfaces
  * cleanly. Model id / audio-flag / pricing are all env-overridable
  * so wrong guesses ship as config flips, not code patches.
+ *
+ * Polish-19.4.3: transparently retries on rate-limit responses with
+ * exponential backoff (10/20/40/60/60s, cap 60s, up to
+ * VEO_RATE_LIMIT_MAX_RETRIES=5 retries). Non-rate-limit failures
+ * (validation, auth, 5xx) return immediately.
  */
 export async function submitVeoVideo(input: VeoSubmitInput): Promise<VeoSubmitResult> {
+  return retryVeoSubmit('submit', () => submitVeoVideoOnce(input));
+}
+
+async function submitVeoVideoOnce(input: VeoSubmitInput): Promise<VeoSubmitResult> {
   const modelId = getVeoModelId();
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(modelId)}:predictLongRunning`;
   const duration = clampVeoDurationSeconds(input.durationSeconds ?? VEO_MAX_SECONDS_PER_CALL);
@@ -494,6 +644,10 @@ export interface VeoExtendSubmitInput {
  * shape to flip to without a redeploy.
  */
 export async function submitVeoExtend(input: VeoExtendSubmitInput): Promise<VeoSubmitResult> {
+  return retryVeoSubmit('extend', () => submitVeoExtendOnce(input));
+}
+
+async function submitVeoExtendOnce(input: VeoExtendSubmitInput): Promise<VeoSubmitResult> {
   const modelId = getVeoModelId();
   const url = `${GEMINI_BASE}/models/${encodeURIComponent(modelId)}:predictLongRunning`;
 

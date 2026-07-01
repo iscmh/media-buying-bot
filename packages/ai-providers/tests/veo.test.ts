@@ -665,3 +665,223 @@ describe('Polish-19.4.1: parseExtendDurationOverride', () => {
     expect(parseExtendDurationOverride('Infinity')).toBeNull();
   });
 });
+
+describe('Polish-19.4.3: detectVeoRateLimit', () => {
+  it('returns true for HTTP 429 status', async () => {
+    const { detectVeoRateLimit } = await import('../src/veo');
+    expect(detectVeoRateLimit(429, undefined)).toBe(true);
+    expect(detectVeoRateLimit(429, 'anything')).toBe(true);
+  });
+
+  it('returns true for Google gRPC RESOURCE_EXHAUSTED (code 8)', async () => {
+    const { detectVeoRateLimit } = await import('../src/veo');
+    expect(detectVeoRateLimit(undefined, undefined, 8)).toBe(true);
+    expect(detectVeoRateLimit(200, 'anything', 8)).toBe(true);
+  });
+
+  it('returns true for string RESOURCE_EXHAUSTED code (case-insensitive)', async () => {
+    const { detectVeoRateLimit } = await import('../src/veo');
+    expect(detectVeoRateLimit(undefined, undefined, 'RESOURCE_EXHAUSTED')).toBe(true);
+    expect(detectVeoRateLimit(undefined, undefined, 'resource_exhausted')).toBe(true);
+  });
+
+  it('returns true for "rate limit" substring in the error message', async () => {
+    const { detectVeoRateLimit } = await import('../src/veo');
+    expect(detectVeoRateLimit(undefined, 'Veo rate limit hit. Retry in a few seconds.')).toBe(true);
+    expect(detectVeoRateLimit(undefined, 'RATE LIMIT exceeded')).toBe(true);
+  });
+
+  it('returns true for "quota exceeded" substring', async () => {
+    const { detectVeoRateLimit } = await import('../src/veo');
+    expect(detectVeoRateLimit(undefined, 'quota exceeded for project')).toBe(true);
+    expect(detectVeoRateLimit(undefined, 'Quota Exceeded')).toBe(true);
+  });
+
+  it('returns true for "resource_exhausted" substring (defensive against Google msg-only surfaces)', async () => {
+    const { detectVeoRateLimit } = await import('../src/veo');
+    expect(detectVeoRateLimit(undefined, 'RESOURCE_EXHAUSTED: too many requests')).toBe(true);
+  });
+
+  it('returns false for non-rate-limit errors (validation / auth / model-not-found / server)', async () => {
+    const { detectVeoRateLimit } = await import('../src/veo');
+    expect(detectVeoRateLimit(400, 'Veo validation failed')).toBe(false);
+    expect(detectVeoRateLimit(401, 'Veo authentication failed')).toBe(false);
+    expect(detectVeoRateLimit(404, 'Model not found')).toBe(false);
+    expect(detectVeoRateLimit(500, 'Veo upstream error')).toBe(false);
+  });
+
+  it('returns false when both status + message are empty', async () => {
+    const { detectVeoRateLimit } = await import('../src/veo');
+    expect(detectVeoRateLimit(undefined, undefined)).toBe(false);
+    expect(detectVeoRateLimit(undefined, '')).toBe(false);
+  });
+});
+
+describe('Polish-19.4.3: computeVeoRateLimitBackoffMs', () => {
+  it('produces the documented [10, 20, 40, 60, 60]s exponential curve', async () => {
+    const { computeVeoRateLimitBackoffMs } = await import('../src/veo');
+    expect(computeVeoRateLimitBackoffMs(0)).toBe(10_000);
+    expect(computeVeoRateLimitBackoffMs(1)).toBe(20_000);
+    expect(computeVeoRateLimitBackoffMs(2)).toBe(40_000);
+    expect(computeVeoRateLimitBackoffMs(3)).toBe(60_000);
+    expect(computeVeoRateLimitBackoffMs(4)).toBe(60_000);
+  });
+
+  it('caps at 60s for arbitrarily high attempt counts', async () => {
+    const { computeVeoRateLimitBackoffMs } = await import('../src/veo');
+    expect(computeVeoRateLimitBackoffMs(10)).toBe(60_000);
+    expect(computeVeoRateLimitBackoffMs(100)).toBe(60_000);
+  });
+
+  it('clamps non-finite / negative attempt indices to the initial interval (10s)', async () => {
+    const { computeVeoRateLimitBackoffMs } = await import('../src/veo');
+    expect(computeVeoRateLimitBackoffMs(NaN)).toBe(10_000);
+    expect(computeVeoRateLimitBackoffMs(-1)).toBe(10_000);
+    expect(computeVeoRateLimitBackoffMs(Infinity)).toBe(10_000);
+  });
+
+  it('total wall-clock across the 5-retry default = ~190s (~3.2 min)', async () => {
+    const { computeVeoRateLimitBackoffMs } = await import('../src/veo');
+    let total = 0;
+    for (let i = 0; i < 5; i++) total += computeVeoRateLimitBackoffMs(i);
+    expect(total).toBe(190_000);
+  });
+});
+
+describe('Polish-19.4.3: getVeoRateLimitMaxRetries', () => {
+  it('defaults to 5 when the env var is unset', async () => {
+    const { getVeoRateLimitMaxRetries, VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES } =
+      await import('../src/veo');
+    delete process.env.VEO_RATE_LIMIT_MAX_RETRIES;
+    expect(VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES).toBe(5);
+    expect(getVeoRateLimitMaxRetries()).toBe(5);
+  });
+
+  it('honors integer env override', async () => {
+    process.env.VEO_RATE_LIMIT_MAX_RETRIES = '3';
+    const { getVeoRateLimitMaxRetries } = await import('../src/veo');
+    expect(getVeoRateLimitMaxRetries()).toBe(3);
+  });
+
+  it('accepts 0 (disable retries) as a valid explicit value', async () => {
+    process.env.VEO_RATE_LIMIT_MAX_RETRIES = '0';
+    const { getVeoRateLimitMaxRetries } = await import('../src/veo');
+    expect(getVeoRateLimitMaxRetries()).toBe(0);
+  });
+
+  it('falls back to default on garbage values', async () => {
+    for (const raw of ['', '   ', 'five', '-1', '3.5', 'NaN']) {
+      process.env.VEO_RATE_LIMIT_MAX_RETRIES = raw;
+      vi.resetModules();
+      const { getVeoRateLimitMaxRetries } = await import('../src/veo');
+      expect(getVeoRateLimitMaxRetries()).toBe(5);
+    }
+  });
+});
+
+describe('Polish-19.4.3: submitVeoVideo retries on rate-limit responses', () => {
+  // Stub sleep() to no-op via the module's __setSleepImplForTests
+  // hatch so the 10/20/40/60s backoffs don't force real wall-clock
+  // waits. Must be applied AFTER dynamic import (module is reset
+  // per test by the file-level beforeEach).
+  async function importWithFastSleep() {
+    const mod = await import('../src/veo');
+    mod.__setSleepImplForTests(() => Promise.resolve());
+    return mod;
+  }
+  afterEach(async () => {
+    const mod = await import('../src/veo');
+    mod.__restoreSleepImplForTests();
+  });
+
+  it('retries once on 429 then succeeds on the second attempt', async () => {
+    let call = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      call++;
+      if (call === 1) {
+        return {
+          status: 429,
+          text: async () => JSON.stringify({ error: { code: 429 } }),
+        } as Response;
+      }
+      return {
+        status: 200,
+        text: async () => JSON.stringify({ name: 'operations/success-after-retry' }),
+      } as Response;
+    }) as typeof globalThis.fetch;
+
+    const { submitVeoVideo } = await importWithFastSleep();
+    const r = await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
+    expect(r.ok).toBe(true);
+    expect(r.operationName).toBe('operations/success-after-retry');
+    expect(call).toBe(2);
+  });
+
+  it('does NOT retry on non-rate-limit failures (400 validation returns immediately)', async () => {
+    let call = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      call++;
+      return {
+        status: 200,
+        text: async () => JSON.stringify({ error: { code: 400, message: 'bad prompt' } }),
+      } as Response;
+    }) as typeof globalThis.fetch;
+
+    const { submitVeoVideo } = await importWithFastSleep();
+    const r = await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/validation failed/);
+    expect(call).toBe(1);
+  });
+
+  it('exhausts retries and surfaces a diagnosable error message', async () => {
+    process.env.VEO_RATE_LIMIT_MAX_RETRIES = '2'; // 3 attempts total
+    let call = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      call++;
+      return { status: 429, text: async () => JSON.stringify({}) } as Response;
+    }) as typeof globalThis.fetch;
+
+    const { submitVeoVideo } = await importWithFastSleep();
+    const r = await submitVeoVideo({ userId: 'u', apiKey: 'k', prompt: 'test' });
+    expect(r.ok).toBe(false);
+    expect(call).toBe(3); // initial + 2 retries
+    expect(r.errorMessage).toMatch(/hit after 3 attempts/);
+    expect(r.errorMessage).toMatch(/VEO_RATE_LIMIT_MAX_RETRIES/);
+  });
+});
+
+describe('Polish-19.4.3: submitVeoExtend retries on rate-limit responses', () => {
+  async function importWithFastSleep() {
+    const mod = await import('../src/veo');
+    mod.__setSleepImplForTests(() => Promise.resolve());
+    return mod;
+  }
+  afterEach(async () => {
+    const mod = await import('../src/veo');
+    mod.__restoreSleepImplForTests();
+  });
+
+  it('retries the extend call on 429 then succeeds', async () => {
+    let call = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      call++;
+      if (call === 1) return { status: 429, text: async () => '{}' } as Response;
+      return {
+        status: 200,
+        text: async () => JSON.stringify({ name: 'operations/ext-recovered' }),
+      } as Response;
+    }) as typeof globalThis.fetch;
+
+    const { submitVeoExtend } = await importWithFastSleep();
+    const r = await submitVeoExtend({
+      userId: 'u',
+      apiKey: 'k',
+      previousVideo: { uri: 'https://generativelanguage.googleapis.com/v1beta/files/xyz' },
+      prompt: 'segment 1',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.operationName).toBe('operations/ext-recovered');
+    expect(call).toBe(2);
+  });
+});

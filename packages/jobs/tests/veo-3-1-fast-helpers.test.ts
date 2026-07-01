@@ -6,11 +6,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  VEO_EXTEND_INTER_CALL_DELAY_MS_DEFAULT,
   buildVeoDownloadHeaders,
   computeVeoPollIntervalSeconds,
   extractSourceScriptVerbatim,
   fallbackToSingleSegment,
   getVeoChainingMode,
+  getVeoExtendInterCallDelayMs,
   parseVeoAdSpec,
   resolveAutoVeoDuration,
   resolveVeoTargetDuration,
@@ -746,5 +748,61 @@ describe('Polish-19.4.2: runClaudeAdSpec systemPrompt tripwires', () => {
     const src = await readSrc();
     expect(src).toMatch(/source_script_verbatim: sourceScriptVerbatim/);
     expect(src).toMatch(/extractSourceScriptVerbatim\(jobMetadata\)/);
+  });
+});
+
+describe('Polish-19.4.3: getVeoExtendInterCallDelayMs', () => {
+  const realEnv = process.env;
+  beforeEach(() => {
+    process.env = { ...realEnv };
+    delete process.env.VEO_EXTEND_INTER_CALL_DELAY_MS;
+  });
+  afterEach(() => {
+    process.env = realEnv;
+  });
+
+  it('defaults to 2500ms when env is unset (documented rate-limit breather)', () => {
+    expect(VEO_EXTEND_INTER_CALL_DELAY_MS_DEFAULT).toBe(2500);
+    expect(getVeoExtendInterCallDelayMs()).toBe(2500);
+  });
+
+  it('honors integer env override', () => {
+    process.env.VEO_EXTEND_INTER_CALL_DELAY_MS = '5000';
+    expect(getVeoExtendInterCallDelayMs()).toBe(5000);
+  });
+
+  it('accepts 0 (disable inter-call pause entirely)', () => {
+    process.env.VEO_EXTEND_INTER_CALL_DELAY_MS = '0';
+    expect(getVeoExtendInterCallDelayMs()).toBe(0);
+  });
+
+  it('floors fractional values (step.sleep needs integer ms)', () => {
+    process.env.VEO_EXTEND_INTER_CALL_DELAY_MS = '2500.7';
+    expect(getVeoExtendInterCallDelayMs()).toBe(2500);
+  });
+
+  it('falls back to default on non-numeric / negative values', () => {
+    for (const raw of ['', '   ', 'two-thousand', '-100', 'NaN']) {
+      process.env.VEO_EXTEND_INTER_CALL_DELAY_MS = raw;
+      expect(getVeoExtendInterCallDelayMs()).toBe(2500);
+    }
+  });
+});
+
+describe('Polish-19.4.3: extend runner threads inter-call pause between segments', () => {
+  it('step.sleep runs with VEO_EXTEND_INTER_CALL_DELAY_MS ms between extend calls', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+    // The pause fires INSIDE the extend loop, BEFORE each extend
+    // call (segIdx >= 1). Tripwire: a future cleanup that moves it
+    // out of the loop or drops it would let a 60s ad chain fire 8
+    // back-to-back calls again.
+    expect(src).toMatch(/veo-extend-pause-\$\{variantIndex\}-\$\{segIdx\}/);
+    expect(src).toMatch(/getVeoExtendInterCallDelayMs\(\)/);
+    // Only pauses when interCallDelayMs > 0 (operator-disabled case).
+    expect(src).toMatch(/if \(interCallDelayMs > 0\)/);
   });
 });
