@@ -18,10 +18,10 @@ import { cn } from '@/lib/utils';
 import { acknowledgeLiveGenerationAction } from './ack-action';
 import { createGenerationJobAction, type ConnectedProviders } from './actions';
 import {
+  SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
   SIMPLIFIED_MIN_VARIANTS,
-  VIDEO_DURATION_PRESETS,
   VIDEO_MODELS,
   buildSubmissionFormData,
   canSubmitState,
@@ -29,7 +29,6 @@ import {
   formatModelCostHintPerVariant,
   getDefaultProviderForModel,
   isRecommendedTier,
-  snapToNearestDurationPreset,
   type SimplifiedFormState,
   type VideoModel,
   type VideoModelId,
@@ -55,19 +54,22 @@ interface Props {
 }
 
 /**
- * Polish-20 Commit 1: simplified generation form.
+ * Polish-20 → Polish-20.0.1: simplified generation form.
  *
  * MANDATORY model picker at the top (three cards, budget → recommended
  * → premium). Generate stays disabled until the user picks a model.
  * The recommended-tier card carries a subtle accent so the smart
  * default is visually obvious without being auto-selected.
  *
- * Below the picker: variant count + 4-preset duration buttons
- * (8s / 15s / 30s / 60s). Auto-detected source-video duration snaps to
- * the nearest preset. Free-form entry lives on the /advanced form.
+ * Polish-20.0.1: length picker REMOVED. Duration is auto-detected
+ * from the source video via the Polish-19.3.1 fallback chain — the
+ * simplified form is duration-less. Users who need explicit control
+ * open the advanced form at /concepts/[id]/generate/advanced.
  *
- * Live cost preview updates on every state change so the user sees
- * "picked Seedance 1.5 Pro at 30s = ~$1.46" before hitting Generate.
+ * Cost preview uses the client-detected source duration when
+ * available; when detection is still pending the preview shows a
+ * "calculated after source analysis" placeholder rather than a
+ * misleading $0.
  */
 export function SimplifiedGenerationForm({
   conceptId,
@@ -83,9 +85,6 @@ export function SimplifiedGenerationForm({
   // Polish-20: model picker required. Spec: user MUST pick — no default.
   const [modelId, setModelId] = React.useState<VideoModelId | null>(null);
   const [variantCount, setVariantCount] = React.useState<number>(SIMPLIFIED_DEFAULT_VARIANTS);
-  const [durationSeconds, setDurationSeconds] = React.useState<number>(
-    snapToNearestDurationPreset(detectedSourceSeconds),
-  );
 
   const [error, setError] = React.useState<string | null>(null);
   const [liveAck, setLiveAck] = React.useState(initialLiveAck);
@@ -100,18 +99,22 @@ export function SimplifiedGenerationForm({
     modelId,
     providerId,
     variantCount,
-    durationSeconds,
   };
   const canSubmit = canSubmitState(state);
 
-  // Live cost preview. When no model is picked yet, we show a
-  // placeholder rather than a $0 (which would look like a bug).
+  // Polish-20.0.1: cost preview uses the client-detected source
+  // duration when available; falls back to the shared default (30s)
+  // when detection is still pending. The worker's Polish-19.3.1
+  // fallback chain resolves the final target server-side, so this
+  // number is a preview only.
+  const previewSeconds = detectedSourceSeconds ?? SIMPLIFIED_DEFAULT_DURATION_SECONDS;
+  const detectionPending = detectedSourceSeconds == null;
   const estimate = modelId
     ? estimateGenerationCost({
         conceptType: 'ugc',
         variantCount,
         videoModelId: modelId,
-        sourceDurationSeconds: durationSeconds,
+        sourceDurationSeconds: previewSeconds,
       })
     : null;
 
@@ -129,6 +132,11 @@ export function SimplifiedGenerationForm({
     const formData = buildSubmissionFormData({
       conceptId,
       state,
+      // Polish-20.0.1: thread the client-detected source duration
+      // through as an optional FormData field. The worker still
+      // falls back to analyze-concept's vision output when this is
+      // absent.
+      detectedSourceSeconds,
     });
     startTransition(async () => {
       setError(null);
@@ -204,14 +212,14 @@ export function SimplifiedGenerationForm({
               model={model}
               picked={modelId === model.id}
               disabled={isPending}
-              targetSeconds={durationSeconds}
+              targetSeconds={previewSeconds}
               onPick={() => setModelId(model.id)}
             />
           ))}
         </div>
       </section>
 
-      {/* Variant count + duration presets */}
+      {/* Variant count + auto-detected duration indicator */}
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <label htmlFor="variant-count" className="text-fg block text-sm font-medium">
@@ -232,37 +240,21 @@ export function SimplifiedGenerationForm({
             <span className="text-fg-muted text-sm">variations</span>
           </div>
         </div>
+        {/* Polish-20.0.1: length picker removed. Duration flows from
+            client-side detection → worker's Polish-19.3.1 fallback
+            chain. Users who need explicit control go to /advanced. */}
         <div>
-          <p className="text-fg block text-sm font-medium">
-            Length{' '}
-            {detectedSourceSeconds != null && (
-              <span className="text-fg-subtle text-xs font-normal">
-                (snapped from {detectedSourceSeconds}s source)
-              </span>
-            )}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {VIDEO_DURATION_PRESETS.map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => setDurationSeconds(preset)}
-                disabled={isPending}
-                aria-pressed={durationSeconds === preset}
-                className={cn(
-                  'h-8 min-w-[3.25rem] rounded-md border px-3 text-sm transition-colors',
-                  durationSeconds === preset
-                    ? 'border-fg bg-fg text-bg'
-                    : 'border-input bg-bg-elevated text-fg-muted hover:text-fg',
-                  isPending && 'cursor-not-allowed opacity-60',
-                )}
-              >
-                {preset}s
-              </button>
-            ))}
-          </div>
+          <p className="text-fg block text-sm font-medium">Length</p>
+          {detectedSourceSeconds != null ? (
+            <p className="text-fg-muted mt-1 text-sm">
+              Auto-detected: <span className="text-fg font-mono">{detectedSourceSeconds}s</span>{' '}
+              <span className="text-fg-subtle text-xs">from source video</span>
+            </p>
+          ) : (
+            <p className="text-fg-subtle mt-1 text-xs">Auto-detected from source video.</p>
+          )}
           <p className="text-fg-subtle mt-1 text-xs">
-            Free-form length lives in the{' '}
+            Need an override? Use the{' '}
             <Link
               href={`/concepts/${conceptId}/generate/advanced`}
               className="hover:text-fg underline underline-offset-4"
@@ -287,15 +279,21 @@ export function SimplifiedGenerationForm({
             {estimate ? `$${estimate.estimateUsd.toFixed(2)}` : '—'}
           </span>
         </div>
-        {estimate != null && (
+        {estimate != null && detectionPending && (
           <p className="text-fg-subtle mt-1 text-xs">
-            {variantCount} variation{variantCount === 1 ? '' : 's'} × {durationSeconds}s each
+            Cost calculated after source analysis — showing preview at{' '}
+            {SIMPLIFIED_DEFAULT_DURATION_SECONDS}s default.
+          </p>
+        )}
+        {estimate != null && !detectionPending && (
+          <p className="text-fg-subtle mt-1 text-xs">
+            {variantCount} variation{variantCount === 1 ? '' : 's'} × {previewSeconds}s each
           </p>
         )}
         {overCap && (
           <p className="mt-1 text-xs text-[color:var(--accent-negative)]">
-            Over your remaining daily cap (${remaining.toFixed(2)} left). Raise the cap on Settings
-            or reduce variants / length.
+            Over your remaining daily cap (${remaining.toFixed(2)} left). Raise the cap on Settings,
+            reduce variants, or pick a cheaper model.
           </p>
         )}
         {!hasKieKey && modelId != null && (

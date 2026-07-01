@@ -1,12 +1,12 @@
 /**
- * Polish-19 Commit 3 → Polish-20 Commit 4: pure helpers for the
- * simplified generation form.
+ * Polish-19 Commit 3 → Polish-20.0.1: pure helpers for the simplified
+ * generation form.
  *
- * Post-Polish-20: the form picks a (model, provider) pair from
- * packages/shared/src/video-models.ts. The legacy `pipeline` +
- * `voiceId` fields on the FormData shape are gone; the action
- * handler dispatches purely on modelId + providerId written to
- * job.metadata.
+ * Post-Polish-20.0.1: the form picks a (model, provider) pair from
+ * packages/shared/src/video-models.ts. Duration is auto-detected
+ * from the source video (Polish-19.3.1 fallback chain) — the
+ * simplified form no longer exposes a length picker. Advanced form
+ * (/advanced) retains free-form entry for power users.
  */
 import {
   computeSegmentCountForModel,
@@ -14,8 +14,6 @@ import {
   getDefaultProviderForModel,
   getModelProviderConfig,
   getVideoModel,
-  snapToNearestDurationPreset,
-  VIDEO_DURATION_PRESETS,
   VIDEO_MODELS,
   type VideoModel,
   type VideoModelId,
@@ -25,14 +23,12 @@ import {
 // Re-export the shared descriptor bits the form component needs so
 // the component file only imports from a single module.
 export {
-  VIDEO_DURATION_PRESETS,
   VIDEO_MODELS,
   computeSegmentCountForModel,
   formatModelCostHintPerVariant,
   getDefaultProviderForModel,
   getModelProviderConfig,
   getVideoModel,
-  snapToNearestDurationPreset,
 };
 export type { VideoModel, VideoModelId, VideoProviderId };
 
@@ -42,9 +38,12 @@ export const SIMPLIFIED_MAX_VARIANTS = 10;
 export const SIMPLIFIED_DEFAULT_VARIANTS = 5;
 
 /**
- * Polish-20: default duration preset when no source has been detected
- * yet. 30s matches the most common UGC ad length and stays consistent
- * with the pre-Polish-20 form default.
+ * Polish-20.0.1: fallback target duration when the source video hasn't
+ * been analyzed / duration wasn't detected. Matches the worker's
+ * resolveAutoVideoDuration default so the form's cost preview lines
+ * up with what the worker will actually spend when it lands on this
+ * branch. Callers should prefer detected source duration when
+ * available and fall back here only as a placeholder.
  */
 export const SIMPLIFIED_DEFAULT_DURATION_SECONDS = 30;
 
@@ -75,37 +74,45 @@ export function isRecommendedTier(modelId: VideoModelId): boolean {
 }
 
 /**
- * Polish-20: form state shape. Model picker is REQUIRED (per spec
+ * Polish-20.0.1: form state shape. Model picker is REQUIRED (per spec
  * user MUST pick), represented as `modelId | null`. Generate button
  * stays disabled until non-null. `providerId` defaults to the model's
  * cheapest live provider (kie.ai at Polish-20 launch).
+ *
+ * NO duration field — the simplified form is duration-less; the
+ * worker's Polish-19.3.1 resolveAutoVideoDuration fallback chain
+ * picks the target from analyze-concept output OR the client-detected
+ * source duration threaded through buildSubmissionFormData.
  */
 export interface SimplifiedFormState {
   modelId: VideoModelId | null;
   providerId: VideoProviderId | null;
   variantCount: number;
-  durationSeconds: number;
 }
 
 /**
- * Polish-20: is the state complete enough to submit? Blocks Generate
- * until the model picker has a value.
+ * Polish-20.0.1: is the state complete enough to submit? Blocks
+ * Generate until the model picker has a value. Duration is no longer
+ * required from the form — the worker resolves it server-side.
  */
 export function canSubmitState(state: SimplifiedFormState): boolean {
   if (state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
     return false;
   }
-  if (!Number.isFinite(state.durationSeconds) || state.durationSeconds <= 0) return false;
   return true;
 }
 
 /**
  * Build the FormData payload the simplified form submits.
  *
- * Polish-20 Commit 4 clean shape:
- *   - conceptId, variantCount, sourceDurationSeconds
+ * Polish-20.0.1 shape:
+ *   - conceptId, variantCount
  *   - modelId + providerId — the canonical routing signals
+ *   - sourceDurationSeconds — ONLY when the caller passes a client-
+ *     detected value (analyze-concept + fallback chain also produce
+ *     one server-side; the FormData channel just seeds it when
+ *     detection ran early)
  *   - intensity=medium + mode=live still hardcoded because the
  *     action handler validates them, but the values are constants
  *     the simplified form never surfaces
@@ -113,13 +120,28 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
 export function buildSubmissionFormData(input: {
   conceptId: string;
   state: SimplifiedFormState;
+  /**
+   * Optional client-detected source duration (from
+   * apps/web/app/concepts/[id]/generate/detect-video-duration.ts).
+   * Persisted to job.metadata.source_duration_seconds so the
+   * worker's Polish-19.3.1 fallback chain lands on it when
+   * analyze-concept hasn't emitted a vision-derived value yet.
+   * Omitted when unknown; the worker falls back to 30s default.
+   */
+  detectedSourceSeconds?: number | null;
 }): FormData {
   const fd = new FormData();
   fd.set('conceptId', input.conceptId);
   fd.set('intensity', 'medium');
   fd.set('mode', 'live');
   fd.set('variantCount', String(input.state.variantCount));
-  fd.set('sourceDurationSeconds', String(input.state.durationSeconds));
+  if (
+    input.detectedSourceSeconds != null &&
+    Number.isFinite(input.detectedSourceSeconds) &&
+    input.detectedSourceSeconds > 0
+  ) {
+    fd.set('sourceDurationSeconds', String(Math.round(input.detectedSourceSeconds)));
+  }
   if (input.state.modelId) fd.set('modelId', input.state.modelId);
   if (input.state.providerId) fd.set('providerId', input.state.providerId);
   return fd;
