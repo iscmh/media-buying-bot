@@ -64,9 +64,12 @@ export const generationJobs = pgTable('generation_jobs', {
   // detectCreativeFormat — format class, demographics, setting,
   // tone, pacing, visual elements, extracted dialogue.
   detectedFormat: jsonb('detected_format'),
-  // Polish-6: the pipeline the router picked (e.g.
-  // 'heygen_avatar_talking_head', 'kling_3_multi_clip_native_lipsync',
-  // 'sora_2_single_shot', 'nano_banana_static_image').
+  // Polish-6 → Polish-20 Commit 4: the surviving legacy pipeline the
+  // router picked ('heygen_avatar_talking_head', 'sora_2_single_shot',
+  // 'nano_banana_static_image'). The Polish-20 unified video-variant
+  // worker does NOT write here — its routing signal is
+  // metadata.model_id + metadata.provider_id (see
+  // packages/shared/src/video-models.ts).
   pickedPipeline: text('picked_pipeline'),
   // Polish-6: Supabase Storage path for the user's uploaded reference
   // creative (video or image). The vision detection step reads from

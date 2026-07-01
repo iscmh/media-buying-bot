@@ -290,25 +290,56 @@ export const generateVideoVariant = inngest.createFunction(
     );
 
     if (mode === 'mock') {
+      // Polish-20 Commit 5: mock path now matches the live path's
+      // row shape — per-segment rows (isClipPart: true) when
+      // segmentCount > 1, plus a composite row (isClipPart: false).
+      // Same shape lets the /runs/[id] grid + review filters behave
+      // identically in mock and live modes.
       await step.sleep('mock-render', '2s');
       await step.run('insert-mock-rows', async () => {
         const db = getDb();
-        for (let i = 0; i < variantCount; i++) {
+        const mockUrl = 'https://samplelib.com/lib/preview/mp4/sample-10s.mp4';
+        for (let variantIndex = 0; variantIndex < variantCount; variantIndex++) {
+          if (autoDuration.segmentCount > 1) {
+            const segmentRows = Array.from(
+              { length: autoDuration.segmentCount },
+              (_, segmentIndex) => ({
+                userId,
+                generationJobId: jobId,
+                fileUrl: mockUrl,
+                aspectRatio: '9:16' as const,
+                status: 'ready_for_review' as const,
+                format: `video_${modelId}_segment`,
+                clipIndex: segmentIndex,
+                isClipPart: true,
+                generationMetadata: {
+                  mock: true,
+                  variant_index: variantIndex,
+                  segment_index: segmentIndex,
+                  model_id: modelId,
+                  provider_id: providerId,
+                  duration_seconds: model.maxSingleCallSeconds,
+                },
+              }),
+            );
+            await db.insert(schema.generatedCreatives).values(segmentRows);
+          }
           await db.insert(schema.generatedCreatives).values({
             userId,
             generationJobId: jobId,
-            fileUrl: 'https://samplelib.com/lib/preview/mp4/sample-10s.mp4',
+            fileUrl: mockUrl,
             aspectRatio: '9:16',
             status: 'ready_for_review',
             format: `video_${modelId}`,
             isClipPart: false,
             generationMetadata: {
               mock: true,
-              variant_index: i,
+              variant_index: variantIndex,
               model_id: modelId,
               provider_id: providerId,
               duration_seconds: autoDuration.targetSeconds,
               segment_count: autoDuration.segmentCount,
+              stitched: autoDuration.segmentCount > 1,
             },
           });
         }
@@ -320,7 +351,7 @@ export const generateVideoVariant = inngest.createFunction(
         startedAt,
         variantCount,
         actualCostUsd: 0,
-        provider: config.providerId === 'kie_ai' ? 'kie_ai' : 'kie_ai',
+        provider: 'kie_ai',
         path: 'video-variant',
       });
       return { jobId, mode, generated: variantCount };

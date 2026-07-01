@@ -1,13 +1,11 @@
 /**
- * Polish-19.0.4: shared Nano Banana prompt directives. The two
- * constants below were iteratively tuned across Polish-9.x → 12.x
- * (UGC realism, anti-text, anti-b-roll). They previously lived inline
- * inside generate-kling-multi-clip-variants.ts; extracted here so the
- * Polish-19 Kling Avatar v2 worker can reuse them without a sibling-
- * file import, and so future pipelines have a clean shared source.
- *
- * The original file re-exports both names so the existing test suite
- * + Omni Flash worker imports keep working without churn.
+ * Polish-19.0.4 → Polish-20 Commit 5: shared Nano Banana prompt
+ * directives. The two constants below were iteratively tuned across
+ * Polish-9.x → 12.x (UGC realism, anti-text, anti-b-roll). Retained
+ * post-Polish-20 for a future Polish-21+ reference-image mode on the
+ * unified video-variant worker (each ModelProviderConfig can opt
+ * into providing a Nano Banana first-frame image per its
+ * `imageField` slot).
  */
 
 /**

@@ -1,10 +1,9 @@
 /**
- * Polish-19.0.4: tests for the shared image-prompts helpers extracted
- * from generate-kling-multi-clip-variants.ts. Pins the directives the
- * Polish-9.x → 12.x iteration tuned into existence (anti-text,
- * amateur-selfie realism) AND pins the deliberate scope cut for the
- * Kling Avatar pipeline (single-line anti-celeb, NOT the long
- * Polish-12.6 exclusion list).
+ * Polish-19.0.4 → Polish-20 Commit 5: tests for the shared image-
+ * prompts helpers. Pins the directives the Polish-9.x → 12.x
+ * iteration tuned into existence (anti-text, amateur-selfie realism)
+ * for reuse by any Polish-21+ reference-image mode on the unified
+ * video-variant worker.
  */
 import { describe, expect, it } from 'vitest';
 import {

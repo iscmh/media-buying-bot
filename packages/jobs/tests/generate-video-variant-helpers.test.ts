@@ -314,3 +314,132 @@ describe('Polish-20 Commit 2: analyze-concept dispatch route on model_id', () =>
     expect(src).toMatch(/Polish-20 unified worker/);
   });
 });
+
+describe('Polish-20 Commit 5: mock-mode regression pins', () => {
+  // The mock branch of generate-video-variant is what /admin's mock
+  // toggle exercises — verifying the plumbing before real spend.
+  // These tripwires assert the mock path (a) writes rows that match
+  // the live path's shape, and (b) exercises every model in the
+  // launch matrix identically.
+
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-video-variant.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('mock branch fires on mode==="mock" BEFORE the live segment fan-out', async () => {
+    const src = await readSrc();
+    // The mock branch returns early with mode=mock; live fan-out only
+    // runs on mode=live. A regression that let mock fall through to
+    // the live path would spend real money on kie.ai.
+    const mockIdx = src.indexOf("if (mode === 'mock')");
+    const fanoutIdx = src.indexOf('Array.from({ length: variantCount }');
+    expect(mockIdx).toBeGreaterThan(-1);
+    expect(fanoutIdx).toBeGreaterThan(-1);
+    expect(mockIdx).toBeLessThan(fanoutIdx);
+  });
+
+  it('mock composite row carries model_id + provider_id + segment_count metadata', async () => {
+    const src = await readSrc();
+    // Every mock composite row must include the routing signals so
+    // /runs/[id] can distinguish variants per model without a DB
+    // schema change. Tripwire against a regression that dropped one
+    // of the descriptor fields.
+    expect(src).toMatch(/mock: true/);
+    expect(src).toMatch(/model_id: modelId/);
+    expect(src).toMatch(/provider_id: providerId/);
+    expect(src).toMatch(/segment_count: autoDuration\.segmentCount/);
+  });
+
+  it('mock multi-segment path writes per-segment rows (isClipPart: true) + composite (isClipPart: false)', async () => {
+    const src = await readSrc();
+    // Multi-segment mocks match the live shape so the review grid
+    // filters (`isClipPart = false`) work identically in both modes.
+    expect(src).toMatch(/if \(autoDuration\.segmentCount > 1\)/);
+    expect(src).toMatch(/format: `video_\$\{modelId\}_segment`/);
+    expect(src).toMatch(/isClipPart: true/);
+    expect(src).toMatch(/isClipPart: false/);
+    // Composite row's stitched flag mirrors segmentCount > 1
+    expect(src).toMatch(/stitched: autoDuration\.segmentCount > 1/);
+  });
+
+  it('mock 8s Seedance 1.5 Pro produces 1 segment (no per-segment rows)', () => {
+    // Segment count math is the shared descriptor's job — this test
+    // pins the math the mock branch relies on. Seedance 1.5 Pro's
+    // 12s cap means 8s target → 1 segment → composite only, no
+    // per-segment rows.
+    const s15pro = getVideoModel('seedance_1_5_pro')!;
+    const r = resolveAutoVideoDuration({ source_duration_seconds: 8 }, s15pro);
+    expect(r.segmentCount).toBe(1);
+    expect(r.targetSeconds).toBe(8);
+  });
+
+  it('mock 60s Seedance 1.5 Pro produces 5 segments (12s × 5) — user-spec regression', () => {
+    // From the Polish-20 Commit 5 spec: "60s Seedance 1.5 Pro variant
+    // → verify segmentCount = 5 (60 / 12)". Pin the math so a future
+    // model-cap change (12s → 10s, say) surfaces this as a failing
+    // test before it ships surprise per-variant cost.
+    const s15pro = getVideoModel('seedance_1_5_pro')!;
+    const r = resolveAutoVideoDuration({ source_duration_seconds: 60 }, s15pro);
+    expect(r.segmentCount).toBe(5);
+    expect(r.targetSeconds).toBe(60);
+  });
+
+  it('mock 60s Kling 3.0 Standard produces 4 segments (15s × 4)', () => {
+    const kling = getVideoModel('kling_3_standard')!;
+    const r = resolveAutoVideoDuration({ source_duration_seconds: 60 }, kling);
+    expect(r.segmentCount).toBe(4);
+    expect(r.targetSeconds).toBe(60);
+  });
+
+  it('mock 60s Seedance 2 produces 4 segments (15s × 4)', () => {
+    const s2 = getVideoModel('seedance_2')!;
+    const r = resolveAutoVideoDuration({ source_duration_seconds: 60 }, s2);
+    expect(r.segmentCount).toBe(4);
+    expect(r.targetSeconds).toBe(60);
+  });
+
+  it('mock branch marks the job completed with provider="kie_ai" + path="video-variant"', async () => {
+    const src = await readSrc();
+    // Mock completions must use the same telemetry path label as the
+    // live worker so the admin dashboard's per-worker rollups
+    // aggregate correctly across mock and live jobs.
+    expect(src).toMatch(
+      /mode,\s*startedAt,\s*variantCount,\s*actualCostUsd: 0,\s*provider: 'kie_ai',\s*path: 'video-variant'/,
+    );
+  });
+});
+
+describe('Polish-20 Commit 5: three-model happy-path config lookup', () => {
+  // The unified worker's `getModelProviderConfig(modelId, providerId)`
+  // is the only routing decision on the hot path. Pin that every
+  // launch model resolves to a live kie.ai config with the exact
+  // fields the kie-video client will read.
+  it('resolves ModelProviderConfig for every launch model', async () => {
+    const { getModelProviderConfig } = await import('@mbb/shared');
+    for (const modelId of ['seedance_1_5_pro', 'kling_3_standard', 'seedance_2'] as const) {
+      const config = getModelProviderConfig(modelId, 'kie_ai');
+      expect(config, `no config for ${modelId} × kie_ai`).toBeDefined();
+      expect(config!.endpointUrl).toBe('https://api.kie.ai/api/v1/jobs/createTask');
+      expect(config!.usdPerSecond).toBeGreaterThan(0);
+      expect(config!.modelParam.length).toBeGreaterThan(0);
+      // inputShape fields the kie-video client requires.
+      expect(config!.inputShape.promptField).toBe('prompt');
+      expect(config!.inputShape.durationField).toBe('duration');
+      expect(config!.inputShape.aspectRatioField).toBe('aspect_ratio');
+      expect(['number', 'string']).toContain(config!.inputShape.durationFormat);
+    }
+  });
+
+  it('every launch model targets the kie.ai createTask endpoint (Polish-20 launch provider)', async () => {
+    const { VIDEO_MODELS, getModelProviderConfig } = await import('@mbb/shared');
+    for (const model of VIDEO_MODELS) {
+      const config = getModelProviderConfig(model.id, 'kie_ai');
+      expect(config).toBeDefined();
+      expect(config!.providerId).toBe('kie_ai');
+    }
+  });
+});

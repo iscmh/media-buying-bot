@@ -12,9 +12,11 @@ export const connectionStatusEnum = pgEnum('connection_status', [
   'error',
 ]);
 
-// Polish-4: + kling (Replicate cinematic-voiceover format), elevenlabs
-// (TTS for the same), replicate + tavus reserved so future providers
-// don't need another ALTER TYPE migration.
+// Polish-20 Commit 5: 'kling' + 'elevenlabs' + 'tavus' retained in
+// the pg enum for stale historical rows (removing enum values
+// requires a destructive migration). Application code no longer
+// writes 'elevenlabs' after Commit 4's ElevenLabs deletion;
+// 'kling' stays because Replicate BYOK keys are stored under it.
 export const aiProviderEnum = pgEnum('ai_provider', [
   'arcads',
   'heygen',

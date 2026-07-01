@@ -3,11 +3,11 @@ import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { type FailoverReadyState } from './failover';
 
 /**
- * Polish-4: shared lifecycle helpers for variant-generation workers.
- * Both generate-ugc-variants (HeyGen avatar talking head) and
- * generate-cinematic-variants (Kling cinematic voiceover) use the
- * same generation_jobs lifecycle — extract markers so both workers
- * post a consistent audit trail.
+ * Polish-4 → Polish-20 Commit 5: shared lifecycle helpers for
+ * variant-generation workers. Every worker (generate-ugc-variants,
+ * generate-video-variant, generate-sora-variants, generate-static-*)
+ * uses the same generation_jobs lifecycle — extract markers so
+ * every worker posts a consistent audit trail.
  */
 
 export async function markJobFailed(

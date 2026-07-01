@@ -19,8 +19,12 @@ const RESPONSE_BODY_EXCERPT_BYTES = 2048;
  */
 export async function logAiProviderApiCall(input: {
   userId: string;
-  // Polish-4: + kling (Replicate cinematic video gen), replicate
-  // (generic Replicate calls), elevenlabs (TTS voiceover).
+  // Polish-20 Commit 5: 'elevenlabs' + 'tavus' removed from the
+  // caller-facing union. Historical audit rows with those values
+  // still exist in the DB; the pg enum is unchanged. 'kling' is
+  // retained because the shared Replicate helpers (concat / lipsync
+  // / audio-trim / frame-extract) still tag their audit rows with
+  // it — Replicate BYOK keys are stored under the 'kling' name.
   provider:
     | 'gemini'
     | 'claude'
@@ -30,7 +34,6 @@ export async function logAiProviderApiCall(input: {
     | 'creatify'
     | 'kling'
     | 'replicate'
-    | 'elevenlabs'
     | 'openai';
   endpoint: string;
   method: string;

@@ -58,7 +58,7 @@ media-buying-bot/
 ├─ packages/
 │  ├─ shared/             zod schemas, env validation, shared types
 │  ├─ db/                 Drizzle schema, queries, safety layer, encryption
-│  ├─ ai-providers/       Arcads / HeyGen / Creatify abstraction
+│  ├─ ai-providers/       AI-provider clients + kie.ai video pipeline (Polish-20)
 │  ├─ meta-api/           Meta Graph API wrapper (rate limit + audit + safety)
 │  └─ jobs/               Inngest function definitions
 ├─ supabase/
@@ -67,6 +67,52 @@ media-buying-bot/
 │  └─ seed.sql
 └─ .github/workflows/ci.yml
 ```
+
+---
+
+## UGC video generation (Polish-20)
+
+UGC ads run through a single unified worker
+(`packages/jobs/src/functions/generate-video-variant.ts`) driven by
+the descriptor layer in `packages/shared/src/video-models.ts`. The
+form's mandatory model picker is the only routing signal — the
+worker reads `job.metadata.model_id + provider_id` and looks up the
+`ModelProviderConfig` (endpoint, per-field wire format, per-second
+cost). No pipeline enum, no format switch, no per-model client.
+
+### Launch model set
+
+| Model              | Tier        | Per-sec (kie.ai) | Per-call cap | Notes                                                                             |
+| ------------------ | ----------- | ---------------- | ------------ | --------------------------------------------------------------------------------- |
+| Seedance 1.5 Pro   | Budget      | $0.035           | 12s (step 2) | `bytedance/seedance-1.5-pro`, `fixed_lens: true`                                  |
+| Kling 3.0 Standard | Recommended | $0.10            | 15s          | `kling-3.0/video`, `mode: 'std'`, `multi_shots: false`, duration is a STRING enum |
+| Seedance 2 (Pro)   | Premium     | $0.33            | 15s          | `bytedance/seedance-2`, `resolution: '720p'`                                      |
+
+Duration presets on the simplified form: 8s / 15s / 30s / 60s.
+Sources above each model's per-call cap chunk into segments and
+stitch via the Polish-19.3 Replicate ffmpeg-concat helper.
+
+### BYOK requirements
+
+- **Tool connections** (`tool_connections` table) — three keys required:
+  - `claude` — Claude ad-spec script writer
+  - `gemini` — Gemini Vision one-shot source analysis (Polish-12)
+  - `kie_ai` — kie.ai video generation (all three launch models)
+- **AI provider connections** (`ai_provider_connections` table) —
+  optional cards for the legacy survivors (HeyGen avatar / Sora 2 /
+  Nano Banana image), unrelated to the UGC video path.
+
+Set all three tool keys at `/connections/tools`. The form's Generate
+button stays disabled with a "connect kie.ai" nudge until the
+`kie_ai` slot is populated.
+
+### Multi-provider expansion (Polish-21+)
+
+`packages/shared/src/video-models.ts` ships four provider entries
+(kie_ai / fal_ai / wavespeed / atlas_cloud) with only `kie_ai` flipped
+`liveAtLaunch: true`. Adding a new provider is a new client file +
+new `ModelProviderConfig` entry + flip the flag — no architectural
+change to the worker or form.
 
 ---
 
@@ -174,16 +220,16 @@ curl https://YOUR-VERCEL-DOMAIN/api/health
 
 ## Roadmap (full)
 
-| Phase | Scope                                                                                  | Status |
-| ----- | -------------------------------------------------------------------------------------- | ------ |
-| 1     | Monorepo scaffold, schema, safety layer, empty pages, kill switches                    | ✓      |
-| 2     | BYO Meta token onboarding, TG link flow, AI provider connect, settings UI, ToS signing | next   |
-| 3     | Concept upload, generation pipeline (Arcads + HeyGen + Creatify), captions, B-roll     |        |
-| 4     | Auto-launch to Meta, retry logic, pre-launch compliance, pattern-of-use staggering     |        |
-| 5     | Performance polling, kill/scale logic, TG approval flows, suspicious-activity monitor  |        |
-| 6     | Dashboard, daily P&L summaries (per-user TZ), TG daily digest                          |        |
-| 7     | Beta polish, support tooling, agency BM partner deal                                   |        |
-| 8     | Stripe billing, founding member migration, paid tiers                                  |        |
+| Phase | Scope                                                                                         | Status |
+| ----- | --------------------------------------------------------------------------------------------- | ------ |
+| 1     | Monorepo scaffold, schema, safety layer, empty pages, kill switches                           | ✓      |
+| 2     | BYO Meta token onboarding, TG link flow, AI provider connect, settings UI, ToS signing        | next   |
+| 3     | Concept upload, unified video-variant pipeline (Seedance / Kling 3.0 / Seedance 2 via kie.ai) |        |
+| 4     | Auto-launch to Meta, retry logic, pre-launch compliance, pattern-of-use staggering            |        |
+| 5     | Performance polling, kill/scale logic, TG approval flows, suspicious-activity monitor         |        |
+| 6     | Dashboard, daily P&L summaries (per-user TZ), TG daily digest                                 |        |
+| 7     | Beta polish, support tooling, agency BM partner deal                                          |        |
+| 8     | Stripe billing, founding member migration, paid tiers                                         |        |
 
 ---
 
