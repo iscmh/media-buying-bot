@@ -140,6 +140,34 @@ export function extractSourceScriptVerbatim(jobMetadata: Record<string, unknown>
   return typeof t === 'string' ? t : '';
 }
 
+/**
+ * Polish-20.0.3: strip fields Claude should NOT see when writing
+ * per-segment yapper prompts. The pre-20.0.3 worker forwarded the
+ * ENTIRE jobMetadata blob as `source_analysis`, which included the
+ * analyze-concept step's `draft_prompt` — a bracketed
+ * ("**Camera Shot:**", "**Actions:**", etc.) Sora-era monolith.
+ * Claude then copied that bracketed structure into its segment
+ * prompts, so Seedance received bracketed prose instead of yapper
+ * prose (production diagnostic on job 395cc9b7).
+ *
+ * We now hand Claude ONLY the vision-derived analysis object
+ * (subject / scene / audio cues / duration), plus the sourceScript
+ * verbatim at the top level. Nothing else.
+ */
+export function sanitizeSourceAnalysisForClaude(
+  jobMetadata: Record<string, unknown> | null,
+): Record<string, unknown> {
+  if (!jobMetadata) return {};
+  const analysis = jobMetadata['analysis'];
+  if (analysis && typeof analysis === 'object' && !Array.isArray(analysis)) {
+    // Return a defensive copy so Claude can't see stray root-level
+    // fields (draft_prompt, model_id, provider_id, _live, etc.)
+    // leaking through via prototype chain.
+    return { ...(analysis as Record<string, unknown>) };
+  }
+  return {};
+}
+
 // -------------------------------------------------------------------
 // Ad-spec types (Polish-19.4.2 shape carried forward)
 // -------------------------------------------------------------------
@@ -880,6 +908,7 @@ async function runClaudeAdSpec(input: {
 
   const sourceScriptVerbatim = extractSourceScriptVerbatim(jobMetadata);
   const { min: minWords, max: maxWords } = computeWordCountRangePerSegment(model);
+  const sanitizedSourceAnalysis = sanitizeSourceAnalysisForClaude(jobMetadata);
 
   const systemPrompt =
     `You write ${model.displayName} prompts for short UGC video ads. Output ONLY valid JSON ` +
@@ -889,16 +918,21 @@ async function runClaudeAdSpec(input: {
     `  "segments": [\n` +
     `    {\n` +
     `      "index": 0,\n` +
-    `      "prompt": "Self-contained ${model.displayName} prompt for this segment — visual scene + speaker attribution + dialogue in quotes + acoustic texture line",\n` +
+    `      "prompt": "One continuous paragraph of yapper-style prose (see FORMAT + WORKED EXAMPLE below)",\n` +
     `      "sound_texture": "Close-mic iPhone front-camera compression, faint room tone, no music."\n` +
     `    }\n` +
     `    // one entry per segment; each segment is ${model.maxSingleCallSeconds}s (${model.displayName}'s per-call cap)\n` +
     `  ]\n` +
     `}\n\n` +
-    `STRUCTURE PER segment.prompt (in this order, one paragraph):\n` +
+    `FORMAT — HARD REQUIREMENTS (Polish-20.0.3 regression pin):\n` +
+    `- Every segment.prompt is ONE FLOWING PARAGRAPH of natural yapper-style prose. NO bracketed sections. NO **Camera Shot:**, NO **Actions:**, NO **Dialogue:**, NO **Character:**, NO "Setting:" / "Lighting:" / "Framing:" labels. If the source_analysis input contains this bracketed style, IGNORE that structure — DO NOT copy it.\n` +
+    `- The prose weaves scene, character, action, dialogue, and audio texture together in one paragraph, like you're describing a video you just watched to a friend.\n\n` +
+    `STRUCTURE PER segment.prompt (weave these together into ONE paragraph — NOT numbered sections):\n` +
     `1. Visual scene (who: age-range, gender, ethnicity, outfit; where: room/setting; lighting; framing — UGC iPhone selfie hand-held, NOT studio, NOT cinematic).\n` +
     `2. Speaker attribution + spoken dialogue in quotes. Templates: "She says: '...'" / "He confesses: '...'" / "She whispers: '...'" / "He half-laughs: '...'". Pick attribution matching the emotional beat.\n` +
     `3. Acoustic texture line woven into the prose (repeat the sound_texture field's content inside the prompt — the model reads audio cues from the prompt body, not adjacent JSON).\n\n` +
+    `WORKED EXAMPLE (yapper-style prose the models respond to — Polish-20.0.3 anchor):\n` +
+    `"A 34-year-old white woman with light brown hair films herself in the driver's seat of a parked dark-interior SUV, dashboard-mounted phone framing her chest-up, steady tripod-style. She's mid-conversation, hand gesturing as she lists things, picking up like she's telling her friend a story. Warm afternoon sunlight through the driver's side window catches her face. She says in an exhausted-but-relieved conversational tone, like venting to a friend on FaceTime: 'I swear to god, I was spending $80 a month on face serums that did NOTHING. Zero. Nada.' Close-mic dashboard-camera compression, faint car interior room tone, distant parking lot ambient noise, no music. Raw iPhone footage aesthetic, TikTok confessional energy, no-filter realism, natural handheld micro-jitter, vertical 9:16."\n\n` +
     `WORD COUNT PER SEGMENT (HARD LIMITS — going over breaks the yapping pace and looks fake):\n` +
     `- Every segment: ${minWords}-${maxWords} words of dialogue, natural yapping pace ~170wpm (${model.maxSingleCallSeconds}s per call × 170wpm / 60).\n` +
     `- Word count = spoken words inside the quotes ONLY (excludes speaker attribution + visual/sound description).\n\n` +
@@ -923,9 +957,14 @@ async function runClaudeAdSpec(input: {
     `for a ${targetSeconds}s ad on ${model.displayName}. This variant is index ${variantIndex} — ` +
     `differentiate from other variants by adapting the character demographics and setting while preserving the source's hooks and key phrases.`;
 
+  // Polish-20.0.3: sanitize source_analysis so Claude only sees the
+  // vision-derived scene/subject fields — NOT the Sora-era
+  // draft_prompt blob (which used to bleed bracketed section styling
+  // into Claude's output on job 395cc9b7). We keep the raw script
+  // verbatim at the top level so PRESERVE rules still fire.
   const userMessage = JSON.stringify({
     source_script_verbatim: sourceScriptVerbatim,
-    source_analysis: jobMetadata ?? {},
+    source_analysis: sanitizedSourceAnalysis,
     target_duration_seconds: targetSeconds,
     target_segment_count: segmentCount,
     model_id: model.id,

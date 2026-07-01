@@ -15,6 +15,7 @@ import {
   fallbackToSingleSegment,
   parseVideoAdSpec,
   resolveAutoVideoDuration,
+  sanitizeSourceAnalysisForClaude,
 } from '../src/functions/generate-video-variant';
 
 describe('Polish-20: computeVideoPollIntervalSeconds', () => {
@@ -569,5 +570,199 @@ describe('Polish-20.0.2 hotfix: analyze-concept dispatch precedence tripwires', 
     // video-variant registration MUST stay.
     expect(registrySrc).toMatch(/'generation\/video-variant\.requested'/);
     expect(registrySrc).toMatch(/generateVideoVariant/);
+  });
+});
+
+describe('Polish-20.0.3: sanitizeSourceAnalysisForClaude', () => {
+  it('returns ONLY the vision-derived analysis object (strips draft_prompt / model_id / _live)', () => {
+    const jobMetadata = {
+      analysis: {
+        script_transcription: 'I swear to god...',
+        subject: { appearance: 'woman in car' },
+        video_duration_seconds: 24,
+      },
+      draft_prompt: '**Character:** David. **Camera Shot:** Medium.',
+      model_id: 'seedance_1_5_pro',
+      provider_id: 'kie_ai',
+      _live: true,
+      analyzed_at: '2026-01-01T00:00:00Z',
+      source_duration_seconds: 24,
+    };
+    const r = sanitizeSourceAnalysisForClaude(jobMetadata);
+    // Vision fields SURVIVE:
+    expect(r.script_transcription).toBe('I swear to god...');
+    expect(r.subject).toEqual({ appearance: 'woman in car' });
+    expect(r.video_duration_seconds).toBe(24);
+    // Sora-era + routing fields ARE stripped — this is the exact
+    // regression that caused Claude to copy bracketed prose on
+    // job 395cc9b7.
+    expect(r.draft_prompt).toBeUndefined();
+    expect(r.model_id).toBeUndefined();
+    expect(r.provider_id).toBeUndefined();
+    expect(r._live).toBeUndefined();
+    expect(r.analyzed_at).toBeUndefined();
+    expect(r.source_duration_seconds).toBeUndefined();
+  });
+
+  it('returns empty object for null / missing analysis (Claude gets no context, not stale context)', () => {
+    expect(sanitizeSourceAnalysisForClaude(null)).toEqual({});
+    expect(sanitizeSourceAnalysisForClaude({})).toEqual({});
+    expect(sanitizeSourceAnalysisForClaude({ analysis: null })).toEqual({});
+    expect(sanitizeSourceAnalysisForClaude({ analysis: 'string-not-object' })).toEqual({});
+    expect(sanitizeSourceAnalysisForClaude({ analysis: [1, 2] })).toEqual({});
+  });
+
+  it('returns a defensive copy (mutation does not leak back to caller state)', () => {
+    const inner = { script_transcription: 'x' };
+    const r = sanitizeSourceAnalysisForClaude({ analysis: inner });
+    (r as { added?: boolean }).added = true;
+    expect(inner).not.toHaveProperty('added');
+  });
+});
+
+describe('Polish-20.0.3: runClaudeAdSpec system-prompt regression tripwires', () => {
+  // The Polish-20.0.3 hotfix rewrote runClaudeAdSpec's system prompt
+  // to (a) hard-reject bracketed section styling ("**Character:**"
+  // etc.) and (b) anchor Claude to a yapper-style worked example.
+  // These tripwires pin those changes so a future prompt cleanup
+  // can't drop them without failing CI.
+
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-video-variant.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('system prompt explicitly rejects bracketed section style ("**Camera Shot:**", etc.)', async () => {
+    const src = await readSrc();
+    expect(src).toMatch(/NO bracketed sections/);
+    expect(src).toMatch(/\*\*Camera Shot:\*\*/);
+    expect(src).toMatch(/\*\*Actions:\*\*/);
+    expect(src).toMatch(/\*\*Dialogue:\*\*/);
+    expect(src).toMatch(/IGNORE that structure/);
+  });
+
+  it('system prompt anchors Claude on a yapper-style worked example (not bracketed sections)', async () => {
+    const src = await readSrc();
+    // The 20.0.3 worked example uses "I swear to god" + "$80" + "NOTHING"
+    // in flowing prose to anchor Claude on the target style. Pin the
+    // markers so a future rewrite either keeps this shape or ships a
+    // new anchor with a new test.
+    expect(src).toMatch(/WORKED EXAMPLE/);
+    expect(src).toMatch(/yapper-style prose/);
+    expect(src).toMatch(/I swear to god/);
+    expect(src).toMatch(/\$80/);
+    expect(src).toMatch(/NOTHING/);
+  });
+
+  it('worker calls runClaudeAdSpec BEFORE any submitKieVideo call (not draft_prompt passthrough)', async () => {
+    const src = await readSrc();
+    // Layout regression: the Claude ad-spec step must be the first
+    // substantive step of every variant, generating segments[] used
+    // by the fan-out. A regression that skipped Claude (or that
+    // passed draft_prompt straight to Seedance) would fail this
+    // ordering check.
+    //
+    // Look for the CALL sites (not the identifier — the definition
+    // appears later in the file). `runClaudeAdSpec({` matches the
+    // invocation; `submitKieVideo({` matches the segment submit.
+    const claudeCallIdx = src.indexOf('runClaudeAdSpec({');
+    const submitCallIdx = src.indexOf('submitKieVideo({');
+    expect(claudeCallIdx).toBeGreaterThan(-1);
+    expect(submitCallIdx).toBeGreaterThan(-1);
+    expect(claudeCallIdx).toBeLessThan(submitCallIdx);
+  });
+
+  it('userMessage passes SANITIZED source_analysis (not jobMetadata directly)', async () => {
+    const src = await readSrc();
+    // Regression against passing `source_analysis: jobMetadata ?? {}`
+    // which was the exact bug on job 395cc9b7 — Claude saw draft_prompt
+    // and copied bracketed styling.
+    expect(src).toMatch(/source_analysis: sanitizedSourceAnalysis/);
+    expect(src).toMatch(/sanitizeSourceAnalysisForClaude\(jobMetadata\)/);
+  });
+
+  it('userMessage still passes source_script_verbatim at the top level (PRESERVE rules)', async () => {
+    const src = await readSrc();
+    // The Polish-19.4.2 source-script-verbatim preservation still
+    // fires — the sanitize step trimmed the analysis dict, not the
+    // top-level verbatim script.
+    expect(src).toMatch(/source_script_verbatim: sourceScriptVerbatim/);
+    expect(src).toMatch(/extractSourceScriptVerbatim\(jobMetadata\)/);
+  });
+});
+
+describe('Polish-20.0.3: extractInnerVisionAnalysis', () => {
+  it('unwraps Gemini shape { analysis: {...}, draft_prompt: "..." } → inner analysis object', async () => {
+    const { extractInnerVisionAnalysis } = await import('../src/functions/analyze-concept');
+    const gemini = {
+      analysis: {
+        script_transcription: 'yap yap',
+        video_duration_seconds: 24,
+        subject: { appearance: 'x' },
+      },
+      draft_prompt: '**Character:** David. **Camera Shot:** Medium.',
+    };
+    const r = extractInnerVisionAnalysis(gemini);
+    expect(r.script_transcription).toBe('yap yap');
+    expect(r.video_duration_seconds).toBe(24);
+    expect(r).not.toHaveProperty('draft_prompt');
+  });
+
+  it('handles a legacy flat shape (no inner .analysis wrapper) — strips draft_prompt but keeps peer fields', async () => {
+    const { extractInnerVisionAnalysis } = await import('../src/functions/analyze-concept');
+    const flat = {
+      script_transcription: 'legacy shape',
+      draft_prompt: 'should be stripped',
+      video_duration_seconds: 12,
+    };
+    const r = extractInnerVisionAnalysis(flat);
+    expect(r.script_transcription).toBe('legacy shape');
+    expect(r.video_duration_seconds).toBe(12);
+    expect(r).not.toHaveProperty('draft_prompt');
+  });
+
+  it('handles null / undefined / non-object inputs defensively', async () => {
+    const { extractInnerVisionAnalysis } = await import('../src/functions/analyze-concept');
+    expect(extractInnerVisionAnalysis(null)).toEqual({});
+    expect(extractInnerVisionAnalysis(undefined)).toEqual({});
+    // TypeScript would reject these but the runtime should still
+    // return safely.
+    expect(extractInnerVisionAnalysis('string' as unknown as Record<string, unknown>)).toEqual({});
+  });
+});
+
+describe('Polish-20.0.3: analyze-concept store-analysis nesting fix', () => {
+  it('store-analysis uses extractInnerVisionAnalysis (fixes metadata.analysis.analysis double-nesting)', async () => {
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(
+      new URL('../src/functions/analyze-concept.ts', import.meta.url),
+      'utf8',
+    );
+    // Regression against writing `analysis: visionResult.analysis`
+    // directly — that produced metadata.analysis.analysis.subject
+    // and leaked draft_prompt into the worker's Claude context on
+    // job 395cc9b7. The 20.0.3 fix extracts the inner analysis
+    // object before the merge; pin both call sites.
+    expect(src).toMatch(
+      /const innerAnalysis = extractInnerVisionAnalysis\(visionResult\.analysis\)/,
+    );
+    expect(src).toMatch(/analysis: innerAnalysis/);
+    // Guard against the exact pre-20.0.3 pattern regressing.
+    expect(src).not.toMatch(/analysis: visionResult\.analysis,\s*_live/);
+  });
+});
+
+describe('Polish-20.0.3: Gemini Vision schema requests video_duration_seconds', () => {
+  it('UGC_DECONSTRUCTOR_SYSTEM_PROMPT schema block includes video_duration_seconds', async () => {
+    const { UGC_DECONSTRUCTOR_SYSTEM_PROMPT } = await import('@mbb/shared');
+    // Pre-20.0.3 the schema omitted video_duration_seconds so
+    // Gemini never returned it and the worker's fallback chain
+    // dropped to the 30s default. Regression against dropping it
+    // again during a future schema tighten.
+    expect(UGC_DECONSTRUCTOR_SYSTEM_PROMPT).toMatch(/video_duration_seconds/);
+    expect(UGC_DECONSTRUCTOR_SYSTEM_PROMPT).toMatch(/video_duration_seconds requirement/);
   });
 });

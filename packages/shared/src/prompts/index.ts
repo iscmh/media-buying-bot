@@ -97,6 +97,7 @@ subtitles, captions, watermark, text overlays, words on screen, logo, branding, 
 \`\`\`json
 {
   "analysis": {
+    "video_duration_seconds": 0,
     "script_transcription": "string with (pause) and [tone] markers",
     "implied_device": "string",
     "social_context": "string",
@@ -119,6 +120,8 @@ subtitles, captions, watermark, text overlays, words on screen, logo, branding, 
   "draft_prompt": "<the full Sora 2 prompt as one string with all brackets replaced, ≤5000 chars>"
 }
 \`\`\`
+
+**video_duration_seconds requirement**: measure the source video's total duration in seconds. Round to the nearest integer. This drives the downstream generation's target length — return 0 only when you truly cannot determine it (never omit the field).
 
 3. No preamble, no explanation outside the JSON. Just the JSON object.
 

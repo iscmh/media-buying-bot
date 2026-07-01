@@ -228,13 +228,24 @@ export const analyzeConcept = inngest.createFunction(
     }
 
     await step.run('store-analysis', async () => {
-      // Polish-19.3.1 hotfix: merge instead of overwrite. See the
-      // mock-path comment for the bug history. Spread order: vision
-      // at root (Polish-12 back-compat), form fields override
-      // (user-picked beats AI-estimated). Vision is also nested
-      // under `.analysis` so the video-variant worker's fallback
-      // chain can read job.metadata.analysis.video_duration_seconds
-      // without worrying about root-level shape drift.
+      // Polish-19.3.1 → Polish-20.0.3 hotfix: merge instead of
+      // overwrite, AND unwrap Gemini's inner `analysis` field before
+      // nesting. Pre-20.0.3 wrote `analysis: visionResult.analysis`
+      // where visionResult.analysis was the ENTIRE Gemini response
+      // ({analysis: {...}, draft_prompt: '...'}) — that produced
+      // metadata.analysis.analysis.subject double-nesting AND leaked
+      // the Sora-era draft_prompt into the video-variant worker's
+      // Claude context, making it copy the bracketed section format
+      // instead of writing yapper prose.
+      //
+      // Now we extract the vision's INNER `analysis` object so
+      // metadata.analysis.script_transcription etc. land at the
+      // shape resolveAutoVideoDuration + extractSourceScriptVerbatim
+      // expect. draft_prompt is retained at the root for legacy
+      // callers that read it, but it's NOT copied into the nested
+      // analysis object (see runClaudeAdSpec's source_analysis
+      // stripping for the read-side of this cleanup).
+      const innerAnalysis = extractInnerVisionAnalysis(visionResult.analysis);
       const db = getDb();
       const existing = await db.query.generationJobs.findFirst({
         where: eq(schema.generationJobs.id, jobId),
@@ -247,7 +258,7 @@ export const analyzeConcept = inngest.createFunction(
           metadata: {
             ...visionResult.analysis,
             ...prior,
-            analysis: visionResult.analysis,
+            analysis: innerAnalysis,
             _live: true,
             analyzed_at: new Date().toISOString(),
           },
@@ -375,6 +386,43 @@ async function loadJobRoutingEvent(
     );
     return 'generation/ugc.requested';
   }
+}
+
+/**
+ * Polish-20.0.3: unwrap Gemini's inner `analysis` field so the
+ * downstream video-variant worker reads metadata.analysis.subject
+ * (etc.) at the flat level extractSourceScriptVerbatim and
+ * resolveAutoVideoDuration expect.
+ *
+ * Gemini's response schema wraps everything under a top-level
+ * `analysis` object PLUS a peer `draft_prompt` string:
+ *   { analysis: { script_transcription, subject, ... }, draft_prompt }
+ *
+ * Pre-Polish-20.0.3 the entire response object was written as
+ * `metadata.analysis`, producing metadata.analysis.analysis.subject
+ * (double-nested) AND leaking draft_prompt into Claude's context —
+ * Claude then copied the Sora-era bracketed section style instead
+ * of writing yapper-style prose (production diagnostic on job
+ * 395cc9b7).
+ *
+ * When the vision result already has the flat shape (older mock
+ * paths, or a schema-drift edge case where Gemini emits fields at
+ * the top level), the helper leaves it as-is.
+ */
+export function extractInnerVisionAnalysis(
+  visionAnalysis: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!visionAnalysis || typeof visionAnalysis !== 'object') return {};
+  const inner = (visionAnalysis as Record<string, unknown>)['analysis'];
+  if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+    return inner as Record<string, unknown>;
+  }
+  // Already flat — return the whole object minus draft_prompt so it
+  // can't leak into the worker's Claude context via the analysis
+  // key path.
+  const flat = { ...(visionAnalysis as Record<string, unknown>) };
+  delete flat['draft_prompt'];
+  return flat;
 }
 
 /**
