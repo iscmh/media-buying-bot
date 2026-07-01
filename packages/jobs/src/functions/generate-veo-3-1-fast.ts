@@ -234,8 +234,21 @@ export function buildVeoDownloadHeaders(
 export interface VeoAdSegment {
   /** 0-indexed position in the chain. */
   index: number;
-  /** Self-contained Veo prompt for this 8s chunk. */
+  /**
+   * Self-contained Veo prompt for this chunk (8s for segment 0, 7s
+   * for extend segments). Includes visual scene, dialogue in quotes
+   * with speaker attribution, and (Polish-19.4.2) an acoustic
+   * texture line woven into the prose.
+   */
   prompt: string;
+  /**
+   * Polish-19.4.2: structured acoustic texture description Claude
+   * emits alongside the prompt (also woven INTO the prompt). Kept
+   * as a separate field so tests can inspect what Claude produced
+   * per segment without re-parsing the prompt string. Optional —
+   * parser stays tolerant so pre-19.4.2 cached specs still validate.
+   */
+  sound_texture?: string;
 }
 
 export interface VeoAdSpec {
@@ -285,7 +298,18 @@ function validateVeoAdSpec(value: unknown): VeoAdSpec | null {
     if (typeof s.prompt !== 'string' || s.prompt.length === 0) return null;
     // Accept either numeric index or default to array position.
     const idx = typeof s.index === 'number' && Number.isFinite(s.index) ? s.index : i;
-    segments.push({ index: idx, prompt: s.prompt });
+    // Polish-19.4.2: carry sound_texture through when present. Not
+    // required — pre-19.4.2 cached responses lack the field and must
+    // still validate. Empty string treated as absent.
+    const soundTexture =
+      typeof s.sound_texture === 'string' && s.sound_texture.length > 0
+        ? s.sound_texture
+        : undefined;
+    segments.push({
+      index: idx,
+      prompt: s.prompt,
+      ...(soundTexture !== undefined ? { sound_texture: soundTexture } : {}),
+    });
   }
   return { segments };
 }
@@ -302,6 +326,26 @@ function validateVeoAdSpec(value: unknown): VeoAdSpec | null {
  */
 export function fallbackToSingleSegment(rawText: string): VeoAdSpec {
   return { segments: [{ index: 0, prompt: rawText }] };
+}
+
+/**
+ * Polish-19.4.2: extract the source ad's script transcription from
+ * jobMetadata so runClaudeAdSpec can lift it into a top-level
+ * user-message field. The Gemini Vision analyze-concept step writes
+ * this under `metadata.analysis.script_transcription` per the shared
+ * Sora prompt schema (packages/shared/src/prompts/index.ts:100).
+ *
+ * Returns "" if the transcription is missing / not a string / empty
+ * — Claude's system prompt tolerates the empty case (falls back to
+ * generating from source_analysis + own creative judgment) so a
+ * concept with no vision-detected script still works.
+ */
+export function extractSourceScriptVerbatim(jobMetadata: Record<string, unknown> | null): string {
+  if (!jobMetadata) return '';
+  const analysis = jobMetadata['analysis'];
+  if (!analysis || typeof analysis !== 'object') return '';
+  const t = (analysis as Record<string, unknown>)['script_transcription'];
+  return typeof t === 'string' ? t : '';
 }
 
 interface VeoVariantResult {
@@ -881,35 +925,67 @@ async function runClaudeAdSpec(input: {
     }
     throw err;
   }
+  // Polish-19.4.2: lift the source ad's script transcription out of
+  // the general metadata blob and into a top-level user-message
+  // field so Claude sees the exact winning words next to the
+  // "preserve hooks + key phrases" directive. Everything else in
+  // jobMetadata still flows through under source_analysis for the
+  // vision cues (framing, background, subject appearance).
+  const sourceScriptVerbatim = extractSourceScriptVerbatim(jobMetadata);
+
   const systemPrompt =
     `You write Veo 3.1 prompts for short UGC video ads. Output ONLY valid JSON ` +
     `matching the schema below — no markdown fences, no preamble, no trailing prose.\n\n` +
     `REQUIRED SCHEMA:\n` +
     `{\n` +
     `  "segments": [\n` +
-    `    { "index": 0, "prompt": "Self-contained Veo prompt for the first 8s..." },\n` +
-    `    { "index": 1, "prompt": "Continuation Veo prompt for the next 7s..." }\n` +
-    `    // ... one entry per segment; segments[0] is 8s, segments[1..] are 7s each\n` +
+    `    {\n` +
+    `      "index": 0,\n` +
+    `      "prompt": "Self-contained Veo prompt for the first 8s — visual scene + speaker attribution + dialogue in quotes + acoustic texture line",\n` +
+    `      "sound_texture": "Close-mic iPhone front-camera compression, faint room tone, no music."\n` +
+    `    },\n` +
+    `    {\n` +
+    `      "index": 1,\n` +
+    `      "prompt": "Continuation Veo prompt for the next 7s ...",\n` +
+    `      "sound_texture": "..."\n` +
+    `    }\n` +
+    `    // one entry per segment; segments[0] is 8s (Veo base), segments[1..] are 7s each (Veo extend)\n` +
     `  ]\n` +
     `}\n\n` +
-    `STRUCTURE PER segment.prompt:\n` +
-    `1. Visual scene (who, where, lighting, framing — UGC iPhone selfie style, NOT studio, NOT cinematic).\n` +
-    `2. Spoken dialogue in quotes.\n` +
-    `3. Ambient sound cues.\n\n` +
+    `STRUCTURE PER segment.prompt (in this order, one paragraph):\n` +
+    `1. Visual scene (who: age-range, gender, ethnicity, outfit; where: room/setting; lighting; framing — UGC iPhone selfie hand-held, NOT studio, NOT cinematic).\n` +
+    `2. Speaker attribution + spoken dialogue in quotes. Example templates: "She says: '...'" / "He confesses: '...'" / "She whispers: '...'" / "He half-laughs: '...'". Pick attribution that matches the emotional beat.\n` +
+    `3. Acoustic texture line woven into the prose (repeat the sound_texture field's content inside the prompt — Veo reads audio cues from the prompt body, not from adjacent JSON fields).\n\n` +
+    `WORD COUNT PER SEGMENT (HARD LIMITS — going over breaks the yapping pace and looks fake):\n` +
+    `- Segment 0 (Veo base, 8s @ 720p): 22-28 words of dialogue max, natural yapping pace ~170wpm.\n` +
+    `- Segments 1..N-1 (Veo extend, +7s each): 18-24 words each.\n` +
+    `- Word count = spoken words inside the quotes ONLY (excludes speaker attribution + visual/sound description).\n\n` +
+    `SOURCE-SCRIPT PRESERVATION (this is NOT verbatim quoting — this is preserving what MADE the source ad win while varying the wrapper):\n` +
+    `- PRESERVE: hook openers ("I swear to god", "You will NOT believe"), dollar amounts, ALL CAPS emphasis words, filler words (like, honestly, literally), ellipses, natural stammers, key product/offer phrases from the source.\n` +
+    `- ADAPT: character demographics, setting details, non-essential specifics for variant differentiation.\n` +
+    `- WORKED EXAMPLE — source: "I swear to god, I was spending $80 a month on face serums that did NOTHING. Then my esthetician told me about this $12 drugstore toner..."\n` +
+    `  CORRECT segment 0: "I swear to god, I've been buying these $80 face serums for months and they did NOTHING. Zero. Nada." (preserves "I swear to god" + "$80" + "NOTHING" + energy pattern, adapts specifics).\n` +
+    `  WRONG segment 0: "I was spending $80 a month on face serums that did NOTHING." (just quoting a random chunk — loses hook variation across variants).\n\n` +
     `HARD CONSTRAINTS (apply to every segment):\n` +
-    `- segments[0] covers exactly 8s; segments[1..] cover 7s each. Dialogue must FIT at natural pace (~150wpm = ~17-20 words).\n` +
     `- Single character, single scene, single camera angle — consistent across all segments.\n` +
     `- Photoreal amateur smartphone selfie aesthetic. NOT a 3D character, NOT animated, NOT CGI.\n` +
     `- Character is a fictional everyperson with no resemblance to any public figure.\n` +
-    `- No on-screen text, no captions, no graphics, no watermarks.\n\n` +
+    `- No on-screen text, no captions, no graphics, no watermarks, no subtitles.\n\n` +
     `MULTI-SEGMENT RULES (only when segments.length > 1):\n` +
-    `- segments[0] hooks the viewer in the first second.\n` +
-    `- Middle segments deepen the story / build the pitch.\n` +
+    `- segments[0] hooks the viewer in the first second — use the source's opening hook, adapted.\n` +
+    `- Middle segments deepen the story / build the pitch, using preserved key phrases from the source.\n` +
     `- The FINAL segment ends with a clear call-to-action.\n` +
-    `- Maintain character + setting continuity across segments (same person, same outfit, same room).\n\n` +
+    `- Maintain character + setting continuity across segments (same person, same outfit, same room, same lighting).\n\n` +
+    `SOUND TEXTURE EXAMPLES (pick one that matches the visual scene; weave verbatim into the prompt AND emit in the sound_texture field):\n` +
+    `- "Close-mic iPhone front-camera compression, faint room tone, no music."\n` +
+    `- "Handheld iPhone audio, faint traffic outside, no music, slight bathroom tile echo."\n` +
+    `- "Static tripod audio, air conditioner hum in background, no music."\n` +
+    `- "Kitchen ambient (fridge hum, faint dish clatter), close-mic iPhone selfie audio, no music."\n\n` +
     `THIS REQUEST: return EXACTLY ${segmentCount} segment${segmentCount === 1 ? '' : 's'} ` +
-    `for a ${durationSeconds}s ad.`;
+    `for a ${durationSeconds}s ad. This variant is index ${variantIndex} — differentiate from other variants by adapting the character demographics and setting while preserving the source's hooks and key phrases.`;
+
   const userMessage = JSON.stringify({
+    source_script_verbatim: sourceScriptVerbatim,
     source_analysis: jobMetadata ?? {},
     target_duration_seconds: durationSeconds,
     target_segment_count: segmentCount,

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildVeoDownloadHeaders,
   computeVeoPollIntervalSeconds,
+  extractSourceScriptVerbatim,
   fallbackToSingleSegment,
   getVeoChainingMode,
   parseVeoAdSpec,
@@ -566,5 +567,184 @@ describe('Polish-19.4: worker dispatch + extend chain source shape', () => {
     expect(src).toMatch(/runOneVariantConcat\(/);
     expect(src).toMatch(/Promise\.all\(\s*adSpec\.segments\.map/);
     expect(src).toMatch(/runVeoStitch/);
+  });
+});
+
+describe('Polish-19.4.2: extractSourceScriptVerbatim', () => {
+  it('returns metadata.analysis.script_transcription when present', () => {
+    const r = extractSourceScriptVerbatim({
+      analysis: {
+        script_transcription:
+          'I swear to god, I was spending $80 a month on face serums that did NOTHING.',
+      },
+    });
+    expect(r).toContain('I swear to god');
+    expect(r).toContain('$80');
+    expect(r).toContain('NOTHING');
+  });
+
+  it('returns empty string when metadata is null', () => {
+    expect(extractSourceScriptVerbatim(null)).toBe('');
+  });
+
+  it('returns empty string when analysis is missing / not an object', () => {
+    expect(extractSourceScriptVerbatim({})).toBe('');
+    expect(extractSourceScriptVerbatim({ analysis: null })).toBe('');
+    expect(extractSourceScriptVerbatim({ analysis: 'string' })).toBe('');
+    expect(extractSourceScriptVerbatim({ analysis: 42 })).toBe('');
+  });
+
+  it('returns empty string when script_transcription is missing / not a string', () => {
+    expect(extractSourceScriptVerbatim({ analysis: {} })).toBe('');
+    expect(extractSourceScriptVerbatim({ analysis: { script_transcription: null } })).toBe('');
+    expect(extractSourceScriptVerbatim({ analysis: { script_transcription: 42 } })).toBe('');
+  });
+
+  it('preserves markers verbatim ((pause), [tone], ellipses, ALL CAPS)', () => {
+    // Per the shared Sora prompt schema, transcription is a string
+    // "with (pause) and [tone] markers". The helper is a passthrough,
+    // NOT a normalizer — those markers must survive.
+    const raw = 'You WILL NOT believe... (pause) [excited] this $12 drugstore toner is INSANE.';
+    const r = extractSourceScriptVerbatim({ analysis: { script_transcription: raw } });
+    expect(r).toBe(raw);
+  });
+});
+
+describe('Polish-19.4.2: parseVeoAdSpec carries sound_texture through', () => {
+  it('parses segments with sound_texture emitted by Claude', () => {
+    const withSound = JSON.stringify({
+      segments: [
+        {
+          index: 0,
+          prompt: "She says: 'I swear to god...'",
+          sound_texture: 'Close-mic iPhone front-camera compression, faint room tone, no music.',
+        },
+        {
+          index: 1,
+          prompt: "She confesses: '...'",
+          sound_texture: 'Static tripod audio, air conditioner hum, no music.',
+        },
+      ],
+    });
+    const r = parseVeoAdSpec(withSound);
+    expect(r?.segments).toHaveLength(2);
+    expect(r?.segments[0]?.sound_texture).toBe(
+      'Close-mic iPhone front-camera compression, faint room tone, no music.',
+    );
+    expect(r?.segments[1]?.sound_texture).toBe(
+      'Static tripod audio, air conditioner hum, no music.',
+    );
+  });
+
+  it('parses segments WITHOUT sound_texture (back-compat with pre-19.4.2 responses)', () => {
+    // Pre-19.4.2 the field didn't exist. Cached specs / older Claude
+    // responses that omit it must still validate — parser stays
+    // tolerant.
+    const withoutSound = JSON.stringify({
+      segments: [{ index: 0, prompt: "She says: 'hi'" }],
+    });
+    const r = parseVeoAdSpec(withoutSound);
+    expect(r?.segments).toHaveLength(1);
+    expect(r?.segments[0]?.sound_texture).toBeUndefined();
+  });
+
+  it('drops empty-string sound_texture (treated as absent)', () => {
+    const r = parseVeoAdSpec(
+      JSON.stringify({
+        segments: [{ index: 0, prompt: 'p', sound_texture: '' }],
+      }),
+    );
+    expect(r?.segments[0]?.sound_texture).toBeUndefined();
+  });
+
+  it('drops non-string sound_texture (defensive against Claude misfires)', () => {
+    const r = parseVeoAdSpec(
+      JSON.stringify({
+        segments: [{ index: 0, prompt: 'p', sound_texture: 42 }],
+      }),
+    );
+    // Still validates (sound_texture is optional) but the bad value
+    // is dropped, not surfaced as a garbage field.
+    expect(r).not.toBeNull();
+    expect(r?.segments[0]?.sound_texture).toBeUndefined();
+  });
+});
+
+describe('Polish-19.4.2: runClaudeAdSpec systemPrompt tripwires', () => {
+  // The system prompt is a big string literal inside runClaudeAdSpec.
+  // These tripwires pin the parts that materially affect output
+  // quality per the Polish-19.4.2 spec — a future "let me trim this
+  // prompt" cleanup must NOT drop any of these without a doc note.
+
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-veo-3-1-fast.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('word-count calibration: segment 0 = 22-28 words, extends = 18-24 words', async () => {
+    const src = await readSrc();
+    expect(src).toMatch(/22-28 words/);
+    expect(src).toMatch(/18-24 words/);
+    // Yapping-pace reference (~170wpm — the actual UGC talking speed,
+    // above the 150wpm we were quoting in 19.4 which underfilled the
+    // 8s window and let Veo pad with dead air / lip-flap).
+    expect(src).toMatch(/~170wpm/);
+  });
+
+  it('word-count comment pins base=8s / extends=+7s alignment', async () => {
+    // Guardrail — if a future edit says "22-28 words for a 7s
+    // segment", the word/second ratio breaks. This pins the mapping.
+    const src = await readSrc();
+    expect(src).toMatch(/Segment 0 \(Veo base, 8s @ 720p\): 22-28 words/);
+    expect(src).toMatch(/Segments 1\.\.N-1 \(Veo extend, \+7s each\): 18-24 words/);
+  });
+
+  it('preserve-hooks-not-verbatim block calls out what to PRESERVE vs ADAPT', async () => {
+    const src = await readSrc();
+    expect(src).toMatch(/PRESERVE:.*hook openers.*dollar amounts.*ALL CAPS/s);
+    expect(src).toMatch(/ADAPT:.*character demographics.*setting details/s);
+    expect(src).toMatch(/NOT verbatim quoting/i);
+  });
+
+  it('includes the worked "I swear to god / $80 / NOTHING" example inline', async () => {
+    // The worked example anchors what "preserve hooks" looks like in
+    // practice — much more effective in the prompt than an abstract
+    // rule. Pinned so a future cleanup doesn't drop it.
+    const src = await readSrc();
+    expect(src).toMatch(/I swear to god/);
+    expect(src).toMatch(/\$80/);
+    expect(src).toMatch(/NOTHING/);
+    expect(src).toMatch(/CORRECT segment 0/);
+    expect(src).toMatch(/WRONG segment 0/);
+  });
+
+  it('speaker-attribution template ("She says:" / "He confesses:") is required', async () => {
+    const src = await readSrc();
+    expect(src).toMatch(/Speaker attribution \+ spoken dialogue in quotes/);
+    expect(src).toMatch(/She says:/);
+    expect(src).toMatch(/He confesses:/);
+  });
+
+  it('sound_texture field is in the schema block AND has example values', async () => {
+    const src = await readSrc();
+    // Schema pin
+    expect(src).toMatch(/"sound_texture":/);
+    // Example acoustic textures from the spec — at least one of the
+    // canonical three must appear so Claude has a shape to copy.
+    expect(src).toMatch(/Close-mic iPhone front-camera compression/);
+    expect(src).toMatch(/faint traffic outside/);
+    expect(src).toMatch(/air conditioner hum/);
+  });
+
+  it('user-message payload lifts source_script_verbatim to top level (not buried in source_analysis)', async () => {
+    // Tripwire — the whole point of Polish-19.4.2 Part 2 is that
+    // Claude sees the source script as a first-class field, NOT
+    // buried inside a JSON dump next to twenty vision cues.
+    const src = await readSrc();
+    expect(src).toMatch(/source_script_verbatim: sourceScriptVerbatim/);
+    expect(src).toMatch(/extractSourceScriptVerbatim\(jobMetadata\)/);
   });
 });
