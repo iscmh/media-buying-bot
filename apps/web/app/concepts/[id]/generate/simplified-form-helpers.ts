@@ -1,69 +1,55 @@
 /**
- * Polish-19 Commit 3: pure helpers for the simplified generation form.
+ * Polish-19 Commit 3 → Polish-20 Commit 1: pure helpers for the
+ * simplified generation form.
  *
- * Extracted so the form's submission logic + defaults + clamps can be
- * tested without spinning up React / jsdom (same pattern Polish-12 used
- * for the kie-omni worker decision helpers).
+ * Polish-20 shift: the form now picks a (model, provider) pair from
+ * the packages/shared/src/video-models.ts descriptor layer instead
+ * of a PipelineType. Legacy `pipeline` field is retained on the
+ * FormData shape so the existing action handler still routes to a
+ * worker during the architectural transition — Commit 2 flips
+ * dispatch to the new unified worker, Commits 3-4 remove the legacy
+ * pipelines entirely.
  */
 import type { PipelineType } from '@mbb/shared';
-import { computeVeoSegmentCount } from '@mbb/shared';
+import {
+  computeSegmentCountForModel,
+  formatModelCostHintPerVariant,
+  getDefaultProviderForModel,
+  getModelProviderConfig,
+  getVideoModel,
+  snapToNearestDurationPreset,
+  VIDEO_DURATION_PRESETS,
+  VIDEO_MODELS,
+  type VideoModel,
+  type VideoModelId,
+  type VideoProviderId,
+} from '@mbb/shared';
 
-/**
- * Polish-19.3: preset durations for the Veo 3.1 Fast pipeline. Free-
- * form length entry doesn't make sense for Veo because the worker
- * chunks output into 8s segments; a 23s pick would generate ~3
- * segments (24s of output) anyway. Presets map cleanly to segment
- * counts: 8s/15s/30s/60s → 1/2/4/8 segments respectively.
- *
- * Other pipelines (Kling, Omni Flash, HeyGen) keep the free-form
- * number input — their workers don't chunk and accept arbitrary
- * durations.
- */
-export interface VeoLengthPreset {
-  seconds: number;
-  /** Display label shown on the button. */
-  label: string;
-  /** Pre-computed segment count for the button's secondary hint. */
-  segments: number;
-}
-
-export const VEO_LENGTH_PRESETS: VeoLengthPreset[] = [
-  { seconds: 8, label: '8s', segments: computeVeoSegmentCount(8) },
-  { seconds: 15, label: '15s', segments: computeVeoSegmentCount(15) },
-  { seconds: 30, label: '30s', segments: computeVeoSegmentCount(30) },
-  { seconds: 60, label: '60s', segments: computeVeoSegmentCount(60) },
-];
-
-/**
- * Polish-19.3: snap a free-form length to the nearest Veo preset.
- * Used when the user switches pipeline back to Veo with an existing
- * length state — e.g. switching from Kling (30s) → Veo, the value
- * snaps to the 30s preset rather than landing on a non-preset value.
- */
-export function snapToVeoPreset(seconds: number): VeoLengthPreset {
-  if (!Number.isFinite(seconds) || seconds <= 0) return VEO_LENGTH_PRESETS[0]!;
-  // Find the closest preset by absolute distance.
-  let closest = VEO_LENGTH_PRESETS[0]!;
-  let closestDelta = Math.abs(closest.seconds - seconds);
-  for (const p of VEO_LENGTH_PRESETS) {
-    const d = Math.abs(p.seconds - seconds);
-    if (d < closestDelta) {
-      closest = p;
-      closestDelta = d;
-    }
-  }
-  return closest;
-}
+// Re-export the shared descriptor bits the form component needs so
+// the component file only imports from a single module.
+export {
+  VIDEO_DURATION_PRESETS,
+  VIDEO_MODELS,
+  computeSegmentCountForModel,
+  formatModelCostHintPerVariant,
+  getDefaultProviderForModel,
+  getModelProviderConfig,
+  getVideoModel,
+  snapToNearestDurationPreset,
+};
+export type { VideoModel, VideoModelId, VideoProviderId };
 
 /** Variant-count picker bounds. Min 1, max enforced server-side. */
 export const SIMPLIFIED_MIN_VARIANTS = 1;
 export const SIMPLIFIED_MAX_VARIANTS = 10;
 export const SIMPLIFIED_DEFAULT_VARIANTS = 5;
 
-/** Length picker bounds (seconds). Matches worker's MIN/MAX target. */
-export const SIMPLIFIED_MIN_LENGTH_SECONDS = 8;
-export const SIMPLIFIED_MAX_LENGTH_SECONDS = 300;
-export const SIMPLIFIED_DEFAULT_LENGTH_SECONDS = 30;
+/**
+ * Polish-20: default duration preset when no source has been detected
+ * yet. 30s matches the most common UGC ad length and stays consistent
+ * with the pre-Polish-20 form default.
+ */
+export const SIMPLIFIED_DEFAULT_DURATION_SECONDS = 30;
 
 /**
  * Clamp the variant-count input. Non-numeric / negative / fractional
@@ -80,53 +66,76 @@ export function clampVariantCount(raw: number): number {
 }
 
 /**
- * Clamp the length input. Same bounds as the kie-kling-avatar worker's
- * resolveTargetDuration so the cost preview matches what the worker
- * will produce. Defaults to 30s on garbage input.
+ * Polish-20: model-tier accent for the "Recommended" card. Returns
+ * true only for the middle-tier model so the picker can render a
+ * subtle border / badge without hardcoding the specific model id.
+ * A future model-set reshuffle only needs the qualityTier field
+ * updated on the descriptor.
  */
-export function clampLengthSeconds(raw: number): number {
-  if (!Number.isFinite(raw) || raw <= 0) return SIMPLIFIED_DEFAULT_LENGTH_SECONDS;
-  const ceiled = Math.ceil(raw);
-  if (ceiled < SIMPLIFIED_MIN_LENGTH_SECONDS) return SIMPLIFIED_MIN_LENGTH_SECONDS;
-  if (ceiled > SIMPLIFIED_MAX_LENGTH_SECONDS) return SIMPLIFIED_MAX_LENGTH_SECONDS;
-  return ceiled;
+export function isRecommendedTier(modelId: VideoModelId): boolean {
+  const m = getVideoModel(modelId);
+  return m?.qualityTier === 'recommended';
 }
 
+/**
+ * Polish-20: form state shape. Model picker is REQUIRED (per spec
+ * user MUST pick), represented as `modelId | null`. Generate button
+ * stays disabled until non-null. `providerId` defaults to the model's
+ * cheapest live provider (kie.ai at Polish-20 launch).
+ */
 export interface SimplifiedFormState {
-  pipeline: PipelineType;
-  voiceId: string;
+  modelId: VideoModelId | null;
+  providerId: VideoProviderId | null;
   variantCount: number;
-  lengthSeconds: number;
+  durationSeconds: number;
+}
+
+/**
+ * Polish-20: is the state complete enough to submit? Blocks Generate
+ * until the model picker has a value.
+ */
+export function canSubmitState(state: SimplifiedFormState): boolean {
+  if (state.modelId == null) return false;
+  if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
+    return false;
+  }
+  if (!Number.isFinite(state.durationSeconds) || state.durationSeconds <= 0) return false;
+  return true;
 }
 
 /**
  * Build the FormData payload the simplified form submits.
- * Matches the existing createGenerationJobAction FormData shape:
- *   - conceptId, pipeline, variantCount, sourceDurationSeconds (legacy
- *     name; conceptually IS the target duration the worker uses), voiceId
- *   - intensity hardcoded to 'medium' since the simplified form doesn't
- *     expose the picker (Advanced form keeps it).
- *   - mode hardcoded to 'live' (Polish-3 retired the mock toggle).
+ *
+ * Polish-20 Commit 1 additive shape:
+ *   - Everything the existing createGenerationJobAction reads
+ *     (conceptId, pipeline, variantCount, sourceDurationSeconds,
+ *     intensity=medium, mode=live, voiceId).
+ *   - NEW fields: modelId, providerId, sourceDurationSeconds always
+ *     sent (worker's Polish-19.3.1 fallback chain honors it).
+ *   - `pipeline` is set to a stable legacy value so the existing
+ *     analyze-concept dispatch keeps working during Commit 1. Commit 2
+ *     flips analyze-concept to route on modelId instead and this
+ *     field becomes vestigial before being removed in Commit 3.
  */
 export function buildSubmissionFormData(input: {
   conceptId: string;
+  legacyPipeline: PipelineType;
+  legacyVoiceId: string;
   state: SimplifiedFormState;
 }): FormData {
   const fd = new FormData();
   fd.set('conceptId', input.conceptId);
   fd.set('intensity', 'medium');
   fd.set('mode', 'live');
-  fd.set('pipeline', input.state.pipeline);
-  fd.set('voiceId', input.state.voiceId);
+  // Polish-20 Commit 1 legacy compat: keep pipeline + voiceId writes
+  // so the pre-Commit 2 dispatch still routes to a working worker.
+  fd.set('pipeline', input.legacyPipeline);
+  fd.set('voiceId', input.legacyVoiceId);
   fd.set('variantCount', String(input.state.variantCount));
-  // Polish-19.3.1: the simplified form no longer surfaces a length
-  // picker for Veo — the worker auto-resolves duration via its
-  // fallback chain (analysis.video_duration_seconds → form
-  // source_duration_seconds → 30s default). For Veo we OMIT the
-  // FormData field entirely so the worker falls through to the
-  // auto path; other pipelines still pass the form-state length.
-  if (input.state.pipeline !== 'veo_3_1_fast_native_audio') {
-    fd.set('sourceDurationSeconds', String(input.state.lengthSeconds));
-  }
+  fd.set('sourceDurationSeconds', String(input.state.durationSeconds));
+  // Polish-20 NEW: descriptor-driven fields. Commit 2 makes these the
+  // canonical routing signal.
+  if (input.state.modelId) fd.set('modelId', input.state.modelId);
+  if (input.state.providerId) fd.set('providerId', input.state.providerId);
   return fd;
 }

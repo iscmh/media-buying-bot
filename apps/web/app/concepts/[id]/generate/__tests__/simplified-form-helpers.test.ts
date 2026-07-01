@@ -1,25 +1,23 @@
 /**
- * Polish-19 Commit 3: pure-helper tests for the simplified generation
- * form. Mirrors the Polish-12 pattern — react/jsdom-free, just clamp +
- * submission-payload logic.
+ * Polish-19 Commit 3 → Polish-20 Commit 1: pure-helper tests for the
+ * simplified generation form. React/jsdom-free — just clamp helpers +
+ * FormData submission shape.
  */
 import { describe, expect, it } from 'vitest';
 import { defaultPipeline } from '@mbb/shared';
 import {
-  SIMPLIFIED_DEFAULT_LENGTH_SECONDS,
+  SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
-  SIMPLIFIED_MAX_LENGTH_SECONDS,
   SIMPLIFIED_MAX_VARIANTS,
-  SIMPLIFIED_MIN_LENGTH_SECONDS,
   SIMPLIFIED_MIN_VARIANTS,
-  VEO_LENGTH_PRESETS,
+  VIDEO_DURATION_PRESETS,
   buildSubmissionFormData,
-  clampLengthSeconds,
+  canSubmitState,
   clampVariantCount,
-  snapToVeoPreset,
+  isRecommendedTier,
 } from '../simplified-form-helpers';
 
-describe('Polish-19: clampVariantCount', () => {
+describe('Polish-20: clampVariantCount', () => {
   it('passes through canonical mid-range values', () => {
     expect(clampVariantCount(1)).toBe(1);
     expect(clampVariantCount(5)).toBe(5);
@@ -47,164 +45,139 @@ describe('Polish-19: clampVariantCount', () => {
   });
 });
 
-describe('Polish-19: clampLengthSeconds', () => {
-  it('passes through canonical mid-range values', () => {
-    expect(clampLengthSeconds(30)).toBe(30);
-    expect(clampLengthSeconds(60)).toBe(60);
-    expect(clampLengthSeconds(120)).toBe(120);
+describe('Polish-20: canSubmitState — Generate button gate', () => {
+  const base = {
+    modelId: 'kling_3_standard' as const,
+    providerId: 'kie_ai' as const,
+    variantCount: 5,
+    durationSeconds: 30,
+  };
+
+  it('accepts a complete state (model picked, count valid, duration set)', () => {
+    expect(canSubmitState(base)).toBe(true);
   });
 
-  it('ceils fractional values so the worker never under-generates', () => {
-    expect(clampLengthSeconds(29.1)).toBe(30);
-    expect(clampLengthSeconds(30.9)).toBe(31);
+  it('BLOCKS submission when modelId is null (spec: user MUST pick)', () => {
+    expect(canSubmitState({ ...base, modelId: null })).toBe(false);
   });
 
-  it('clamps below MIN to MIN', () => {
-    expect(clampLengthSeconds(3)).toBe(SIMPLIFIED_MIN_LENGTH_SECONDS);
-    expect(clampLengthSeconds(1)).toBe(SIMPLIFIED_MIN_LENGTH_SECONDS);
+  it('BLOCKS when variantCount is below MIN or non-integer', () => {
+    expect(canSubmitState({ ...base, variantCount: 0 })).toBe(false);
+    expect(canSubmitState({ ...base, variantCount: 3.5 })).toBe(false);
+    expect(canSubmitState({ ...base, variantCount: NaN })).toBe(false);
   });
 
-  it('clamps above MAX (5-minute kie.ai ceiling) to MAX', () => {
-    expect(clampLengthSeconds(600)).toBe(SIMPLIFIED_MAX_LENGTH_SECONDS);
-    expect(clampLengthSeconds(99999)).toBe(SIMPLIFIED_MAX_LENGTH_SECONDS);
+  it('BLOCKS when durationSeconds is missing / non-positive', () => {
+    expect(canSubmitState({ ...base, durationSeconds: 0 })).toBe(false);
+    expect(canSubmitState({ ...base, durationSeconds: -5 })).toBe(false);
+    expect(canSubmitState({ ...base, durationSeconds: NaN })).toBe(false);
   });
 
-  it('returns default on garbage input', () => {
-    expect(clampLengthSeconds(0)).toBe(SIMPLIFIED_DEFAULT_LENGTH_SECONDS);
-    expect(clampLengthSeconds(-10)).toBe(SIMPLIFIED_DEFAULT_LENGTH_SECONDS);
-    expect(clampLengthSeconds(NaN)).toBe(SIMPLIFIED_DEFAULT_LENGTH_SECONDS);
+  it('allows submission even when providerId is null (form auto-picks default)', () => {
+    // Provider is optional in the state — the form auto-fills it from
+    // the model's default provider descriptor. The action-handler
+    // side is what actually needs a resolved provider.
+    expect(canSubmitState({ ...base, providerId: null })).toBe(true);
   });
 });
 
-describe('Polish-19: buildSubmissionFormData', () => {
-  it('emits the FormData keys the existing createGenerationJobAction handler reads', () => {
-    const fd = buildSubmissionFormData({
-      conceptId: 'concept_abc',
-      state: {
-        // Polish-19.3.1: pin a NON-Veo pipeline so this baseline test
-        // still asserts sourceDurationSeconds is sent. Veo-specific
-        // omit behavior has its own test below.
-        pipeline: 'kie_kling_avatar_v2_standard',
-        voiceId: '21m00Tcm4TlvDq8ikWAM',
-        variantCount: 5,
-        lengthSeconds: 30,
-      },
-    });
-    // Existing handler reads exactly these keys; the simplified form
-    // must match the names verbatim or the action will reject the
-    // submission with "Pick an intensity" / similar.
-    expect(fd.get('conceptId')).toBe('concept_abc');
-    expect(fd.get('intensity')).toBe('medium'); // hardcoded; not user-facing
-    expect(fd.get('mode')).toBe('live');
-    expect(fd.get('pipeline')).toBe('kie_kling_avatar_v2_standard');
-    expect(fd.get('voiceId')).toBe('21m00Tcm4TlvDq8ikWAM');
-    expect(fd.get('variantCount')).toBe('5');
-    // Polish-14.1 legacy name — semantically IS the target duration.
-    // See actions.ts for the rationale on not renaming.
-    expect(fd.get('sourceDurationSeconds')).toBe('30');
+describe('Polish-20: isRecommendedTier — accent flag for the middle card', () => {
+  it('true only for the Kling 3.0 Standard recommended tier', () => {
+    expect(isRecommendedTier('kling_3_standard')).toBe(true);
   });
 
-  it('always sets intensity=medium (simplified form hides the picker)', () => {
+  it('false for the budget + premium tiers', () => {
+    expect(isRecommendedTier('seedance_1_5_pro')).toBe(false);
+    expect(isRecommendedTier('seedance_2')).toBe(false);
+  });
+});
+
+describe('Polish-20: buildSubmissionFormData', () => {
+  it('emits the FormData keys createGenerationJobAction reads (legacy compat + new fields)', () => {
+    const fd = buildSubmissionFormData({
+      conceptId: 'concept_abc',
+      legacyPipeline: defaultPipeline(),
+      legacyVoiceId: '21m00Tcm4TlvDq8ikWAM',
+      state: {
+        modelId: 'kling_3_standard',
+        providerId: 'kie_ai',
+        variantCount: 5,
+        durationSeconds: 30,
+      },
+    });
+    // Legacy compat (Polish-20 Commit 1 keeps these so pre-Commit-2
+    // dispatch still routes to a working worker):
+    expect(fd.get('conceptId')).toBe('concept_abc');
+    expect(fd.get('intensity')).toBe('medium'); // hardcoded; simplified form hides picker
+    expect(fd.get('mode')).toBe('live');
+    expect(fd.get('pipeline')).toBe(defaultPipeline());
+    expect(fd.get('voiceId')).toBe('21m00Tcm4TlvDq8ikWAM');
+    expect(fd.get('variantCount')).toBe('5');
+    // Polish-14.1 legacy name — worker's target duration.
+    expect(fd.get('sourceDurationSeconds')).toBe('30');
+    // Polish-20 NEW: descriptor-driven routing signals.
+    expect(fd.get('modelId')).toBe('kling_3_standard');
+    expect(fd.get('providerId')).toBe('kie_ai');
+  });
+
+  it('OMITS modelId + providerId when the state fields are null (defense-in-depth)', () => {
+    // Should never happen in practice — canSubmitState blocks submit
+    // when modelId is null — but defensively the builder skips the
+    // field rather than writing 'null' string values the action
+    // handler would parse.
     const fd = buildSubmissionFormData({
       conceptId: 'c',
+      legacyPipeline: defaultPipeline(),
+      legacyVoiceId: 'v',
       state: {
-        pipeline: defaultPipeline(),
-        voiceId: 'v',
+        modelId: null,
+        providerId: null,
         variantCount: 1,
-        lengthSeconds: 8,
+        durationSeconds: 8,
+      },
+    });
+    expect(fd.has('modelId')).toBe(false);
+    expect(fd.has('providerId')).toBe(false);
+  });
+
+  it('always sends sourceDurationSeconds (worker Polish-19.3.1 fallback chain honors it)', () => {
+    const fd = buildSubmissionFormData({
+      conceptId: 'c',
+      legacyPipeline: defaultPipeline(),
+      legacyVoiceId: 'v',
+      state: {
+        modelId: 'seedance_1_5_pro',
+        providerId: 'kie_ai',
+        variantCount: 3,
+        durationSeconds: 15,
+      },
+    });
+    expect(fd.get('sourceDurationSeconds')).toBe('15');
+  });
+
+  it('intensity + mode are always hardcoded (simplified form does not expose either)', () => {
+    const fd = buildSubmissionFormData({
+      conceptId: 'c',
+      legacyPipeline: defaultPipeline(),
+      legacyVoiceId: 'v',
+      state: {
+        modelId: 'seedance_2',
+        providerId: 'kie_ai',
+        variantCount: 1,
+        durationSeconds: 60,
       },
     });
     expect(fd.get('intensity')).toBe('medium');
-  });
-
-  it('emits the current defaultPipeline() — flips automatically if the canonical default changes', () => {
-    const fd = buildSubmissionFormData({
-      conceptId: 'c',
-      state: {
-        pipeline: defaultPipeline(),
-        voiceId: 'v',
-        variantCount: 5,
-        lengthSeconds: 30,
-      },
-    });
-    // After Polish-19 Commit 1 this is kie_kling_avatar_v2_standard.
-    // A future flip changes both this assertion AND defaultPipeline()
-    // simultaneously — the test acts as a tripwire.
-    expect(fd.get('pipeline')).toBe(defaultPipeline());
-  });
-
-  it('Polish-19.3.1: OMITS sourceDurationSeconds when pipeline=veo (worker auto-resolves)', () => {
-    const fd = buildSubmissionFormData({
-      conceptId: 'c',
-      state: {
-        pipeline: 'veo_3_1_fast_native_audio',
-        voiceId: 'v',
-        variantCount: 5,
-        lengthSeconds: 30, // would normally be sent; veo omits
-      },
-    });
-    expect(fd.has('sourceDurationSeconds')).toBe(false);
-  });
-
-  it('Polish-19.3.1: STILL sends sourceDurationSeconds for non-Veo pipelines (Kling/Omni/HeyGen)', () => {
-    const fd = buildSubmissionFormData({
-      conceptId: 'c',
-      state: {
-        pipeline: 'kie_kling_avatar_v2_standard',
-        voiceId: 'v',
-        variantCount: 5,
-        lengthSeconds: 30,
-      },
-    });
-    expect(fd.get('sourceDurationSeconds')).toBe('30');
+    expect(fd.get('mode')).toBe('live');
   });
 });
 
-describe('Polish-19.3: VEO_LENGTH_PRESETS', () => {
-  it('ships exactly four presets covering 8s/15s/30s/60s', () => {
-    expect(VEO_LENGTH_PRESETS.map((p) => p.seconds)).toEqual([8, 15, 30, 60]);
+describe('Polish-20: SIMPLIFIED_DEFAULT_DURATION_SECONDS + preset table', () => {
+  it('duration default is 30s (matches the most common UGC ad length)', () => {
+    expect(SIMPLIFIED_DEFAULT_DURATION_SECONDS).toBe(30);
   });
 
-  it('each preset has a label and a pre-computed segment count', () => {
-    for (const p of VEO_LENGTH_PRESETS) {
-      expect(p.label).toMatch(/s$/);
-      expect(p.segments).toBeGreaterThan(0);
-    }
-  });
-
-  it('segment counts match computeVeoSegmentCount: 1/2/4/8', () => {
-    const segments = VEO_LENGTH_PRESETS.map((p) => p.segments);
-    expect(segments).toEqual([1, 2, 4, 8]);
-  });
-});
-
-describe('Polish-19.3: snapToVeoPreset', () => {
-  it('returns the exact preset when the input matches a preset value', () => {
-    expect(snapToVeoPreset(8).seconds).toBe(8);
-    expect(snapToVeoPreset(15).seconds).toBe(15);
-    expect(snapToVeoPreset(30).seconds).toBe(30);
-    expect(snapToVeoPreset(60).seconds).toBe(60);
-  });
-
-  it('snaps to the closest preset for between-preset values', () => {
-    // closer to 15 than 30
-    expect(snapToVeoPreset(20).seconds).toBe(15);
-    // closer to 30 than 15 (delta: 30-23=7 vs 23-15=8)
-    expect(snapToVeoPreset(23).seconds).toBe(30);
-    // closer to 30 than 60
-    expect(snapToVeoPreset(40).seconds).toBe(30);
-    // closer to 60 than 30
-    expect(snapToVeoPreset(50).seconds).toBe(60);
-  });
-
-  it('clamps below-floor values to the smallest preset (8s)', () => {
-    expect(snapToVeoPreset(0).seconds).toBe(8);
-    expect(snapToVeoPreset(-5).seconds).toBe(8);
-    expect(snapToVeoPreset(NaN).seconds).toBe(8);
-  });
-
-  it('snaps above-ceiling values to the largest preset (60s)', () => {
-    expect(snapToVeoPreset(120).seconds).toBe(60);
-    expect(snapToVeoPreset(9999).seconds).toBe(60);
+  it('re-exported preset table matches the descriptor (8/15/30/60)', () => {
+    expect(VIDEO_DURATION_PRESETS).toEqual([8, 15, 30, 60]);
   });
 });

@@ -590,3 +590,194 @@ describe('Polish-14.1: sourceDurationSeconds drives the kie_omni_flash_native qu
     expect(r.estimateUsd).toBeCloseTo(3.0202, 4);
   });
 });
+
+describe('Polish-20: estimateByVideoModel branch (descriptor-driven)', () => {
+  // Cost formula per variant:
+  //   $0.05 Claude script + billed_seconds × $/sec + $0.15 concat (if N>1)
+  // billed_seconds = segmentCount × model.maxSingleCallSeconds
+
+  // ---- Seedance 1.5 Pro (12s cap, $0.035/sec) ----
+  //   8s  (1 seg,  billed 12s): 0.05 + 12×0.035           = $0.47
+  //  15s  (2 segs, billed 24s): 0.05 + 24×0.035 + 0.15    = $1.04
+  //  30s  (3 segs, billed 36s): 0.05 + 36×0.035 + 0.15    = $1.46
+  //  60s  (5 segs, billed 60s): 0.05 + 60×0.035 + 0.15    = $2.30
+
+  it('Seedance 1.5 Pro 8s → single segment, no concat', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_1_5_pro',
+      sourceDurationSeconds: 8,
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.47, 4);
+    expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(false);
+  });
+
+  it('Seedance 1.5 Pro 30s → 3 segments + concat', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_1_5_pro',
+      sourceDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.46, 4);
+    expect(r.breakdown.some((b) => /3 segments/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(true);
+  });
+
+  it('Seedance 1.5 Pro 60s → 5 segments + concat', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_1_5_pro',
+      sourceDurationSeconds: 60,
+    });
+    expect(r.estimateUsd).toBeCloseTo(2.3, 4);
+  });
+
+  // ---- Kling 3.0 Standard (15s cap, $0.10/sec) ----
+  //   8s  (1 seg,  billed 15s): 0.05 + 15×0.10           = $1.55
+  //  15s  (1 seg,  billed 15s): 0.05 + 15×0.10           = $1.55
+  //  30s  (2 segs, billed 30s): 0.05 + 30×0.10 + 0.15    = $3.20
+  //  60s  (4 segs, billed 60s): 0.05 + 60×0.10 + 0.15    = $6.20
+
+  it('Kling 3.0 Standard 15s → single segment (15s cap fits target)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'kling_3_standard',
+      sourceDurationSeconds: 15,
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.55, 4);
+    expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(false);
+  });
+
+  it('Kling 3.0 Standard 30s → 2 segments + concat', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'kling_3_standard',
+      sourceDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(3.2, 4);
+    expect(r.breakdown.some((b) => /2 segments/.test(b.item))).toBe(true);
+  });
+
+  it('Kling 3.0 Standard 60s → 4 segments + concat', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'kling_3_standard',
+      sourceDurationSeconds: 60,
+    });
+    expect(r.estimateUsd).toBeCloseTo(6.2, 4);
+  });
+
+  // ---- Seedance 2 (15s cap, $0.33/sec) ----
+  //   8s  (1 seg,  billed 15s): 0.05 + 15×0.33           = $5.00
+  //  30s  (2 segs, billed 30s): 0.05 + 30×0.33 + 0.15    = $10.10
+  //  60s  (4 segs, billed 60s): 0.05 + 60×0.33 + 0.15    = $20.00
+
+  it('Seedance 2 30s → 2 segments + concat', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_2',
+      sourceDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(10.1, 4);
+  });
+
+  it('Seedance 2 60s → 4 segments + concat', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_2',
+      sourceDurationSeconds: 60,
+    });
+    expect(r.estimateUsd).toBeCloseTo(20.0, 4);
+  });
+
+  // ---- Variant scaling ----
+
+  it('scales linearly with variantCount: 5 × Kling 30s = $16.00', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 5,
+      videoModelId: 'kling_3_standard',
+      sourceDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(16.0, 4);
+  });
+
+  // ---- Precedence + defaults ----
+
+  it('videoModelId wins over legacy `pipeline` field when both are set', () => {
+    // If videoModelId routes correctly, we get the Kling 30s = $3.20;
+    // if the legacy Veo branch fired, the number would be different.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'veo_3_1_fast_native_audio',
+      videoModelId: 'kling_3_standard',
+      sourceDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(3.2, 4);
+  });
+
+  it('sourceDurationSeconds wins over estimatedDurationSeconds', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_1_5_pro',
+      sourceDurationSeconds: 8, // → 1 seg
+      estimatedDurationSeconds: 60, // would be 5 segs, ignored
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.47, 4);
+  });
+
+  it('defaults to 30s target when neither duration is provided', () => {
+    // Missing duration → 30s → Seedance 1.5 Pro 3 segs → $1.46
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_1_5_pro',
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.46, 4);
+  });
+
+  it('defaults provider to cheapest live provider when videoProviderId is omitted', () => {
+    // At Polish-20 launch that is kie.ai for every model.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_1_5_pro',
+      sourceDurationSeconds: 30,
+    });
+    // Same result as passing 'kie_ai' explicitly.
+    expect(r.estimateUsd).toBeCloseTo(1.46, 4);
+  });
+
+  it('returns $0 for unknown modelId (defensive — never crashes the form)', () => {
+    // Cast around the compile-time enum guard.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'nope' as never,
+      sourceDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBe(0);
+    expect(r.breakdown).toEqual([]);
+  });
+
+  it('runaway duration clamps to 8-segment ceiling (matches segment-count cap)', () => {
+    // Seedance 1.5 Pro 600s → 8 segs × 12s = 96s billed. Cost = 0.05 + 96×0.035 + 0.15 = $3.56.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'seedance_1_5_pro',
+      sourceDurationSeconds: 600,
+    });
+    expect(r.estimateUsd).toBeCloseTo(3.56, 4);
+  });
+});

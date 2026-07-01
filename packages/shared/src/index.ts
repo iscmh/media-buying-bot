@@ -9,6 +9,7 @@ export * from './tool-provider-form';
 export * from './timezone';
 export * from './cost-estimation';
 export * from './pipeline-descriptors';
+export * from './video-models';
 export * from './elevenlabs-voices';
 export * from './kie-omni-prompt';
 export * from './error-translation';

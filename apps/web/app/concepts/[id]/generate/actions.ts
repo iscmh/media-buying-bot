@@ -114,6 +114,18 @@ export async function createGenerationJobAction(
   const rawVoiceId = formData.get('voiceId');
   const voiceId =
     typeof rawVoiceId === 'string' && rawVoiceId.trim().length > 0 ? rawVoiceId.trim() : null;
+  // Polish-20 Commit 1: descriptor-driven model + provider selection.
+  // Persisted on job.metadata alongside the legacy pipeline / voice_id
+  // fields — Commit 2 flips the worker dispatch to read from these,
+  // Commit 3+4 remove the legacy metadata paths.
+  const rawModelId = formData.get('modelId');
+  const modelId =
+    typeof rawModelId === 'string' && rawModelId.trim().length > 0 ? rawModelId.trim() : null;
+  const rawProviderId = formData.get('providerId');
+  const providerId =
+    typeof rawProviderId === 'string' && rawProviderId.trim().length > 0
+      ? rawProviderId.trim()
+      : null;
 
   if (!conceptId) return { ok: false, errorMessage: 'Missing concept id.' };
   if (!VALID_INTENSITY.has(intensity)) {
@@ -251,18 +263,22 @@ export async function createGenerationJobAction(
       pickedPipeline: pipelineDesc.pipeline,
       // Polish-9: reference creative storage path (auto-detect upload).
       ...(referenceStoragePath ? { referenceCreativeStoragePath: referenceStoragePath } : {}),
-      // Polish-14.1 + Polish-19 Commit 3: persist optional metadata
-      // fields the worker reads. source_duration_seconds drives the
-      // worker's target duration; voice_id picks the ElevenLabs voice
-      // (Kling Avatar v2 pipeline). Both are nullable — workers tolerate
-      // an absent metadata column and fall back to safe defaults.
-      ...(sourceDurationSeconds != null || voiceId != null
+      // Polish-14.1 + Polish-19 Commit 3 + Polish-20 Commit 1: persist
+      // optional metadata fields the worker reads. source_duration_seconds
+      // drives the worker's target duration; voice_id picks the
+      // ElevenLabs voice (legacy Kling Avatar v2 pipeline); model_id +
+      // provider_id are the new descriptor-driven routing signals
+      // Commit 2 will dispatch on. All fields are nullable — workers
+      // tolerate absent columns and fall back to safe defaults.
+      ...(sourceDurationSeconds != null || voiceId != null || modelId != null || providerId != null
         ? {
             metadata: {
               ...(sourceDurationSeconds != null
                 ? { source_duration_seconds: sourceDurationSeconds }
                 : {}),
               ...(voiceId != null ? { voice_id: voiceId } : {}),
+              ...(modelId != null ? { model_id: modelId } : {}),
+              ...(providerId != null ? { provider_id: providerId } : {}),
             },
           }
         : {}),

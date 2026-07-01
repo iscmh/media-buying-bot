@@ -14,6 +14,17 @@
  * the type-only import below.
  */
 
+import {
+  MODEL_PROVIDER_CONFIGS,
+  VIDEO_MODELS,
+  computeSegmentCountForModel,
+  getDefaultProviderForModel,
+  getModelProviderConfig,
+  getVideoModel,
+  type VideoModelId,
+  type VideoProviderId,
+} from './video-models';
+
 export type ConceptType = 'static' | 'ugc';
 export type UgcVideoProvider = 'kie_ai' | 'heygen' | 'arcads';
 // Polish-4: creative format. avatar_talking_head=HeyGen avatar mode;
@@ -340,11 +351,37 @@ export interface EstimateInput {
    * callers (the form preview) just default to 'extend'.
    */
   veoChainingMode?: VeoChainingMode;
+  /**
+   * Polish-20: new descriptor-driven cost path. When present, wins
+   * over `pipeline` / `provider` / `format` — the estimator hits
+   * the (modelId × providerId) ModelProviderConfig for its per-second
+   * price and segment math. The form uses this from Polish-20 Commit 1
+   * onward; the legacy pipeline branches stay live until Commits 3+4
+   * remove them.
+   */
+  videoModelId?: VideoModelId;
+  videoProviderId?: VideoProviderId;
 }
 
 export function estimateGenerationCost(input: EstimateInput): CostEstimate {
   const { conceptType, variantCount } = input;
   const breakdown: CostBreakdownItem[] = [];
+
+  // Polish-20: descriptor-driven path wins over legacy pipeline branches.
+  // When Commit 3+4 remove the legacy pipelines, all UGC callers will
+  // route through here.
+  if (input.videoModelId) {
+    return estimateByVideoModel({
+      modelId: input.videoModelId,
+      // Default provider = cheapest live provider for the model. Polish-20
+      // launch: always kie.ai (only live provider). Polish-21+ callers
+      // that let the user pick pass providerId explicitly.
+      providerId: input.videoProviderId ?? getDefaultProviderForModel(input.videoModelId)?.id,
+      variantCount,
+      // Polish-14.1: sourceDurationSeconds wins over estimatedDurationSeconds.
+      targetSeconds: input.sourceDurationSeconds ?? input.estimatedDurationSeconds,
+    });
+  }
 
   // Polish-9.4: pipeline drives provider. Server call sites (the create-
   // job action) and clients that only know the picked pipeline can
@@ -704,3 +741,74 @@ function estimateByPipeline(
 function round4(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
+
+// =========================================================================
+// Polish-20: descriptor-driven video-model cost estimator
+// =========================================================================
+//
+// Cost per variant:
+//   $0.05 Claude script (one call returns the segments[] array for the
+//   whole variant) + total_output_seconds × usdPerSecond
+//   + $0.15 Replicate ffmpeg-concat when segmentCount > 1.
+//
+// Segment count comes from computeSegmentCountForModel(model, target).
+// Total billed seconds = segmentCount × model.maxSingleCallSeconds
+// (each per-call submit runs at the model's per-call cap; last chunk
+// is billed at the cap even if the user's target is slightly less).
+
+const VIDEO_MODEL_CLAUDE_SCRIPT_USD = 0.05;
+const VIDEO_MODEL_STITCH_USD = 0.15;
+const VIDEO_MODEL_DEFAULT_TARGET_SECONDS = 30;
+
+interface EstimateByVideoModelInput {
+  modelId: VideoModelId;
+  providerId: VideoProviderId | undefined;
+  variantCount: number;
+  targetSeconds?: number;
+}
+
+function estimateByVideoModel(input: EstimateByVideoModelInput): CostEstimate {
+  const { modelId, variantCount } = input;
+  const breakdown: CostBreakdownItem[] = [];
+  const target = input.targetSeconds ?? VIDEO_MODEL_DEFAULT_TARGET_SECONDS;
+  const model = getVideoModel(modelId);
+  const config = input.providerId ? getModelProviderConfig(modelId, input.providerId) : undefined;
+
+  // Defensive guard: unknown model or no live provider yields a zero
+  // estimate so the form's cost display renders "$0.00" instead of
+  // crashing. The estimator IS the source of truth for the daily-cap
+  // check, so an unknown model can't accidentally allow spend either
+  // — the worker refuses to run without a valid config.
+  if (!model || !config) {
+    return { estimateUsd: 0, breakdown: [] };
+  }
+
+  const segmentCount = computeSegmentCountForModel(model, target);
+  const billedSecondsPerVariant = segmentCount * model.maxSingleCallSeconds;
+  const totalSegments = variantCount * segmentCount;
+
+  breakdown.push({
+    item: `Claude segments script (${variantCount} × $${VIDEO_MODEL_CLAUDE_SCRIPT_USD.toFixed(2)})`,
+    cost: round4(variantCount * VIDEO_MODEL_CLAUDE_SCRIPT_USD),
+  });
+  breakdown.push({
+    item:
+      `${model.displayName} (${totalSegments} segment${totalSegments === 1 ? '' : 's'} × ` +
+      `${model.maxSingleCallSeconds}s × $${config.usdPerSecond.toFixed(3)}/sec)`,
+    cost: round4(variantCount * billedSecondsPerVariant * config.usdPerSecond),
+  });
+  if (segmentCount > 1) {
+    breakdown.push({
+      item: `Replicate ffmpeg-concat (${variantCount} × $${VIDEO_MODEL_STITCH_USD.toFixed(2)})`,
+      cost: round4(variantCount * VIDEO_MODEL_STITCH_USD),
+    });
+  }
+
+  const estimateUsd = round4(breakdown.reduce((sum, b) => sum + b.cost, 0));
+  return { estimateUsd, breakdown };
+}
+
+// Silences the linter for the config list — kept live so tests can
+// assert the MODEL_PROVIDER_CONFIGS coverage matrix stays populated.
+void MODEL_PROVIDER_CONFIGS;
+void VIDEO_MODELS;
