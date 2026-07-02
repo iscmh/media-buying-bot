@@ -403,13 +403,16 @@ describe('Polish-20 Commit 5: mock-mode regression pins', () => {
     expect(r.targetSeconds).toBe(60);
   });
 
-  it('mock branch marks the job completed with provider="kie_ai" + path="video-variant"', async () => {
+  it('mock branch marks the job completed with provider=<providerId> + path="video-variant"', async () => {
     const src = await readSrc();
-    // Mock completions must use the same telemetry path label as the
-    // live worker so the admin dashboard's per-worker rollups
-    // aggregate correctly across mock and live jobs.
+    // Polish-21 Commit 2: provider tag derives from job.metadata's
+    // routing key so mock jobs on Hedra tag as `hedra`, kie.ai jobs
+    // as `kie_ai`, and future providers slot in without a code
+    // change. Path label stays constant so admin per-worker rollups
+    // aggregate correctly across mock and live jobs regardless of
+    // provider.
     expect(src).toMatch(
-      /mode,\s*startedAt,\s*variantCount,\s*actualCostUsd: 0,\s*provider: 'kie_ai',\s*path: 'video-variant'/,
+      /mode,\s*startedAt,\s*variantCount,\s*actualCostUsd: 0,\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*\/\/[^\n]*\n\s*provider: providerId,\s*path: 'video-variant'/,
     );
   });
 });
@@ -771,5 +774,293 @@ describe('Polish-20.0.3: Gemini Vision schema requests video_duration_seconds', 
     // again during a future schema tighten.
     expect(UGC_DECONSTRUCTOR_SYSTEM_PROMPT).toMatch(/video_duration_seconds/);
     expect(UGC_DECONSTRUCTOR_SYSTEM_PROMPT).toMatch(/video_duration_seconds requirement/);
+  });
+});
+
+// =====================================================================
+// Polish-21 Commit 2: Hedra branch dispatch + Claude prompt + parser
+// =====================================================================
+
+describe('Polish-21 Commit 2: parseVideoAdSpecHedra', () => {
+  it('accepts nested {scene: {scene_description, script}}', async () => {
+    const { parseVideoAdSpecHedra } = await import('../src/functions/generate-video-variant');
+    const raw = JSON.stringify({
+      scene: {
+        scene_description: 'A 34-year-old woman in a parked SUV, tripod-style selfie framing.',
+        script: 'I swear to god, I was spending $80 a month on face serums.',
+      },
+    });
+    const r = parseVideoAdSpecHedra(raw);
+    expect(r).not.toBeNull();
+    expect(r!.scene.script).toMatch(/\$80/);
+    expect(r!.scene.scene_description).toMatch(/tripod-style/);
+  });
+
+  it('accepts a flat {scene_description, script} shape too (defensive fallback)', async () => {
+    const { parseVideoAdSpecHedra } = await import('../src/functions/generate-video-variant');
+    const raw = JSON.stringify({
+      scene_description: 'Kitchen selfie, morning light.',
+      script: 'You will NOT believe this hack.',
+    });
+    const r = parseVideoAdSpecHedra(raw);
+    expect(r).not.toBeNull();
+    expect(r!.scene.scene_description).toMatch(/Kitchen/);
+    expect(r!.scene.script).toMatch(/NOT believe/);
+  });
+
+  it('unwraps ```json fences', async () => {
+    const { parseVideoAdSpecHedra } = await import('../src/functions/generate-video-variant');
+    const raw = '```json\n{"scene":{"scene_description":"a","script":"b"}}\n```';
+    const r = parseVideoAdSpecHedra(raw);
+    expect(r).not.toBeNull();
+    expect(r!.scene.scene_description).toBe('a');
+  });
+
+  it('rejects empty scene_description or missing script', async () => {
+    const { parseVideoAdSpecHedra } = await import('../src/functions/generate-video-variant');
+    expect(parseVideoAdSpecHedra('{"scene":{"scene_description":"","script":"x"}}')).toBeNull();
+    expect(parseVideoAdSpecHedra('{"scene":{"scene_description":"x"}}')).toBeNull();
+    expect(parseVideoAdSpecHedra('not json')).toBeNull();
+  });
+
+  it('recovers when JSON is preceded/followed by prose (worst-case Claude output)', async () => {
+    const { parseVideoAdSpecHedra } = await import('../src/functions/generate-video-variant');
+    const raw =
+      'Here is the scene:\n{"scene":{"scene_description":"kitchen","script":"hi"}}\nThanks!';
+    const r = parseVideoAdSpecHedra(raw);
+    expect(r).not.toBeNull();
+    expect(r!.scene.script).toBe('hi');
+  });
+});
+
+describe('Polish-21 Commit 2: pickHedraVoiceForVariant (worker helper)', () => {
+  it('returns a valid roster entry for every variant in a 5-batch', async () => {
+    const { pickHedraVoiceForVariant } = await import('../src/functions/generate-video-variant');
+    const jobId = 'job-abc-xyz-42';
+    const picks = Array.from({ length: 5 }, (_, i) =>
+      pickHedraVoiceForVariant({ variantIndex: i, variantCount: 5, jobId }),
+    );
+    expect(picks).toHaveLength(5);
+    for (const v of picks) {
+      expect(v.id.length).toBeGreaterThan(0);
+      expect(['female', 'male']).toContain(v.gender);
+    }
+    // 5 unique voices out of the 6-slot roster.
+    expect(new Set(picks.map((v) => v.id)).size).toBe(5);
+  });
+
+  it('same jobId + variantCount + variantIndex returns identical voice (Inngest retry safe)', async () => {
+    const { pickHedraVoiceForVariant } = await import('../src/functions/generate-video-variant');
+    const a = pickHedraVoiceForVariant({ variantIndex: 2, variantCount: 5, jobId: 'j-1' });
+    const b = pickHedraVoiceForVariant({ variantIndex: 2, variantCount: 5, jobId: 'j-1' });
+    expect(a.id).toBe(b.id);
+  });
+
+  it('different jobIds land different variant-0 voices (batch-level diversity)', async () => {
+    const { pickHedraVoiceForVariant } = await import('../src/functions/generate-video-variant');
+    const ids = ['j-a', 'j-b', 'j-c', 'j-d', 'j-e', 'j-f'];
+    const first = ids.map(
+      (jobId) => pickHedraVoiceForVariant({ variantIndex: 0, variantCount: 5, jobId }).id,
+    );
+    expect(new Set(first).size).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('Polish-21 Commit 2: worker dispatch tripwires', () => {
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-video-variant.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('runOneVariant dispatches to runOneVariantHedra when model.id === "hedra_character_3"', async () => {
+    const src = await readSrc();
+    // Layout regression: the Hedra branch must be the FIRST decision
+    // in runOneVariant. Without it, the kie.ai fan-out runs on Hedra
+    // jobs and crashes on getKieVideoUsdPerSecond / submitKieVideo.
+    expect(src).toMatch(
+      /async function runOneVariant\(input: RunOneVariantInput\): Promise<VideoVariantResult> \{[\s\S]*?if \(input\.model\.id === 'hedra_character_3'\) \{[\s\S]*?return runOneVariantHedra\(input\);/,
+    );
+  });
+
+  it('runOneVariantHedra is defined and calls Claude → Nano Banana → asset → submit → poll → download → insert in that order', async () => {
+    const src = await readSrc();
+    // Pin the 9-step Polish-21 Commit 2 flow via step.run identifier
+    // ordering. Regressions that skip Nano Banana or run the poll
+    // before submit will fail this ordering check.
+    const orderedStepLabels = [
+      'hedra-claude-',
+      'hedra-nano-banana-',
+      'hedra-image-asset-',
+      'hedra-submit-',
+      'hedra-poll-',
+      'hedra-upload-video-',
+      'hedra-insert-composite-',
+    ];
+    let lastIdx = -1;
+    for (const label of orderedStepLabels) {
+      const idx = src.indexOf(label);
+      expect(idx, `step ${label} missing`).toBeGreaterThan(-1);
+      expect(idx, `step ${label} out of order`).toBeGreaterThan(lastIdx);
+      lastIdx = idx;
+    }
+  });
+
+  it('runOneVariantHedra checks isHedraVoiceRosterUncurated FIRST (fail-fast before spending)', async () => {
+    const src = await readSrc();
+    // Roster gate must run before any paid API call so an empty
+    // roster doesn't burn Claude/Nano Banana credits before erroring.
+    const rosterGateIdx = src.indexOf('isHedraVoiceRosterUncurated()');
+    const claudeIdx = src.indexOf('hedra-claude-');
+    expect(rosterGateIdx).toBeGreaterThan(-1);
+    expect(claudeIdx).toBeGreaterThan(-1);
+    expect(rosterGateIdx).toBeLessThan(claudeIdx);
+  });
+
+  it('runOneVariantHedra loads the hedra BYOK key (not kie_ai)', async () => {
+    const src = await readSrc();
+    // Regression against copy-paste from the kie.ai branch — the
+    // Hedra flow must call loadDecryptedKeys(..., ['hedra']) at each
+    // step boundary (fresh decrypt per step keeps plaintext short-
+    // lived, matches the Polish-3 chokepoint rationale).
+    const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
+    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    expect(runOneVariantHedraStart).toBeGreaterThan(-1);
+    expect(runOneVariantHedraEnd).toBeGreaterThan(runOneVariantHedraStart);
+    const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
+    expect(hedraFn).toMatch(/loadDecryptedKeys\(userId, \['hedra'\]\)/);
+    // Nano Banana still uses gemini — that's expected.
+    expect(hedraFn).toMatch(/loadDecryptedKeys\(userId, \['gemini'\]\)/);
+    // NO kie_ai lookups in the Hedra branch.
+    expect(hedraFn).not.toMatch(/loadDecryptedKeys\(userId, \['kie_ai'\]\)/);
+  });
+
+  it('Hedra submit uses tts { voiceId, text } (name in voiceId field, not audio_id)', async () => {
+    const src = await readSrc();
+    // Polish-21 Commit 2 ships native TTS (roster voice NAME in the
+    // voice_id field). Uploaded-audio mode is exposed on the client
+    // but the worker doesn't use it at launch. Regression pin: an
+    // accidental audio_id path would silently swap voices.
+    const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
+    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
+    expect(hedraFn).toMatch(/tts: \{ voiceId: voice\.id, text: script \}/);
+    expect(hedraFn).not.toMatch(/audioAssetId:/);
+  });
+
+  it('Hedra composite row carries voice + generation metadata for forensics', async () => {
+    const src = await readSrc();
+    // Every field we log to generationMetadata is what the run-
+    // detail page renders and what we grep for in production
+    // diagnostics. Pin them so a future rewrite doesn't silently
+    // drop forensic surface.
+    const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
+    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
+    expect(hedraFn).toMatch(/hedra_generation_id: generationId/);
+    expect(hedraFn).toMatch(/hedra_input_asset_id: startKeyframeId/);
+    expect(hedraFn).toMatch(/voice_id: voice\.id/);
+    expect(hedraFn).toMatch(/voice_gender: voice\.gender/);
+    expect(hedraFn).toMatch(/text_prompt: sceneDescription/);
+    expect(hedraFn).toMatch(/script,/);
+  });
+});
+
+describe('Polish-21 Commit 2: runClaudeAdSpecHedra system prompt', () => {
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-video-variant.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('asks for scenes[] shape NOT segments[] — Character 3 is single-call', async () => {
+    const src = await readSrc();
+    // Pin the schema anchor. A regression that reused Polish-20's
+    // segments[] structure for Hedra would generate multi-scene
+    // output the single-call Hedra flow can't consume.
+    const hedraPromptStart = src.indexOf('async function runClaudeAdSpecHedra');
+    const hedraPromptEnd = src.indexOf('// ---', hedraPromptStart);
+    expect(hedraPromptStart).toBeGreaterThan(-1);
+    const hedraPromptFn = src.slice(hedraPromptStart, hedraPromptEnd);
+    expect(hedraPromptFn).toMatch(/"scene"/);
+    expect(hedraPromptFn).toMatch(/"scene_description"/);
+    expect(hedraPromptFn).toMatch(/"script"/);
+    expect(hedraPromptFn).not.toMatch(/"segments"/);
+  });
+
+  it('drops sound_texture (Hedra handles audio via native TTS)', async () => {
+    const src = await readSrc();
+    // Character 3 generates audio from TTS on the roster voice. The
+    // Polish-20.0.3 sound_texture field is meaningless here — pin
+    // that it does NOT appear in the Hedra prompt schema.
+    const hedraPromptStart = src.indexOf('async function runClaudeAdSpecHedra');
+    const hedraPromptEnd = src.indexOf('// ---', hedraPromptStart);
+    const hedraPromptFn = src.slice(hedraPromptStart, hedraPromptEnd);
+    expect(hedraPromptFn).not.toMatch(/sound_texture/);
+  });
+
+  it('drops speaker-attribution boilerplate ("She says:" / "He confesses:") — script IS the speech', async () => {
+    const src = await readSrc();
+    // Character 3's audio is the script text sent to TTS. If Claude
+    // emits stage directions like "She says: '...'" the TTS voice
+    // will literally read "She says" aloud.
+    const hedraPromptStart = src.indexOf('async function runClaudeAdSpecHedra');
+    const hedraPromptEnd = src.indexOf('// ---', hedraPromptStart);
+    const hedraPromptFn = src.slice(hedraPromptStart, hedraPromptEnd);
+    expect(hedraPromptFn).toMatch(/NO stage directions, NO speaker attribution/);
+  });
+
+  it('specifies 50-80 word scene descriptions (not the Polish-20 300-word yapper)', async () => {
+    const src = await readSrc();
+    const hedraPromptStart = src.indexOf('async function runClaudeAdSpecHedra');
+    const hedraPromptEnd = src.indexOf('// ---', hedraPromptStart);
+    const hedraPromptFn = src.slice(hedraPromptStart, hedraPromptEnd);
+    expect(hedraPromptFn).toMatch(/50-80 words/);
+  });
+
+  it('KEEPS Polish-19.4.2 verbatim source-script preservation rule', async () => {
+    const src = await readSrc();
+    // This is the core ad-copy skill Claude adds. Verbatim preservation
+    // of hook openers, dollar amounts, ALL CAPS words, filler words,
+    // ellipses, product/offer phrases from the source ad.
+    const hedraPromptStart = src.indexOf('async function runClaudeAdSpecHedra');
+    const hedraPromptEnd = src.indexOf('// ---', hedraPromptStart);
+    const hedraPromptFn = src.slice(hedraPromptStart, hedraPromptEnd);
+    expect(hedraPromptFn).toMatch(/SOURCE-SCRIPT PRESERVATION/);
+    expect(hedraPromptFn).toMatch(/PRESERVE/);
+    expect(hedraPromptFn).toMatch(/hook openers/);
+    expect(hedraPromptFn).toMatch(/dollar amounts/);
+    expect(hedraPromptFn).toMatch(/ALL CAPS emphasis words/);
+    expect(hedraPromptFn).toMatch(/source_script_verbatim: sourceScriptVerbatim/);
+  });
+
+  it('rejects bracketed Sora-era styling (Polish-20.0.3 anchor still applies to Hedra)', async () => {
+    const src = await readSrc();
+    // Even though Hedra is a different flow, Claude's tendency to
+    // copy bracketed source structure would still leak into
+    // scene_description prose. Pin the "IGNORE bracketed style"
+    // instruction.
+    const hedraPromptStart = src.indexOf('async function runClaudeAdSpecHedra');
+    const hedraPromptEnd = src.indexOf('// ---', hedraPromptStart);
+    const hedraPromptFn = src.slice(hedraPromptStart, hedraPromptEnd);
+    expect(hedraPromptFn).toMatch(/NO bracketed sections/);
+    expect(hedraPromptFn).toMatch(/IGNORE it — do NOT copy the structure/);
+  });
+
+  it('userMessage includes source_script_verbatim + sanitized source_analysis (not raw jobMetadata)', async () => {
+    const src = await readSrc();
+    // Same Polish-20.0.3 sanitization discipline as the kie.ai path —
+    // Hedra Claude also gets ONLY the vision-derived analysis, never
+    // the draft_prompt blob.
+    const hedraFnStart = src.indexOf('async function runClaudeAdSpecHedra');
+    const hedraFnEnd = src.indexOf('// ---', hedraFnStart);
+    const hedraFn = src.slice(hedraFnStart, hedraFnEnd);
+    expect(hedraFn).toMatch(/source_script_verbatim: sourceScriptVerbatim/);
+    expect(hedraFn).toMatch(/source_analysis: sanitizedSourceAnalysis/);
+    expect(hedraFn).toMatch(/sanitizeSourceAnalysisForClaude\(jobMetadata\)/);
   });
 });

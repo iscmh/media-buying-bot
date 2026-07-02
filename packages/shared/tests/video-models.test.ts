@@ -6,13 +6,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   HEDRA_VOICE_ROSTER,
-  HEDRA_VOICE_ROSTER_PLACEHOLDER_PREFIX,
   MODEL_PROVIDER_CONFIGS,
   VIDEO_DURATION_PRESETS,
   VIDEO_MODELS,
   VIDEO_PROVIDERS,
+  computeHedraVoiceOffsetForJob,
   computeSegmentCountForModel,
   formatModelCostHintPerVariant,
+  getDefaultHedraVoice,
   getDefaultProviderForModel,
   getLiveProvidersForModel,
   getModelProviderConfig,
@@ -21,6 +22,7 @@ import {
   isHedraVoiceRosterUncurated,
   pickHedraVoicesForBatch,
   snapToNearestDurationPreset,
+  type HedraVoiceRosterEntry,
   type VideoModelId,
 } from '../src/video-models';
 
@@ -223,28 +225,68 @@ describe('Polish-21: getLiveProvidersForModel + getDefaultProviderForModel', () 
   });
 });
 
-describe('Polish-21: HEDRA_VOICE_ROSTER + pickHedraVoicesForBatch', () => {
-  it('ships 6 placeholder voice slots at Polish-21 launch (operator curates before flipping live)', () => {
-    expect(HEDRA_VOICE_ROSTER).toHaveLength(6);
+describe('Polish-21 Commit 2: HEDRA_VOICE_ROSTER (named voices) + helpers', () => {
+  it('ships 6 named voices at Polish-21 launch (Jessica / Will / Matilda / Todd / Sarah / Jamal)', () => {
+    expect(HEDRA_VOICE_ROSTER.map((v) => v.id)).toEqual([
+      'Jessica',
+      'Will',
+      'Matilda',
+      'Todd',
+      'Sarah',
+      'Jamal',
+    ]);
+  });
+
+  it('every roster entry carries label + description + gender + age', () => {
     for (const v of HEDRA_VOICE_ROSTER) {
-      expect(v.id).toMatch(new RegExp(`^${HEDRA_VOICE_ROSTER_PLACEHOLDER_PREFIX}`));
+      expect(v.id.length).toBeGreaterThan(0);
       expect(v.label.length).toBeGreaterThan(0);
-      expect(v.persona.length).toBeGreaterThan(0);
+      expect(v.description.length).toBeGreaterThan(0);
+      expect(['female', 'male']).toContain(v.gender);
+      expect(['young', 'middle_aged']).toContain(v.age);
     }
   });
 
-  it('isHedraVoiceRosterUncurated returns true while all IDs are PLACEHOLDER-*', () => {
-    expect(isHedraVoiceRosterUncurated()).toBe(true);
+  it('exactly ONE entry is marked isDefault: true (Matilda — 40+ mom audience)', () => {
+    const defaults = HEDRA_VOICE_ROSTER.filter((v) => v.isDefault === true);
+    expect(defaults).toHaveLength(1);
+    expect(defaults[0]!.id).toBe('Matilda');
+  });
+
+  it('gender + age spread covers young/middle-aged × female/male (variant diversity)', () => {
+    const buckets = new Set(HEDRA_VOICE_ROSTER.map((v) => `${v.gender}_${v.age}`));
+    expect(buckets.size).toBeGreaterThanOrEqual(3);
+    expect(buckets.has('female_young')).toBe(true);
+    expect(buckets.has('male_young')).toBe(true);
+    expect(buckets.has('female_middle_aged')).toBe(true);
+    expect(buckets.has('male_middle_aged')).toBe(true);
+  });
+
+  it('getDefaultHedraVoice returns the isDefault entry (Matilda)', () => {
+    expect(getDefaultHedraVoice()?.id).toBe('Matilda');
+  });
+
+  it('getDefaultHedraVoice falls back to first entry when no isDefault flag set', () => {
+    const roster: HedraVoiceRosterEntry[] = [
+      { id: 'a', label: 'a', description: 'a', gender: 'female', age: 'young' },
+      { id: 'b', label: 'b', description: 'b', gender: 'male', age: 'young' },
+    ];
+    expect(getDefaultHedraVoice(roster)?.id).toBe('a');
+  });
+
+  it('getDefaultHedraVoice returns undefined for an empty roster', () => {
+    expect(getDefaultHedraVoice([])).toBeUndefined();
+  });
+
+  it('isHedraVoiceRosterUncurated returns false with the shipping named-voice roster', () => {
+    expect(isHedraVoiceRosterUncurated()).toBe(false);
+  });
+
+  it('isHedraVoiceRosterUncurated returns true only for a truly empty roster', () => {
+    expect(isHedraVoiceRosterUncurated([])).toBe(true);
     expect(
       isHedraVoiceRosterUncurated([
-        { id: 'PLACEHOLDER-a', label: 'a', persona: 'a' },
-        { id: 'real-uuid', label: 'b', persona: 'b' },
-      ]),
-    ).toBe(false);
-    expect(
-      isHedraVoiceRosterUncurated([
-        { id: 'real-uuid-1', label: 'a', persona: 'a' },
-        { id: 'real-uuid-2', label: 'b', persona: 'b' },
+        { id: 'x', label: 'x', description: 'x', gender: 'female', age: 'young' },
       ]),
     ).toBe(false);
   });
@@ -264,10 +306,10 @@ describe('Polish-21: HEDRA_VOICE_ROSTER + pickHedraVoicesForBatch', () => {
   });
 
   it('offset shifts the start position deterministically', () => {
-    const roster = [
-      { id: 'a', label: 'a', persona: 'a' },
-      { id: 'b', label: 'b', persona: 'b' },
-      { id: 'c', label: 'c', persona: 'c' },
+    const roster: HedraVoiceRosterEntry[] = [
+      { id: 'a', label: 'a', description: 'a', gender: 'female', age: 'young' },
+      { id: 'b', label: 'b', description: 'b', gender: 'male', age: 'young' },
+      { id: 'c', label: 'c', description: 'c', gender: 'female', age: 'middle_aged' },
     ];
     expect(pickHedraVoicesForBatch(3, 0, roster).map((v) => v.id)).toEqual(['a', 'b', 'c']);
     expect(pickHedraVoicesForBatch(3, 1, roster).map((v) => v.id)).toEqual(['b', 'c', 'a']);
@@ -280,6 +322,22 @@ describe('Polish-21: HEDRA_VOICE_ROSTER + pickHedraVoicesForBatch', () => {
     expect(pickHedraVoicesForBatch(0)).toEqual([]);
     expect(pickHedraVoicesForBatch(-1)).toEqual([]);
     expect(pickHedraVoicesForBatch(3, 0, [])).toEqual([]);
+  });
+
+  it('computeHedraVoiceOffsetForJob is deterministic per jobId (retries produce same picks)', () => {
+    const a = computeHedraVoiceOffsetForJob('job-abc-123');
+    const b = computeHedraVoiceOffsetForJob('job-abc-123');
+    expect(a).toBe(b);
+    expect(a).toBeGreaterThanOrEqual(0);
+  });
+
+  it('computeHedraVoiceOffsetForJob differs across job ids (batch-level diversity)', () => {
+    // Not a strict guarantee — two jobIds *could* collide — but the
+    // fixture list picks strings that don't. If a future roster
+    // change breaks this, the test is signaling a real regression.
+    const ids = ['job-a', 'job-b', 'job-c', 'job-d', 'job-e', 'job-f'];
+    const offsets = ids.map((id) => computeHedraVoiceOffsetForJob(id) % HEDRA_VOICE_ROSTER.length);
+    expect(new Set(offsets).size).toBeGreaterThanOrEqual(2);
   });
 });
 

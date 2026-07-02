@@ -24,6 +24,9 @@ export interface DecryptedKeys {
   kling?: string;
   // Polish-6: OpenAI key (Whisper transcription + Sora 2 generation).
   openai?: string;
+  // Polish-21: Hedra Character 3 BYOK. Lives in
+  // ai_provider_connections under provider='hedra'.
+  hedra?: string;
 }
 
 export type ProviderKey = keyof DecryptedKeys;

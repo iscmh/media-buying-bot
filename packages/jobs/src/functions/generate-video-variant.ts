@@ -1,16 +1,27 @@
+import { Buffer } from 'node:buffer';
 import { eq } from 'drizzle-orm';
 import {
   callClaude,
+  callGeminiImage,
   checkReplicateConcat,
+  createHedraAsset,
   isVideoConcatEnabled,
+  pollHedraGeneration,
   pollKieVideo,
+  submitHedraGeneration,
   submitKieVideo,
   submitReplicateConcat,
+  uploadHedraAsset,
 } from '@mbb/ai-providers';
 import {
+  computeHedraVoiceOffsetForJob,
   computeSegmentCountForModel,
+  getDefaultHedraVoice,
   getModelProviderConfig,
   getVideoModel,
+  isHedraVoiceRosterUncurated,
+  pickHedraVoicesForBatch,
+  type HedraVoiceRosterEntry,
   type ModelProviderConfig,
   type VideoModel,
   type VideoModelId,
@@ -21,7 +32,7 @@ import { extractMetadataObject } from './analyze-concept';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
-import { uploadGeneratedVideoFromUrl } from '../lib/storage';
+import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
 
 /**
  * Polish-20: unified video-variant worker.
@@ -382,7 +393,10 @@ export const generateVideoVariant = inngest.createFunction(
         startedAt,
         variantCount,
         actualCostUsd: 0,
-        provider: 'kie_ai',
+        // Polish-21: provider tag now derives from the actual routing
+        // key so admin per-worker rollups aggregate hedra jobs
+        // separately from kie.ai jobs.
+        provider: providerId,
         path: 'video-variant',
       });
       return { jobId, mode, generated: variantCount };
@@ -408,6 +422,7 @@ export const generateVideoVariant = inngest.createFunction(
           jobId,
           userId,
           variantIndex: index,
+          variantCount,
           model,
           config,
           targetSeconds: autoDuration.targetSeconds,
@@ -434,7 +449,8 @@ export const generateVideoVariant = inngest.createFunction(
       startedAt,
       variantCount: successes.length,
       actualCostUsd: totalCost,
-      provider: 'kie_ai',
+      // Polish-21: provider tag from the actual routing key.
+      provider: providerId,
       path: 'video-variant',
       partialFailures: failures.map((f) => ({ index: f.index, error: f.error })),
     });
@@ -451,6 +467,13 @@ interface RunOneVariantInput {
   jobId: string;
   userId: string;
   variantIndex: number;
+  /**
+   * Polish-21: total variants in the batch. Hedra path uses this to
+   * pick a deterministic voice roster slice per batch (each variant
+   * lands a different voice for max ad-test diversity). Legacy
+   * kie.ai path ignores it.
+   */
+  variantCount: number;
   model: VideoModel;
   config: ModelProviderConfig;
   targetSeconds: number;
@@ -459,6 +482,13 @@ interface RunOneVariantInput {
 }
 
 async function runOneVariant(input: RunOneVariantInput): Promise<VideoVariantResult> {
+  // Polish-21 Commit 2: dispatch. Hedra Character 3 is single-call
+  // image-to-talking-avatar — completely different flow (asset upload,
+  // native TTS, no segments, no concat). Legacy kie.ai path stays
+  // through Commit 3 for backwards-compat with in-flight jobs.
+  if (input.model.id === 'hedra_character_3') {
+    return runOneVariantHedra(input);
+  }
   const {
     step,
     jobId,
@@ -616,6 +646,571 @@ async function runOneVariant(input: RunOneVariantInput): Promise<VideoVariantRes
   });
 
   return { index: variantIndex, ok: true, costUsd: cost, fileUrl: compositeUrl };
+}
+
+// -------------------------------------------------------------------
+// Polish-21 Commit 2: Hedra Character 3 branch
+// -------------------------------------------------------------------
+//
+// Single-call image-to-talking-avatar. Zero segment fan-out, zero
+// stitch. Nine well-defined step.run boundaries per variant:
+//   1. Claude → {scene_description, script} (short-scene format)
+//   2. Nano Banana Pro → reference character image (base64)
+//   3. Voice roster gate check + variant → voice assignment
+//   4. createHedraAsset({type: 'image'}) → asset id
+//   5. uploadHedraAsset (multipart) → bytes land
+//   6. submitHedraGeneration({start_keyframe_id, tts, text_prompt})
+//   7. pollHedraGeneration until 'complete'|'error'
+//   8. Download mp4 → Supabase Storage
+//   9. Insert generated_creatives row (isClipPart: false — Hedra is
+//      never a multi-clip source)
+//
+// Every step.run wraps a single API call so Inngest's retry
+// semantics can replay a stalled poll without re-running Claude etc.
+//
+// Voice picker: pickHedraVoicesForBatch(variantCount, offset) with
+// offset derived from jobId — each batch lands a different voice on
+// variant 0, but retries of the same job produce identical output.
+
+/**
+ * Polish-21: Character 3 uses ~50-80 word scene descriptions rather
+ * than the yapper prose Polish-20.0.3 tuned for kie.ai models.
+ * Character 3 handles motion from the audio track natively — long
+ * camera choreography prompts fight the model.
+ */
+export interface VideoAdScene {
+  scene_description: string;
+  script: string;
+}
+
+/**
+ * Polish-21: single-scene ad spec for Character 3 (one scene per
+ * variant since Character 3 is single-call). Replaces the
+ * Polish-20 `VideoAdSpec.segments[]` structure.
+ */
+export interface VideoAdSpecHedra {
+  scene: VideoAdScene;
+}
+
+export function parseVideoAdSpecHedra(raw: string | unknown): VideoAdSpecHedra | null {
+  if (typeof raw !== 'string') return validateVideoAdSpecHedra(raw);
+  let candidate = raw.trim();
+  const fenceMatch = candidate.match(/^```(?:json|JSON)?\s*\n?([\s\S]*?)\n?```\s*$/);
+  if (fenceMatch && fenceMatch[1]) candidate = fenceMatch[1].trim();
+  try {
+    return validateVideoAdSpecHedra(JSON.parse(candidate));
+  } catch {
+    /* fall through */
+  }
+  const first = candidate.indexOf('{');
+  const last = candidate.lastIndexOf('}');
+  if (first !== -1 && last > first) {
+    try {
+      return validateVideoAdSpecHedra(JSON.parse(candidate.slice(first, last + 1)));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function validateVideoAdSpecHedra(value: unknown): VideoAdSpecHedra | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  // Accept either {scene: {...}} or a flat {scene_description, script}
+  // shape. Claude occasionally emits the flat shape when only one
+  // scene is asked for.
+  if (v.scene && typeof v.scene === 'object' && !Array.isArray(v.scene)) {
+    return validateSceneBody(v.scene as Record<string, unknown>);
+  }
+  return validateSceneBody(v);
+}
+
+function validateSceneBody(body: Record<string, unknown>): VideoAdSpecHedra | null {
+  const sd = body['scene_description'];
+  const sc = body['script'];
+  if (typeof sd !== 'string' || sd.length === 0) return null;
+  if (typeof sc !== 'string' || sc.length === 0) return null;
+  return { scene: { scene_description: sd, script: sc } };
+}
+
+// Polish-21: Hedra Character 3 typical run is 30-90s of generation.
+// Warmup shorter than kie.ai (Character 3 rarely finishes < 20s).
+const HEDRA_POLL_WARMUP_SECONDS = 8;
+const HEDRA_POLL_INTERVAL_SECONDS = 5;
+const HEDRA_POLL_MAX_ATTEMPTS = 80;
+
+async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVariantResult> {
+  const {
+    step,
+    jobId,
+    userId,
+    variantIndex,
+    variantCount,
+    model,
+    config,
+    targetSeconds,
+    jobMetadata,
+  } = input;
+  let cost = 0;
+
+  // Voice roster gate — Polish-21 Commit 2 ships with named voices,
+  // so this returns false. Kept as a defensive check in case a
+  // future accidental roster wipe would silently no-op the batch.
+  if (isHedraVoiceRosterUncurated()) {
+    return {
+      index: variantIndex,
+      ok: false,
+      costUsd: 0,
+      error:
+        'Hedra voice roster is empty. Populate HEDRA_VOICE_ROSTER in ' +
+        'packages/shared/src/video-models.ts via scripts/hedra-list-voices.mjs.',
+    };
+  }
+
+  // Step 1: Claude ad spec (short-scene format).
+  const adSpecResult = await step.run(`hedra-claude-${variantIndex}`, async () =>
+    runClaudeAdSpecHedra({ userId, jobId, variantIndex, variantCount, jobMetadata, model }),
+  );
+  cost += adSpecResult.costUsd;
+  if (!adSpecResult.ok) {
+    return { index: variantIndex, ok: false, costUsd: cost, error: adSpecResult.error };
+  }
+  const { scene_description: sceneDescription, script } = adSpecResult.spec.scene;
+
+  // Step 2: Nano Banana Pro reference image gen.
+  const refImageResult = await step.run(`hedra-nano-banana-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['gemini']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError)
+        return { ok: false as const, error: err.message, costUsd: 0 };
+      throw err;
+    }
+    // Character 3 keyframe: photoreal amateur smartphone selfie
+    // framing matching the scene description. Vertical 9:16 for
+    // downstream Hedra output aspect.
+    const imagePrompt =
+      `Photoreal amateur smartphone selfie photograph, vertical 9:16 framing, ` +
+      `chest-up. Scene: ${sceneDescription}. Natural lighting, no filters, no text ` +
+      `overlays, no captions, no watermarks. Fictional everyperson with no ` +
+      `resemblance to any public figure. TikTok confessional aesthetic — raw ` +
+      `iPhone footage look, subtle handheld micro-jitter cue. Single character in frame.`;
+    const gen = await callGeminiImage({
+      userId,
+      apiKey: keys.gemini!,
+      prompt: imagePrompt,
+      generationJobId: jobId,
+    });
+    if (!gen.ok || !gen.imageBase64) {
+      return {
+        ok: false as const,
+        error: gen.errorMessage ?? 'Nano Banana failed',
+        costUsd: gen.costUsd,
+      };
+    }
+    return {
+      ok: true as const,
+      imageBase64: gen.imageBase64,
+      mimeType: gen.imageMimeType ?? 'image/png',
+      costUsd: gen.costUsd,
+    };
+  });
+  cost += refImageResult.costUsd;
+  if (!refImageResult.ok) {
+    return { index: variantIndex, ok: false, costUsd: cost, error: refImageResult.error };
+  }
+
+  // Step 3: mirror the reference image to Supabase so the run-detail
+  // page can render it alongside the video. Failure is non-fatal —
+  // the video generation still lands; we just lose the forensic thumb.
+  let referenceImageUrl: string | undefined;
+  try {
+    const uploaded = await step.run(`hedra-ref-upload-${variantIndex}`, async () =>
+      uploadGeneratedImage({
+        userId,
+        jobId,
+        variantIndex,
+        imageBase64: refImageResult.imageBase64,
+        mimeType: refImageResult.mimeType,
+        filenamePrefix: 'hedra-ref-',
+      }),
+    );
+    referenceImageUrl = uploaded.publicUrl;
+  } catch (err) {
+    console.log(
+      `[generate-video-variant] variant ${variantIndex}: Supabase mirror of Hedra ` +
+        `reference image failed; continuing without forensic thumb. err=${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // Step 4+5: create Hedra image asset + upload bytes.
+  const assetResult = await step.run(`hedra-image-asset-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['hedra']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+    const create = await createHedraAsset({
+      userId,
+      apiKey: keys.hedra!,
+      name: `variant-${variantIndex}.png`,
+      type: 'image',
+      generationJobId: jobId,
+    });
+    if (!create.ok || !create.assetId) {
+      return {
+        ok: false as const,
+        error: create.errorMessage ?? 'Hedra createHedraAsset failed',
+      };
+    }
+    const bytes = Buffer.from(refImageResult.imageBase64, 'base64');
+    const upload = await uploadHedraAsset({
+      userId,
+      apiKey: keys.hedra!,
+      assetId: create.assetId,
+      filename: `variant-${variantIndex}.png`,
+      contentType: refImageResult.mimeType,
+      bytes: new Uint8Array(bytes),
+      generationJobId: jobId,
+    });
+    if (!upload.ok) {
+      return { ok: false as const, error: upload.errorMessage ?? 'Hedra uploadHedraAsset failed' };
+    }
+    return { ok: true as const, assetId: create.assetId };
+  });
+  if (!assetResult.ok) {
+    return { index: variantIndex, ok: false, costUsd: cost, error: assetResult.error };
+  }
+  const startKeyframeId = assetResult.assetId;
+
+  // Voice pick (deterministic per (jobId, variantIndex, variantCount)).
+  const voice = pickHedraVoiceForVariant({ variantIndex, variantCount, jobId });
+
+  // Step 6: submit generation.
+  const submitResult = await step.run(`hedra-submit-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['hedra']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+    return submitHedraGeneration({
+      userId,
+      apiKey: keys.hedra!,
+      aiModelId: config.modelParam,
+      startKeyframeId,
+      // Polish-21 Commit 2: `voiceId` field carries the Hedra voice
+      // NAME (roster's `id` field), not a UUID. Character 3's API
+      // contract for names-vs-UUIDs is unverified; the client's
+      // loud-log on first submit surfaces a rejection cleanly.
+      tts: { voiceId: voice.id, text: script },
+      textPrompt: sceneDescription,
+      resolution: '720p',
+      aspectRatio: '9:16',
+      generationJobId: jobId,
+    });
+  });
+  if (!submitResult.ok || !submitResult.generationId) {
+    return {
+      index: variantIndex,
+      ok: false,
+      costUsd: cost,
+      error:
+        'errorMessage' in submitResult
+          ? (submitResult.errorMessage ?? 'Hedra submit failed')
+          : 'error' in submitResult
+            ? submitResult.error
+            : 'Hedra submit failed',
+    };
+  }
+  const generationId = submitResult.generationId;
+
+  // Step 7: poll until terminal.
+  await step.sleep(`hedra-warmup-${variantIndex}`, `${HEDRA_POLL_WARMUP_SECONDS}s`);
+  let downloadUrl: string | undefined;
+  let outputAssetId: string | undefined;
+  let pollError: string | undefined;
+  for (let attempt = 0; attempt < HEDRA_POLL_MAX_ATTEMPTS; attempt++) {
+    const poll = await step.run(`hedra-poll-${variantIndex}-${attempt}`, async () => {
+      let keys;
+      try {
+        keys = await loadDecryptedKeys(userId, ['hedra']);
+      } catch (err) {
+        if (err instanceof MissingProviderKeyError)
+          return { ok: false as const, error: err.message };
+        throw err;
+      }
+      return pollHedraGeneration({
+        userId,
+        apiKey: keys.hedra!,
+        generationId,
+        generationJobId: jobId,
+      });
+    });
+    if (!('status' in poll)) {
+      pollError = 'error' in poll ? poll.error : 'Hedra poll failed with no status';
+      break;
+    }
+    if (!poll.ok) {
+      pollError = poll.errorMessage ?? 'Hedra poll failed';
+      break;
+    }
+    if (poll.status === 'error') {
+      pollError = poll.errorMessage ?? 'Hedra reported error';
+      break;
+    }
+    if (poll.status === 'complete') {
+      if (poll.downloadUrl) {
+        downloadUrl = poll.downloadUrl;
+        outputAssetId = poll.assetId;
+        break;
+      }
+      pollError = poll.errorMessage ?? 'Hedra complete without download URL';
+      break;
+    }
+    // queued / processing / pending → keep polling
+    await step.sleep(`hedra-wait-${variantIndex}-${attempt}`, `${HEDRA_POLL_INTERVAL_SECONDS}s`);
+  }
+
+  // Bill on submit-to-terminal even if we time out — Hedra charges
+  // credits when Character 3 starts, not when we retrieve the output.
+  cost += targetSeconds * config.usdPerSecond;
+
+  if (!downloadUrl) {
+    console.log(
+      `[generate-video-variant] variant ${variantIndex} (hedra): timed out after ` +
+        `${HEDRA_POLL_MAX_ATTEMPTS} polls. generationId=${generationId} ` +
+        `last_error=${pollError ?? 'unset'}`,
+    );
+    return {
+      index: variantIndex,
+      ok: false,
+      costUsd: cost,
+      error:
+        `Hedra generation ${generationId} did not reach terminal state within ` +
+        `${HEDRA_POLL_MAX_ATTEMPTS} polls.` +
+        (pollError ? ` Last error: ${pollError}` : ''),
+    };
+  }
+
+  // Step 8: mirror the mp4 to Supabase Storage.
+  const upload = await step.run(`hedra-upload-video-${variantIndex}`, async () =>
+    uploadGeneratedVideoFromUrl({
+      userId,
+      jobId,
+      remoteUrl: downloadUrl,
+      filename: `video-${model.id}-${variantIndex}-composite`,
+    }),
+  );
+
+  // Step 9: write generated_creatives composite row. Hedra is
+  // single-call so isClipPart: false and no per-segment rows.
+  await step.run(`hedra-insert-composite-${variantIndex}`, async () => {
+    const db = getDb();
+    await db.insert(schema.generatedCreatives).values({
+      userId,
+      generationJobId: jobId,
+      fileUrl: upload.publicUrl,
+      aspectRatio: '9:16',
+      status: 'ready_for_review',
+      format: `video_${model.id}`,
+      isClipPart: false,
+      generationMetadata: {
+        variant_index: variantIndex,
+        model_id: model.id,
+        provider_id: config.providerId,
+        hedra_generation_id: generationId,
+        hedra_input_asset_id: startKeyframeId,
+        hedra_output_asset_id: outputAssetId ?? null,
+        reference_image_url: referenceImageUrl ?? null,
+        voice_id: voice.id,
+        voice_label: voice.label,
+        voice_gender: voice.gender,
+        voice_age: voice.age,
+        text_prompt: sceneDescription,
+        script,
+        duration_seconds: targetSeconds,
+        segment_count_requested: 1,
+        segment_count_generated: 1,
+        stitched: false,
+      },
+    });
+  });
+
+  return { index: variantIndex, ok: true, costUsd: cost, fileUrl: upload.publicUrl };
+}
+
+/**
+ * Pick a voice for this variant. Deterministic per (jobId, variantCount)
+ * — retries of the same job produce identical picks. Falls back to
+ * `getDefaultHedraVoice()` when pickHedraVoicesForBatch returns fewer
+ * entries than expected (defensive; the roster is fixed at 6).
+ */
+export function pickHedraVoiceForVariant(input: {
+  variantIndex: number;
+  variantCount: number;
+  jobId: string;
+}): HedraVoiceRosterEntry {
+  const offset = computeHedraVoiceOffsetForJob(input.jobId);
+  const picks = pickHedraVoicesForBatch(Math.max(1, input.variantCount), offset);
+  if (picks.length > 0) {
+    return picks[input.variantIndex % picks.length]!;
+  }
+  const fallback = getDefaultHedraVoice();
+  if (!fallback) {
+    throw new Error('Hedra voice roster returned no voices and no default is set.');
+  }
+  return fallback;
+}
+
+/**
+ * Polish-21 Commit 2: Claude ad-spec for Hedra Character 3.
+ *
+ * Character 3 produces motion from the audio track — long camera
+ * choreography prompts fight the model. This prompt asks for a
+ * SHORT (~50-80 word) scene description + a matching script, one
+ * scene per variant (no segments[] fan-out).
+ *
+ * Dropped from the Polish-20.0.3 kie.ai prompt:
+ *   - segments[] structure (Character 3 is single-call)
+ *   - sound_texture field (Hedra handles audio via native TTS)
+ *   - word-count calibration per segment (single-call = fixed length
+ *     from audio duration, not from prompt word count)
+ *   - speaker attribution boilerplate ("She says: ..." templates)
+ *   - motion / camera choreography beats
+ *
+ * Kept:
+ *   - Polish-19.4.2 verbatim source-script preservation
+ *   - Polish-20.0.3 sanitized source_analysis (no draft_prompt leak)
+ *   - Photoreal amateur smartphone selfie aesthetic anchor
+ */
+async function runClaudeAdSpecHedra(input: {
+  userId: string;
+  jobId: string;
+  variantIndex: number;
+  variantCount: number;
+  jobMetadata: Record<string, unknown> | null;
+  model: VideoModel;
+}): Promise<
+  | { ok: true; spec: VideoAdSpecHedra; costUsd: number }
+  | { ok: false; error: string; costUsd: number }
+> {
+  const { userId, jobId, variantIndex, variantCount, jobMetadata, model } = input;
+  let keys;
+  try {
+    keys = await loadDecryptedKeys(userId, ['claude']);
+  } catch (err) {
+    if (err instanceof MissingProviderKeyError) {
+      return { ok: false, error: err.message, costUsd: 0 };
+    }
+    throw err;
+  }
+
+  const sourceScriptVerbatim = extractSourceScriptVerbatim(jobMetadata);
+  const sanitizedSourceAnalysis = sanitizeSourceAnalysisForClaude(jobMetadata);
+
+  const systemPrompt =
+    `You write ${model.displayName} scene prompts for short UGC talking-head video ads. ` +
+    `Output ONLY valid JSON matching the schema below — no markdown fences, no preamble, ` +
+    `no trailing prose.\n\n` +
+    `REQUIRED SCHEMA:\n` +
+    `{\n` +
+    `  "scene": {\n` +
+    `    "scene_description": "50-80 words describing setting + character + tone + framing + lighting. ONE paragraph, no bracketed sections.",\n` +
+    `    "script": "The words the character speaks aloud (this is TTS audio, not on-screen text)."\n` +
+    `  }\n` +
+    `}\n\n` +
+    `HOW ${model.displayName} WORKS (context so you write for the model, not against it):\n` +
+    `- Character 3 is an image-to-talking-avatar model. It receives ONE reference image ` +
+    `(a photoreal selfie of the character) + audio TTS of the script, and produces natural ` +
+    `body movement, gestures, head shifts, and phoneme-accurate lip-sync.\n` +
+    `- Motion, camera work, gestures — Character 3 handles all of these FROM THE AUDIO. ` +
+    `Do NOT write camera moves, motion beats, gesture choreography, or shot-list bullets. ` +
+    `Those fight the model.\n` +
+    `- The scene_description is a STATIC scene anchor. Describe what a photo of this ` +
+    `moment would show, then trust Character 3 to animate it.\n\n` +
+    `FORMAT — HARD REQUIREMENTS:\n` +
+    `- scene_description is ONE flowing paragraph. NO bracketed sections. ` +
+    `NO **Camera Shot:**, NO **Actions:**, NO **Dialogue:**, NO **Character:**, ` +
+    `NO "Setting:"/"Lighting:"/"Framing:" labels. If source_analysis contains this ` +
+    `bracketed style, IGNORE it — do NOT copy the structure.\n` +
+    `- 50-80 words for scene_description. Longer = wasted tokens on choreography ` +
+    `Character 3 ignores.\n` +
+    `- The scene_description weaves together (in one paragraph): setting/location, ` +
+    `character (age range, gender, ethnicity, outfit, brief persona hint), tone/energy, ` +
+    `camera framing (chest-up UGC iPhone selfie, tripod-style or hand-held), lighting mood.\n` +
+    `- script is the words spoken aloud only. NO stage directions, NO speaker attribution ` +
+    `("She says:", "He confesses:") — the whole thing IS the speech.\n\n` +
+    `WORKED EXAMPLE (Polish-21 anchor — this is the yapper-style scene + script the ` +
+    `operator manually tested on Hedra Character 3):\n` +
+    `{\n` +
+    `  "scene": {\n` +
+    `    "scene_description": "A 34-year-old woman with light brown hair sits in the driver's seat of a parked dark-interior SUV, chest-up dashboard-mounted phone framing, tripod-style stability. Warm afternoon sunlight through the driver's side window catches her face. Confessional TikTok tone, like venting to a friend on FaceTime. Raw iPhone selfie aesthetic, no filter, casual outfit.",\n` +
+    `    "script": "I swear to god, I was spending $80 a month on face serums that did NOTHING. Zero. Nada. Like, honestly? I finally figured it out — and I wish I'd known sooner."\n` +
+    `  }\n` +
+    `}\n\n` +
+    `SOURCE-SCRIPT PRESERVATION (Polish-19.4.2 rule — this is NOT verbatim quoting, ` +
+    `preserve what MADE the source ad win while varying the wrapper):\n` +
+    `- PRESERVE from source: hook openers ("I swear to god", "You will NOT believe"), ` +
+    `dollar amounts, ALL CAPS emphasis words, filler words (like, honestly, literally), ` +
+    `ellipses, natural stammers, key product/offer phrases.\n` +
+    `- ADAPT: character demographics (age, gender, ethnicity, outfit), setting/location, ` +
+    `non-essential specifics — for variant differentiation.\n\n` +
+    `HARD CONSTRAINTS:\n` +
+    `- Single character, single static scene, single camera framing.\n` +
+    `- Photoreal amateur smartphone selfie aesthetic. NOT 3D, NOT animated, NOT CGI, ` +
+    `NOT cinematic.\n` +
+    `- Character is a fictional everyperson with no resemblance to any public figure.\n` +
+    `- The script is what gets SPOKEN. No stage directions, no on-screen text, no captions.\n\n` +
+    `THIS REQUEST: this is variant ${variantIndex} of ${variantCount} in a batch. ` +
+    `Differentiate from other variants by adapting the character demographics + setting ` +
+    `+ tone while preserving the source's hooks and key phrases. Target duration is set by ` +
+    `the audio Character 3 generates from your script — aim for a script whose read ` +
+    `length matches the source ad pacing.`;
+
+  const userMessage = JSON.stringify({
+    source_script_verbatim: sourceScriptVerbatim,
+    source_analysis: sanitizedSourceAnalysis,
+    model_id: model.id,
+    variant_index: variantIndex,
+    variant_count: variantCount,
+  });
+  const claude = await callClaude({
+    userId,
+    apiKey: keys.claude!,
+    systemPrompt,
+    userMessage,
+    // 50-80 word scene + a short script ≈ 300 tokens; cap modestly.
+    maxTokens: 2048,
+    generationJobId: jobId,
+  });
+  if (!claude.ok) {
+    return {
+      ok: false,
+      error: claude.errorMessage ?? 'Claude Hedra ad-spec call failed',
+      costUsd: claude.costUsd,
+    };
+  }
+  const rawText = (claude.text ?? '').trim();
+  if (!rawText) {
+    return { ok: false, error: 'Claude returned an empty Hedra ad spec', costUsd: claude.costUsd };
+  }
+  const parsed = parseVideoAdSpecHedra(rawText);
+  if (parsed) return { ok: true, spec: parsed, costUsd: claude.costUsd };
+  console.log(
+    `[generate-video-variant] variant ${variantIndex} (hedra): scene JSON failed to parse; ` +
+      `raw text: ${rawText.slice(0, 500)}`,
+  );
+  return {
+    ok: false,
+    error: 'Claude returned an unparseable Hedra scene spec',
+    costUsd: claude.costUsd,
+  };
 }
 
 // -------------------------------------------------------------------

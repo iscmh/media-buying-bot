@@ -365,79 +365,129 @@ export const MODEL_PROVIDER_CONFIGS: readonly ModelProviderConfig[] = [
 ];
 
 // -------------------------------------------------------------------
-// Polish-21: Hedra voice roster
+// Polish-21 Commit 2: Hedra voice roster (named voices)
 // -------------------------------------------------------------------
 //
 // Native-TTS voice pool the worker rotates through for a variant
 // batch. For a 5-variant generation the worker picks 5 distinct
 // voices from this list (varied gender / age / accent) so each
-// variant lands a different voice + different Nano Banana reference
-// image — max ad-test diversity per batch.
+// variant lands a different voice + a different Nano Banana
+// reference image — max ad-test diversity per batch.
 //
-// The UUIDs below are PLACEHOLDERS. Before flipping Hedra live the
-// operator runs `pnpm --filter @mbb/jobs hedra:voices` (see
-// scripts/hedra-list-voices.ts), picks 5-8 well-matched voices, and
-// pastes the real UUIDs here. This mirrors the pattern used for the
-// Character 3 model UUID: hardcoded from a one-time authenticated
-// lookup rather than a runtime /voices call.
+// The `id` field carries Hedra's voice NAME rather than a UUID at
+// Polish-21 launch. Operator's GET /voices returned an empty array
+// during Commit 1 investigation, so Commit 2 ships with names and
+// lets the API surface accept-or-reject on the first live call
+// (loud-logged so a rejection is obvious). If Hedra rejects names,
+// Polish-21 hotfix hunts UUIDs via browser dev tools and swaps them
+// in here.
 //
-// If the roster is left with placeholder UUIDs, the worker's Hedra
-// branch refuses to run and surfaces a clear "curate Hedra voices"
-// error to the operator.
+// Matilda is flagged isDefault=true — the 40+ mom audience is the
+// core UGC ad-test persona and Matilda's warm-narration timbre is
+// the safest fallback when the roster shape breaks.
 
 export interface HedraVoiceRosterEntry {
-  /** Hedra voice UUID from GET /voices. */
+  /**
+   * Hedra voice identifier. Passed as the `voice_id` field on
+   * POST /generations audio_generation. At Polish-21 launch this
+   * holds the voice NAME (Hedra API contract for names-vs-UUIDs is
+   * unverified — see file-level comment). Post-Polish-21-hotfix
+   * this will hold the UUID.
+   */
   id: string;
   /** Free-form display label — used in logs and worker debug output. */
   label: string;
-  /** Rough persona tag for ad-test diversity picking. */
-  persona: string;
+  /** One-sentence positioning; goes into generation metadata for forensics. */
+  description: string;
+  gender: 'female' | 'male';
+  /** Rough age bracket for ad-test diversity picking. */
+  age: 'young' | 'middle_aged';
+  /** True on exactly ONE roster entry — the safe-fallback voice. */
+  isDefault?: true;
 }
 
-export const HEDRA_VOICE_ROSTER_PLACEHOLDER_PREFIX = 'PLACEHOLDER-';
-
+/**
+ * Polish-21 Commit 2: operator-curated Hedra voice roster. Names
+ * lifted from Hedra's public voice library (verified via
+ * hedra.com/app during Commit 1 investigation session). Matilda is
+ * the 40+ mom audience default; the other five give
+ * gender × age spread for 5-variant batch diversity.
+ *
+ * Extending the roster is a one-line edit — pickHedraVoicesForBatch
+ * rotates through whatever's here.
+ */
 export const HEDRA_VOICE_ROSTER: readonly HedraVoiceRosterEntry[] = [
   {
-    id: 'PLACEHOLDER-female-20s-american',
-    label: 'Casual 20s female (American)',
-    persona: 'female_20s_american_casual',
+    id: 'Jessica',
+    label: 'Jessica — young female (conversational, expressive)',
+    description:
+      'Young female, conversational + expressive. Good for hooks and confessional TikTok energy.',
+    gender: 'female',
+    age: 'young',
   },
   {
-    id: 'PLACEHOLDER-male-20s-american',
-    label: 'Casual 20s male (American)',
-    persona: 'male_20s_american_casual',
+    id: 'Will',
+    label: 'Will — young male (friendly, social media)',
+    description: 'Young male, friendly + social-media natural. Good for casual bro-yapper UGC.',
+    gender: 'male',
+    age: 'young',
   },
   {
-    id: 'PLACEHOLDER-female-40s-american',
-    label: 'Casual 40s female (American)',
-    persona: 'female_40s_american_casual',
+    id: 'Matilda',
+    label: 'Matilda — middle-aged female (friendly, narration)',
+    description:
+      'Middle-aged female, friendly + narrative. 40+ mom audience default — safest fallback voice.',
+    gender: 'female',
+    age: 'middle_aged',
+    isDefault: true,
   },
   {
-    id: 'PLACEHOLDER-male-40s-american',
-    label: 'Casual 40s male (American)',
-    persona: 'male_40s_american_casual',
+    id: 'Todd',
+    label: 'Todd — middle-aged male (advertisement)',
+    description: 'Middle-aged male, advertisement register. Good for authority/pitch beats.',
+    gender: 'male',
+    age: 'middle_aged',
   },
   {
-    id: 'PLACEHOLDER-female-30s-british',
-    label: 'Casual 30s female (British)',
-    persona: 'female_30s_british_casual',
+    id: 'Sarah',
+    label: 'Sarah — young female (soft, news)',
+    description:
+      'Young female, soft + news-cadence. Good for calmer confessional / storytelling variants.',
+    gender: 'female',
+    age: 'young',
   },
   {
-    id: 'PLACEHOLDER-male-30s-american',
-    label: 'Casual 30s male (American, varied)',
-    persona: 'male_30s_american_varied',
+    id: 'Jamal',
+    label: 'Jamal — young male (social media, chill)',
+    description: 'Young male, social-media chill. Good for laid-back conversational hooks.',
+    gender: 'male',
+    age: 'young',
   },
 ];
 
 /**
- * True when every entry in the roster is still a PLACEHOLDER — the
- * worker refuses to submit generations while this returns true so
- * operators can't accidentally ship placeholder UUIDs to Hedra.
+ * Returns the entry marked `isDefault: true`. Falls back to the
+ * first roster entry if the flag is missing (defensive — the roster
+ * is hand-curated so the invariant should hold, but tests pin it).
+ */
+export function getDefaultHedraVoice(
+  roster: readonly HedraVoiceRosterEntry[] = HEDRA_VOICE_ROSTER,
+): HedraVoiceRosterEntry | undefined {
+  if (roster.length === 0) return undefined;
+  return roster.find((v) => v.isDefault === true) ?? roster[0];
+}
+
+/**
+ * True when the roster is EMPTY. The Polish-21 Commit 2 roster is
+ * hand-populated with named voices, so this returns false in
+ * production. Kept as a defensive gate on the worker's Hedra
+ * branch — a future accidental roster wipe would surface a clear
+ * error instead of a silent no-op.
  */
 export function isHedraVoiceRosterUncurated(
   roster: readonly HedraVoiceRosterEntry[] = HEDRA_VOICE_ROSTER,
 ): boolean {
-  return roster.every((v) => v.id.startsWith(HEDRA_VOICE_ROSTER_PLACEHOLDER_PREFIX));
+  return roster.length === 0;
 }
 
 /**
@@ -460,6 +510,21 @@ export function pickHedraVoicesForBatch(
     picks.push(roster[(start + i) % roster.length]!);
   }
   return picks;
+}
+
+/**
+ * Deterministic offset for pickHedraVoicesForBatch derived from the
+ * job id. Two concurrent batches with different job ids land
+ * different voices on variant 0 → more test surface across the
+ * operator's rolling batches. Same job id retried → identical
+ * picks, so an Inngest retry produces the same output.
+ */
+export function computeHedraVoiceOffsetForJob(jobId: string): number {
+  let hash = 0;
+  for (let i = 0; i < jobId.length; i++) {
+    hash = (hash * 31 + jobId.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
 }
 
 // -------------------------------------------------------------------
