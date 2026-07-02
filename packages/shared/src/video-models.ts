@@ -28,8 +28,16 @@
  * @mbb/ai-providers here.
  */
 
-export type VideoModelId = 'seedance_1_5_pro' | 'kling_3_standard' | 'seedance_2';
-export type VideoProviderId = 'kie_ai' | 'fal_ai' | 'wavespeed' | 'atlas_cloud';
+export type VideoModelId =
+  | 'seedance_1_5_pro'
+  | 'kling_3_standard'
+  | 'seedance_2'
+  // Polish-21: Hedra Character 3 image-to-talking-avatar. Sole
+  // user-facing model at launch — the seedance/kling entries stay
+  // in the descriptor through Polish-21 Commit 3 for backwards
+  // compat, then vanish alongside kie-video.ts.
+  | 'hedra_character_3';
+export type VideoProviderId = 'kie_ai' | 'fal_ai' | 'wavespeed' | 'atlas_cloud' | 'hedra';
 export type VideoModelQualityTier = 'budget' | 'recommended' | 'premium';
 
 /**
@@ -81,18 +89,29 @@ export interface VideoModel {
    * Per-call duration cap. Longer targets are chunked into N calls
    * (ceil(target / maxSingleCallSeconds)) and stitched via the
    * Polish-19.3 Replicate ffmpeg-concat helper.
+   *
+   * Polish-21: single-call models (Hedra Character 3, 90s cap) set
+   * this to the full cap and the worker skips the concat step — the
+   * ratio is what gates fan-out, not a per-model flag.
    */
   maxSingleCallSeconds: number;
   supportedResolutions: readonly string[];
   supportedAspectRatios: readonly string[];
   /**
-   * Whether the model requires a reference image input. None of the
-   * Polish-20 launch models REQUIRE it — all support text-to-video.
-   * Kept as a flag for future models (Kling Element mode / Seedance
-   * 2's `@Image1` marker mode) that may.
+   * Whether the model requires a reference image input. Polish-21:
+   * hedra_character_3 REQUIRES the reference image (`start_keyframe`)
+   * — the worker's Nano Banana Pro step gates on this flag before
+   * submitting.
    */
   requiresReferenceImage: boolean;
   supportsAudio: boolean;
+  /**
+   * Polish-21: hidden from the form's model picker but still valid
+   * for existing in-flight jobs. Used to phase out models while the
+   * worker still knows how to look them up. Defaults to false
+   * (visible in the picker) when omitted.
+   */
+  hiddenFromLauncher?: boolean;
 }
 
 export interface VideoProvider {
@@ -132,6 +151,10 @@ export interface ModelProviderConfig {
 // -------------------------------------------------------------------
 
 export const VIDEO_MODELS: readonly VideoModel[] = [
+  // Polish-21: seedance/kling entries stay hidden from the launcher
+  // (hiddenFromLauncher: true) so existing metadata / dispatch code
+  // paths still typecheck through Commit 2. Commit 3 physically
+  // removes them alongside packages/ai-providers/src/kie-video.ts.
   {
     id: 'seedance_1_5_pro',
     displayName: 'Seedance 1.5 Pro',
@@ -143,6 +166,7 @@ export const VIDEO_MODELS: readonly VideoModel[] = [
     supportedAspectRatios: ['9:16', '16:9', '1:1', '3:4', '4:3', '21:9'],
     requiresReferenceImage: false,
     supportsAudio: true,
+    hiddenFromLauncher: true,
   },
   {
     id: 'kling_3_standard',
@@ -151,10 +175,11 @@ export const VIDEO_MODELS: readonly VideoModel[] = [
     description:
       'Best value. Materially better than Seedance 1.5 Pro at ~3× the price. The default recommendation for most UGC ads.',
     maxSingleCallSeconds: 15,
-    supportedResolutions: ['720p'], // Polish-20 launch fixes mode=std (720p). Pro/4K exposed in Polish-21+.
+    supportedResolutions: ['720p'],
     supportedAspectRatios: ['9:16', '16:9', '1:1'],
     requiresReferenceImage: false,
     supportsAudio: true,
+    hiddenFromLauncher: true,
   },
   {
     id: 'seedance_2',
@@ -167,6 +192,25 @@ export const VIDEO_MODELS: readonly VideoModel[] = [
     supportedAspectRatios: ['9:16', '16:9', '1:1', '3:4', '4:3', '21:9'],
     requiresReferenceImage: false,
     supportsAudio: true,
+    hiddenFromLauncher: true,
+  },
+  {
+    // Polish-21: Hedra Character 3. Image-to-talking-avatar. Single
+    // call, up to 90s, no character drift, tight lip-sync. Reference
+    // image comes from Nano Banana Pro; audio comes from Hedra native
+    // TTS (Polish-21 launch) or ElevenLabs BYOK (Polish-22). Because
+    // it's single-call the worker skips the multi-segment fan-out +
+    // Replicate concat entirely.
+    id: 'hedra_character_3',
+    displayName: 'Hedra Character 3',
+    qualityTier: 'recommended',
+    description:
+      'AI-generated talking avatar from a character reference image. Natural body movement, tight lip-sync, no character drift across variants.',
+    maxSingleCallSeconds: 90,
+    supportedResolutions: ['540p', '720p'],
+    supportedAspectRatios: ['9:16', '16:9', '1:1'],
+    requiresReferenceImage: true,
+    supportsAudio: true,
   },
 ];
 
@@ -174,6 +218,9 @@ export const VIDEO_PROVIDERS: readonly VideoProvider[] = [
   {
     id: 'kie_ai',
     displayName: 'kie.ai',
+    // Polish-21: kie.ai stays as a live-at-launch entry through
+    // Commit 3 (which removes it) so the Polish-20 seedance/kling
+    // configs still resolve to a provider during the transition.
     liveAtLaunch: true,
     requiredCredentialProvider: 'kie_ai',
   },
@@ -194,6 +241,16 @@ export const VIDEO_PROVIDERS: readonly VideoProvider[] = [
     displayName: 'Atlas Cloud',
     liveAtLaunch: false,
     requiredCredentialProvider: 'atlas_cloud',
+  },
+  {
+    // Polish-21: Hedra Character 3 provider. BYOK key in
+    // ai_provider_connections under provider='hedra' (see migration
+    // 0032). Worker's Hedra branch loads it via
+    // loadAiProviderKeys(userId, ['hedra']).
+    id: 'hedra',
+    displayName: 'Hedra',
+    liveAtLaunch: true,
+    requiredCredentialProvider: 'hedra',
   },
 ];
 
@@ -270,7 +327,140 @@ export const MODEL_PROVIDER_CONFIGS: readonly ModelProviderConfig[] = [
       },
     },
   },
+  {
+    // Polish-21: Hedra Character 3 config. The Hedra API uses a
+    // different shape than kie.ai (asset upload + generation submit +
+    // /status poll rather than createTask + recordInfo), so
+    // `inputShape` here carries LEGACY-shaped placeholder field names
+    // — the hedra-video client builds the real body from its own
+    // typed input struct and IGNORES `inputShape`. The block is kept
+    // populated so the ModelProviderConfig type check passes and the
+    // per-model cost math still resolves the entry.
+    //
+    // ai_model_id is hardcoded here (matches the official
+    // hedra-labs/hedra-api-starter override, line 139). If Hedra
+    // rotates the Character 3 UUID, edit this string.
+    //
+    // usdPerSecond: 0.033 per Polish-21 spec — base rate at Hedra Pro
+    // tier (~6 credits/sec × $0.0055/credit). Actual per-credit rate
+    // depends on the user's Hedra plan; the estimator surfaces a
+    // range hint in the UI so operators aren't quoted a false number.
+    modelId: 'hedra_character_3',
+    providerId: 'hedra',
+    usdPerSecond: 0.033,
+    endpointUrl: 'https://api.hedra.com/web-app/public',
+    modelParam: 'd1dd37a3-e39a-4854-a298-6510289f9cf2',
+    inputShape: {
+      promptField: 'text_prompt',
+      imageField: 'start_keyframe_id',
+      audioField: '(hedra_manages_audio)',
+      durationField: 'duration_ms',
+      durationFormat: 'number',
+      aspectRatioField: 'aspect_ratio',
+      extras: {
+        resolution: '720p',
+      },
+    },
+  },
 ];
+
+// -------------------------------------------------------------------
+// Polish-21: Hedra voice roster
+// -------------------------------------------------------------------
+//
+// Native-TTS voice pool the worker rotates through for a variant
+// batch. For a 5-variant generation the worker picks 5 distinct
+// voices from this list (varied gender / age / accent) so each
+// variant lands a different voice + different Nano Banana reference
+// image — max ad-test diversity per batch.
+//
+// The UUIDs below are PLACEHOLDERS. Before flipping Hedra live the
+// operator runs `pnpm --filter @mbb/jobs hedra:voices` (see
+// scripts/hedra-list-voices.ts), picks 5-8 well-matched voices, and
+// pastes the real UUIDs here. This mirrors the pattern used for the
+// Character 3 model UUID: hardcoded from a one-time authenticated
+// lookup rather than a runtime /voices call.
+//
+// If the roster is left with placeholder UUIDs, the worker's Hedra
+// branch refuses to run and surfaces a clear "curate Hedra voices"
+// error to the operator.
+
+export interface HedraVoiceRosterEntry {
+  /** Hedra voice UUID from GET /voices. */
+  id: string;
+  /** Free-form display label — used in logs and worker debug output. */
+  label: string;
+  /** Rough persona tag for ad-test diversity picking. */
+  persona: string;
+}
+
+export const HEDRA_VOICE_ROSTER_PLACEHOLDER_PREFIX = 'PLACEHOLDER-';
+
+export const HEDRA_VOICE_ROSTER: readonly HedraVoiceRosterEntry[] = [
+  {
+    id: 'PLACEHOLDER-female-20s-american',
+    label: 'Casual 20s female (American)',
+    persona: 'female_20s_american_casual',
+  },
+  {
+    id: 'PLACEHOLDER-male-20s-american',
+    label: 'Casual 20s male (American)',
+    persona: 'male_20s_american_casual',
+  },
+  {
+    id: 'PLACEHOLDER-female-40s-american',
+    label: 'Casual 40s female (American)',
+    persona: 'female_40s_american_casual',
+  },
+  {
+    id: 'PLACEHOLDER-male-40s-american',
+    label: 'Casual 40s male (American)',
+    persona: 'male_40s_american_casual',
+  },
+  {
+    id: 'PLACEHOLDER-female-30s-british',
+    label: 'Casual 30s female (British)',
+    persona: 'female_30s_british_casual',
+  },
+  {
+    id: 'PLACEHOLDER-male-30s-american',
+    label: 'Casual 30s male (American, varied)',
+    persona: 'male_30s_american_varied',
+  },
+];
+
+/**
+ * True when every entry in the roster is still a PLACEHOLDER — the
+ * worker refuses to submit generations while this returns true so
+ * operators can't accidentally ship placeholder UUIDs to Hedra.
+ */
+export function isHedraVoiceRosterUncurated(
+  roster: readonly HedraVoiceRosterEntry[] = HEDRA_VOICE_ROSTER,
+): boolean {
+  return roster.every((v) => v.id.startsWith(HEDRA_VOICE_ROSTER_PLACEHOLDER_PREFIX));
+}
+
+/**
+ * Deterministic voice picker: for a batch of N variants, returns N
+ * voice entries rotating through the roster (wraps if N > roster
+ * length). Same variantCount + roster → same picks, so retries of
+ * the same job produce identical output. First entry starts at the
+ * `offset` position — used to shuffle across concurrent batches so
+ * the same voice doesn't always win variant 0.
+ */
+export function pickHedraVoicesForBatch(
+  variantCount: number,
+  offset: number = 0,
+  roster: readonly HedraVoiceRosterEntry[] = HEDRA_VOICE_ROSTER,
+): HedraVoiceRosterEntry[] {
+  if (variantCount <= 0 || roster.length === 0) return [];
+  const picks: HedraVoiceRosterEntry[] = [];
+  const start = ((offset % roster.length) + roster.length) % roster.length;
+  for (let i = 0; i < variantCount; i++) {
+    picks.push(roster[(start + i) % roster.length]!);
+  }
+  return picks;
+}
 
 // -------------------------------------------------------------------
 // Lookup + math helpers

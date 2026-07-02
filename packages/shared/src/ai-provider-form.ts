@@ -27,9 +27,13 @@ const HEYGEN_KEY_PATTERN = /^[A-Za-z0-9_=-]{20,256}$/;
 // Polish-8: new providers.
 const REPLICATE_KEY_PATTERN = /^r8_[A-Za-z0-9]{32,128}$/;
 const OPENAI_KEY_PATTERN = /^sk-[A-Za-z0-9_-]{20,256}$/;
+// Polish-21: Hedra API keys are opaque tokens from hedra.com/api-profile.
+// Observed shape is 20+ alphanumeric with occasional _-. — we accept a
+// wide superset since Hedra hasn't documented an exact charset.
+const HEDRA_KEY_PATTERN = /^[A-Za-z0-9_.=-]{20,256}$/;
 export const AiProviderKeyInputSchema = z
   .object({
-    provider: z.enum(['arcads', 'heygen', 'creatify', 'replicate', 'openai']),
+    provider: z.enum(['arcads', 'heygen', 'creatify', 'replicate', 'openai', 'hedra']),
     apiKey: z.string().trim().min(1, 'Paste your API key.'),
   })
   .superRefine((value, ctx) => {
@@ -56,6 +60,10 @@ export const AiProviderKeyInputSchema = z
       case 'openai':
         pattern = OPENAI_KEY_PATTERN;
         hint = 'OpenAI keys start with sk- followed by 20+ chars.';
+        break;
+      case 'hedra':
+        pattern = HEDRA_KEY_PATTERN;
+        hint = 'Hedra keys are 20+ chars from hedra.com/api-profile.';
         break;
     }
     if (!pattern.test(value.apiKey)) {
@@ -128,6 +136,14 @@ export const AI_PROVIDER_META: Record<
     apiDocsUrl: 'https://platform.openai.com/docs/api-reference',
     verificationMethod: 'api',
   },
+  hedra: {
+    label: 'Hedra',
+    description:
+      'Character 3 image-to-talking-avatar. Single-call full video, tight lip-sync, no character drift across variants.',
+    pricingUrl: 'https://www.hedra.com/pricing',
+    apiDocsUrl: 'https://www.hedra.com/docs',
+    verificationMethod: 'api',
+  },
 };
 
 /**
@@ -140,4 +156,12 @@ export const AI_PROVIDER_META: Record<
 // not ai_provider_connections — the underlying ai_provider enum doesn't
 // include 'gemini' because Gemini is a tool provider in the data model.
 // The connect cards exposed here are the ones that map to ai_provider_connections rows.
-export const CONNECTABLE_AI_PROVIDERS: AIProviderName[] = ['heygen', 'replicate', 'openai'];
+// Polish-21: hedra added as the primary video-gen provider for the
+// Character 3 pipeline. Order matters — hedra first so the connect
+// page surfaces it above the legacy heygen/replicate/openai cards.
+export const CONNECTABLE_AI_PROVIDERS: AIProviderName[] = [
+  'hedra',
+  'heygen',
+  'replicate',
+  'openai',
+];

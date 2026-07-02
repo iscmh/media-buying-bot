@@ -311,25 +311,47 @@ function estimateByVideoModel(input: EstimateByVideoModelInput): CostEstimate {
     return { estimateUsd: 0, breakdown: [] };
   }
 
+  // Polish-21: Hedra Character 3 bills by ACTUAL audio duration, not
+  // by the per-call cap. maxSingleCallSeconds=90 is a hard limit, not
+  // a billing unit. The rest of the descriptor (seedance / kling)
+  // charges the full per-call cap even when the target is shorter,
+  // so we branch on modelId here rather than adding a
+  // billsByActualDuration flag to VideoModel.
+  const billsByActualDuration = modelId === 'hedra_character_3';
+
   const segmentCount = computeSegmentCountForModel(model, target);
-  const billedSecondsPerVariant = segmentCount * model.maxSingleCallSeconds;
+  const billedSecondsPerVariant = billsByActualDuration
+    ? Math.max(1, Math.round(target))
+    : segmentCount * model.maxSingleCallSeconds;
   const totalSegments = variantCount * segmentCount;
 
   breakdown.push({
     item: `Claude segments script (${variantCount} × $${VIDEO_MODEL_CLAUDE_SCRIPT_USD.toFixed(2)})`,
     cost: round4(variantCount * VIDEO_MODEL_CLAUDE_SCRIPT_USD),
   });
-  breakdown.push({
-    item:
-      `${model.displayName} (${totalSegments} segment${totalSegments === 1 ? '' : 's'} × ` +
-      `${model.maxSingleCallSeconds}s × $${config.usdPerSecond.toFixed(3)}/sec)`,
-    cost: round4(variantCount * billedSecondsPerVariant * config.usdPerSecond),
-  });
-  if (segmentCount > 1) {
+  if (billsByActualDuration) {
+    // Polish-21: Hedra ships one video per variant with cost driven
+    // by audio length. Present as "variants × seconds" rather than
+    // "segments × per-call cap".
     breakdown.push({
-      item: `Replicate ffmpeg-concat (${variantCount} × $${VIDEO_MODEL_STITCH_USD.toFixed(2)})`,
-      cost: round4(variantCount * VIDEO_MODEL_STITCH_USD),
+      item:
+        `${model.displayName} (${variantCount} × ${billedSecondsPerVariant}s × ` +
+        `~$${config.usdPerSecond.toFixed(3)}/sec)`,
+      cost: round4(variantCount * billedSecondsPerVariant * config.usdPerSecond),
     });
+  } else {
+    breakdown.push({
+      item:
+        `${model.displayName} (${totalSegments} segment${totalSegments === 1 ? '' : 's'} × ` +
+        `${model.maxSingleCallSeconds}s × $${config.usdPerSecond.toFixed(3)}/sec)`,
+      cost: round4(variantCount * billedSecondsPerVariant * config.usdPerSecond),
+    });
+    if (segmentCount > 1) {
+      breakdown.push({
+        item: `Replicate ffmpeg-concat (${variantCount} × $${VIDEO_MODEL_STITCH_USD.toFixed(2)})`,
+        cost: round4(variantCount * VIDEO_MODEL_STITCH_USD),
+      });
+    }
   }
 
   const estimateUsd = round4(breakdown.reduce((sum, b) => sum + b.cost, 0));

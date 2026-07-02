@@ -13,7 +13,16 @@ export type ConnectionMethod = 'byok' | 'oauth';
 // union just stops surfacing it. arcads / creatify stay for legacy
 // DB rows. Gemini + Claude + Kie.ai live in tool_provider (see
 // /connections/tools), not ai_provider.
-export type AIProviderName = 'arcads' | 'heygen' | 'creatify' | 'replicate' | 'openai';
+export type AIProviderName =
+  | 'arcads'
+  | 'heygen'
+  | 'creatify'
+  | 'replicate'
+  | 'openai'
+  // Polish-21: Hedra Character 3 image-to-talking-avatar. Replaces
+  // the Polish-20 kie.ai 3-model text-to-video pipeline. BYOK key
+  // stored in ai_provider_connections under provider='hedra'.
+  | 'hedra';
 
 export type CampaignObjective = 'CBO' | 'ABO';
 

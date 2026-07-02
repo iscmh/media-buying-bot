@@ -20,6 +20,15 @@ import {
   type VideoProviderId,
 } from '@mbb/shared';
 
+// Polish-21: the simplified form only surfaces launcher-visible
+// models. seedance/kling/seedance_2 are retained in the shared
+// descriptor through Polish-21 Commit 3 (worker + tests still
+// reference their config lookups) but are marked
+// hiddenFromLauncher: true so the picker doesn't show them.
+export const LAUNCHER_VISIBLE_MODELS: readonly VideoModel[] = VIDEO_MODELS.filter(
+  (m) => !m.hiddenFromLauncher,
+);
+
 // Re-export the shared descriptor bits the form component needs so
 // the component file only imports from a single module.
 export {
@@ -101,6 +110,20 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
     return false;
   }
   return true;
+}
+
+/**
+ * Polish-21: when the launcher only surfaces a single model the
+ * picker collapses to an auto-selected default. Callers use this to
+ * decide whether to render the 3-card model picker or just show a
+ * "Model: {name}" line. When the launcher grows a second visible
+ * model (Polish-22 HeyGen candidate) the picker reappears
+ * automatically.
+ */
+export function getSoleLauncherModel(
+  models: readonly VideoModel[] = LAUNCHER_VISIBLE_MODELS,
+): VideoModel | null {
+  return models.length === 1 ? (models[0] ?? null) : null;
 }
 
 /**

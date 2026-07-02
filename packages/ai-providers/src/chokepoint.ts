@@ -38,7 +38,9 @@ export type ProviderName =
   | 'creatify'
   | 'kling'
   | 'replicate'
-  | 'openai';
+  | 'openai'
+  // Polish-21: Hedra Character 3 image-to-talking-avatar.
+  | 'hedra';
 
 export interface CallProviderInput {
   userId: string;

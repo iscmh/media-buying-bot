@@ -57,15 +57,23 @@ describe('Polish-20 Commit 4: buildConnectedProviders surviving slots', () => {
       gemini: { connected: false },
       claude: { connected: false },
       kie_ai: { connected: false },
+      // Polish-21: hedra slot added for the Character 3 pipeline.
+      hedra: { connected: false },
     });
     // Legacy slots removed by Commit 4:
     expect((r as unknown as Record<string, unknown>).kling).toBeUndefined();
     expect((r as unknown as Record<string, unknown>).elevenlabs).toBeUndefined();
   });
+
+  it('Polish-21: hedra slot populates from ai_provider_connections', () => {
+    const rows: AiProviderRow[] = [{ provider: 'hedra', tier: null }];
+    const r = buildConnectedProviders(rows, NO_TOOLS);
+    expect(r.hedra.connected).toBe(true);
+  });
 });
 
-describe('Polish-20 Commit 4: AI_PROVIDER_QUERY_LIST', () => {
-  it('covers only the ai_provider_connections enum values the surviving pipelines consult', () => {
-    expect(new Set(AI_PROVIDER_QUERY_LIST)).toEqual(new Set(['heygen', 'openai']));
+describe('Polish-21: AI_PROVIDER_QUERY_LIST', () => {
+  it('covers heygen + openai + hedra (Polish-21 adds hedra for Character 3)', () => {
+    expect(new Set(AI_PROVIDER_QUERY_LIST)).toEqual(new Set(['heygen', 'openai', 'hedra']));
   });
 });

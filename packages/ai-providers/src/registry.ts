@@ -1,6 +1,7 @@
 import type { AIProviderName } from '@mbb/shared';
 import { ArcadsProvider } from './arcads';
 import { CreatifyProvider } from './creatify';
+import { HedraProvider } from './hedra';
 import { HeyGenProvider } from './heygen';
 import { OpenAIProvider } from './openai-provider';
 import { ReplicateProvider } from './replicate';
@@ -13,6 +14,8 @@ const registry = new Map<AIProviderName, AIProvider>([
   // Polish-8: BYOK verify cards for the providers the new pipelines need.
   ['replicate', new ReplicateProvider()],
   ['openai', new OpenAIProvider()],
+  // Polish-21: Hedra Character 3 image-to-talking-avatar.
+  ['hedra', new HedraProvider()],
 ]);
 
 export function getProvider(name: AIProviderName): AIProvider {

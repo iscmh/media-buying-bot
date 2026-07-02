@@ -25,6 +25,11 @@ export interface ConnectedProviders {
   // ai_provider_connections) — toolProviders is the auth source.
   claude: { connected: boolean };
   kie_ai: { connected: boolean };
+  // Polish-21: Hedra Character 3 BYOK. Lives in
+  // ai_provider_connections under provider='hedra'. Gates the
+  // simplified form's Generate button just like kie.ai did in
+  // Polish-20.
+  hedra: { connected: boolean };
 }
 
 export interface AiProviderRow {
@@ -46,11 +51,13 @@ export function buildConnectedProviders(
     gemini: { connected: toolProviders.has('gemini') },
     claude: { connected: toolProviders.has('claude') },
     kie_ai: { connected: toolProviders.has('kie_ai') },
+    hedra: { connected: byAi.has('hedra') },
   };
 }
 
 /**
  * ai_provider DB enum values the loader queries for. Only the
  * providers the surviving pipelines still consult are listed.
+ * Polish-21: hedra added for the Character 3 pipeline.
  */
-export const AI_PROVIDER_QUERY_LIST = ['heygen', 'openai'] as const;
+export const AI_PROVIDER_QUERY_LIST = ['heygen', 'openai', 'hedra'] as const;

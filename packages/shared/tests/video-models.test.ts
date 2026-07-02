@@ -5,6 +5,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  HEDRA_VOICE_ROSTER,
+  HEDRA_VOICE_ROSTER_PLACEHOLDER_PREFIX,
   MODEL_PROVIDER_CONFIGS,
   VIDEO_DURATION_PRESETS,
   VIDEO_MODELS,
@@ -16,80 +18,131 @@ import {
   getModelProviderConfig,
   getVideoModel,
   getVideoProvider,
+  isHedraVoiceRosterUncurated,
+  pickHedraVoicesForBatch,
   snapToNearestDurationPreset,
   type VideoModelId,
 } from '../src/video-models';
 
-describe('Polish-20: VIDEO_MODELS launch set', () => {
-  it('ships exactly three models: Seedance 1.5 Pro / Kling 3.0 Standard / Seedance 2', () => {
-    expect(VIDEO_MODELS.map((m) => m.id)).toEqual([
+/**
+ * Polish-21: hidden-from-launcher seedance/kling entries are retained
+ * in the descriptor through Commit 3 (worker + tests still reference
+ * their config lookups). These helpers scope the launch-set
+ * assertions to the non-hidden slice so Polish-21's launcher-visible
+ * matrix is the single source of truth.
+ */
+const LAUNCHER_MODELS = VIDEO_MODELS.filter((m) => !m.hiddenFromLauncher);
+const HIDDEN_LEGACY_MODELS = VIDEO_MODELS.filter((m) => m.hiddenFromLauncher);
+
+describe('Polish-21: VIDEO_MODELS launcher-visible set', () => {
+  it('ships exactly one launcher-visible model: Hedra Character 3', () => {
+    expect(LAUNCHER_MODELS.map((m) => m.id)).toEqual(['hedra_character_3']);
+  });
+
+  it('retains three hidden legacy models for backwards compat: seedance_1_5_pro / kling_3_standard / seedance_2', () => {
+    // Polish-21 Commit 3 physically removes these alongside
+    // packages/ai-providers/src/kie-video.ts. Until then they stay
+    // in the descriptor so kie-video worker paths still resolve.
+    expect(HIDDEN_LEGACY_MODELS.map((m) => m.id)).toEqual([
       'seedance_1_5_pro',
       'kling_3_standard',
       'seedance_2',
     ]);
   });
 
-  it('models are ordered budget → recommended → premium', () => {
-    expect(VIDEO_MODELS.map((m) => m.qualityTier)).toEqual(['budget', 'recommended', 'premium']);
+  it('launcher-visible models are all recommended-tier (single sole model at launch)', () => {
+    expect(LAUNCHER_MODELS.map((m) => m.qualityTier)).toEqual(['recommended']);
   });
 
-  it('every model supports 9:16 (vertical UGC is the product spine)', () => {
-    for (const m of VIDEO_MODELS) {
+  it('every launcher-visible model supports 9:16 (vertical UGC is the product spine)', () => {
+    for (const m of LAUNCHER_MODELS) {
       expect(m.supportedAspectRatios).toContain('9:16');
     }
   });
 
-  it('every model supports 720p (the launch quality target)', () => {
-    for (const m of VIDEO_MODELS) {
+  it('every launcher-visible model supports 720p (the launch quality target)', () => {
+    for (const m of LAUNCHER_MODELS) {
       expect(m.supportedResolutions).toContain('720p');
     }
   });
 
-  it('every model supports audio (Polish-20 spec: no ElevenLabs TTS step)', () => {
-    for (const m of VIDEO_MODELS) {
+  it('every launcher-visible model supports audio (Hedra Character 3 handles TTS natively)', () => {
+    for (const m of LAUNCHER_MODELS) {
       expect(m.supportsAudio).toBe(true);
     }
   });
 
-  it('per-call caps: Seedance 1.5 Pro = 12s, Kling 3.0 = 15s, Seedance 2 = 15s', () => {
+  it('per-call cap: Hedra Character 3 = 90s (single-call full video)', () => {
+    expect(getVideoModel('hedra_character_3')!.maxSingleCallSeconds).toBe(90);
+  });
+
+  it('legacy models retain their Polish-20 per-call caps: Seedance 1.5 Pro = 12s, Kling 3.0 = 15s, Seedance 2 = 15s', () => {
     expect(getVideoModel('seedance_1_5_pro')!.maxSingleCallSeconds).toBe(12);
     expect(getVideoModel('kling_3_standard')!.maxSingleCallSeconds).toBe(15);
     expect(getVideoModel('seedance_2')!.maxSingleCallSeconds).toBe(15);
   });
 
-  it('no model REQUIRES a reference image at Polish-20 launch', () => {
-    // All three support text-to-video natively; Nano Banana ref is
-    // opt-in per variant in Polish-20 Commit 2's worker.
-    for (const m of VIDEO_MODELS) {
+  it('Hedra Character 3 REQUIRES a reference image (Nano Banana keyframe)', () => {
+    expect(getVideoModel('hedra_character_3')!.requiresReferenceImage).toBe(true);
+  });
+
+  it('legacy models do NOT require a reference image (text-to-video native)', () => {
+    for (const m of HIDDEN_LEGACY_MODELS) {
       expect(m.requiresReferenceImage).toBe(false);
     }
   });
 });
 
-describe('Polish-20: VIDEO_PROVIDERS launch matrix', () => {
-  it('ships four provider entries with only kie.ai live at launch', () => {
+describe('Polish-21: VIDEO_PROVIDERS launch matrix', () => {
+  it('ships five provider entries: kie.ai + fal.ai + wavespeed + atlas_cloud + hedra', () => {
     expect(VIDEO_PROVIDERS.map((p) => p.id)).toEqual([
       'kie_ai',
       'fal_ai',
       'wavespeed',
       'atlas_cloud',
+      'hedra',
     ]);
+  });
+
+  it('kie.ai + hedra live at launch (fal.ai / wavespeed / atlas_cloud dormant)', () => {
     for (const p of VIDEO_PROVIDERS) {
-      if (p.id === 'kie_ai') expect(p.liveAtLaunch).toBe(true);
+      if (p.id === 'kie_ai' || p.id === 'hedra') expect(p.liveAtLaunch).toBe(true);
       else expect(p.liveAtLaunch).toBe(false);
     }
   });
 
-  it('every provider maps to a credential-provider key for the tool_connections lookup', () => {
+  it('every provider maps to a credential-provider key for the connection lookup', () => {
     for (const p of VIDEO_PROVIDERS) {
       expect(p.requiredCredentialProvider.length).toBeGreaterThan(0);
     }
   });
+
+  it('hedra provider maps to the ai_provider_connections `hedra` key', () => {
+    expect(getVideoProvider('hedra')!.requiredCredentialProvider).toBe('hedra');
+  });
 });
 
-describe('Polish-20: MODEL_PROVIDER_CONFIGS launch coverage', () => {
-  it('every launch model has exactly ONE kie.ai config (Polish-21+ adds more)', () => {
-    for (const m of VIDEO_MODELS) {
+describe('Polish-21: MODEL_PROVIDER_CONFIGS launch coverage', () => {
+  it('Hedra Character 3 has exactly one hedra config', () => {
+    const configs = MODEL_PROVIDER_CONFIGS.filter((c) => c.modelId === 'hedra_character_3');
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.providerId).toBe('hedra');
+  });
+
+  it('Character 3 modelParam is the hardcoded ai_model_id UUID from hedra-labs/hedra-api-starter', () => {
+    expect(getModelProviderConfig('hedra_character_3', 'hedra')!.modelParam).toBe(
+      'd1dd37a3-e39a-4854-a298-6510289f9cf2',
+    );
+  });
+
+  it('Character 3 posts to the public Hedra API base URL', () => {
+    expect(getModelProviderConfig('hedra_character_3', 'hedra')!.endpointUrl).toBe(
+      'https://api.hedra.com/web-app/public',
+    );
+  });
+
+  it('legacy models retain their kie.ai configs pending Commit 3 deletion', () => {
+    for (const m of HIDDEN_LEGACY_MODELS) {
       const configs = MODEL_PROVIDER_CONFIGS.filter((c) => c.modelId === m.id);
       expect(configs).toHaveLength(1);
       expect(configs[0]!.providerId).toBe('kie_ai');
@@ -152,19 +205,81 @@ describe('Polish-20: per-model input-shape tripwires', () => {
   });
 });
 
-describe('Polish-20: getLiveProvidersForModel + getDefaultProviderForModel', () => {
-  it('every launch model returns exactly one live provider (kie.ai)', () => {
-    for (const m of VIDEO_MODELS) {
+describe('Polish-21: getLiveProvidersForModel + getDefaultProviderForModel', () => {
+  it('Hedra Character 3 returns the hedra provider', () => {
+    const live = getLiveProvidersForModel('hedra_character_3');
+    expect(live).toHaveLength(1);
+    expect(live[0]!.id).toBe('hedra');
+    expect(getDefaultProviderForModel('hedra_character_3')?.id).toBe('hedra');
+  });
+
+  it('legacy models return the kie.ai provider (until Commit 3 removes them)', () => {
+    for (const m of HIDDEN_LEGACY_MODELS) {
       const live = getLiveProvidersForModel(m.id);
       expect(live).toHaveLength(1);
       expect(live[0]!.id).toBe('kie_ai');
+      expect(getDefaultProviderForModel(m.id)?.id).toBe('kie_ai');
+    }
+  });
+});
+
+describe('Polish-21: HEDRA_VOICE_ROSTER + pickHedraVoicesForBatch', () => {
+  it('ships 6 placeholder voice slots at Polish-21 launch (operator curates before flipping live)', () => {
+    expect(HEDRA_VOICE_ROSTER).toHaveLength(6);
+    for (const v of HEDRA_VOICE_ROSTER) {
+      expect(v.id).toMatch(new RegExp(`^${HEDRA_VOICE_ROSTER_PLACEHOLDER_PREFIX}`));
+      expect(v.label.length).toBeGreaterThan(0);
+      expect(v.persona.length).toBeGreaterThan(0);
     }
   });
 
-  it('the default provider is the cheapest live provider (kie.ai at Polish-20 launch)', () => {
-    for (const m of VIDEO_MODELS) {
-      expect(getDefaultProviderForModel(m.id)?.id).toBe('kie_ai');
-    }
+  it('isHedraVoiceRosterUncurated returns true while all IDs are PLACEHOLDER-*', () => {
+    expect(isHedraVoiceRosterUncurated()).toBe(true);
+    expect(
+      isHedraVoiceRosterUncurated([
+        { id: 'PLACEHOLDER-a', label: 'a', persona: 'a' },
+        { id: 'real-uuid', label: 'b', persona: 'b' },
+      ]),
+    ).toBe(false);
+    expect(
+      isHedraVoiceRosterUncurated([
+        { id: 'real-uuid-1', label: 'a', persona: 'a' },
+        { id: 'real-uuid-2', label: 'b', persona: 'b' },
+      ]),
+    ).toBe(false);
+  });
+
+  it('pickHedraVoicesForBatch returns N distinct voices for N ≤ roster.length', () => {
+    const picks = pickHedraVoicesForBatch(5);
+    expect(picks).toHaveLength(5);
+    const ids = new Set(picks.map((v) => v.id));
+    expect(ids.size).toBe(5);
+  });
+
+  it('pickHedraVoicesForBatch wraps when N > roster.length', () => {
+    const picks = pickHedraVoicesForBatch(9);
+    expect(picks).toHaveLength(9);
+    // First 6 = whole roster (in order); tail = wrap
+    expect(picks[6]?.id).toBe(HEDRA_VOICE_ROSTER[0]!.id);
+  });
+
+  it('offset shifts the start position deterministically', () => {
+    const roster = [
+      { id: 'a', label: 'a', persona: 'a' },
+      { id: 'b', label: 'b', persona: 'b' },
+      { id: 'c', label: 'c', persona: 'c' },
+    ];
+    expect(pickHedraVoicesForBatch(3, 0, roster).map((v) => v.id)).toEqual(['a', 'b', 'c']);
+    expect(pickHedraVoicesForBatch(3, 1, roster).map((v) => v.id)).toEqual(['b', 'c', 'a']);
+    expect(pickHedraVoicesForBatch(3, 4, roster).map((v) => v.id)).toEqual(['b', 'c', 'a']);
+    // Negative offsets normalize.
+    expect(pickHedraVoicesForBatch(3, -1, roster).map((v) => v.id)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('returns empty array for non-positive count or empty roster', () => {
+    expect(pickHedraVoicesForBatch(0)).toEqual([]);
+    expect(pickHedraVoicesForBatch(-1)).toEqual([]);
+    expect(pickHedraVoicesForBatch(3, 0, [])).toEqual([]);
   });
 });
 

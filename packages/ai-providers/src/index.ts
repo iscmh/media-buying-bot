@@ -6,6 +6,8 @@ export { CreatifyProvider } from './creatify';
 // Polish-8: verify-only providers for the BYOK connect cards.
 export { ReplicateProvider } from './replicate';
 export { OpenAIProvider } from './openai-provider';
+// Polish-21: Hedra Character 3 BYOK verify card.
+export { HedraProvider } from './hedra';
 
 // Phase 3b: real provider clients used by the Inngest generation jobs.
 // These bypass the Phase 1 `AIProvider` interface (which was scoped to
@@ -143,6 +145,34 @@ export {
   type KieVideoPollResult,
   type KieVideoState,
 } from './kie-video';
+
+// Polish-21: Hedra Character 3 image-to-talking-avatar client.
+export {
+  createHedraAsset,
+  uploadHedraAsset,
+  submitHedraGeneration,
+  pollHedraGeneration,
+  listHedraVoices,
+  verifyHedraKey,
+  normalizeHedraStatus,
+  translateHedraErrorStatus,
+  extractHedraErrorMessage,
+  __resetHedraFirstCallLogForTests,
+  type HedraAssetType,
+  type HedraCreateAssetInput,
+  type HedraCreateAssetResult,
+  type HedraUploadAssetInput,
+  type HedraUploadAssetResult,
+  type HedraTtsInput,
+  type HedraSubmitGenerationInput,
+  type HedraSubmitGenerationResult,
+  type HedraPollStatusInput,
+  type HedraPollStatusResult,
+  type HedraGenerationStatus,
+  type HedraVoicesListInput,
+  type HedraVoicesListResult,
+  type HedraVoiceRaw,
+} from './hedra-video';
 
 // Polish-6: vision detection + Whisper transcription for auto-format.
 export {

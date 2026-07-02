@@ -18,16 +18,17 @@ import { cn } from '@/lib/utils';
 import { acknowledgeLiveGenerationAction } from './ack-action';
 import { createGenerationJobAction, type ConnectedProviders } from './actions';
 import {
+  LAUNCHER_VISIBLE_MODELS,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
   SIMPLIFIED_MIN_VARIANTS,
-  VIDEO_MODELS,
   buildSubmissionFormData,
   canSubmitState,
   clampVariantCount,
   formatModelCostHintPerVariant,
   getDefaultProviderForModel,
+  getSoleLauncherModel,
   isRecommendedTier,
   type SimplifiedFormState,
   type VideoModel,
@@ -54,12 +55,13 @@ interface Props {
 }
 
 /**
- * Polish-20 → Polish-20.0.1: simplified generation form.
+ * Polish-20 → Polish-21: simplified generation form.
  *
- * MANDATORY model picker at the top (three cards, budget → recommended
- * → premium). Generate stays disabled until the user picks a model.
- * The recommended-tier card carries a subtle accent so the smart
- * default is visually obvious without being auto-selected.
+ * Polish-21: with a single launcher-visible model (Hedra Character 3)
+ * the 3-card model picker is hidden and the sole model auto-selects
+ * on mount. When a second visible model lands (Polish-22 HeyGen
+ * candidate) getSoleLauncherModel returns null and the picker
+ * automatically reappears.
  *
  * Polish-20.0.1: length picker REMOVED. Duration is auto-detected
  * from the source video via the Polish-19.3.1 fallback chain — the
@@ -82,8 +84,13 @@ export function SimplifiedGenerationForm({
 }: Props) {
   const router = useRouter();
 
-  // Polish-20: model picker required. Spec: user MUST pick — no default.
-  const [modelId, setModelId] = React.useState<VideoModelId | null>(null);
+  // Polish-21: when there's exactly one launcher-visible model
+  // (Hedra Character 3), auto-select it and hide the picker. Multi-
+  // model state (Polish-22+) falls back to "user must pick".
+  const soleModel = getSoleLauncherModel();
+  const [modelId, setModelId] = React.useState<VideoModelId | null>(
+    soleModel ? soleModel.id : null,
+  );
   const [variantCount, setVariantCount] = React.useState<number>(SIMPLIFIED_DEFAULT_VARIANTS);
 
   const [error, setError] = React.useState<string | null>(null);
@@ -121,11 +128,11 @@ export function SimplifiedGenerationForm({
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate != null && estimate.estimateUsd > remaining;
 
-  // Polish-20 launch requires the kie.ai BYOK key since every live
-  // provider entry maps to it. When the user hasn't connected it, we
-  // still render the picker (so they can SEE what they'd get) but
-  // disable submission with a clear "connect kie.ai" nudge.
-  const hasKieKey = connectedProviders.kie_ai.connected;
+  // Polish-21: Hedra Character 3 requires a Hedra API key. Replaces
+  // the Polish-20 kie.ai gate — the form still renders even when
+  // disconnected so operators can see the cost preview, but Generate
+  // stays disabled with a "connect Hedra" nudge.
+  const hasProviderKey = connectedProviders.hedra.connected;
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -197,27 +204,43 @@ export function SimplifiedGenerationForm({
         )}
       </section>
 
-      {/* Polish-20: model picker (MANDATORY, top-level, not under Advanced) */}
-      <section aria-labelledby="model-picker-heading" className="space-y-3">
-        <div className="flex items-baseline justify-between">
+      {/* Polish-20 → Polish-21: model picker. Hidden when a single
+          model is launcher-visible (Hedra Character 3 alone). The
+          model + provider line still surfaces so operators know what
+          they're about to spend on. Multi-model state reintroduces
+          the 3-card picker automatically. */}
+      {soleModel ? (
+        <section aria-labelledby="model-picker-heading" className="space-y-2">
           <h2 id="model-picker-heading" className="text-fg text-sm font-medium">
-            Model <span className="text-[color:var(--accent-negative)]">*</span>
+            Model
           </h2>
-          <span className="text-fg-subtle text-xs">Pick a model to continue</span>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {VIDEO_MODELS.map((model) => (
-            <ModelCard
-              key={model.id}
-              model={model}
-              picked={modelId === model.id}
-              disabled={isPending}
-              targetSeconds={previewSeconds}
-              onPick={() => setModelId(model.id)}
-            />
-          ))}
-        </div>
-      </section>
+          <div className="border-border bg-bg-surface rounded-md border px-4 py-3 text-sm">
+            <span className="text-fg font-semibold">{soleModel.displayName}</span>{' '}
+            <span className="text-fg-subtle text-xs">— {soleModel.description}</span>
+          </div>
+        </section>
+      ) : (
+        <section aria-labelledby="model-picker-heading" className="space-y-3">
+          <div className="flex items-baseline justify-between">
+            <h2 id="model-picker-heading" className="text-fg text-sm font-medium">
+              Model <span className="text-[color:var(--accent-negative)]">*</span>
+            </h2>
+            <span className="text-fg-subtle text-xs">Pick a model to continue</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {LAUNCHER_VISIBLE_MODELS.map((model) => (
+              <ModelCard
+                key={model.id}
+                model={model}
+                picked={modelId === model.id}
+                disabled={isPending}
+                targetSeconds={previewSeconds}
+                onPick={() => setModelId(model.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Variant count + auto-detected duration indicator */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -296,11 +319,14 @@ export function SimplifiedGenerationForm({
             reduce variants, or pick a cheaper model.
           </p>
         )}
-        {!hasKieKey && modelId != null && (
+        {!hasProviderKey && modelId != null && (
           <p className="mt-1 text-xs text-[color:var(--accent-negative)]">
-            Connect your kie.ai key on{' '}
-            <Link href="/connections/tools" className="hover:text-fg underline underline-offset-4">
-              /connections/tools
+            Connect your Hedra key on{' '}
+            <Link
+              href="/connections/ai-provider"
+              className="hover:text-fg underline underline-offset-4"
+            >
+              /connections/ai-provider
             </Link>{' '}
             to generate.
           </p>
@@ -319,12 +345,12 @@ export function SimplifiedGenerationForm({
         </p>
         <Button
           type="submit"
-          disabled={isPending || overCap || !canSubmit || !hasKieKey}
+          disabled={isPending || overCap || !canSubmit || !hasProviderKey}
           title={
             !canSubmit
               ? 'Pick a model to generate variations.'
-              : !hasKieKey
-                ? 'Connect a kie.ai key to generate.'
+              : !hasProviderKey
+                ? 'Connect a Hedra key to generate.'
                 : undefined
           }
         >

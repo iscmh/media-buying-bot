@@ -435,9 +435,16 @@ describe('Polish-20 Commit 5: three-model happy-path config lookup', () => {
     }
   });
 
-  it('every launch model targets the kie.ai createTask endpoint (Polish-20 launch provider)', async () => {
+  it('every legacy launch model targets the kie.ai createTask endpoint (Polish-20 provider)', async () => {
+    // Polish-21: Hedra Character 3 is launcher-visible and routes to
+    // the Hedra provider; the seedance/kling entries stay hidden
+    // (hiddenFromLauncher: true) and retain their kie.ai configs
+    // through Commit 3. Scope this pin to the still-hidden legacy
+    // slice so it survives the Polish-21 transition.
     const { VIDEO_MODELS, getModelProviderConfig } = await import('@mbb/shared');
-    for (const model of VIDEO_MODELS) {
+    const legacyModels = VIDEO_MODELS.filter((m) => m.hiddenFromLauncher);
+    expect(legacyModels.length).toBeGreaterThan(0);
+    for (const model of legacyModels) {
       const config = getModelProviderConfig(model.id, 'kie_ai');
       expect(config).toBeDefined();
       expect(config!.providerId).toBe('kie_ai');

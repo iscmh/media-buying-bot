@@ -34,7 +34,9 @@ export async function logAiProviderApiCall(input: {
     | 'creatify'
     | 'kling'
     | 'replicate'
-    | 'openai';
+    | 'openai'
+    // Polish-21: Hedra Character 3 image-to-talking-avatar audit tag.
+    | 'hedra';
   endpoint: string;
   method: string;
   requestBody?: Record<string, unknown>;

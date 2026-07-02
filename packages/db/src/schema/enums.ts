@@ -27,6 +27,9 @@ export const aiProviderEnum = pgEnum('ai_provider', [
   'elevenlabs',
   // Polish-6: OpenAI key for Whisper transcription + Sora 2 generation.
   'openai',
+  // Polish-21: Hedra Character 3 image-to-talking-avatar. Migration
+  // 0032 adds the value on the DB side.
+  'hedra',
 ]);
 
 // Polish-4: tier label per provider. nullable on the connection row —
