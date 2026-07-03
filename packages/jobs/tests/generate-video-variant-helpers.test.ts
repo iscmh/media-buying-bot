@@ -1249,75 +1249,78 @@ describe('Polish-21.0.1: worker text_prompt threading + pre-submit log', () => {
 //     spec.character (not the old inline template)
 // =====================================================================
 
-describe('Polish-21.0.5: composeNanoBananaCharacterPrompt (JOHN pattern)', () => {
+describe('Polish-21.0.7: composeNanoBananaCharacterPrompt (Linda pattern)', () => {
   const sampleCharacter = async () => {
     const { FALLBACK_STRUCTURED_CHARACTER } =
       await import('../src/functions/generate-video-variant');
     return FALLBACK_STRUCTURED_CHARACTER;
   };
 
-  it('emits the single UGC iPhone selfie lead as block 1 (Polish-21.0.6)', async () => {
+  it('emits the Linda vertical iPhone selfie lead as block 1', async () => {
     const { composeNanoBananaCharacterPrompt } =
       await import('../src/functions/generate-video-variant');
     const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
-    // Regression pin: single-character UGC framing. Polish-21.0.5
-    // shipped a three-view character sheet ("front view, side view,
-    // back view") that Hedra Character 3 interpreted as three
-    // separate people and animated as three different characters
-    // in one video. Polish-21.0.6 replaces it with a single
-    // front-facing iPhone selfie photo — matches Character 3's
-    // single-image single-character architecture.
-    expect(p).toMatch(/Photorealistic iPhone selfie photo of a/);
-    expect(p).toMatch(/-year-old American female named Alex/);
-    // Character framing: front-facing, chest-up, held at chest
-    // height (the exact UGC selfie geometry).
-    expect(p).toMatch(/filming herself holding her phone at chest height/);
-    expect(p).toMatch(/Front-facing chest-up framing/);
-    expect(p).toMatch(/9:16 vertical/);
+    // Regression pin: Polish-21.0.7 Linda lead — "fictional
+    // {age}-year-old {nationality} {gender} named {name}. Generic
+    // {demographic_role} appearance." Every anchor word matters.
+    expect(p).toMatch(/Photorealistic vertical iPhone selfie of a fictional/);
+    expect(p).toMatch(/68-year-old American female named Linda/);
+    expect(p).toMatch(/Generic suburban grandmother appearance/);
+    // "fictional" prevents Nano Banana from pattern-matching to
+    // real people; without it the model defaults to stock-photo
+    // celebrity faces.
+    expect(p).toMatch(/fictional/);
   });
 
-  it('Polish-21.0.6 tripwire: three-view character-sheet framing must NOT appear', async () => {
+  it('Polish-21.0.6 tripwire preserved: three-view character-sheet framing must NOT appear', async () => {
     const { composeNanoBananaCharacterPrompt } =
       await import('../src/functions/generate-video-variant');
     const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
-    // Regression pin against reverting to the Polish-21.0.5 three-
-    // view lead. Character 3 rendered that as three different
-    // characters talking — broke every live variant. Any revert
-    // that re-introduces "three-view" or the specific "front view,
-    // side view, back view" enumeration MUST fail this pin.
+    // Regression pin against Polish-21.0.5's three-view lead that
+    // Character 3 interpreted as three separate people.
     expect(p).not.toMatch(/three-view/i);
     expect(p).not.toMatch(/character sheet/i);
     expect(p).not.toMatch(/front view, side view, back view/i);
   });
 
-  it('male character gets his/himself pronouns in the selfie lead (not her/herself)', async () => {
-    const { composeNanoBananaCharacterPrompt, FALLBACK_STRUCTURED_CHARACTER } =
-      await import('../src/functions/generate-video-variant');
-    const male = { ...FALLBACK_STRUCTURED_CHARACTER, gender: 'male' as const };
-    const p = composeNanoBananaCharacterPrompt(male);
-    expect(p).toMatch(/filming himself holding his phone at chest height/);
-    expect(p).not.toMatch(/filming herself/);
-    expect(p).not.toMatch(/holding her phone/);
-  });
-
-  it('emits the SKIN REALISM MANDATE with ALL THREE ZERO anchors (verbatim)', async () => {
+  it('emits PHYSICAL FEATURES block as itemized bullets with asymmetry directive', async () => {
     const { composeNanoBananaCharacterPrompt } =
       await import('../src/functions/generate-video-variant');
     const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
-    // Regression pin: every ZERO must be present and verbatim. A
-    // future prompt tune that drops one of these degrades output
-    // toward the AI-CGI look the operator diagnosed on the first
-    // live variant. The order + phrasing is proven working — do
-    // not paraphrase.
-    expect(p).toMatch(/SKIN REALISM MANDATE: Hyper-realistic unedited human skin/);
+    // Polish-21.0.7 anchor: itemized bullets render sharper on Nano
+    // Banana than paragraphs. The "deliberately asymmetric and
+    // ordinary" directive is the header that keeps bullets honest.
+    expect(p).toMatch(/PHYSICAL FEATURES \(deliberately asymmetric and ordinary\):/);
+    // Bullets should be marked with "- ". Each of the 8 feature
+    // fields feeds one bullet.
+    expect(p).toMatch(/- Shoulder-length salt-and-pepper hair/);
+    expect(p).toMatch(/- Slightly uneven eye line/);
+    expect(p).toMatch(/- Ordinary nose — slightly wider than average/);
+    expect(p).toMatch(/- Thin lips, slightly asymmetric mouth/);
+    expect(p).toMatch(/- Warm hazel eyes with visible crow/);
+    expect(p).toMatch(/- Soft jawline with mild jowls/);
+    expect(p).toMatch(
+      /- Oval face with natural fullness at the cheeks, NOT chiseled, NOT model-shaped/,
+    );
+    expect(p).toMatch(/- Clothing: Faded navy cotton crewneck/);
+  });
+
+  it('emits the SKIN REALISM MANDATE with ALL THREE ZERO anchors preserved (Polish-21.0.5 continuity)', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
+    // Polish-21.0.7 keeps the Polish-21.0.5 ZERO anchors verbatim
+    // AND adds "ZERO airbrushing" from the Linda template — belt
+    // and suspenders against beauty-filter defaults.
+    expect(p).toMatch(/SKIN REALISM MANDATE: Real \d+-year-old skin/);
+    expect(p).toMatch(/ZERO airbrushing\./);
     expect(p).toMatch(/ZERO beauty filters\./);
     expect(p).toMatch(/ZERO skin smoothing\./);
     expect(p).toMatch(/ZERO AI plastic-skin artifacts\./);
-    // Fictional-everyperson clause pins the "not a model, not an
-    // actor, not an AI-generated character" tail — this is the
-    // clause that stops Nano Banana from defaulting to
-    // stock-photo aesthetic.
+    // Fictional-everyperson clause preserved.
     expect(p).toMatch(/not a model, not an actor, not an AI-generated character\./);
+    // Linda-shape age-appropriate detail from FALLBACK.
+    expect(p).toMatch(/faint age spots on the cheekbones/);
   });
 
   it('includes stubble line only when skin_color_for_stubble != "none"', async () => {
@@ -1325,24 +1328,85 @@ describe('Polish-21.0.5: composeNanoBananaCharacterPrompt (JOHN pattern)', () =>
       await import('../src/functions/generate-video-variant');
     const female = await sampleCharacter();
     const promptFemale = composeNanoBananaCharacterPrompt(female);
-    expect(promptFemale).toMatch(/Natural vellus hair on forearms/);
     // Sample fallback has skin_color_for_stubble='none' → no stubble line.
     expect(promptFemale).not.toMatch(/stubble shadow/);
 
     const male = { ...female, gender: 'male' as const, skin_color_for_stubble: 'grey' as const };
     const promptMale = composeNanoBananaCharacterPrompt(male);
-    expect(promptMale).toMatch(/real grey stubble shadow on upper lip and jaw/);
+    expect(promptMale).toMatch(/Real grey stubble shadow on upper lip and jaw/);
     expect(promptMale).toMatch(/one day of missed shaving/);
   });
 
-  it('emits "Shot on iPhone front camera" in block 5 (camera anchor)', async () => {
+  it('emits the CRITICAL ANTI-CELEBRITY DIRECTIVE block with named examples + anonymous-not-attractive reframe + regenerate self-check', async () => {
     const { composeNanoBananaCharacterPrompt } =
       await import('../src/functions/generate-video-variant');
     const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
-    // Regression pin: the exact "Shot on iPhone front camera" phrase
-    // anchors Nano Banana's aspect-ratio + amateur-selfie
-    // aesthetic. Alternatives ("smartphone selfie", "iPhone photo")
-    // are weaker anchors.
+    // Polish-21.0.7 NEW block. Every anchor here is essential —
+    // Nano Banana pattern-matches to famous training-data faces
+    // without these named-example steers.
+    expect(p).toMatch(/CRITICAL ANTI-CELEBRITY DIRECTIVE:/);
+    expect(p).toMatch(/DELIBERATELY GENERIC and FORGETTABLE/);
+    // Named actress examples — at least 8 to hit the operator's
+    // spec minimum.
+    expect(p).toMatch(/Meryl Streep/);
+    expect(p).toMatch(/Helen Mirren/);
+    expect(p).toMatch(/Jane Fonda/);
+    expect(p).toMatch(/Diane Keaton/);
+    expect(p).toMatch(/Judi Dench/);
+    // News + politician sub-categories.
+    expect(p).toMatch(/Barbara Walters/);
+    expect(p).toMatch(/Diane Sawyer/);
+    expect(p).toMatch(/Hillary Clinton/);
+    expect(p).toMatch(/Nancy Pelosi/);
+    // Anti-attractive reframe.
+    expect(p).toMatch(/Aim for ANONYMOUS, not ATTRACTIVE/);
+    expect(p).toMatch(/intentionally unremarkable/);
+    // Regenerate self-check.
+    expect(p).toMatch(/If the face looks like a TV .+ character, regenerate/);
+    // "real human you'd walk past on the street and forget" anchor.
+    expect(p).toMatch(/walk past on the street and forget/);
+  });
+
+  it('anti-celeb directive lists at least 8 named examples across categories', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
+    // Count "listable" named examples in the anti-celeb directive
+    // via the fixture roster. Operator's spec requires 8-12 actress
+    // + 4-6 news + 4-6 politician. Total floor: 8 combined
+    // (should easily clear with the FALLBACK Linda roster).
+    const antiCelebSection = p.slice(p.indexOf('CRITICAL ANTI-CELEBRITY DIRECTIVE'));
+    const namedExamples = [
+      'Meryl Streep',
+      'Helen Mirren',
+      'Jane Fonda',
+      'Diane Keaton',
+      'Sally Field',
+      'Goldie Hawn',
+      'Susan Sarandon',
+      'Glenn Close',
+      'Judi Dench',
+      'Maggie Smith',
+      'Barbara Walters',
+      'Diane Sawyer',
+      'Katie Couric',
+      'Oprah',
+      'Ellen DeGeneres',
+      'Hillary Clinton',
+      'Nancy Pelosi',
+      'Barbara Bush',
+      'Michelle Obama',
+    ];
+    const hits = namedExamples.filter((n) => antiCelebSection.includes(n));
+    expect(hits.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('emits "Shot on iPhone front camera" camera anchor (Polish-21.0.5 continuity)', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
+    // Polish-21.0.5 anchor preserved — the exact phrase steers
+    // Nano Banana's aspect-ratio + amateur-selfie aesthetic.
     expect(p).toMatch(/Shot on iPhone front camera, 9:16 vertical, natural daylight from/);
     expect(p).toMatch(/slightly shaky handheld feel/);
   });
@@ -1351,9 +1415,6 @@ describe('Polish-21.0.5: composeNanoBananaCharacterPrompt (JOHN pattern)', () =>
     const { composeNanoBananaCharacterPrompt } =
       await import('../src/functions/generate-video-variant');
     const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
-    // Regression pin: without this tail Nano Banana routinely
-    // renders floating text or phone-screen UI (Kling 3.0 guide
-    // documented the same issue). Verbatim.
     expect(p).toMatch(
       /ABSOLUTELY NO phones, cameras, screens, social media UI, floating text, or digital overlays visible anywhere in the frame\./,
     );
@@ -1370,40 +1431,61 @@ describe('Polish-21.0.5: composeNanoBananaCharacterPrompt (JOHN pattern)', () =>
     expect(composeNanoBananaCharacterPrompt(male)).toMatch(/He must look like a real \d+-year-old/);
   });
 
-  it('threads role_description verbatim into the SKIN REALISM MANDATE', async () => {
+  it('threads demographic_role into three places: lead, SKIN REALISM, and anti-celeb regenerate check', async () => {
     const { composeNanoBananaCharacterPrompt } =
       await import('../src/functions/generate-video-variant');
     const char = {
       ...(await sampleCharacter()),
-      role_description: 'retired schoolteacher',
+      demographic_role: 'retired schoolteacher',
     };
     const p = composeNanoBananaCharacterPrompt(char);
+    // Lead: "Generic retired schoolteacher appearance."
+    expect(p).toMatch(/Generic retired schoolteacher appearance/);
+    // SKIN REALISM: "must look like a real {age}-year-old retired schoolteacher"
     expect(p).toMatch(/real \d+-year-old retired schoolteacher, not a model/);
+    // Anti-celeb: "TV retired schoolteacher character, regenerate"
+    expect(p).toMatch(/TV retired schoolteacher character, regenerate/);
   });
 });
 
-describe('Polish-21.0.5: parseStructuredCharacter (JOHN block parser)', () => {
-  it('parses a well-formed character block', async () => {
+describe('Polish-21.0.7: parseStructuredCharacter (Linda block parser)', () => {
+  it('parses a well-formed Linda character block', async () => {
     const { parseStructuredCharacter } = await import('../src/functions/generate-video-variant');
     const raw = {
       name: 'Marcus',
       age: 42,
       nationality: 'Filipino',
       gender: 'male',
-      hair_description: 'short jet-black hair, side-parted with a slight cowlick at the crown',
-      face_description:
-        "broad oval face with visible pore texture, slight jowl weight at 42, faint crow's feet, dark warm brown eyes with soft crinkle lines",
-      body_posture_clothing:
-        'solid average build with slightly rounded shoulders suggesting a life at a desk, wearing a faded charcoal cotton polo showing honest wear at the collar',
+      demographic_role: 'middle-aged office worker',
+      hair_bullet: 'Short jet-black hair, slightly messy, NOT styled, NOT symmetrical',
+      eye_asymmetry_bullet:
+        'Slightly uneven eye line — left eyelid heavier than right (natural asymmetry)',
+      nose_bullet: 'Ordinary nose — small bump at the bridge and slightly wide nostrils',
+      mouth_bullet:
+        'Medium lips, slightly asymmetric mouth, natural slight downturn on the right side',
+      eye_color_and_age_detail:
+        "Dark warm brown eyes with faint crow's feet and mild under-eye shadows",
+      jaw_bullet: 'Soft jawline with mild jowl weight (age-appropriate)',
+      face_shape_bullet: 'Broad oval face, NOT chiseled, NOT model-shaped',
+      clothing_bullet:
+        'Faded charcoal cotton polo with honest wear at the collar — not new, not designer',
+      setting_paragraph:
+        'Home office corner, cool morning light from a north-facing window off-camera. Cluttered lived-in feel.',
+      skin_age_appropriate_detail:
+        'faint sun-spot pigmentation on cheekbones, natural pore texture on nose, mild redness on upper cheeks',
       skin_color_for_stubble: 'black',
-      role_description: 'middle-aged office worker',
-      setting_description: 'home office corner, cool morning light through a north-facing window',
+      anti_celeb_actress_examples: ['Meryl Streep', 'Helen Mirren', 'Jane Fonda', 'Diane Keaton'],
+      anti_celeb_news_examples: ['Barbara Walters', 'Diane Sawyer'],
+      anti_celeb_politician_examples: ['Nancy Pelosi', 'Hillary Clinton'],
     };
     const r = parseStructuredCharacter(raw);
     expect(r.name).toBe('Marcus');
     expect(r.age).toBe(42);
     expect(r.gender).toBe('male');
     expect(r.skin_color_for_stubble).toBe('black');
+    expect(r.demographic_role).toBe('middle-aged office worker');
+    expect(r.hair_bullet).toMatch(/Short jet-black hair/);
+    expect(r.anti_celeb_actress_examples).toHaveLength(4);
   });
 
   it('falls back to FALLBACK_STRUCTURED_CHARACTER when Claude drops a required field', async () => {
@@ -1491,8 +1573,8 @@ describe('Polish-21.0.5: parseStructuredCharacter (JOHN block parser)', () => {
   });
 });
 
-describe('Polish-21.0.5: parseVideoAdSpecHedra with character block', () => {
-  it('hydrates the character field when Claude output includes it', async () => {
+describe('Polish-21.0.7: parseVideoAdSpecHedra with Linda character block', () => {
+  it('hydrates the Linda character field when Claude output includes it', async () => {
     const { parseVideoAdSpecHedra } = await import('../src/functions/generate-video-variant');
     const raw = JSON.stringify({
       scene: {
@@ -1505,18 +1587,35 @@ describe('Polish-21.0.5: parseVideoAdSpecHedra with character block', () => {
         age: 34,
         nationality: 'American',
         gender: 'female',
-        hair_description: 'dark brown hair pulled into a loose low bun',
-        face_description: 'oval face with faint freckles and warm hazel eyes',
-        body_posture_clothing: 'average build in a worn navy hoodie with fraying cuffs',
+        demographic_role: 'thirty-something everyperson',
+        hair_bullet: 'Dark brown hair pulled into a loose low bun, slightly messy, NOT styled',
+        eye_asymmetry_bullet: 'Slightly uneven eye line — right eyelid heavier than left',
+        nose_bullet: 'Ordinary nose — narrow bridge with faint bump',
+        mouth_bullet: 'Full lips, slightly asymmetric smile, downturn on the left corner',
+        eye_color_and_age_detail: 'Warm hazel eyes with faint freckle line across the bridge',
+        jaw_bullet: 'Soft jawline with light cheek fullness',
+        face_shape_bullet: 'Oval face, NOT chiseled, NOT model-shaped, natural cheek fullness',
+        clothing_bullet: 'Worn navy hoodie with fraying cuffs — not new, not designer',
+        setting_paragraph:
+          'Kitchen counter, cool morning light through a window. Cluttered morning-breakfast feel.',
+        skin_age_appropriate_detail:
+          'faint freckling across the nose, subtle acne scarring on the chin, natural pore texture',
         skin_color_for_stubble: 'none',
-        role_description: 'thirty-something everyperson',
-        setting_description: 'kitchen counter, cool morning light through a window',
+        anti_celeb_actress_examples: [
+          'Anne Hathaway',
+          'Emma Stone',
+          'Natalie Portman',
+          'Jennifer Lawrence',
+        ],
+        anti_celeb_news_examples: ['Robin Meade', "Norah O'Donnell"],
+        anti_celeb_politician_examples: ['Chelsea Clinton', 'Ivanka Trump'],
       },
     });
     const r = parseVideoAdSpecHedra(raw);
     expect(r).not.toBeNull();
     expect(r!.character.name).toBe('Elena');
-    expect(r!.character.setting_description).toMatch(/kitchen counter/);
+    expect(r!.character.setting_paragraph).toMatch(/kitchen counter/i);
+    expect(r!.character.hair_bullet).toMatch(/loose low bun/);
   });
 
   it('falls back to FALLBACK_STRUCTURED_CHARACTER when scene is valid but character is missing', async () => {
@@ -1546,7 +1645,7 @@ describe('Polish-21.0.5: parseVideoAdSpecHedra with character block', () => {
   });
 });
 
-describe('Polish-21.0.5: runClaudeAdSpecHedra system prompt (JOHN character + yapper scene)', () => {
+describe('Polish-21.0.7: runClaudeAdSpecHedra system prompt (Linda character + yapper scene)', () => {
   const readSrc = async () => {
     const fs = await import('node:fs/promises');
     return fs.readFile(
@@ -1555,31 +1654,49 @@ describe('Polish-21.0.5: runClaudeAdSpecHedra system prompt (JOHN character + ya
     );
   };
 
-  it('requests a character block with JOHN naturalistic-paragraph fields', async () => {
+  it('requests a character block with Linda itemized-bullet fields', async () => {
     const src = await readSrc();
     const start = src.indexOf('async function runClaudeAdSpecHedra');
     const end = src.indexOf('// ---', start);
     const promptFn = src.slice(start, end);
-    // Every required JOHN paragraph field must be in the schema
+    // Every required Linda-shape bullet field must be in the schema
     // Claude sees.
-    expect(promptFn).toMatch(/"hair_description":/);
-    expect(promptFn).toMatch(/"face_description":/);
-    expect(promptFn).toMatch(/"body_posture_clothing":/);
+    expect(promptFn).toMatch(/"demographic_role":/);
+    expect(promptFn).toMatch(/"hair_bullet":/);
+    expect(promptFn).toMatch(/"eye_asymmetry_bullet":/);
+    expect(promptFn).toMatch(/"nose_bullet":/);
+    expect(promptFn).toMatch(/"mouth_bullet":/);
+    expect(promptFn).toMatch(/"eye_color_and_age_detail":/);
+    expect(promptFn).toMatch(/"jaw_bullet":/);
+    expect(promptFn).toMatch(/"face_shape_bullet":/);
+    expect(promptFn).toMatch(/"clothing_bullet":/);
+    expect(promptFn).toMatch(/"setting_paragraph":/);
+    expect(promptFn).toMatch(/"skin_age_appropriate_detail":/);
     expect(promptFn).toMatch(/"skin_color_for_stubble":/);
-    expect(promptFn).toMatch(/"role_description":/);
-    expect(promptFn).toMatch(/"setting_description":/);
+    // Anti-celebrity arrays.
+    expect(promptFn).toMatch(/"anti_celeb_actress_examples":/);
+    expect(promptFn).toMatch(/"anti_celeb_news_examples":/);
+    expect(promptFn).toMatch(/"anti_celeb_politician_examples":/);
   });
 
-  it('anti-athletic + wear-detail directives are present (JOHN pattern anchors)', async () => {
+  it('itemized-bullets + anti-celebrity directives are present (Linda pattern anchors)', async () => {
     const src = await readSrc();
     const start = src.indexOf('async function runClaudeAdSpecHedra');
     const end = src.indexOf('// ---', start);
     const promptFn = src.slice(start, end);
-    // Regression pin: the exact phrasing that keeps Claude from
-    // defaulting to "athletic build, pristine white t-shirt".
-    expect(promptFn).toMatch(/NEVER "athletic"/);
-    expect(promptFn).toMatch(/wear detail/);
-    expect(promptFn).toMatch(/No pristine outfits/);
+    // Regression pin: the exact phrasing that steers Claude to
+    // itemized bullets over paragraphs (bullets render sharper).
+    expect(promptFn).toMatch(/ITEMIZED BULLETS/);
+    expect(promptFn).toMatch(/NOT flowing paragraphs/);
+    expect(promptFn).toMatch(/SPECIFIC imperfection/);
+    // Anti-attractive reframe in Claude's directive.
+    expect(promptFn).toMatch(/ANONYMOUS, not ATTRACTIVE/);
+    // Anti-celebrity guidance for Claude's example generation.
+    expect(promptFn).toMatch(/ANTI-CELEBRITY/i);
+    expect(promptFn).toMatch(/pattern-matches to famous faces/);
+    // Wear detail preserved from Polish-21.0.5.
+    expect(promptFn).toMatch(/wear condition/);
+    expect(promptFn).toMatch(/pristine outfits/i);
   });
 
   it('scene_description template names the yapper anchor components (age, framing, lighting, tone, dialogue)', async () => {

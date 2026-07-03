@@ -685,18 +685,23 @@ export interface VideoAdScene {
 }
 
 /**
- * Polish-21.0.5 hotfix: structured character schema for the Nano
- * Banana Pro reference image call. Restores the Polish-12.x "JOHN"
- * naturalistic paragraph pattern that produces photoreal
- * amateur-selfie references instead of the AI-CGI look the Polish-21
- * Commit 2 inline `imagePrompt` was producing.
+ * Polish-21.0.7 hotfix: structured character schema for the Nano
+ * Banana Pro reference image call. Rewrites the Polish-21.0.5 JOHN
+ * paragraph shape to the operator's manually-verified "Linda"
+ * pattern: ITEMIZED physical-feature bullets with specific
+ * imperfections + a CRITICAL ANTI-CELEBRITY DIRECTIVE block with
+ * named examples + "anonymous not attractive" reframe.
  *
- * Naturalistic PARAGRAPH fields (hair_description,
- * face_description, body_posture_clothing, setting_description) —
- * NOT itemized objects. Claude has a strong tendency to
- * bullet-list character details when given itemized JSON fields;
- * naturalistic paragraphs beat that tendency and let
- * casting-director copy through.
+ * Rationale:
+ *   - Nano Banana Pro renders itemized bullets sharper than flowing
+ *     paragraphs (paragraph anchors get averaged out; bullets
+ *     survive with their specific imperfection intact).
+ *   - Without an explicit anti-celebrity directive, Nano Banana
+ *     pattern-matches to famous training-data faces by default.
+ *     Named examples in the prompt steer the model away from those
+ *     specific attractors.
+ *   - "Anonymous, not attractive" reframes the default beauty-
+ *     optimization goal that produces stock-photo output.
  */
 export type SkinColorForStubble = 'grey' | 'brown' | 'black' | 'blonde' | 'red' | 'none';
 
@@ -705,42 +710,97 @@ export interface StructuredCharacter {
   age: number;
   nationality: string;
   gender: 'male' | 'female';
-  /** Single flowing paragraph — length, color, styling. NOT bullet form. */
-  hair_description: string;
-  /** Single flowing paragraph — face, laugh lines, crow's feet, jowls, eye color woven together. */
-  face_description: string;
-  /** Single flowing paragraph — build, posture cued to life context, clothing with wear detail. */
-  body_posture_clothing: string;
+  /** e.g. "suburban grandmother", "working dad", "young professional". */
+  demographic_role: string;
+  /** Bullet — length, color, styling. Ends with "slightly messy, NOT styled" qualifier. */
+  hair_bullet: string;
+  /** Bullet — one specific eye-line asymmetry (e.g. droopy eyelid on one side). */
+  eye_asymmetry_bullet: string;
+  /** Bullet — one specific nose imperfection (bump on bridge, wider than average, etc). */
+  nose_bullet: string;
+  /** Bullet — mouth asymmetry / downturn detail. */
+  mouth_bullet: string;
+  /** Bullet — eye color + age-specific detail (crow's feet, bags, redness). */
+  eye_color_and_age_detail: string;
+  /** Bullet — jaw with subtle imperfection (jowls, softness, weak chin). */
+  jaw_bullet: string;
+  /** Bullet — face shape with "NOT chiseled, NOT model-shaped" qualifier. */
+  face_shape_bullet: string;
+  /** Bullet — specific clothing item + material + wear condition. */
+  clothing_bullet: string;
+  /** Paragraph — sitting/standing setting with specific furniture/props + light source. */
+  setting_paragraph: string;
+  /** String — age-appropriate skin imperfections (age spots / acne scars / freckles / etc). */
+  skin_age_appropriate_detail: string;
   /** Drives the SKIN REALISM MANDATE stubble line. */
   skin_color_for_stubble: SkinColorForStubble;
-  /** e.g. "grandfather", "mother", "retiree", "young professional". */
-  role_description: string;
-  /** Single flowing paragraph — the scene location + daylight source. */
-  setting_description: string;
+  /**
+   * 8-12 age-appropriate actresses the face MUST NOT resemble.
+   * Named examples steer Nano Banana away from the celebrity
+   * attractors it defaults to.
+   */
+  anti_celeb_actress_examples: string[];
+  /** 4-6 news anchors / talk show hosts the face MUST NOT resemble. */
+  anti_celeb_news_examples: string[];
+  /** 4-6 political figures / spouses the face MUST NOT resemble. */
+  anti_celeb_politician_examples: string[];
 }
 
 /**
- * Polish-21.0.5: safe-fallback character used when Claude's output
- * omits or fails to parse the character block. Keeps the pipeline
- * moving with a generic everyperson instead of blowing up the
- * whole variant. Matches the JOHN pattern's naturalistic paragraph
- * shape.
+ * Polish-21.0.7: safe-fallback Linda-shape everyperson used when
+ * Claude's output omits or fails to parse the character block.
+ * Concrete itemized values match the operator's manually verified
+ * production reference. Age tuned to the ~65+ suburban grandmother
+ * bucket — the most-tested UGC ad-target demographic.
  */
 export const FALLBACK_STRUCTURED_CHARACTER: StructuredCharacter = {
-  name: 'Alex',
-  age: 34,
+  name: 'Linda',
+  age: 68,
   nationality: 'American',
   gender: 'female',
-  hair_description:
-    'shoulder-length light brown hair, loosely pulled back with a couple of stray strands framing the face — natural texture, no salon polish',
-  face_description:
-    'warm oval face with faint laugh lines around the eyes, a natural asymmetry to the smile, subtle freckling across the nose bridge, and warm hazel eyes with soft crinkle lines at the outer corners',
-  body_posture_clothing:
-    "average build with slightly rounded shoulders suggesting a life at a desk, wearing a casual soft grey cotton crewneck that shows honest wear at the neckline — not new, not designer. Relaxed posture, elbows tucked in like she's holding the phone close for a private conversation",
+  demographic_role: 'suburban grandmother',
+  hair_bullet:
+    'Shoulder-length salt-and-pepper hair, slightly messy, NOT styled, NOT symmetrical — a couple of loose strands framing the face',
+  eye_asymmetry_bullet:
+    'Slightly uneven eye line — one eyelid drooping slightly more than the other (natural aging)',
+  nose_bullet: 'Ordinary nose — slightly wider than average, with a small bump on the bridge',
+  mouth_bullet: 'Thin lips, slightly asymmetric mouth, natural slight downturn on the left side',
+  eye_color_and_age_detail: "Warm hazel eyes with visible crow's feet and slight bags underneath",
+  jaw_bullet: 'Soft jawline with mild jowls (age-appropriate) — no sharp definition',
+  face_shape_bullet:
+    'Oval face with natural fullness at the cheeks, NOT chiseled, NOT model-shaped',
+  clothing_bullet:
+    'Faded navy cotton crewneck with honest wear at the neckline — not new, not designer',
+  setting_paragraph:
+    'Sitting at a slightly cluttered morning kitchen table — a coffee mug and unopened mail visible behind her, warm natural window light from off-camera. Cozy lived-in feel.',
+  skin_age_appropriate_detail:
+    "faint age spots on the cheekbones, small broken capillaries near the nose, natural crow's feet at the outer eye corners",
   skin_color_for_stubble: 'none',
-  role_description: 'thirty-something everyperson',
-  setting_description:
-    'casual living-room corner, late-afternoon natural daylight coming through a window off-camera, muted neutral walls behind, no visible screens or ad-tech props',
+  anti_celeb_actress_examples: [
+    'Meryl Streep',
+    'Helen Mirren',
+    'Jane Fonda',
+    'Diane Keaton',
+    'Sally Field',
+    'Goldie Hawn',
+    'Susan Sarandon',
+    'Glenn Close',
+    'Judi Dench',
+    'Maggie Smith',
+  ],
+  anti_celeb_news_examples: [
+    'Barbara Walters',
+    'Diane Sawyer',
+    'Katie Couric',
+    'Oprah',
+    'Ellen DeGeneres',
+  ],
+  anti_celeb_politician_examples: [
+    'Hillary Clinton',
+    'Nancy Pelosi',
+    'Barbara Bush',
+    'Michelle Obama',
+  ],
 };
 
 /**
@@ -759,23 +819,27 @@ export interface VideoAdSpecHedra {
 }
 
 /**
- * Polish-21.0.5 → Polish-21.0.6: compose the Nano Banana Pro image
- * prompt from the structured character using the 6-block pattern:
- *   1. Single UGC iPhone selfie lead (Polish-21.0.6 — replaces the
- *      Polish-21.0.5 three-view character sheet, which Hedra
- *      Character 3 interpreted as three separate characters and
- *      then animated as three different people in one video)
- *   2. Head / face (single flowing paragraph)
- *   3. Body / posture / clothing (single paragraph)
- *   4. SKIN REALISM MANDATE (verbatim anchor — all three ZERO
- *      requirements + fictional-everyperson clause)
- *   5. Camera / setting (single line)
- *   6. Anti-AI directive tail (verbatim from Kling 3.0 guide)
+ * Polish-21.0.7 hotfix: compose the Nano Banana Pro image prompt
+ * from the structured character using the operator's manually-
+ * verified Linda 7-block pattern:
  *
- * The anchors are word-for-word — a future rewrite that softens
- * "ZERO beauty filters / ZERO skin smoothing / ZERO AI plastic-skin
- * artifacts" or drops the anti-AI directive silently degrades
- * quality on Nano Banana output. Tests pin every anchor.
+ *   1. Vertical iPhone selfie lead (fictional + demographic hint)
+ *   2. PHYSICAL FEATURES (deliberately asymmetric and ordinary) —
+ *      itemized bullets with specific imperfections
+ *   3. Setting paragraph
+ *   4. SKIN REALISM MANDATE (all three ZERO anchors preserved from
+ *      Polish-21.0.5 tests + Linda-style age-appropriate detail)
+ *   5. CRITICAL ANTI-CELEBRITY DIRECTIVE (new — named examples of
+ *      who the face MUST NOT resemble + "anonymous not attractive"
+ *      reframe + regenerate self-check)
+ *   6. Camera / setting anchor
+ *   7. Anti-AI directive tail (verbatim from Kling 3.0 guide)
+ *
+ * Key wording anchors are word-for-word — a future rewrite that
+ * softens the ZERO clauses, drops the ANONYMOUS-not-ATTRACTIVE
+ * reframe, or removes the celebrity examples silently degrades
+ * Nano Banana output back toward AI-CGI stock-photo aesthetic.
+ * Tests pin every anchor.
  */
 export function composeNanoBananaCharacterPrompt(character: StructuredCharacter): string {
   const {
@@ -783,55 +847,91 @@ export function composeNanoBananaCharacterPrompt(character: StructuredCharacter)
     age,
     nationality,
     gender,
-    hair_description,
-    face_description,
-    body_posture_clothing,
+    demographic_role,
+    hair_bullet,
+    eye_asymmetry_bullet,
+    nose_bullet,
+    mouth_bullet,
+    eye_color_and_age_detail,
+    jaw_bullet,
+    face_shape_bullet,
+    clothing_bullet,
+    setting_paragraph,
+    skin_age_appropriate_detail,
     skin_color_for_stubble,
-    role_description,
-    setting_description,
+    anti_celeb_actress_examples,
+    anti_celeb_news_examples,
+    anti_celeb_politician_examples,
   } = character;
   const pronoun = gender === 'female' ? 'She' : 'He';
-  const reflexivePronoun = gender === 'female' ? 'herself' : 'himself';
+  const objectPronoun = gender === 'female' ? 'her' : 'him';
   const stubbleClause =
     skin_color_for_stubble === 'none'
-      ? // Female / clean-shaven face — no stubble line, but keep pore + vellus detail.
-        'Visible pores, natural sebaceous texture on nose. Natural vellus hair on forearms.'
-      : `Visible pores, natural sebaceous texture on nose, real ${skin_color_for_stubble} stubble shadow on upper lip and jaw from one day of missed shaving. Natural vellus hair on forearms.`;
+      ? ''
+      : ` Real ${skin_color_for_stubble} stubble shadow on upper lip and jaw from one day of missed shaving.`;
 
-  // Polish-21.0.6 hotfix: single UGC iPhone selfie lead. Character 3
-  // takes ONE image and animates ONE character; a three-view sheet
-  // was being interpreted as three separate people. Chest-up
-  // front-facing framing produces the correct single-character
-  // reference for the downstream Hedra generation.
+  // Block 1 — Linda selfie lead.
   const block1_selfieLead =
-    `Photorealistic iPhone selfie photo of a ${age}-year-old ${nationality} ${gender} named ${name}, ` +
-    `filming ${reflexivePronoun} holding ${gender === 'female' ? 'her' : 'his'} phone at chest height. ` +
-    `Front-facing chest-up framing, natural handheld micro-jitter, 9:16 vertical.`;
+    `Photorealistic vertical iPhone selfie of a fictional ${age}-year-old ${nationality} ${gender} named ${name}. ` +
+    `Generic ${demographic_role} appearance.`;
 
-  const block2_headFace = `${hair_description}. ${face_description}.`;
+  // Block 2 — PHYSICAL FEATURES (itemized bullets, deliberately
+  // asymmetric). Bullets render sharper on Nano Banana than paragraphs;
+  // the anti-generic imperfection stays intact instead of averaging out.
+  const block2_physicalFeatures =
+    `PHYSICAL FEATURES (deliberately asymmetric and ordinary):\n` +
+    `- ${hair_bullet}\n` +
+    `- ${eye_asymmetry_bullet}\n` +
+    `- ${nose_bullet}\n` +
+    `- ${mouth_bullet}\n` +
+    `- ${eye_color_and_age_detail}\n` +
+    `- ${jaw_bullet}\n` +
+    `- ${face_shape_bullet}\n` +
+    `- Clothing: ${clothing_bullet}`;
 
-  const block3_bodyPostureClothing = body_posture_clothing + '.';
+  // Block 3 — Setting.
+  const block3_setting = setting_paragraph;
 
+  // Block 4 — SKIN REALISM MANDATE. Preserves the Polish-21.0.5 anchors
+  // ("ZERO beauty filters. ZERO skin smoothing. ZERO AI plastic-skin
+  // artifacts.") AND adds the Linda-shaped age-appropriate detail line.
   const block4_skinRealism =
-    `SKIN REALISM MANDATE: Hyper-realistic unedited human skin. ${stubbleClause} ` +
-    `ZERO beauty filters. ZERO skin smoothing. ZERO AI plastic-skin artifacts. ` +
-    `${pronoun} must look like a real ${age}-year-old ${role_description}, not a model, not an actor, ` +
+    `SKIN REALISM MANDATE: Real ${age}-year-old skin — visible pores, natural sebaceous texture on nose, ${skin_age_appropriate_detail}, slight redness on cheekbones.${stubbleClause} Natural vellus hair on forearms. ` +
+    `ZERO airbrushing. ZERO beauty filters. ZERO skin smoothing. ZERO AI plastic-skin artifacts. ` +
+    `${pronoun} must look like a real ${age}-year-old ${demographic_role}, not a model, not an actor, ` +
     `not an AI-generated character.`;
 
-  const block5_cameraSetting =
-    `Shot on iPhone front camera, 9:16 vertical, natural daylight from ${setting_description}, ` +
-    `slightly shaky handheld feel.`;
+  // Block 5 — CRITICAL ANTI-CELEBRITY DIRECTIVE (NEW). Steers Nano
+  // Banana away from famous-face attractors with named examples +
+  // the "anonymous not attractive" reframe + regenerate self-check.
+  const actressList = anti_celeb_actress_examples.join(', ');
+  const newsList = anti_celeb_news_examples.join(', ');
+  const politicianList = anti_celeb_politician_examples.join(', ');
+  const block5_antiCelebrity =
+    `CRITICAL ANTI-CELEBRITY DIRECTIVE: The face must be DELIBERATELY GENERIC and FORGETTABLE. The face must NOT resemble:\n` +
+    `- ANY actress (${actressList})\n` +
+    `- ANY news anchor or talk show host (${newsList})\n` +
+    `- ANY political figure or spouse (${politicianList})\n` +
+    `- ANY famous ${gender} of the ~${age}-year-old bracket, living or dead.\n\n` +
+    `The face should look like a RANDOM ${demographic_role}: 'the kind of face where you'd say I think I've seen ${objectPronoun} at the grocery store but you couldn't pick ${objectPronoun} out of a lineup.' Slightly asymmetric, ordinary features, no 'TV polish.'\n\n` +
+    `Aim for ANONYMOUS, not ATTRACTIVE. The face should be intentionally unremarkable. If the face looks like a TV ${demographic_role} character, regenerate. The target is 'real human you'd walk past on the street and forget.'`;
 
-  const block6_antiAiDirective =
+  // Block 6 — Camera anchor (Polish-21.0.5 phrasing preserved for
+  // the existing test pins).
+  const block6_camera = `Shot on iPhone front camera, 9:16 vertical, natural daylight from ${setting_paragraph.split('.')[0]?.toLowerCase() ?? 'the scene setting'}, slightly shaky handheld feel.`;
+
+  // Block 7 — Anti-AI directive (verbatim Kling 3.0 guide anchor).
+  const block7_antiAiDirective =
     'ABSOLUTELY NO phones, cameras, screens, social media UI, floating text, or digital overlays visible anywhere in the frame.';
 
   return [
     block1_selfieLead,
-    block2_headFace,
-    block3_bodyPostureClothing,
+    block2_physicalFeatures,
+    block3_setting,
     block4_skinRealism,
-    block5_cameraSetting,
-    block6_antiAiDirective,
+    block5_antiCelebrity,
+    block6_camera,
+    block7_antiAiDirective,
   ].join('\n\n');
 }
 
@@ -883,37 +983,48 @@ function validateSceneBody(
 }
 
 /**
- * Polish-21.0.5: parse a character block from Claude's output,
- * falling back to FALLBACK_STRUCTURED_CHARACTER when the block is
- * missing / not an object / drops required fields. The scene
- * pipeline can still proceed with a generic everyperson if Claude
- * flubs the character schema — better than blowing up the whole
- * variant.
+ * Polish-21.0.7 hotfix: parse a Linda-shape character block from
+ * Claude's output, falling back to FALLBACK_STRUCTURED_CHARACTER
+ * when the block is missing / not an object / drops required
+ * fields. Partial hydration risks a strange half-Claude, half-
+ * fallback character that reads worse than either shape on its
+ * own — cleaner to fall back wholesale.
  */
 export function parseStructuredCharacter(raw: unknown): StructuredCharacter {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return FALLBACK_STRUCTURED_CHARACTER;
   const c = raw as Record<string, unknown>;
-  const name = typeof c['name'] === 'string' ? (c['name'] as string) : undefined;
+  const str = (key: string): string | undefined =>
+    typeof c[key] === 'string' && (c[key] as string).length > 0 ? (c[key] as string) : undefined;
+  const strArray = (key: string, minLen: number): string[] | undefined => {
+    const v = c[key];
+    if (!Array.isArray(v)) return undefined;
+    const arr = v.filter((x): x is string => typeof x === 'string' && x.length > 0);
+    return arr.length >= minLen ? arr : undefined;
+  };
+
+  const name = str('name');
   const ageRaw = c['age'];
   const age =
     typeof ageRaw === 'number' && Number.isFinite(ageRaw) && ageRaw > 0
       ? Math.round(ageRaw)
       : undefined;
-  const nationality =
-    typeof c['nationality'] === 'string' ? (c['nationality'] as string) : undefined;
+  const nationality = str('nationality');
   const genderRaw = c['gender'];
   const gender: 'male' | 'female' | undefined =
     genderRaw === 'male' || genderRaw === 'female' ? genderRaw : undefined;
-  const hair =
-    typeof c['hair_description'] === 'string' ? (c['hair_description'] as string) : undefined;
-  const face =
-    typeof c['face_description'] === 'string' ? (c['face_description'] as string) : undefined;
-  const body =
-    typeof c['body_posture_clothing'] === 'string'
-      ? (c['body_posture_clothing'] as string)
-      : undefined;
+  const demographic_role = str('demographic_role');
+  const hair_bullet = str('hair_bullet');
+  const eye_asymmetry_bullet = str('eye_asymmetry_bullet');
+  const nose_bullet = str('nose_bullet');
+  const mouth_bullet = str('mouth_bullet');
+  const eye_color_and_age_detail = str('eye_color_and_age_detail');
+  const jaw_bullet = str('jaw_bullet');
+  const face_shape_bullet = str('face_shape_bullet');
+  const clothing_bullet = str('clothing_bullet');
+  const setting_paragraph = str('setting_paragraph');
+  const skin_age_appropriate_detail = str('skin_age_appropriate_detail');
   const stubbleRaw = c['skin_color_for_stubble'];
-  const stubble: SkinColorForStubble | undefined =
+  const skin_color_for_stubble: SkinColorForStubble | undefined =
     stubbleRaw === 'grey' ||
     stubbleRaw === 'brown' ||
     stubbleRaw === 'black' ||
@@ -922,24 +1033,32 @@ export function parseStructuredCharacter(raw: unknown): StructuredCharacter {
     stubbleRaw === 'none'
       ? stubbleRaw
       : undefined;
-  const role =
-    typeof c['role_description'] === 'string' ? (c['role_description'] as string) : undefined;
-  const setting =
-    typeof c['setting_description'] === 'string' ? (c['setting_description'] as string) : undefined;
-  // Any required field missing → whole-record fallback. Partial
-  // hydration risks a strange half-Claude, half-fallback character
-  // that reads worse than either shape on its own.
+  // Anti-celebrity arrays: require at least a few named examples
+  // per category so the DIRECTIVE block has real content.
+  const anti_celeb_actress_examples = strArray('anti_celeb_actress_examples', 4);
+  const anti_celeb_news_examples = strArray('anti_celeb_news_examples', 2);
+  const anti_celeb_politician_examples = strArray('anti_celeb_politician_examples', 2);
+
   if (
     !name ||
     !age ||
     !nationality ||
     !gender ||
-    !hair ||
-    !face ||
-    !body ||
-    !stubble ||
-    !role ||
-    !setting
+    !demographic_role ||
+    !hair_bullet ||
+    !eye_asymmetry_bullet ||
+    !nose_bullet ||
+    !mouth_bullet ||
+    !eye_color_and_age_detail ||
+    !jaw_bullet ||
+    !face_shape_bullet ||
+    !clothing_bullet ||
+    !setting_paragraph ||
+    !skin_age_appropriate_detail ||
+    !skin_color_for_stubble ||
+    !anti_celeb_actress_examples ||
+    !anti_celeb_news_examples ||
+    !anti_celeb_politician_examples
   ) {
     return FALLBACK_STRUCTURED_CHARACTER;
   }
@@ -948,12 +1067,21 @@ export function parseStructuredCharacter(raw: unknown): StructuredCharacter {
     age,
     nationality,
     gender,
-    hair_description: hair,
-    face_description: face,
-    body_posture_clothing: body,
-    skin_color_for_stubble: stubble,
-    role_description: role,
-    setting_description: setting,
+    demographic_role,
+    hair_bullet,
+    eye_asymmetry_bullet,
+    nose_bullet,
+    mouth_bullet,
+    eye_color_and_age_detail,
+    jaw_bullet,
+    face_shape_bullet,
+    clothing_bullet,
+    setting_paragraph,
+    skin_age_appropriate_detail,
+    skin_color_for_stubble,
+    anti_celeb_actress_examples,
+    anti_celeb_news_examples,
+    anti_celeb_politician_examples,
   };
 }
 
@@ -1520,15 +1648,24 @@ async function runClaudeAdSpecHedra(input: {
     `  },\n` +
     `  "character": {\n` +
     `    "name": "First name only. Fictional — no public figure.",\n` +
-    `    "age": 34,\n` +
+    `    "age": 68,\n` +
     `    "nationality": "American / British / Filipino / …",\n` +
     `    "gender": "male" | "female",\n` +
-    `    "hair_description": "Single flowing paragraph — length, color, styling. Naturalistic phrasing like 'shoulder-length light brown hair loosely pulled back with a couple of stray strands'. NOT bullet form.",\n` +
-    `    "face_description": "Single flowing paragraph — face shape, laugh lines, crow's feet, jowls or lack thereof, freckling, eye color with crinkle detail. Woven together as ONE sentence, not a list.",\n` +
-    `    "body_posture_clothing": "Single flowing paragraph — build, shoulder posture tied to life context ('slightly rounded shoulders suggesting a life of desk work' — NOT athletic), specific clothing with wear detail ('soft grey cotton crewneck, honest wear at the neckline — not new, not designer'), relaxed posture cue.",\n` +
+    `    "demographic_role": "e.g. 'suburban grandmother', 'working dad', 'young professional', 'retiree'. Used inside the SKIN REALISM MANDATE + the CRITICAL ANTI-CELEBRITY DIRECTIVE + the 'looks like a TV {role} character, regenerate' self-check.",\n` +
+    `    "hair_bullet": "SHORT bullet — length + color + styling, ending with 'slightly messy, NOT styled' or 'NOT symmetrical'. e.g. 'Shoulder-length salt-and-pepper hair, slightly messy, NOT styled, NOT symmetrical'.",\n` +
+    `    "eye_asymmetry_bullet": "ONE specific eye-line asymmetry. e.g. 'Slightly uneven eye line — one eyelid drooping slightly more than the other (natural aging)'.",\n` +
+    `    "nose_bullet": "ONE specific nose imperfection. e.g. 'Ordinary nose — slightly wider than average, with a small bump on the bridge'.",\n` +
+    `    "mouth_bullet": "Mouth asymmetry / downturn detail. e.g. 'Thin lips, slightly asymmetric mouth, natural slight downturn on the left side'.",\n` +
+    `    "eye_color_and_age_detail": "Eye color + age-specific detail. e.g. 'Warm hazel eyes with visible crow\\'s feet and slight bags underneath'.",\n` +
+    `    "jaw_bullet": "Jawline with subtle imperfection (jowls, softness, weak chin). e.g. 'Soft jawline with mild jowls (age-appropriate)'.",\n` +
+    `    "face_shape_bullet": "Face shape with 'NOT chiseled' or 'NOT model-shaped' qualifier. e.g. 'Oval face, NOT chiseled, NOT model-shaped, natural fullness at cheeks'.",\n` +
+    `    "clothing_bullet": "SPECIFIC clothing item + material + wear condition. e.g. 'Faded navy cotton crewneck with honest wear at the neckline'.",\n` +
+    `    "setting_paragraph": "Sitting/standing scene with SPECIFIC furniture / props + light source. e.g. 'Sitting at a slightly cluttered morning kitchen table — coffee mug and unopened mail behind her, warm natural window light from off-camera. Cozy lived-in feel.'",\n` +
+    `    "skin_age_appropriate_detail": "Age-appropriate skin imperfections woven together as ONE phrase. e.g. 'faint age spots on cheekbones, small broken capillaries near the nose, natural crow\\'s feet at the outer eye corners'.",\n` +
     `    "skin_color_for_stubble": "grey" | "brown" | "black" | "blonde" | "red" | "none",\n` +
-    `    "role_description": "e.g. 'grandfather', 'mother', 'retiree', 'young professional', 'thirty-something everyperson'. Used verbatim in the SKIN REALISM MANDATE.",\n` +
-    `    "setting_description": "Single flowing paragraph — specific location + specific daylight source. e.g. 'parked dark-interior SUV, warm afternoon sunlight through the driver's side window'."\n` +
+    `    "anti_celeb_actress_examples": ["8-12 age-appropriate actress names the face MUST NOT resemble. e.g. ['Meryl Streep', 'Helen Mirren', 'Jane Fonda', 'Diane Keaton', 'Sally Field', 'Goldie Hawn', 'Susan Sarandon', 'Glenn Close', 'Judi Dench', 'Maggie Smith']"],\n` +
+    `    "anti_celeb_news_examples": ["4-6 news anchor / talk show host names. e.g. ['Barbara Walters', 'Diane Sawyer', 'Katie Couric', 'Oprah', 'Ellen DeGeneres']"],\n` +
+    `    "anti_celeb_politician_examples": ["4-6 political figure / spouse names. e.g. ['Hillary Clinton', 'Nancy Pelosi', 'Barbara Bush', 'Michelle Obama']"]\n` +
     `  }\n` +
     `}\n\n` +
     `HOW ${model.displayName} WORKS (context so you write for the model, not against it):\n` +
@@ -1554,38 +1691,56 @@ async function runClaudeAdSpecHedra(input: {
     `like venting to a friend on FaceTime' / 'excited announcement to camera' / 'quiet ` +
     `vulnerable moment'}. She/He says: '{verbatim source hook + variation}'. Natural ` +
     `micro-expressions. Vertical 9:16."\n\n` +
-    `CHARACTER FORMAT — HARD REQUIREMENTS (JOHN pattern — verified working):\n` +
-    `- Naturalistic PARAGRAPHS in hair_description / face_description / ` +
-    `body_posture_clothing / setting_description. NOT itemized JSON objects. NOT bullet ` +
-    `lists. If tempted to write "{ length: '...', color: '...' }" for hair — DO NOT. Write ` +
-    `it as prose a casting director would send to a photographer.\n` +
-    `- shoulder posture MUST cue life context (desk work, retiree posture, standing waitress ` +
-    `posture, etc). NEVER "athletic" — athletic reads as stock-photo model.\n` +
-    `- Clothing MUST have wear detail: "slightly worn at the collar", "faded on the ` +
-    `sleeves", "honest wear at the neckline — not new, not dirty". No pristine outfits.\n` +
+    `CHARACTER FORMAT — HARD REQUIREMENTS (Linda pattern — Polish-21.0.7 verified working):\n` +
+    `- ITEMIZED BULLETS in every physical-feature field. NOT flowing paragraphs. Nano Banana ` +
+    `Pro renders bullets sharper than paragraphs — paragraph anchors get averaged out, ` +
+    `bullets keep the specific imperfection intact.\n` +
+    `- Every bullet MUST contain a SPECIFIC imperfection: droopy eyelid, bump on nose bridge, ` +
+    `asymmetric mouth, mild jowls, natural downturn, etc. Symmetrical / model-shaped defaults ` +
+    `read as AI-CGI on Nano Banana.\n` +
+    `- Clothing MUST be a specific item + material + wear condition: "faded navy cotton ` +
+    `crewneck with honest wear at the neckline". NO pristine outfits, NO designer brands.\n` +
+    `- ANTI-CELEBRITY arrays MUST list 8-12 actress names (age-appropriate to the character), ` +
+    `4-6 news anchors, 4-6 politicians. These names go verbatim into the CRITICAL ANTI-` +
+    `CELEBRITY DIRECTIVE block downstream — Nano Banana pattern-matches to famous faces by ` +
+    `default and needs the named examples to steer AWAY from them.\n` +
+    `- Aim for ANONYMOUS, not ATTRACTIVE. The face should look like a RANDOM ` +
+    `{demographic_role} you'd walk past on the street and forget. NOT a model. NOT a TV ` +
+    `character.\n` +
     `- skin_color_for_stubble drives the SKIN REALISM MANDATE line downstream. Pick 'none' ` +
     `for a smooth-shaven or female face, otherwise pick the color that matches the hair.\n` +
-    `- role_description is used inside "must look like a real {age}-year-old {role}, not a ` +
-    `model, not an actor, not an AI-generated character". Pick something a stranger would ` +
-    `say if asked "who's that in the video".\n\n` +
-    `WORKED EXAMPLE (Polish-21.0.5 anchor — the yapper scene + JOHN character the ` +
-    `operator verified working on Hedra Character 3 + Nano Banana Pro):\n` +
+    `- demographic_role is used in three places downstream: the SKIN REALISM MANDATE ` +
+    `("must look like a real {age}-year-old {role}, not a model..."), the anti-celebrity ` +
+    `directive ("looks like a TV {role} character, regenerate"), and the lead ` +
+    `("Generic {role} appearance"). Pick something a stranger would say if asked "who's that ` +
+    `in the video".\n\n` +
+    `WORKED EXAMPLE (Polish-21.0.7 Linda anchor — the yapper scene + itemized character the ` +
+    `operator manually verified working on Hedra Character 3 + Nano Banana Pro):\n` +
     `{\n` +
     `  "scene": {\n` +
-    `    "scene_description": "A 34-year-old woman films herself in the driver's seat of a parked dark-interior SUV — dashboard-mounted phone chest-up, tripod-style stability. Warm afternoon sunlight through the driver's side window catches her face. Confessional TikTok energy, like venting to a friend on FaceTime. She says: 'I swear to god, I was spending $80 a month on face serums that did NOTHING.' Natural micro-expressions. Vertical 9:16.",\n` +
+    `    "scene_description": "A 68-year-old woman films herself at her cluttered kitchen table — dashboard-style phone chest-up, warm morning window light. Confessional TikTok energy, like venting to a friend on FaceTime. She says: 'I swear to god, I was spending $80 a month on face serums that did NOTHING.' Natural micro-expressions. Vertical 9:16.",\n` +
     `    "script": "I swear to god, I was spending $80 a month on face serums that did NOTHING. Zero. Nada. Like, honestly? I finally figured it out — and I wish I'd known sooner."\n` +
     `  },\n` +
     `  "character": {\n` +
-    `    "name": "Rachel",\n` +
-    `    "age": 34,\n` +
+    `    "name": "Linda",\n` +
+    `    "age": 68,\n` +
     `    "nationality": "American",\n` +
     `    "gender": "female",\n` +
-    `    "hair_description": "shoulder-length light brown hair, loosely pulled back with a couple of stray strands framing the face, natural texture without salon polish",\n` +
-    `    "face_description": "warm oval face with faint laugh lines around the eyes, a natural asymmetry to the smile, light freckling across the nose bridge, and warm hazel eyes with soft crinkle lines at the outer corners",\n` +
-    `    "body_posture_clothing": "average build with slightly rounded shoulders suggesting a life at a desk, wearing a soft grey cotton crewneck that shows honest wear at the neckline — not new, not designer, elbows tucked in like she's holding the phone close for a private conversation",\n` +
+    `    "demographic_role": "suburban grandmother",\n` +
+    `    "hair_bullet": "Shoulder-length salt-and-pepper hair, slightly messy, NOT styled, NOT symmetrical",\n` +
+    `    "eye_asymmetry_bullet": "Slightly uneven eye line — one eyelid drooping slightly more than the other (natural aging)",\n` +
+    `    "nose_bullet": "Ordinary nose — slightly wider than average, with a small bump on the bridge",\n` +
+    `    "mouth_bullet": "Thin lips, slightly asymmetric mouth, natural slight downturn on the left side",\n` +
+    `    "eye_color_and_age_detail": "Warm hazel eyes with visible crow\\'s feet and slight bags underneath",\n` +
+    `    "jaw_bullet": "Soft jawline with mild jowls (age-appropriate)",\n` +
+    `    "face_shape_bullet": "Oval face, NOT chiseled, NOT model-shaped, natural fullness at cheeks",\n` +
+    `    "clothing_bullet": "Faded navy cotton crewneck with honest wear at the neckline",\n` +
+    `    "setting_paragraph": "Sitting at a slightly cluttered morning kitchen table — coffee mug and unopened mail behind her, warm natural window light from off-camera. Cozy lived-in feel.",\n` +
+    `    "skin_age_appropriate_detail": "faint age spots on cheekbones, small broken capillaries near the nose, natural crow\\'s feet at the outer eye corners",\n` +
     `    "skin_color_for_stubble": "none",\n` +
-    `    "role_description": "thirty-something everyperson",\n` +
-    `    "setting_description": "parked dark-interior SUV, warm afternoon sunlight coming through the driver's side window off-camera"\n` +
+    `    "anti_celeb_actress_examples": ["Meryl Streep", "Helen Mirren", "Jane Fonda", "Diane Keaton", "Sally Field", "Goldie Hawn", "Susan Sarandon", "Glenn Close", "Judi Dench", "Maggie Smith"],\n` +
+    `    "anti_celeb_news_examples": ["Barbara Walters", "Diane Sawyer", "Katie Couric", "Oprah", "Ellen DeGeneres"],\n` +
+    `    "anti_celeb_politician_examples": ["Hillary Clinton", "Nancy Pelosi", "Barbara Bush", "Michelle Obama"]\n` +
     `  }\n` +
     `}\n\n` +
     `SOURCE-SCRIPT PRESERVATION (Polish-19.4.2 rule — this is NOT verbatim quoting, ` +
