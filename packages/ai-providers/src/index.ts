@@ -50,6 +50,9 @@ export {
   type UploadGeminiFileResult,
   type PollGeminiFileInput,
   type PollGeminiFileResult,
+  // Polish-21.0.8: Nano Banana 2 model resolver + env override.
+  DEFAULT_NANO_BANANA_MODEL_ID,
+  getNanoBananaModelId,
 } from './gemini-client';
 export {
   callClaude,

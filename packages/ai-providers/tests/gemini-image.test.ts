@@ -104,9 +104,54 @@ describe('callGeminiImage — Phase 3d call shape', () => {
     expect(parts[1]).toHaveProperty('text');
   });
 
-  it('hits the gemini-2.5-flash-image model endpoint', async () => {
+  it('Polish-21.0.8: hits the Nano Banana 2 (gemini-3.1-flash-image) model endpoint by default', async () => {
+    const { captured } = mockFetchOnce(GEMINI_IMAGE_OK);
+    await callGeminiImage({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    // Polish-21.0.8 hotfix: upgraded from Nano Banana Pro
+    // (gemini-2.5-flash-image, plastic-face smart-downgrade
+    // reports) to Nano Banana 2 (gemini-3.1-flash-image, better
+    // character consistency + half the cost + ~3x faster).
+    expect(captured.url).toMatch(/models\/gemini-3\.1-flash-image:generateContent/);
+    // Regression pin: Pro model MUST NOT be the default anymore.
+    expect(captured.url).not.toMatch(/models\/gemini-2\.5-flash-image:generateContent/);
+  });
+});
+
+describe('Polish-21.0.8: getNanoBananaModelId + NANO_BANANA_MODEL_ID env override', () => {
+  const originalEnv = process.env['NANO_BANANA_MODEL_ID'];
+  afterEach(() => {
+    if (originalEnv === undefined) {
+      delete process.env['NANO_BANANA_MODEL_ID'];
+    } else {
+      process.env['NANO_BANANA_MODEL_ID'] = originalEnv;
+    }
+  });
+
+  it('DEFAULT_NANO_BANANA_MODEL_ID is Nano Banana 2 (gemini-3.1-flash-image)', async () => {
+    const { DEFAULT_NANO_BANANA_MODEL_ID } = await import('../src/gemini-client');
+    expect(DEFAULT_NANO_BANANA_MODEL_ID).toBe('gemini-3.1-flash-image');
+  });
+
+  it('getNanoBananaModelId returns the default when NANO_BANANA_MODEL_ID env is unset', async () => {
+    delete process.env['NANO_BANANA_MODEL_ID'];
+    const { getNanoBananaModelId } = await import('../src/gemini-client');
+    expect(getNanoBananaModelId()).toBe('gemini-3.1-flash-image');
+  });
+
+  it('NANO_BANANA_MODEL_ID env override threads through to the request URL (A/B testing without redeploy)', async () => {
+    // Operator can flip back to Pro (`gemini-2.5-flash-image`) or
+    // forward to a preview model without a code change.
+    process.env['NANO_BANANA_MODEL_ID'] = 'gemini-2.5-flash-image';
+    // Fresh import to pick up the env at module-load time isn't
+    // needed — getNanoBananaModelId reads env at call time.
     const { captured } = mockFetchOnce(GEMINI_IMAGE_OK);
     await callGeminiImage({ userId: 'u', apiKey: 'k', prompt: 'p' });
     expect(captured.url).toMatch(/models\/gemini-2\.5-flash-image:generateContent/);
+  });
+
+  it('empty / whitespace-only env override falls through to the default', async () => {
+    process.env['NANO_BANANA_MODEL_ID'] = '   ';
+    const { getNanoBananaModelId } = await import('../src/gemini-client');
+    expect(getNanoBananaModelId()).toBe('gemini-3.1-flash-image');
   });
 });

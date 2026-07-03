@@ -365,3 +365,41 @@ describe('Polish-20: estimateByVideoModel branch (descriptor-driven)', () => {
     expect(r.estimateUsd).toBeCloseTo(3.56, 4);
   });
 });
+
+describe('Polish-21.0.8: Nano Banana 2 cost line on Hedra Character 3 estimates', () => {
+  it('Hedra estimate INCLUDES a Nano Banana 2 reference image line at $0.08/variant', () => {
+    // Polish-21.0.8: character reference images are billed at
+    // Nano Banana 2 pricing (~$0.08/img) — half of Nano Banana Pro
+    // and the model the operator's manually-verified outputs used.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 5,
+      videoModelId: 'hedra_character_3',
+      videoProviderId: 'hedra',
+      sourceDurationSeconds: 30,
+    });
+    const nanoBananaLine = r.breakdown.find((b) => /Nano Banana 2 reference image/.test(b.item));
+    expect(nanoBananaLine).toBeDefined();
+    expect(nanoBananaLine!.item).toMatch(/5 × \$0\.08/);
+    expect(nanoBananaLine!.cost).toBeCloseTo(5 * 0.08, 4);
+  });
+
+  it('Non-Hedra models (seedance / kling) do NOT bill Nano Banana (text-to-video, no reference image)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 3,
+      videoModelId: 'seedance_1_5_pro',
+      videoProviderId: 'kie_ai',
+      sourceDurationSeconds: 30,
+    });
+    expect(r.breakdown.some((b) => /Nano Banana/.test(b.item))).toBe(false);
+  });
+
+  it('VIDEO_MODEL_NANO_BANANA_PER_VARIANT_USD constant is $0.08 (Nano Banana 2 launch price)', async () => {
+    const { VIDEO_MODEL_NANO_BANANA_PER_VARIANT_USD } = await import('../src/cost-estimation');
+    expect(VIDEO_MODEL_NANO_BANANA_PER_VARIANT_USD).toBe(0.08);
+    // Regression pin: was $0.15 under Pro. Any accidental revert
+    // to Pro pricing should fail this pin loudly.
+    expect(VIDEO_MODEL_NANO_BANANA_PER_VARIANT_USD).not.toBe(0.15);
+  });
+});

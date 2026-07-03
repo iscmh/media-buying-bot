@@ -2,11 +2,14 @@ import { computeGeminiImageCost, computeGeminiTextCost } from '@mbb/shared';
 import { callProvider, type CallProviderResult } from './chokepoint';
 
 /**
- * Gemini 2.5 Flash + 2.5 Flash Image (a.k.a. nano-banana) clients.
+ * Gemini 2.5 Flash (vision) + Nano Banana 2 (image gen) clients.
  *
- * Endpoints (verified against Google's public API docs, May 2025):
+ * Endpoints (verified against Google's public API docs):
  *   - Vision/text:  POST .../models/gemini-2.5-flash:generateContent
- *   - Image gen:    POST .../models/gemini-2.5-flash-image:generateContent
+ *   - Image gen:    POST .../models/{NANO_BANANA_MODEL_ID}:generateContent
+ *                   default `gemini-3.1-flash-image` (Nano Banana 2 —
+ *                   Polish-21.0.8 upgrade). Override via
+ *                   NANO_BANANA_MODEL_ID env for A/B testing.
  *   - Files API:    POST /upload/v1beta/files?uploadType=multipart
  *                   GET  /v1beta/files/{name}      (poll state)
  *                   DELETE /v1beta/files/{name}    (cleanup)
@@ -23,7 +26,30 @@ import { callProvider, type CallProviderResult } from './chokepoint';
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_UPLOAD_BASE = 'https://generativelanguage.googleapis.com/upload/v1beta';
 const VISION_MODEL = 'gemini-2.5-flash';
-const IMAGE_MODEL = 'gemini-2.5-flash-image';
+
+/**
+ * Polish-21.0.8 hotfix: default Nano Banana image model.
+ *
+ * Migrated from Nano Banana Pro (`gemini-2.5-flash-image`, ~$0.15/img,
+ * 10-20s, character faces smart-downgraded per widespread April 2026
+ * complaints) to Nano Banana 2 (`gemini-3.1-flash-image`, ~$0.08/img,
+ * 4-8s, better character consistency per Melies review).
+ *
+ * The operator's manually-verified Linda-pattern outputs were run in
+ * the Gemini app (which defaulted to NB2 at Feb 2026 launch); the
+ * bot was silently on Pro and getting the plastic-face downgrade.
+ * Model swap only — Polish-21.0.7 Linda prompt stays intact.
+ *
+ * Override via NANO_BANANA_MODEL_ID env for A/B testing without a
+ * redeploy (e.g. `NANO_BANANA_MODEL_ID=gemini-2.5-flash-image` to
+ * flip back to Pro).
+ */
+export const DEFAULT_NANO_BANANA_MODEL_ID = 'gemini-3.1-flash-image';
+
+export function getNanoBananaModelId(): string {
+  const override = process.env['NANO_BANANA_MODEL_ID']?.trim();
+  return override && override.length > 0 ? override : DEFAULT_NANO_BANANA_MODEL_ID;
+}
 
 // Polish-9.6: env-overridable. IMAGE_TIMEOUT_MS bumped 30→90s — Nano
 // Banana image gen for the Kling pipeline routinely runs 30-60s; 30s
@@ -733,7 +759,11 @@ export interface GeminiImageResult {
 export const GEMINI_IMAGE_TEMPERATURE = 0.4;
 
 export async function callGeminiImage(input: GeminiImageInput): Promise<GeminiImageResult> {
-  const url = `${GEMINI_BASE}/models/${IMAGE_MODEL}:generateContent`;
+  // Polish-21.0.8: resolve the model id at call time so env override
+  // (NANO_BANANA_MODEL_ID) is picked up without a redeploy. Default
+  // is Nano Banana 2 (`gemini-3.1-flash-image`).
+  const nanoBananaModelId = getNanoBananaModelId();
+  const url = `${GEMINI_BASE}/models/${nanoBananaModelId}:generateContent`;
   // Order matters: put the reference image FIRST so the model anchors on
   // it as the thing to edit, then the text instructions referring to it.
   const parts: Array<{ text: string } | { inline_data: { mime_type: string; data: string } }> = [];
@@ -774,7 +804,7 @@ export async function callGeminiImage(input: GeminiImageInput): Promise<GeminiIm
     body,
     timeoutMs: IMAGE_TIMEOUT_MS,
     requestBodyForLog: {
-      model: IMAGE_MODEL,
+      model: nanoBananaModelId,
       prompt_chars: input.prompt.length,
       has_system_instruction: !!input.systemInstruction,
       has_reference_image: !!input.referenceImageBase64,

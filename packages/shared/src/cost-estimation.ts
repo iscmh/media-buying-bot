@@ -287,6 +287,21 @@ function round4(n: number): number {
 const VIDEO_MODEL_CLAUDE_SCRIPT_USD = 0.05;
 const VIDEO_MODEL_STITCH_USD = 0.15;
 const VIDEO_MODEL_DEFAULT_TARGET_SECONDS = 30;
+/**
+ * Polish-21.0.8 hotfix: per-variant character reference image cost.
+ *
+ * Migrated from Nano Banana Pro (~$0.15/img) to Nano Banana 2
+ * (~$0.08/img) after operator diagnosed the Pro API was silently
+ * smart-downgrading UGC character faces (widespread April 2026
+ * complaint pattern). Same Linda prompt, better model, half the
+ * price + ~3× faster.
+ *
+ * Only billed on the Hedra Character 3 branch — that's the only
+ * flow that generates a per-variant Nano Banana reference image.
+ * Legacy kie.ai models produce text-to-video without a reference
+ * image and don't hit this cost.
+ */
+export const VIDEO_MODEL_NANO_BANANA_PER_VARIANT_USD = 0.08;
 
 interface EstimateByVideoModelInput {
   modelId: VideoModelId;
@@ -338,6 +353,13 @@ function estimateByVideoModel(input: EstimateByVideoModelInput): CostEstimate {
         `${model.displayName} (${variantCount} × ${billedSecondsPerVariant}s × ` +
         `~$${config.usdPerSecond.toFixed(3)}/sec)`,
       cost: round4(variantCount * billedSecondsPerVariant * config.usdPerSecond),
+    });
+    // Polish-21.0.8: Nano Banana 2 per-variant character reference
+    // image. Was omitted from earlier Hedra estimates; adding here
+    // so the operator's cost preview reflects the actual bot spend.
+    breakdown.push({
+      item: `Nano Banana 2 reference image (${variantCount} × $${VIDEO_MODEL_NANO_BANANA_PER_VARIANT_USD.toFixed(2)})`,
+      cost: round4(variantCount * VIDEO_MODEL_NANO_BANANA_PER_VARIANT_USD),
     });
   } else {
     breakdown.push({
