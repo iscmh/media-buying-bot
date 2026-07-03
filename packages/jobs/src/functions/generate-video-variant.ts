@@ -890,6 +890,24 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   // Voice pick (deterministic per (jobId, variantIndex, variantCount)).
   const voice = pickHedraVoiceForVariant({ variantIndex, variantCount, jobId });
 
+  // Polish-21.0.1 hardening (job 52923be6 diagnostic): loud-log the
+  // exact text_prompt + script + voice_id we're about to send to
+  // Hedra. The hedra-video client already logs a first-call
+  // diagnostic per (kind, aiModelId) tuple, but that fires only
+  // ONCE per worker cold-start — subsequent submits are silent.
+  // This per-variant log fires on EVERY submit so a future
+  // regression (short scene_description, wrong field mapping,
+  // voice-id-vs-name confusion) surfaces in Inngest logs without
+  // needing to re-run for a first-call fire.
+  console.log(
+    `[generate-video-variant] variant ${variantIndex} (hedra) pre-submit: ` +
+      `voice_id=${voice.id} voice_label=${voice.label} ` +
+      `text_prompt_chars=${sceneDescription.length} ` +
+      `text_prompt_head=${JSON.stringify(sceneDescription.slice(0, 200))} ` +
+      `script_chars=${script.length} ` +
+      `script_head=${JSON.stringify(script.slice(0, 200))}`,
+  );
+
   // Step 6: submit generation.
   const submitResult = await step.run(`hedra-submit-${variantIndex}`, async () => {
     let keys;
@@ -904,10 +922,14 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       apiKey: keys.hedra!,
       aiModelId: config.modelParam,
       startKeyframeId,
-      // Polish-21 Commit 2: `voiceId` field carries the Hedra voice
-      // NAME (roster's `id` field), not a UUID. Character 3's API
-      // contract for names-vs-UUIDs is unverified; the client's
-      // loud-log on first submit surfaces a rejection cleanly.
+      // Polish-21.0.1 hotfix: `voiceId` field carries a Hedra voice
+      // UUID (from HEDRA_VOICE_ROSTER). Commit 2 mistakenly sent
+      // names ("Jessica", "Matilda") in this field and Hedra 422'd
+      // with `invalid literal for int() with base 10: 'jessica-a'`.
+      // The single-entry Polish-21.0.1 roster carries the confirmed
+      // hedra-labs/hedra-api-starter UUID; Polish-21.0.2 restores
+      // the multi-voice batch diversity once Hedra support delivers
+      // the full built-in UUID list.
       tts: { voiceId: voice.id, text: script },
       textPrompt: sceneDescription,
       resolution: '720p',
@@ -1201,16 +1223,78 @@ async function runClaudeAdSpecHedra(input: {
     return { ok: false, error: 'Claude returned an empty Hedra ad spec', costUsd: claude.costUsd };
   }
   const parsed = parseVideoAdSpecHedra(rawText);
-  if (parsed) return { ok: true, spec: parsed, costUsd: claude.costUsd };
-  console.log(
-    `[generate-video-variant] variant ${variantIndex} (hedra): scene JSON failed to parse; ` +
-      `raw text: ${rawText.slice(0, 500)}`,
-  );
-  return {
-    ok: false,
-    error: 'Claude returned an unparseable Hedra scene spec',
-    costUsd: claude.costUsd,
-  };
+  if (!parsed) {
+    console.log(
+      `[generate-video-variant] variant ${variantIndex} (hedra): scene JSON failed to parse; ` +
+        `raw text: ${rawText.slice(0, 500)}`,
+    );
+    return {
+      ok: false,
+      error: 'Claude returned an unparseable Hedra scene spec',
+      costUsd: claude.costUsd,
+    };
+  }
+  // Polish-21.0.1 hardening (job 52923be6 diagnostic): reject
+  // suspiciously short scene_description / script values.
+  //
+  // Before this gate, Claude occasionally emitted a very-short
+  // scene_description like "Aged Man" (picked up from the
+  // source_analysis subject demographic hints) and the parser silently
+  // accepted it. The Hedra submit then sent "Aged Man" as text_prompt,
+  // producing a generation whose character bore no resemblance to the
+  // intended scene. 40 chars is generous — the target is 50-80 WORDS
+  // (~250-400 chars); anything under 40 chars is clearly malformed.
+  const gateResult = validateHedraSpecMinLengths(parsed);
+  if (!gateResult.ok) {
+    console.log(
+      `[generate-video-variant] variant ${variantIndex} (hedra): spec rejected by ` +
+        `length gate. reason=${gateResult.reason} scene_description=${JSON.stringify(
+          parsed.scene.scene_description,
+        )} script=${JSON.stringify(parsed.scene.script)}`,
+    );
+    return { ok: false, error: gateResult.reason, costUsd: claude.costUsd };
+  }
+  return { ok: true, spec: parsed, costUsd: claude.costUsd };
+}
+
+/**
+ * Polish-21.0.1 hardening: minimum-length gate on the parsed Hedra
+ * ad spec. Rejects the suspiciously-short scene_description /
+ * script values that leaked through Commit 2 (job 52923be6 saw
+ * "Aged Man" as scene_description — 8 chars — passed to Hedra as
+ * text_prompt).
+ *
+ * The Claude prompt asks for 50-80 WORDS of scene_description
+ * (~250-400 chars); this gate catches responses under 40 chars
+ * without touching legitimate short-script variants (a hook line
+ * like "You'll NEVER guess." is ~19 chars but the SCENE
+ * description shouldn't be).
+ */
+export const HEDRA_MIN_SCENE_DESCRIPTION_CHARS = 40;
+export const HEDRA_MIN_SCRIPT_CHARS = 8;
+
+export function validateHedraSpecMinLengths(
+  spec: VideoAdSpecHedra,
+): { ok: true } | { ok: false; reason: string } {
+  const { scene_description, script } = spec.scene;
+  if (scene_description.trim().length < HEDRA_MIN_SCENE_DESCRIPTION_CHARS) {
+    return {
+      ok: false,
+      reason:
+        `Claude returned a scene_description that is too short ` +
+        `(${scene_description.trim().length} chars, need ≥${HEDRA_MIN_SCENE_DESCRIPTION_CHARS}). ` +
+        `Retry the job. If it persists, check the Claude prompt for a source_analysis leak.`,
+    };
+  }
+  if (script.trim().length < HEDRA_MIN_SCRIPT_CHARS) {
+    return {
+      ok: false,
+      reason:
+        `Claude returned a script that is too short ` +
+        `(${script.trim().length} chars, need ≥${HEDRA_MIN_SCRIPT_CHARS}). Retry the job.`,
+    };
+  }
+  return { ok: true };
 }
 
 // -------------------------------------------------------------------

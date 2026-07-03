@@ -16,6 +16,9 @@ import {
   parseVideoAdSpec,
   resolveAutoVideoDuration,
   sanitizeSourceAnalysisForClaude,
+  validateHedraSpecMinLengths,
+  HEDRA_MIN_SCENE_DESCRIPTION_CHARS,
+  HEDRA_MIN_SCRIPT_CHARS,
 } from '../src/functions/generate-video-variant';
 
 describe('Polish-20: computeVideoPollIntervalSeconds', () => {
@@ -843,10 +846,15 @@ describe('Polish-21 Commit 2: pickHedraVoiceForVariant (worker helper)', () => {
     expect(picks).toHaveLength(5);
     for (const v of picks) {
       expect(v.id.length).toBeGreaterThan(0);
-      expect(['female', 'male']).toContain(v.gender);
+      expect(['female', 'male', 'unknown']).toContain(v.gender);
     }
-    // 5 unique voices out of the 6-slot roster.
-    expect(new Set(picks.map((v) => v.id)).size).toBe(5);
+    // Polish-21.0.1 hotfix: single-entry roster (Hedra starter UUID)
+    // collapses batch diversity — every variant lands the same voice.
+    // Polish-21.0.2 restores multi-voice diversity when Hedra support
+    // delivers the full UUID roster. The mechanism (pickHedraVoicesForBatch
+    // + rotation) still holds under a multi-entry fixture roster —
+    // the shared-package tests exercise that path.
+    expect(new Set(picks.map((v) => v.id)).size).toBe(1);
   });
 
   it('same jobId + variantCount + variantIndex returns identical voice (Inngest retry safe)', async () => {
@@ -856,13 +864,22 @@ describe('Polish-21 Commit 2: pickHedraVoiceForVariant (worker helper)', () => {
     expect(a.id).toBe(b.id);
   });
 
-  it('different jobIds land different variant-0 voices (batch-level diversity)', async () => {
+  it('single-entry roster hands every jobId + variantIndex the same voice (Polish-21.0.1 trade-off)', async () => {
     const { pickHedraVoiceForVariant } = await import('../src/functions/generate-video-variant');
+    // Polish-21 Commit 2 pinned batch-level diversity here — but the
+    // Commit 2 roster was 6 voices. Polish-21.0.1 collapses to 1
+    // pending Hedra support. Regression pin flips: with a single-
+    // entry roster, EVERY jobId + variantIndex tuple lands the same
+    // voice. Polish-21.0.2 replaces this test with the diversity
+    // pin against the restored multi-voice roster.
     const ids = ['j-a', 'j-b', 'j-c', 'j-d', 'j-e', 'j-f'];
-    const first = ids.map(
-      (jobId) => pickHedraVoiceForVariant({ variantIndex: 0, variantCount: 5, jobId }).id,
+    const picks = ids.flatMap((jobId) =>
+      Array.from(
+        { length: 3 },
+        (_, i) => pickHedraVoiceForVariant({ variantIndex: i, variantCount: 3, jobId }).id,
+      ),
     );
-    expect(new Set(first).size).toBeGreaterThanOrEqual(2);
+    expect(new Set(picks).size).toBe(1);
   });
 });
 
@@ -1062,5 +1079,150 @@ describe('Polish-21 Commit 2: runClaudeAdSpecHedra system prompt', () => {
     expect(hedraFn).toMatch(/source_script_verbatim: sourceScriptVerbatim/);
     expect(hedraFn).toMatch(/source_analysis: sanitizedSourceAnalysis/);
     expect(hedraFn).toMatch(/sanitizeSourceAnalysisForClaude\(jobMetadata\)/);
+  });
+});
+
+// =====================================================================
+// Polish-21.0.1 hotfix regression pins (job 52923be6 diagnostic):
+//   - voice_id field must carry a UUID (not a name)
+//   - scene_description passes a minimum-length gate before being
+//     sent as text_prompt (silently-accepted "Aged Man" fixed)
+//   - runOneVariantHedra loud-logs the exact submit payload so a
+//     future regression surfaces without a first-call-only fire
+// =====================================================================
+
+describe('Polish-21.0.1: validateHedraSpecMinLengths', () => {
+  it('accepts a well-formed 50-80 word scene_description + normal script', () => {
+    const spec = {
+      scene: {
+        scene_description:
+          "A 34-year-old woman with light brown hair sits in the driver's seat of a parked dark-interior SUV, chest-up dashboard-mounted phone framing.",
+        script: 'I swear to god, I was spending $80 a month on face serums.',
+      },
+    };
+    expect(validateHedraSpecMinLengths(spec)).toEqual({ ok: true });
+  });
+
+  it('rejects the exact job 52923be6 failure shape — "Aged Man" scene_description', () => {
+    const spec = {
+      scene: {
+        scene_description: 'Aged Man',
+        script: 'valid script text here',
+      },
+    };
+    const r = validateHedraSpecMinLengths(spec);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toMatch(/scene_description that is too short/);
+      expect(r.reason).toMatch(new RegExp(`≥${HEDRA_MIN_SCENE_DESCRIPTION_CHARS}`));
+    }
+  });
+
+  it('trims whitespace before measuring length (whitespace-padded short values still fail)', () => {
+    const spec = {
+      scene: {
+        scene_description: '   Aged Man   ' + ' '.repeat(80), // char count > gate but trimmed length < gate
+        script: 'valid script text',
+      },
+    };
+    const r = validateHedraSpecMinLengths(spec);
+    expect(r.ok).toBe(false);
+  });
+
+  it('rejects suspiciously short scripts', () => {
+    const spec = {
+      scene: {
+        scene_description:
+          'A well-formed 50-80 word scene description that comfortably clears the minimum-length gate at forty characters.',
+        script: 'hi',
+      },
+    };
+    const r = validateHedraSpecMinLengths(spec);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toMatch(/script that is too short/);
+      expect(r.reason).toMatch(new RegExp(`≥${HEDRA_MIN_SCRIPT_CHARS}`));
+    }
+  });
+
+  it('gate thresholds are exported for cross-file assertions', () => {
+    expect(HEDRA_MIN_SCENE_DESCRIPTION_CHARS).toBe(40);
+    expect(HEDRA_MIN_SCRIPT_CHARS).toBe(8);
+  });
+});
+
+describe('Polish-21.0.1: worker text_prompt threading + pre-submit log', () => {
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-video-variant.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('runClaudeAdSpecHedra runs validateHedraSpecMinLengths AFTER parse succeeds', async () => {
+    const src = await readSrc();
+    // Regression pin: the length gate must run AFTER
+    // parseVideoAdSpecHedra returns a spec but BEFORE the spec is
+    // handed back to the worker. If the gate is dropped or moved
+    // out of order, a short scene_description would silently ship
+    // to Hedra as text_prompt (the exact 52923be6 failure mode).
+    const parseIdx = src.indexOf('const parsed = parseVideoAdSpecHedra(rawText)');
+    const gateIdx = src.indexOf('validateHedraSpecMinLengths(parsed)');
+    expect(parseIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeGreaterThan(parseIdx);
+  });
+
+  it('runOneVariantHedra loud-logs voice_id + text_prompt + script BEFORE the submit step', async () => {
+    const src = await readSrc();
+    // Job 52923be6 diagnostic hardening: the hedra-video client's
+    // first-call diagnostic fires only ONCE per worker cold-start.
+    // The worker's pre-submit log fires on EVERY variant, so a
+    // future regression (short scene_description, wrong field
+    // mapping, voice-id-vs-name confusion) shows up in Inngest
+    // logs immediately without needing a fresh cold-start.
+    const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
+    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
+    expect(hedraFn).toMatch(/pre-submit: `/);
+    expect(hedraFn).toMatch(/voice_id=\$\{voice\.id\}/);
+    expect(hedraFn).toMatch(/text_prompt_chars=\$\{sceneDescription\.length\}/);
+    expect(hedraFn).toMatch(/text_prompt_head=/);
+    expect(hedraFn).toMatch(/script_chars=\$\{script\.length\}/);
+    // Ordering: log fires BEFORE the submit step.run.
+    const logIdx = hedraFn.indexOf('pre-submit:');
+    const submitStepIdx = hedraFn.indexOf('hedra-submit-');
+    expect(logIdx).toBeGreaterThan(-1);
+    expect(submitStepIdx).toBeGreaterThan(-1);
+    expect(logIdx).toBeLessThan(submitStepIdx);
+  });
+
+  it('submitHedraGeneration call threads sceneDescription → textPrompt (not any default fallback)', async () => {
+    const src = await readSrc();
+    // Regression against threading a placeholder / default value
+    // into text_prompt. Only sceneDescription (destructured from
+    // adSpecResult.spec.scene) may occupy this slot.
+    const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
+    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
+    expect(hedraFn).toMatch(/textPrompt: sceneDescription,/);
+    expect(hedraFn).toMatch(
+      /const \{ scene_description: sceneDescription, script \} = adSpecResult\.spec\.scene;/,
+    );
+  });
+
+  it('parseVideoAdSpecHedra with a valid response returns the scene_description verbatim (no mutation / fallback)', async () => {
+    const { parseVideoAdSpecHedra } = await import('../src/functions/generate-video-variant');
+    const originalDescription =
+      'A 34-year-old woman with light brown hair sits in the driver seat of a parked SUV, chest-up phone framing.';
+    const originalScript = 'I swear to god, this $80 serum did nothing.';
+    const raw = JSON.stringify({
+      scene: { scene_description: originalDescription, script: originalScript },
+    });
+    const r = parseVideoAdSpecHedra(raw);
+    expect(r).not.toBeNull();
+    expect(r!.scene.scene_description).toBe(originalDescription);
+    expect(r!.scene.script).toBe(originalScript);
   });
 });

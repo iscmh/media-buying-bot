@@ -225,16 +225,28 @@ describe('Polish-21: getLiveProvidersForModel + getDefaultProviderForModel', () 
   });
 });
 
-describe('Polish-21 Commit 2: HEDRA_VOICE_ROSTER (named voices) + helpers', () => {
-  it('ships 6 named voices at Polish-21 launch (Jessica / Will / Matilda / Todd / Sarah / Jamal)', () => {
-    expect(HEDRA_VOICE_ROSTER.map((v) => v.id)).toEqual([
-      'Jessica',
-      'Will',
-      'Matilda',
-      'Todd',
-      'Sarah',
-      'Jamal',
-    ]);
+describe('Polish-21.0.1 hotfix: HEDRA_VOICE_ROSTER (single UUID) + helpers', () => {
+  /**
+   * Polish-21 Commit 2 shipped a name-based roster (Jessica / Matilda
+   * / etc). Job 52923be6 diagnostic: Hedra rejects names in voice_id
+   * with HTTP 422 `invalid literal for int() with base 10: 'jessica-a'`,
+   * so voice_id requires UUIDs. Polish-21.0.1 replaced the roster
+   * with the single confirmed working voice UUID from
+   * hedra-labs/hedra-api-starter's README example. Polish-21.0.2 will
+   * expand the roster once Hedra support delivers the full UUID list.
+   */
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const STARTER_VOICE_UUID = 'f412c62f-e94f-41c0-bfc6-97f63289941c';
+
+  it('ships EXACTLY ONE roster entry — the Hedra starter UUID', () => {
+    expect(HEDRA_VOICE_ROSTER).toHaveLength(1);
+    expect(HEDRA_VOICE_ROSTER[0]!.id).toBe(STARTER_VOICE_UUID);
+  });
+
+  it('every roster entry id is a valid UUID (regression pin against name-based ids)', () => {
+    for (const v of HEDRA_VOICE_ROSTER) {
+      expect(v.id, `voice ${JSON.stringify(v)} id is not a UUID`).toMatch(UUID_RE);
+    }
   });
 
   it('every roster entry carries label + description + gender + age', () => {
@@ -242,43 +254,46 @@ describe('Polish-21 Commit 2: HEDRA_VOICE_ROSTER (named voices) + helpers', () =
       expect(v.id.length).toBeGreaterThan(0);
       expect(v.label.length).toBeGreaterThan(0);
       expect(v.description.length).toBeGreaterThan(0);
-      expect(['female', 'male']).toContain(v.gender);
-      expect(['young', 'middle_aged']).toContain(v.age);
+      expect(['female', 'male', 'unknown']).toContain(v.gender);
+      expect(['young', 'middle_aged', 'unknown']).toContain(v.age);
     }
   });
 
-  it('exactly ONE entry is marked isDefault: true (Matilda — 40+ mom audience)', () => {
+  it('the sole entry is marked isDefault: true (safe-fallback voice)', () => {
     const defaults = HEDRA_VOICE_ROSTER.filter((v) => v.isDefault === true);
     expect(defaults).toHaveLength(1);
-    expect(defaults[0]!.id).toBe('Matilda');
+    expect(defaults[0]!.id).toBe(STARTER_VOICE_UUID);
   });
 
-  it('gender + age spread covers young/middle-aged × female/male (variant diversity)', () => {
-    const buckets = new Set(HEDRA_VOICE_ROSTER.map((v) => `${v.gender}_${v.age}`));
-    expect(buckets.size).toBeGreaterThanOrEqual(3);
-    expect(buckets.has('female_young')).toBe(true);
-    expect(buckets.has('male_young')).toBe(true);
-    expect(buckets.has('female_middle_aged')).toBe(true);
-    expect(buckets.has('male_middle_aged')).toBe(true);
-  });
-
-  it('getDefaultHedraVoice returns the isDefault entry (Matilda)', () => {
-    expect(getDefaultHedraVoice()?.id).toBe('Matilda');
+  it('getDefaultHedraVoice returns the starter UUID entry', () => {
+    expect(getDefaultHedraVoice()?.id).toBe(STARTER_VOICE_UUID);
   });
 
   it('getDefaultHedraVoice falls back to first entry when no isDefault flag set', () => {
     const roster: HedraVoiceRosterEntry[] = [
-      { id: 'a', label: 'a', description: 'a', gender: 'female', age: 'young' },
-      { id: 'b', label: 'b', description: 'b', gender: 'male', age: 'young' },
+      {
+        id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        label: 'a',
+        description: 'a',
+        gender: 'female',
+        age: 'young',
+      },
+      {
+        id: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        label: 'b',
+        description: 'b',
+        gender: 'male',
+        age: 'young',
+      },
     ];
-    expect(getDefaultHedraVoice(roster)?.id).toBe('a');
+    expect(getDefaultHedraVoice(roster)?.id).toBe(roster[0]!.id);
   });
 
   it('getDefaultHedraVoice returns undefined for an empty roster', () => {
     expect(getDefaultHedraVoice([])).toBeUndefined();
   });
 
-  it('isHedraVoiceRosterUncurated returns false with the shipping named-voice roster', () => {
+  it('isHedraVoiceRosterUncurated returns false with the shipping single-UUID roster', () => {
     expect(isHedraVoiceRosterUncurated()).toBe(false);
   });
 
@@ -286,36 +301,81 @@ describe('Polish-21 Commit 2: HEDRA_VOICE_ROSTER (named voices) + helpers', () =
     expect(isHedraVoiceRosterUncurated([])).toBe(true);
     expect(
       isHedraVoiceRosterUncurated([
-        { id: 'x', label: 'x', description: 'x', gender: 'female', age: 'young' },
+        {
+          id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          label: 'x',
+          description: 'x',
+          gender: 'female',
+          age: 'young',
+        },
       ]),
     ).toBe(false);
   });
 
-  it('pickHedraVoicesForBatch returns N distinct voices for N ≤ roster.length', () => {
+  it('pickHedraVoicesForBatch returns N copies of the sole voice (single-roster fallback)', () => {
     const picks = pickHedraVoicesForBatch(5);
     expect(picks).toHaveLength(5);
-    const ids = new Set(picks.map((v) => v.id));
-    expect(ids.size).toBe(5);
+    for (const v of picks) {
+      expect(v.id).toBe(STARTER_VOICE_UUID);
+    }
+    // Polish-21.0.1 acknowledged trade-off: all variants use the same
+    // voice until Polish-21.0.2 restores multi-voice diversity.
+    expect(new Set(picks.map((v) => v.id)).size).toBe(1);
   });
 
-  it('pickHedraVoicesForBatch wraps when N > roster.length', () => {
+  it('pickHedraVoicesForBatch wraps consistently — every call returns the sole entry', () => {
     const picks = pickHedraVoicesForBatch(9);
     expect(picks).toHaveLength(9);
-    // First 6 = whole roster (in order); tail = wrap
-    expect(picks[6]?.id).toBe(HEDRA_VOICE_ROSTER[0]!.id);
+    for (const v of picks) {
+      expect(v.id).toBe(HEDRA_VOICE_ROSTER[0]!.id);
+    }
   });
 
-  it('offset shifts the start position deterministically', () => {
+  it('offset shifts the start position deterministically (multi-voice fixture roster)', () => {
     const roster: HedraVoiceRosterEntry[] = [
-      { id: 'a', label: 'a', description: 'a', gender: 'female', age: 'young' },
-      { id: 'b', label: 'b', description: 'b', gender: 'male', age: 'young' },
-      { id: 'c', label: 'c', description: 'c', gender: 'female', age: 'middle_aged' },
+      {
+        id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        label: 'a',
+        description: 'a',
+        gender: 'female',
+        age: 'young',
+      },
+      {
+        id: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        label: 'b',
+        description: 'b',
+        gender: 'male',
+        age: 'young',
+      },
+      {
+        id: 'c1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        label: 'c',
+        description: 'c',
+        gender: 'female',
+        age: 'middle_aged',
+      },
     ];
-    expect(pickHedraVoicesForBatch(3, 0, roster).map((v) => v.id)).toEqual(['a', 'b', 'c']);
-    expect(pickHedraVoicesForBatch(3, 1, roster).map((v) => v.id)).toEqual(['b', 'c', 'a']);
-    expect(pickHedraVoicesForBatch(3, 4, roster).map((v) => v.id)).toEqual(['b', 'c', 'a']);
+    expect(pickHedraVoicesForBatch(3, 0, roster).map((v) => v.id)).toEqual([
+      roster[0]!.id,
+      roster[1]!.id,
+      roster[2]!.id,
+    ]);
+    expect(pickHedraVoicesForBatch(3, 1, roster).map((v) => v.id)).toEqual([
+      roster[1]!.id,
+      roster[2]!.id,
+      roster[0]!.id,
+    ]);
+    expect(pickHedraVoicesForBatch(3, 4, roster).map((v) => v.id)).toEqual([
+      roster[1]!.id,
+      roster[2]!.id,
+      roster[0]!.id,
+    ]);
     // Negative offsets normalize.
-    expect(pickHedraVoicesForBatch(3, -1, roster).map((v) => v.id)).toEqual(['c', 'a', 'b']);
+    expect(pickHedraVoicesForBatch(3, -1, roster).map((v) => v.id)).toEqual([
+      roster[2]!.id,
+      roster[0]!.id,
+      roster[1]!.id,
+    ]);
   });
 
   it('returns empty array for non-positive count or empty roster', () => {
@@ -331,13 +391,14 @@ describe('Polish-21 Commit 2: HEDRA_VOICE_ROSTER (named voices) + helpers', () =
     expect(a).toBeGreaterThanOrEqual(0);
   });
 
-  it('computeHedraVoiceOffsetForJob differs across job ids (batch-level diversity)', () => {
-    // Not a strict guarantee — two jobIds *could* collide — but the
-    // fixture list picks strings that don't. If a future roster
-    // change breaks this, the test is signaling a real regression.
+  it('computeHedraVoiceOffsetForJob varies across job ids (batch-level diversity for a future multi-voice roster)', () => {
+    // A single-entry roster collapses the offset to a no-op, but the
+    // underlying hash MUST still vary across job ids so Polish-21.0.2's
+    // multi-voice expansion lands the batch-diversity guarantee for
+    // free. Fixture ids picked to avoid hash collisions.
     const ids = ['job-a', 'job-b', 'job-c', 'job-d', 'job-e', 'job-f'];
-    const offsets = ids.map((id) => computeHedraVoiceOffsetForJob(id) % HEDRA_VOICE_ROSTER.length);
-    expect(new Set(offsets).size).toBeGreaterThanOrEqual(2);
+    const hashes = ids.map((id) => computeHedraVoiceOffsetForJob(id));
+    expect(new Set(hashes).size).toBeGreaterThanOrEqual(2);
   });
 });
 

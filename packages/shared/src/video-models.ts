@@ -399,69 +399,65 @@ export interface HedraVoiceRosterEntry {
   label: string;
   /** One-sentence positioning; goes into generation metadata for forensics. */
   description: string;
-  gender: 'female' | 'male';
+  /**
+   * Polish-21.0.1: widened to include 'unknown' because the Hedra
+   * starter voice UUID we ship in the single-entry roster has no
+   * published gender metadata. When Polish-21.0.2 lands the full
+   * UUID roster from Hedra support, per-voice gender will be known.
+   */
+  gender: 'female' | 'male' | 'unknown';
   /** Rough age bracket for ad-test diversity picking. */
-  age: 'young' | 'middle_aged';
+  age: 'young' | 'middle_aged' | 'unknown';
   /** True on exactly ONE roster entry — the safe-fallback voice. */
   isDefault?: true;
 }
 
 /**
- * Polish-21 Commit 2: operator-curated Hedra voice roster. Names
- * lifted from Hedra's public voice library (verified via
- * hedra.com/app during Commit 1 investigation session). Matilda is
- * the 40+ mom audience default; the other five give
- * gender × age spread for 5-variant batch diversity.
+ * Polish-21.0.1 hotfix: single-entry UUID roster.
  *
- * Extending the roster is a one-line edit — pickHedraVoicesForBatch
- * rotates through whatever's here.
+ * Diagnostic (job 52923be6): the Commit 2 name-based roster shipped
+ * "Jessica" / "Matilda" / etc. in the voice_id field, but Hedra
+ * rejected the submit with HTTP 422:
+ *
+ *   "invalid literal for int() with base 10: 'jessica-a'"
+ *
+ * So Hedra's `audio_generation.voice_id` field is UUID-typed on
+ * their end and doesn't accept the built-in voice name aliases we
+ * assumed during Commit 2 (GET /voices returned an empty array so
+ * we couldn't fetch UUIDs directly). Hedra's own starter repo
+ * (hedra-labs/hedra-api-starter) publishes ONE confirmed working
+ * voice UUID in its README example — we roster that until Hedra
+ * support responds with the full built-in voice UUIDs.
+ *
+ * Cost of the single-voice roster: every variant in a 5-variant
+ * batch uses the SAME voice. Acknowledged trade-off — unblocks
+ * end-to-end testing today; Polish-21.0.2 restores gender × age
+ * batch diversity when Hedra support delivers the UUIDs.
+ *
+ * TODO(polish-21.0.2): Expand roster once Hedra support provides
+ * built-in voice UUIDs (contact via hedra.com/discord or Hedra
+ * support). Target full roster:
+ *   - young female American
+ *   - young male American
+ *   - middle-aged female American (Matilda equivalent, keep as
+ *     isDefault)
+ *   - middle-aged male American
+ *   - young British female
+ *   - one more diverse voice (accent / age varied)
  */
 export const HEDRA_VOICE_ROSTER: readonly HedraVoiceRosterEntry[] = [
   {
-    id: 'Jessica',
-    label: 'Jessica — young female (conversational, expressive)',
+    // Confirmed working voice UUID published in the
+    // hedra-labs/hedra-api-starter README as their example.
+    // First (and only) roster entry until Polish-21.0.2 lands
+    // the full gender × age spread.
+    id: 'f412c62f-e94f-41c0-bfc6-97f63289941c',
+    label: 'Hedra Starter — default voice',
     description:
-      'Young female, conversational + expressive. Good for hooks and confessional TikTok energy.',
-    gender: 'female',
-    age: 'young',
-  },
-  {
-    id: 'Will',
-    label: 'Will — young male (friendly, social media)',
-    description: 'Young male, friendly + social-media natural. Good for casual bro-yapper UGC.',
-    gender: 'male',
-    age: 'young',
-  },
-  {
-    id: 'Matilda',
-    label: 'Matilda — middle-aged female (friendly, narration)',
-    description:
-      'Middle-aged female, friendly + narrative. 40+ mom audience default — safest fallback voice.',
-    gender: 'female',
-    age: 'middle_aged',
+      'Hedra API starter default voice, natural English cadence. Polish-21.0.1 single-roster stand-in while awaiting full UUID roster from Hedra support.',
+    gender: 'unknown',
+    age: 'unknown',
     isDefault: true,
-  },
-  {
-    id: 'Todd',
-    label: 'Todd — middle-aged male (advertisement)',
-    description: 'Middle-aged male, advertisement register. Good for authority/pitch beats.',
-    gender: 'male',
-    age: 'middle_aged',
-  },
-  {
-    id: 'Sarah',
-    label: 'Sarah — young female (soft, news)',
-    description:
-      'Young female, soft + news-cadence. Good for calmer confessional / storytelling variants.',
-    gender: 'female',
-    age: 'young',
-  },
-  {
-    id: 'Jamal',
-    label: 'Jamal — young male (social media, chill)',
-    description: 'Young male, social-media chill. Good for laid-back conversational hooks.',
-    gender: 'male',
-    age: 'young',
   },
 ];
 
