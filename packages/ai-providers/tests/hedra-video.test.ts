@@ -136,6 +136,7 @@ describe('Polish-21: submitHedraGeneration', () => {
       textPrompt: 'A 42-year-old woman in a parked SUV, tripod-style selfie framing.',
       resolution: '720p',
       aspectRatio: '9:16',
+      durationSeconds: 15,
     });
     expect(r.ok).toBe(true);
     expect(r.generationId).toBe('gen-99');
@@ -156,8 +157,12 @@ describe('Polish-21: submitHedraGeneration', () => {
     );
     expect(gvi.resolution).toBe('720p');
     expect(gvi.aspect_ratio).toBe('9:16');
-    // No duration_ms unless explicitly passed (Hedra derives from audio).
-    expect(gvi.duration_ms).toBeUndefined();
+    // Polish-21.0.3 hotfix: duration_ms is REQUIRED on the wire.
+    // The Commit 1 "derive from audio" assumption was contradicted
+    // by Hedra's HTTP 422 "Field required" response. This test now
+    // pins the Polish-21.0.3 default of 15000ms — batch replace
+    // added `durationSeconds: 15` above.
+    expect(gvi.duration_ms).toBe(15_000);
   });
 
   it('uploaded-audio mode: audio_id set; NO audio_generation', async () => {
@@ -172,6 +177,7 @@ describe('Polish-21: submitHedraGeneration', () => {
       textPrompt: 'scene',
       resolution: '540p',
       aspectRatio: '9:16',
+      durationSeconds: 15,
     });
     const body = JSON.parse(
       ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
@@ -181,7 +187,10 @@ describe('Polish-21: submitHedraGeneration', () => {
     expect(body.audio_generation).toBeUndefined();
   });
 
-  it('duration_ms is set only when durationSeconds passed; rounded to milliseconds', async () => {
+  it('duration_ms carries the passed durationSeconds × 1000 (rounded), seed passes through', async () => {
+    // Polish-21.0.3 hotfix: durationSeconds is now REQUIRED and
+    // duration_ms is ALWAYS on the wire. See the dedicated
+    // Polish-21.0.3 describe block below for full clamp coverage.
     captureFetch({ status: 200, body: { id: 'gen-101' } });
     const { submitHedraGeneration } = await import('../src/hedra-video');
     await submitHedraGeneration({
@@ -214,6 +223,7 @@ describe('Polish-21: submitHedraGeneration', () => {
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',
+      durationSeconds: 15,
     });
     expect(r.ok).toBe(false);
     expect(r.errorMessage).toMatch(/audioAssetId or tts/);
@@ -231,6 +241,7 @@ describe('Polish-21: submitHedraGeneration', () => {
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',
+      durationSeconds: 15,
     });
     expect(r.ok).toBe(false);
     expect(r.errorMessage).toMatch(/audioAssetId OR tts/);
@@ -406,6 +417,7 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
       textPrompt: 'A scene description.',
       resolution: '720p',
       aspectRatio: '9:16',
+      durationSeconds: 15,
     });
     const body = JSON.parse(
       ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
@@ -433,6 +445,7 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
       textPrompt: 'Kitchen selfie, morning light.',
       resolution: '720p',
       aspectRatio: '9:16',
+      durationSeconds: 15,
     });
     const body = JSON.parse(
       ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
@@ -460,6 +473,7 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
       textPrompt: 'Scene.',
       resolution: '720p',
       aspectRatio: '9:16',
+      durationSeconds: 15,
     });
     const body = JSON.parse(
       ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
@@ -517,6 +531,7 @@ describe('Polish-21.0.2: URL + header regression pins', () => {
       textPrompt: 'Scene.',
       resolution: '720p',
       aspectRatio: '9:16',
+      durationSeconds: 15,
     });
     // Starter uses `session.post("/generations", ...)` where the
     // session base_url is "https://api.hedra.com/web-app/public".
@@ -624,3 +639,223 @@ describe('Polish-21.0.2: redactHedraApiKey', () => {
     expect(redactHedraApiKey('short')).toBe('x-api-key:(short-key)');
   });
 });
+
+// =====================================================================
+// Polish-21.0.3 hotfix regression pins:
+//   - duration_ms is ALWAYS on the wire (Hedra returns 422 without it)
+//   - duration_ms clamped to [1000, 90000] ms
+//   - default 15000 ms when caller passes 0 / NaN / negative
+//   - FastAPI-shaped 422 `detail: [{loc, msg}]` errors surface field
+//     path + message verbatim (not swallowed into a generic 422)
+// =====================================================================
+
+describe('Polish-21.0.3: submit body ALWAYS carries duration_ms', () => {
+  it('duration_ms is present at the same 30s call from Commit 1 (baseline check)', async () => {
+    captureFetch({ status: 200, body: { id: 'g' } });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k1234567890abcd',
+      aiModelId: 'ai',
+      startKeyframeId: 'img',
+      tts: { voiceId: 'v', text: 't' },
+      textPrompt: 's',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 30,
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    ) as { generated_video_inputs: Record<string, unknown> };
+    expect(body.generated_video_inputs.duration_ms).toBe(30_000);
+    expect(typeof body.generated_video_inputs.duration_ms).toBe('number');
+    // Regression pin: integer, not float.
+    expect(Number.isInteger(body.generated_video_inputs.duration_ms)).toBe(true);
+  });
+
+  it('durationSeconds=0 → duration_ms defaults to 15000 (Polish-21.0.3 safe default)', async () => {
+    captureFetch({ status: 200, body: { id: 'g' } });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k1234567890abcd',
+      aiModelId: 'ai',
+      startKeyframeId: 'img',
+      tts: { voiceId: 'v', text: 't' },
+      textPrompt: 's',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 0,
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    ) as { generated_video_inputs: Record<string, unknown> };
+    expect(body.generated_video_inputs.duration_ms).toBe(15_000);
+  });
+
+  it('durationSeconds=NaN / negative / non-finite → 15000 default (Infinity is non-finite, not "very large")', async () => {
+    const { clampHedraDurationMs } = await import('../src/hedra-video');
+    expect(clampHedraDurationMs(NaN)).toBe(15_000);
+    expect(clampHedraDurationMs(-3)).toBe(15_000);
+    // Regression pin: Infinity is Number.isFinite === false so it
+    // falls to the default, NOT clamped to max. Guards against a
+    // future defensive check that treats Infinity as "clamp to max"
+    // — that would mask a real caller-side bug.
+    expect(clampHedraDurationMs(Infinity)).toBe(15_000);
+    expect(clampHedraDurationMs(-Infinity)).toBe(15_000);
+  });
+
+  it('durationSeconds > 90 → clamped to 90000 ms (Hedra Character 3 hard cap)', async () => {
+    captureFetch({ status: 200, body: { id: 'g' } });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k1234567890abcd',
+      aiModelId: 'ai',
+      startKeyframeId: 'img',
+      tts: { voiceId: 'v', text: 't' },
+      textPrompt: 's',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 500,
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    ) as { generated_video_inputs: Record<string, unknown> };
+    expect(body.generated_video_inputs.duration_ms).toBe(90_000);
+  });
+
+  it('durationSeconds < 1s → clamped to 1000 ms floor', async () => {
+    captureFetch({ status: 200, body: { id: 'g' } });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k1234567890abcd',
+      aiModelId: 'ai',
+      startKeyframeId: 'img',
+      tts: { voiceId: 'v', text: 't' },
+      textPrompt: 's',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 0.5,
+    });
+    const body = JSON.parse(
+      ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
+        .body as string,
+    ) as { generated_video_inputs: Record<string, unknown> };
+    expect(body.generated_video_inputs.duration_ms).toBe(1_000);
+  });
+
+  it('exported duration constants match the clamp behavior (public contract)', async () => {
+    const { HEDRA_DEFAULT_DURATION_MS, HEDRA_MIN_DURATION_MS, HEDRA_MAX_DURATION_MS } =
+      await import('../src/hedra-video');
+    expect(HEDRA_DEFAULT_DURATION_MS).toBe(15_000);
+    expect(HEDRA_MIN_DURATION_MS).toBe(1_000);
+    expect(HEDRA_MAX_DURATION_MS).toBe(90_000);
+  });
+});
+
+describe('Polish-21.0.3: renderFastApiDetail + extractHedraErrorMessage on 422', () => {
+  it('renders the exact job-2026-07-03 duration_ms failure shape verbatim', async () => {
+    const { renderFastApiDetail } = await import('../src/hedra-video');
+    // Actual Hedra response body captured by operator:
+    const detail = [
+      {
+        type: 'missing',
+        loc: ['body', 'generated_video_inputs', 'duration_ms'],
+        msg: 'Field required',
+      },
+    ];
+    const r = renderFastApiDetail(detail);
+    expect(r).toBe('missing at body.generated_video_inputs.duration_ms: Field required');
+  });
+
+  it('joins multiple detail entries with " | " (multi-field errors)', async () => {
+    const { renderFastApiDetail } = await import('../src/hedra-video');
+    const detail = [
+      { type: 'missing', loc: ['body', 'x'], msg: 'X required' },
+      { type: 'string_type', loc: ['body', 'y'], msg: 'Not a string' },
+    ];
+    expect(renderFastApiDetail(detail)).toBe(
+      'missing at body.x: X required | string_type at body.y: Not a string',
+    );
+  });
+
+  it('gracefully omits type when missing, still renders loc + msg', async () => {
+    const { renderFastApiDetail } = await import('../src/hedra-video');
+    expect(renderFastApiDetail([{ loc: ['a', 'b'], msg: 'nope' }])).toBe('a.b: nope');
+  });
+
+  it('returns undefined on empty / shape-mismatched arrays (extractor falls through)', async () => {
+    const { renderFastApiDetail } = await import('../src/hedra-video');
+    expect(renderFastApiDetail([])).toBeUndefined();
+    expect(renderFastApiDetail([null, undefined, 'string'])).toBeUndefined();
+  });
+
+  it('extractHedraErrorMessage surfaces the array-detail path for FastAPI-shape 422 bodies', async () => {
+    const { extractHedraErrorMessage } = await import('../src/hedra-video');
+    const body = {
+      detail: [
+        {
+          type: 'missing',
+          loc: ['body', 'generated_video_inputs', 'duration_ms'],
+          msg: 'Field required',
+        },
+      ],
+    };
+    const r = extractHedraErrorMessage(body);
+    // Regression pin: the field path is IN the message.
+    expect(r).toMatch(/duration_ms/);
+    expect(r).toMatch(/Field required/);
+  });
+
+  it('extractHedraErrorMessage still handles the string-detail path (Hedra 5xx sometimes returns string detail)', async () => {
+    const { extractHedraErrorMessage } = await import('../src/hedra-video');
+    expect(extractHedraErrorMessage({ detail: 'plain string message' })).toBe(
+      'plain string message',
+    );
+  });
+});
+
+describe('Polish-21.0.3: 422 responses surface Hedra field-level detail (not just status)', () => {
+  it('submitHedraGeneration on 422 with FastAPI detail array returns errorMessage containing the field path', async () => {
+    captureFetch({
+      status: 422,
+      body: {
+        detail: [
+          {
+            type: 'missing',
+            loc: ['body', 'generated_video_inputs', 'duration_ms'],
+            msg: 'Field required',
+          },
+        ],
+      },
+    });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    const r = await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k1234567890abcd',
+      aiModelId: 'ai',
+      startKeyframeId: 'img',
+      tts: { voiceId: 'v', text: 't' },
+      textPrompt: 's',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 15,
+    });
+    expect(r.ok).toBe(false);
+    // Polish-21.0.3 regression pin: the extracted message names the
+    // failing field. Pre-hotfix the operator only saw the generic
+    // translated 422 hint, losing the "duration_ms missing" signal.
+    expect(r.errorMessage).toMatch(/duration_ms/);
+    expect(r.errorMessage).toMatch(/Field required/);
+  });
+});
+
+// Polish-21.0.3 worker regression pin lives in
+// packages/jobs/tests/generate-video-variant-helpers.test.ts —
+// direct file access to generate-video-variant.ts source is cleaner
+// from that package than crossing package boundaries here.

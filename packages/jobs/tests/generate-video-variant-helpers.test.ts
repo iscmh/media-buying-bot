@@ -1226,3 +1226,27 @@ describe('Polish-21.0.1: worker text_prompt threading + pre-submit log', () => {
     expect(r!.scene.script).toBe(originalScript);
   });
 });
+
+describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGeneration', () => {
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-video-variant.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('runOneVariantHedra passes durationSeconds: targetSeconds to submitHedraGeneration', async () => {
+    // Ties the worker's Hedra submit call site to the resolved
+    // target duration from resolveAutoVideoDuration (Polish-19.3.1
+    // fallback chain). Regression against a future refactor
+    // dropping the field back to undefined — Hedra would return
+    // HTTP 422 "Field required" on generated_video_inputs.duration_ms.
+    const src = await readSrc();
+    const submitStart = src.indexOf('return submitHedraGeneration({');
+    expect(submitStart).toBeGreaterThan(-1);
+    const submitEnd = src.indexOf('});', submitStart);
+    const submitCall = src.slice(submitStart, submitEnd);
+    expect(submitCall).toMatch(/durationSeconds: targetSeconds,/);
+  });
+});

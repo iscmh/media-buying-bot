@@ -953,6 +953,12 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       textPrompt: sceneDescription,
       resolution: '720p',
       aspectRatio: '9:16',
+      // Polish-21.0.3 hotfix: duration_ms is REQUIRED by Hedra
+      // (docs say optional; reality returns 422 "Field required" —
+      // see hedra-video.ts HedraSubmitGenerationInput JSDoc).
+      // Source: Polish-19.3.1 auto-resolved target duration. The
+      // client clamps to [1000ms, 90000ms] on the wire.
+      durationSeconds: targetSeconds,
       generationJobId: jobId,
     });
   });

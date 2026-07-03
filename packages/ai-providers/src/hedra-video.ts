@@ -110,12 +110,43 @@ export interface HedraSubmitGenerationInput {
   textPrompt: string;
   resolution: '540p' | '720p';
   aspectRatio: '9:16' | '16:9' | '1:1';
-  /** Optional. Hedra derives from audio when omitted (recommended). */
-  durationSeconds?: number;
+  /**
+   * REQUIRED as of Polish-21.0.3 hotfix — job 2026-07-03 diagnostic
+   * confirmed Hedra returns HTTP 422 "Field required" when
+   * generated_video_inputs.duration_ms is missing, even though the
+   * docs mark the field as optional:
+   *
+   *   {"detail": [{"type": "missing",
+   *                "loc": ["body", "generated_video_inputs", "duration_ms"],
+   *                "msg": "Field required"}]}
+   *
+   * Value is clamped to [1000, 90000] ms at submit time
+   * (Hedra Character 3 hard cap 90s; sub-1s doesn't play with TTS
+   * pacing). NaN / non-finite / non-positive → 15000 ms default.
+   */
+  durationSeconds: number;
   /** Optional deterministic seed. */
   seed?: number;
   generationJobId?: string;
   generatedCreativeId?: string;
+}
+
+/** Polish-21.0.3: default when caller passes 0 / NaN / negative. */
+export const HEDRA_DEFAULT_DURATION_MS = 15_000;
+/** Polish-21.0.3: sub-1s doesn't play with TTS pacing. */
+export const HEDRA_MIN_DURATION_MS = 1_000;
+/** Polish-21.0.3: Hedra Character 3 hard cap. */
+export const HEDRA_MAX_DURATION_MS = 90_000;
+
+/**
+ * Polish-21.0.3: clamp a caller-provided duration (seconds) to
+ * Hedra's accepted range and emit the ms value we send on the
+ * wire. Extracted so tests can pin the clamp behavior directly.
+ */
+export function clampHedraDurationMs(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0) return HEDRA_DEFAULT_DURATION_MS;
+  const raw = Math.round(seconds * 1000);
+  return Math.max(HEDRA_MIN_DURATION_MS, Math.min(HEDRA_MAX_DURATION_MS, raw));
 }
 
 export interface HedraSubmitGenerationResult {
@@ -405,9 +436,11 @@ export async function submitHedraGeneration(
       text_prompt: input.textPrompt,
       resolution: input.resolution,
       aspect_ratio: input.aspectRatio,
-      ...(input.durationSeconds != null
-        ? { duration_ms: Math.max(1000, Math.round(input.durationSeconds * 1000)) }
-        : {}),
+      // Polish-21.0.3 hotfix: duration_ms is ALWAYS emitted.
+      // Hedra's docs say optional, real API rejects with 422 when
+      // missing. See HedraSubmitGenerationInput.durationSeconds
+      // JSDoc for the diagnostic.
+      duration_ms: clampHedraDurationMs(input.durationSeconds),
       ...(input.seed != null ? { seed: input.seed } : {}),
     },
   };
@@ -456,10 +489,16 @@ export async function submitHedraGeneration(
 
   logHedraResponse('generations-submit', 'POST', submitUrl, result.status ?? 0, result.rawBody);
   if (!result.ok) {
+    // Polish-21.0.3 hotfix: pull the FastAPI-shaped detail out of
+    // rawBody. The shared chokepoint's extractErrorMessage doesn't
+    // know Hedra's array-detail shape and falls back to "HTTP 422",
+    // which erases the field path from the operator-facing error.
+    // Ours handles both string-detail and array-detail branches.
+    const hedraDetail = extractHedraErrorMessage(result.rawBody);
     return {
       ok: false,
       latencyMs: result.latencyMs,
-      errorMessage: translateHedraErrorStatus(result.status, result.errorMessage),
+      errorMessage: translateHedraErrorStatus(result.status, hedraDetail ?? result.errorMessage),
     };
   }
   const generationId = result.data.id;
@@ -728,6 +767,17 @@ export function extractHedraErrorMessage(body: unknown): string | undefined {
   if (!body || typeof body !== 'object') return undefined;
   const obj = body as Record<string, unknown>;
   if (typeof obj['detail'] === 'string') return obj['detail'];
+  // Polish-21.0.3 hotfix: Hedra returns FastAPI-shaped validation
+  // errors like {detail: [{type, loc: [...segments], msg}]} on
+  // HTTP 422. Extract EACH detail entry into "at body.<path>:
+  // <msg>" so the operator sees WHICH field was rejected. Job
+  // 2026-07-03 diagnostic ran into this on a missing duration_ms —
+  // the old extractor returned undefined and the translated 422
+  // message erased the field-level detail from Inngest logs.
+  if (Array.isArray(obj['detail'])) {
+    const rendered = renderFastApiDetail(obj['detail'] as unknown[]);
+    if (rendered) return rendered;
+  }
   if (typeof obj['message'] === 'string') return obj['message'];
   if (typeof obj['error'] === 'string') return obj['error'];
   const err = obj['error'];
@@ -737,6 +787,39 @@ export function extractHedraErrorMessage(body: unknown): string | undefined {
   }
   if (typeof obj['error_message'] === 'string') return obj['error_message'] as string;
   return undefined;
+}
+
+/**
+ * Polish-21.0.3 hotfix: render a FastAPI-shaped validation detail
+ * array into a human-readable string. Handles the exact shape Hedra
+ * returned for the duration_ms case:
+ *
+ *   [{"type": "missing",
+ *     "loc": ["body", "generated_video_inputs", "duration_ms"],
+ *     "msg": "Field required"}]
+ *
+ * → "missing at body.generated_video_inputs.duration_ms: Field required"
+ *
+ * Joins multiple details with " | ". Returns undefined when the
+ * array shape doesn't look FastAPI-y so extractHedraErrorMessage
+ * can fall through to the next fallback.
+ */
+export function renderFastApiDetail(items: unknown[]): string | undefined {
+  const parts: string[] = [];
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const loc = Array.isArray(rec['loc'])
+      ? (rec['loc'] as unknown[]).map((s) => String(s)).join('.')
+      : undefined;
+    const msg = typeof rec['msg'] === 'string' ? rec['msg'] : undefined;
+    const type = typeof rec['type'] === 'string' ? rec['type'] : undefined;
+    if (!loc && !msg) continue;
+    const prefix = type ? `${type} at ${loc ?? '(no path)'}` : (loc ?? '(no path)');
+    parts.push(msg ? `${prefix}: ${msg}` : prefix);
+  }
+  if (parts.length === 0) return undefined;
+  return parts.join(' | ');
 }
 
 const _firstCallLogged = new Set<string>();
