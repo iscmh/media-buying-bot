@@ -148,7 +148,21 @@ interface HedraSubmitResponse {
   id?: string;
 }
 
-export type HedraGenerationStatus = 'queued' | 'processing' | 'pending' | 'complete' | 'error';
+/**
+ * Polish-21.0.2: `finalizing` added per the Hedra docs
+ * (hedra.com/docs/api-reference/public/get-status status enum lists
+ * queued / processing / finalizing / complete / error). Previous
+ * enum omitted `finalizing`; a poll response with that value would
+ * fall through normalizeHedraStatus and surface as
+ * "Hedra status response missing status" mid-generation.
+ */
+export type HedraGenerationStatus =
+  | 'queued'
+  | 'processing'
+  | 'pending'
+  | 'finalizing'
+  | 'complete'
+  | 'error';
 
 export interface HedraPollStatusInput {
   userId: string;
@@ -163,6 +177,24 @@ export interface HedraPollStatusResult {
   status?: HedraGenerationStatus;
   downloadUrl?: string;
   assetId?: string;
+  /**
+   * Polish-21.0.2 hotfix: dedicated flag for 404 responses so the
+   * worker can retry them during the initial post-submit window
+   * instead of terminating the poll loop. Job 1db50a7c saw a fast
+   * 189ms 404 on the first poll — most likely Hedra's status
+   * endpoint has an eventual-consistency lag between when POST
+   * /generations returns success and when the generation is
+   * queryable via GET /generations/{id}/status. Distinguishing 404
+   * from other errors lets the worker absorb that window without
+   * failing the variant.
+   */
+  notFound?: true;
+  /**
+   * Polish-21.0.2: current progress to completion (0-1). Surfaced
+   * for operator diagnostics + a future run-detail progress bar.
+   * `undefined` when Hedra doesn't return the field.
+   */
+  progress?: number;
   errorMessage?: string;
   latencyMs: number;
 }
@@ -173,6 +205,7 @@ interface HedraStatusResponse {
   download_url?: string;
   asset_id?: string;
   error_message?: string;
+  progress?: number;
 }
 
 export interface HedraVoicesListInput {
@@ -201,12 +234,14 @@ export async function createHedraAsset(
   input: HedraCreateAssetInput,
 ): Promise<HedraCreateAssetResult> {
   const body = { name: input.name, type: input.type };
+  const url = `${HEDRA_BASE}/assets`;
   logFirstResponseIfFirstCall('assets-create', input.type, body);
+  logHedraRequest('assets-create', 'POST', url, input.apiKey, body);
 
   const result = await callProvider<HedraCreateAssetResponse>({
     userId: input.userId,
     provider: 'hedra',
-    url: `${HEDRA_BASE}/assets`,
+    url,
     method: 'POST',
     headers: {
       'x-api-key': input.apiKey,
@@ -222,6 +257,7 @@ export async function createHedraAsset(
     generatedCreativeId: input.generatedCreativeId,
   });
 
+  logHedraResponse('assets-create', 'POST', url, result.status ?? 0, result.rawBody);
   if (!result.ok) {
     return {
       ok: false,
@@ -256,12 +292,14 @@ export async function uploadHedraAsset(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ASSET_UPLOAD_TIMEOUT_MS);
 
-  logFirstResponseIfFirstCall('assets-upload', input.contentType, {
+  const uploadRequestSummary = {
     assetId: input.assetId,
     filename: input.filename,
     contentType: input.contentType,
     bytes: input.bytes.byteLength,
-  });
+  };
+  logFirstResponseIfFirstCall('assets-upload', input.contentType, uploadRequestSummary);
+  logHedraRequest('assets-upload', 'POST', url, input.apiKey, uploadRequestSummary);
 
   let status = 0;
   let rawBody: unknown = null;
@@ -297,6 +335,7 @@ export async function uploadHedraAsset(
     if (!(status >= 200 && status < 300)) {
       errorMessage = translateHedraErrorStatus(status, extractHedraErrorMessage(rawBody));
     }
+    logHedraResponse('assets-upload', 'POST', url, status, rawBody);
   } catch (err) {
     const isAbort = err instanceof Error && err.name === 'AbortError';
     errorMessage = isAbort
@@ -380,12 +419,19 @@ export async function submitHedraGeneration(
       text: input.tts.text,
     };
 
+  const submitUrl = `${HEDRA_BASE}/generations`;
   logFirstResponseIfFirstCall('generations-submit', input.aiModelId, body);
+  // Polish-21.0.2 hotfix: log FULL submit body on every call. Job
+  // 1db50a7c returned 404 from POST /generations even though the
+  // body byte-exactly matches hedra-labs/hedra-api-starter. Wire-
+  // level log lets the operator paste the exact payload into a
+  // Hedra support ticket for cross-vendor diagnosis.
+  logHedraRequest('generations-submit', 'POST', submitUrl, input.apiKey, body);
 
   const result = await callProvider<HedraSubmitResponse>({
     userId: input.userId,
     provider: 'hedra',
-    url: `${HEDRA_BASE}/generations`,
+    url: submitUrl,
     method: 'POST',
     headers: {
       'x-api-key': input.apiKey,
@@ -408,6 +454,7 @@ export async function submitHedraGeneration(
     generatedCreativeId: input.generatedCreativeId,
   });
 
+  logHedraResponse('generations-submit', 'POST', submitUrl, result.status ?? 0, result.rawBody);
   if (!result.ok) {
     return {
       ok: false,
@@ -429,11 +476,41 @@ export async function submitHedraGeneration(
 // -------------------------------------------------------------------
 // Poll — GET /generations/{id}/status
 // -------------------------------------------------------------------
+//
+// URL path VERIFIED against three authoritative sources during
+// Polish-21.0.2 investigation (job 1db50a7c diagnosed a fast 189ms
+// 404 on the first poll):
+//   - Hedra docs — https://www.hedra.com/docs/api-reference/public/get-status
+//   - Official Python starter — hedra-labs/hedra-api-starter/main.py
+//     line 204: `session.get(f"/generations/{generation_id}/status")`
+//   - Official Node SDK — hedra-labs/hedra-node/src/Client.ts::getStatus
+//     line 574: `generations/${core.url.encodePathParam(generationId)}/status`
+//
+// All three use the exact `{HEDRA_BASE}/generations/{id}/status`
+// path we build below. The 189ms 404 is therefore NOT a URL bug —
+// most likely an eventual-consistency window between POST
+// /generations returning success and the status record becoming
+// queryable. The worker's poll loop absorbs the window by treating
+// early 404s as `notFound: true` (a keep-polling signal) rather
+// than a terminal error.
+
+/** Canonical path segment builder, exported so tests can pin it. */
+export function buildHedraStatusUrl(generationId: string): string {
+  return `${HEDRA_BASE}/generations/${encodeURIComponent(generationId)}/status`;
+}
+
+// Log full response body ONCE per generationId on 404 so operators
+// see the exact Hedra response text on the first live case. After
+// that the body is elided to keep Inngest log volume sane.
+const _hedra404BodyLogged = new Set<string>();
 
 export async function pollHedraGeneration(
   input: HedraPollStatusInput,
 ): Promise<HedraPollStatusResult> {
-  const url = `${HEDRA_BASE}/generations/${encodeURIComponent(input.generationId)}/status`;
+  const url = buildHedraStatusUrl(input.generationId);
+  logHedraRequest('generations-status', 'GET', url, input.apiKey, {
+    generation_id: input.generationId,
+  });
   const result = await callProvider<HedraStatusResponse>({
     userId: input.userId,
     provider: 'hedra',
@@ -448,7 +525,24 @@ export async function pollHedraGeneration(
     generatedCreativeId: input.generatedCreativeId,
   });
 
+  logHedraResponse('generations-status', 'GET', url, result.status ?? 0, result.rawBody);
   if (!result.ok) {
+    // Polish-21.0.2: dedicated 404 flag so the worker can decide
+    // between "keep polling, generation not queryable yet" and
+    // "terminal error, bail out". Non-404 transport failures still
+    // surface as `ok: false, errorMessage: ...`.
+    if (result.status === 404) {
+      const key = input.generationId;
+      if (!_hedra404BodyLogged.has(key)) {
+        _hedra404BodyLogged.add(key);
+        console.log(
+          `[hedra] first 404 on status endpoint for generation=${key}: ` +
+            `url=${url} response_body=${JSON.stringify(result.rawBody).slice(0, 2000)}. ` +
+            `Treating as eventual-consistency lag; worker will retry.`,
+        );
+      }
+      return { ok: false, notFound: true, latencyMs: result.latencyMs };
+    }
     return {
       ok: false,
       latencyMs: result.latencyMs,
@@ -463,11 +557,16 @@ export async function pollHedraGeneration(
       errorMessage: `Hedra status response missing status (got ${JSON.stringify(result.data.status)})`,
     };
   }
+  const progress =
+    typeof result.data.progress === 'number' && Number.isFinite(result.data.progress)
+      ? result.data.progress
+      : undefined;
   if (status === 'error') {
     return {
       ok: true,
       status,
       latencyMs: result.latencyMs,
+      progress,
       errorMessage: result.data.error_message ?? 'Hedra reported error without a message.',
     };
   }
@@ -480,6 +579,7 @@ export async function pollHedraGeneration(
       return {
         ok: true,
         status,
+        progress,
         latencyMs: result.latencyMs,
         errorMessage: 'Hedra reported complete but response missing download_url / url.',
       };
@@ -489,10 +589,16 @@ export async function pollHedraGeneration(
       status,
       downloadUrl,
       assetId: result.data.asset_id,
+      progress,
       latencyMs: result.latencyMs,
     };
   }
-  return { ok: true, status, latencyMs: result.latencyMs };
+  return { ok: true, status, progress, latencyMs: result.latencyMs };
+}
+
+/** TEST-ONLY: reset the per-generationId 404 log memoization. */
+export function __resetHedra404LogForTests(): void {
+  _hedra404BodyLogged.clear();
 }
 
 /**
@@ -508,6 +614,10 @@ export function normalizeHedraStatus(raw: unknown): HedraGenerationStatus | unde
   if (lower === 'processing' || lower === 'running' || lower === 'in_progress') return 'processing';
   if (lower === 'pending') return 'pending';
   if (lower === 'queued') return 'queued';
+  // Polish-21.0.2: docs list `finalizing` as a real Hedra status
+  // (queued → processing → finalizing → complete). Not handling it
+  // would surface as "status missing" mid-generation.
+  if (lower === 'finalizing') return 'finalizing';
   return undefined;
 }
 
@@ -644,4 +754,48 @@ function logFirstResponseIfFirstCall(
 /** TEST-ONLY: clear the first-call log memoization. */
 export function __resetHedraFirstCallLogForTests(): void {
   _firstCallLogged.clear();
+}
+
+/**
+ * Polish-21.0.2 hotfix: wire-level pre-flight + response log for
+ * EVERY Hedra call. Job 1db50a7c diagnosed POST /generations
+ * returning 404 even though the submit body matches
+ * hedra-labs/hedra-api-starter byte-for-byte. Without an always-on
+ * request/response log, the operator couldn't attach the exact
+ * wire payload to a Hedra support ticket. These logs fire on every
+ * call so the full payload + full response body are visible in
+ * Inngest logs immediately — critical for cross-vendor diagnostics.
+ *
+ * Redacts the API key to the first 4 characters + trailing 4 to
+ * keep audit rows safe while still identifying which key was in
+ * use (useful when the operator rotates between test + prod keys).
+ */
+export function redactHedraApiKey(apiKey: string): string {
+  if (!apiKey || apiKey.length < 12) return 'x-api-key:(short-key)';
+  return `x-api-key:${apiKey.slice(0, 4)}…${apiKey.slice(-4)}`;
+}
+
+export function logHedraRequest(
+  kind: string,
+  method: string,
+  url: string,
+  apiKey: string,
+  body: unknown,
+): void {
+  const bodyStr = body == null ? '(no body)' : JSON.stringify(body).slice(0, 3000);
+  console.log(
+    `[hedra] ${kind} REQUEST: ${method} ${url} ` +
+      `auth=${redactHedraApiKey(apiKey)} body=${bodyStr}`,
+  );
+}
+
+export function logHedraResponse(
+  kind: string,
+  method: string,
+  url: string,
+  status: number,
+  body: unknown,
+): void {
+  const bodyStr = body == null ? '(no body)' : JSON.stringify(body).slice(0, 3000);
+  console.log(`[hedra] ${kind} RESPONSE: ${method} ${url} → ${status} body=${bodyStr}`);
 }

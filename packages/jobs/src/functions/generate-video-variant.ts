@@ -736,9 +736,28 @@ function validateSceneBody(body: Record<string, unknown>): VideoAdSpecHedra | nu
 
 // Polish-21: Hedra Character 3 typical run is 30-90s of generation.
 // Warmup shorter than kie.ai (Character 3 rarely finishes < 20s).
-const HEDRA_POLL_WARMUP_SECONDS = 8;
+//
+// Polish-21.0.2: warmup bumped 8s → 15s after job 1db50a7c diagnosed
+// a fast 189ms 404 on the first status poll. The URL is verified
+// correct against three authoritative sources (Hedra docs, official
+// Python starter, official Node SDK — see hedra-video.ts docstring),
+// so the 404 is most plausibly eventual-consistency lag between
+// submit and status endpoints. 15s + retry-on-404 during the first
+// N attempts absorbs the window without meaningfully extending
+// wall-clock on the happy path.
+const HEDRA_POLL_WARMUP_SECONDS = 15;
 const HEDRA_POLL_INTERVAL_SECONDS = 5;
 const HEDRA_POLL_MAX_ATTEMPTS = 80;
+/**
+ * Polish-21.0.2: the number of consecutive 404s during the initial
+ * post-submit window that we treat as "generation not queryable yet,
+ * keep polling" rather than terminal error. 12 attempts × 5s
+ * interval = ~60s tolerance for Hedra's status-endpoint replication
+ * lag. If 404s persist beyond this window the worker fails the
+ * variant loudly (likely a real bug — wrong endpoint, deleted
+ * generation, or auth scope mismatch).
+ */
+const HEDRA_POLL_MAX_INITIAL_404S = 12;
 
 async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVariantResult> {
   const {
@@ -957,6 +976,14 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   let downloadUrl: string | undefined;
   let outputAssetId: string | undefined;
   let pollError: string | undefined;
+  // Polish-21.0.2: track consecutive 404s during the initial poll
+  // window. Job 1db50a7c saw a fast 189ms 404 on the first poll
+  // even though the URL is verified correct against three sources
+  // (docs page + hedra-labs/hedra-api-starter + hedra-labs/hedra-node
+  // SDK). Most plausible cause: eventual-consistency between submit
+  // and status endpoints. We absorb the window here so a single
+  // early 404 doesn't fail the variant.
+  let consecutive404s = 0;
   for (let attempt = 0; attempt < HEDRA_POLL_MAX_ATTEMPTS; attempt++) {
     const poll = await step.run(`hedra-poll-${variantIndex}-${attempt}`, async () => {
       let keys;
@@ -974,10 +1001,28 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         generationJobId: jobId,
       });
     });
-    if (!('status' in poll)) {
+    if (!('status' in poll) && !('notFound' in poll)) {
       pollError = 'error' in poll ? poll.error : 'Hedra poll failed with no status';
       break;
     }
+    // Polish-21.0.2: 404 during initial window → "not queryable yet"
+    // keep polling. Persistent 404s → real error, fail the variant.
+    if ('notFound' in poll && poll.notFound) {
+      consecutive404s += 1;
+      if (consecutive404s > HEDRA_POLL_MAX_INITIAL_404S) {
+        pollError =
+          `Hedra status endpoint returned 404 for generation ${generationId} ` +
+          `on ${consecutive404s} consecutive polls (>${HEDRA_POLL_MAX_INITIAL_404S} limit). ` +
+          `URL verified against docs + hedra-labs/hedra-api-starter + hedra-labs/hedra-node; ` +
+          `probable causes: generation was deleted upstream, API key lacks read scope, ` +
+          `or the generation_id in the submit response is not the poll id. ` +
+          `Check the first-404 log emitted by hedra-video.ts for the full response body.`;
+        break;
+      }
+      await step.sleep(`hedra-wait-${variantIndex}-${attempt}`, `${HEDRA_POLL_INTERVAL_SECONDS}s`);
+      continue;
+    }
+    consecutive404s = 0;
     if (!poll.ok) {
       pollError = poll.errorMessage ?? 'Hedra poll failed';
       break;
