@@ -1238,6 +1238,408 @@ describe('Polish-21.0.1: worker text_prompt threading + pre-submit log', () => {
   });
 });
 
+// =====================================================================
+// Polish-21.0.5 hotfix regression pins:
+//   - composeNanoBananaCharacterPrompt emits all six JOHN pattern
+//     blocks including all three ZERO anchors + anti-AI directive
+//   - parseStructuredCharacter falls back cleanly on malformed input
+//   - runClaudeAdSpecHedra prompt requests the yapper scene template
+//     + JOHN character schema
+//   - runOneVariantHedra composes Nano Banana prompt from
+//     spec.character (not the old inline template)
+// =====================================================================
+
+describe('Polish-21.0.5: composeNanoBananaCharacterPrompt (JOHN pattern)', () => {
+  const sampleCharacter = async () => {
+    const { FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    return FALLBACK_STRUCTURED_CHARACTER;
+  };
+
+  it('emits the three-view casting-director lead as block 1', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
+    // Regression pin: verbatim JOHN-pattern lead. Softening this to
+    // "portrait of a..." or "photo of a..." silently degrades
+    // Nano Banana's likelihood of holding a consistent identity
+    // across gestures.
+    expect(p).toMatch(
+      /Photorealistic three-view character sheet — front view, side view, back view/,
+    );
+    expect(p).toMatch(/-year-old American female named Alex/);
+  });
+
+  it('emits the SKIN REALISM MANDATE with ALL THREE ZERO anchors (verbatim)', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
+    // Regression pin: every ZERO must be present and verbatim. A
+    // future prompt tune that drops one of these degrades output
+    // toward the AI-CGI look the operator diagnosed on the first
+    // live variant. The order + phrasing is proven working — do
+    // not paraphrase.
+    expect(p).toMatch(/SKIN REALISM MANDATE: Hyper-realistic unedited human skin/);
+    expect(p).toMatch(/ZERO beauty filters\./);
+    expect(p).toMatch(/ZERO skin smoothing\./);
+    expect(p).toMatch(/ZERO AI plastic-skin artifacts\./);
+    // Fictional-everyperson clause pins the "not a model, not an
+    // actor, not an AI-generated character" tail — this is the
+    // clause that stops Nano Banana from defaulting to
+    // stock-photo aesthetic.
+    expect(p).toMatch(/not a model, not an actor, not an AI-generated character\./);
+  });
+
+  it('includes stubble line only when skin_color_for_stubble != "none"', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const female = await sampleCharacter();
+    const promptFemale = composeNanoBananaCharacterPrompt(female);
+    expect(promptFemale).toMatch(/Natural vellus hair on forearms/);
+    // Sample fallback has skin_color_for_stubble='none' → no stubble line.
+    expect(promptFemale).not.toMatch(/stubble shadow/);
+
+    const male = { ...female, gender: 'male' as const, skin_color_for_stubble: 'grey' as const };
+    const promptMale = composeNanoBananaCharacterPrompt(male);
+    expect(promptMale).toMatch(/real grey stubble shadow on upper lip and jaw/);
+    expect(promptMale).toMatch(/one day of missed shaving/);
+  });
+
+  it('emits "Shot on iPhone front camera" in block 5 (camera anchor)', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
+    // Regression pin: the exact "Shot on iPhone front camera" phrase
+    // anchors Nano Banana's aspect-ratio + amateur-selfie
+    // aesthetic. Alternatives ("smartphone selfie", "iPhone photo")
+    // are weaker anchors.
+    expect(p).toMatch(/Shot on iPhone front camera, 9:16 vertical, natural daylight from/);
+    expect(p).toMatch(/slightly shaky handheld feel/);
+  });
+
+  it('emits the anti-AI directive tail (Kling 3.0 guide anchor)', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
+    // Regression pin: without this tail Nano Banana routinely
+    // renders floating text or phone-screen UI (Kling 3.0 guide
+    // documented the same issue). Verbatim.
+    expect(p).toMatch(
+      /ABSOLUTELY NO phones, cameras, screens, social media UI, floating text, or digital overlays visible anywhere in the frame\./,
+    );
+  });
+
+  it('gender-conditioned pronoun in the fictional-everyperson clause', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const female = await sampleCharacter();
+    expect(composeNanoBananaCharacterPrompt(female)).toMatch(
+      /She must look like a real \d+-year-old/,
+    );
+    const male = { ...female, gender: 'male' as const };
+    expect(composeNanoBananaCharacterPrompt(male)).toMatch(/He must look like a real \d+-year-old/);
+  });
+
+  it('threads role_description verbatim into the SKIN REALISM MANDATE', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const char = {
+      ...(await sampleCharacter()),
+      role_description: 'retired schoolteacher',
+    };
+    const p = composeNanoBananaCharacterPrompt(char);
+    expect(p).toMatch(/real \d+-year-old retired schoolteacher, not a model/);
+  });
+});
+
+describe('Polish-21.0.5: parseStructuredCharacter (JOHN block parser)', () => {
+  it('parses a well-formed character block', async () => {
+    const { parseStructuredCharacter } = await import('../src/functions/generate-video-variant');
+    const raw = {
+      name: 'Marcus',
+      age: 42,
+      nationality: 'Filipino',
+      gender: 'male',
+      hair_description: 'short jet-black hair, side-parted with a slight cowlick at the crown',
+      face_description:
+        "broad oval face with visible pore texture, slight jowl weight at 42, faint crow's feet, dark warm brown eyes with soft crinkle lines",
+      body_posture_clothing:
+        'solid average build with slightly rounded shoulders suggesting a life at a desk, wearing a faded charcoal cotton polo showing honest wear at the collar',
+      skin_color_for_stubble: 'black',
+      role_description: 'middle-aged office worker',
+      setting_description: 'home office corner, cool morning light through a north-facing window',
+    };
+    const r = parseStructuredCharacter(raw);
+    expect(r.name).toBe('Marcus');
+    expect(r.age).toBe(42);
+    expect(r.gender).toBe('male');
+    expect(r.skin_color_for_stubble).toBe('black');
+  });
+
+  it('falls back to FALLBACK_STRUCTURED_CHARACTER when Claude drops a required field', async () => {
+    const { parseStructuredCharacter, FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    // Missing hair_description → whole-record fallback (partial
+    // hydration would produce a half-Claude / half-fallback shape).
+    const partial = {
+      name: 'Marcus',
+      age: 42,
+      nationality: 'Filipino',
+      gender: 'male',
+      face_description: 'x',
+      body_posture_clothing: 'x',
+      skin_color_for_stubble: 'black',
+      role_description: 'x',
+      setting_description: 'x',
+    };
+    expect(parseStructuredCharacter(partial)).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+  });
+
+  it('falls back on non-object / null / array inputs', async () => {
+    const { parseStructuredCharacter, FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    expect(parseStructuredCharacter(null)).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+    expect(parseStructuredCharacter(undefined)).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+    expect(parseStructuredCharacter('string')).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+    expect(parseStructuredCharacter([])).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+  });
+
+  it('rejects invalid skin_color_for_stubble enum values (falls back)', async () => {
+    const { parseStructuredCharacter, FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    const badStubble = {
+      name: 'x',
+      age: 30,
+      nationality: 'x',
+      gender: 'male',
+      hair_description: 'x',
+      face_description: 'x',
+      body_posture_clothing: 'x',
+      skin_color_for_stubble: 'PURPLE',
+      role_description: 'x',
+      setting_description: 'x',
+    };
+    expect(parseStructuredCharacter(badStubble)).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+  });
+
+  it('rejects invalid gender enum values (falls back)', async () => {
+    const { parseStructuredCharacter, FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    const badGender = {
+      name: 'x',
+      age: 30,
+      nationality: 'x',
+      gender: 'nonbinary',
+      hair_description: 'x',
+      face_description: 'x',
+      body_posture_clothing: 'x',
+      skin_color_for_stubble: 'none',
+      role_description: 'x',
+      setting_description: 'x',
+    };
+    expect(parseStructuredCharacter(badGender)).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+  });
+
+  it('rejects non-positive / non-finite age (falls back)', async () => {
+    const { parseStructuredCharacter, FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    for (const age of [0, -3, NaN, Infinity, 'thirty']) {
+      const bad = {
+        name: 'x',
+        age,
+        nationality: 'x',
+        gender: 'male',
+        hair_description: 'x',
+        face_description: 'x',
+        body_posture_clothing: 'x',
+        skin_color_for_stubble: 'none',
+        role_description: 'x',
+        setting_description: 'x',
+      };
+      expect(parseStructuredCharacter(bad)).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+    }
+  });
+});
+
+describe('Polish-21.0.5: parseVideoAdSpecHedra with character block', () => {
+  it('hydrates the character field when Claude output includes it', async () => {
+    const { parseVideoAdSpecHedra } = await import('../src/functions/generate-video-variant');
+    const raw = JSON.stringify({
+      scene: {
+        scene_description:
+          'A 34-year-old woman films herself in her kitchen — morning natural light.',
+        script: 'Real script text here.',
+      },
+      character: {
+        name: 'Elena',
+        age: 34,
+        nationality: 'American',
+        gender: 'female',
+        hair_description: 'dark brown hair pulled into a loose low bun',
+        face_description: 'oval face with faint freckles and warm hazel eyes',
+        body_posture_clothing: 'average build in a worn navy hoodie with fraying cuffs',
+        skin_color_for_stubble: 'none',
+        role_description: 'thirty-something everyperson',
+        setting_description: 'kitchen counter, cool morning light through a window',
+      },
+    });
+    const r = parseVideoAdSpecHedra(raw);
+    expect(r).not.toBeNull();
+    expect(r!.character.name).toBe('Elena');
+    expect(r!.character.setting_description).toMatch(/kitchen counter/);
+  });
+
+  it('falls back to FALLBACK_STRUCTURED_CHARACTER when scene is valid but character is missing', async () => {
+    const { parseVideoAdSpecHedra, FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    const raw = JSON.stringify({
+      scene: { scene_description: 'valid scene text with enough length here.', script: 'hi hi hi' },
+    });
+    const r = parseVideoAdSpecHedra(raw);
+    expect(r).not.toBeNull();
+    // Regression pin: pipeline moves forward with a generic
+    // everyperson instead of blowing up. Character-drop was a
+    // real risk during Polish-21 Commit 2 (maxTokens truncation).
+    expect(r!.character).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+  });
+
+  it('falls back when scene is valid but character is malformed', async () => {
+    const { parseVideoAdSpecHedra, FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    const raw = JSON.stringify({
+      scene: { scene_description: 'valid scene text with enough length here.', script: 'hi hi hi' },
+      character: { name: 'Half', age: 30 }, // missing everything else
+    });
+    const r = parseVideoAdSpecHedra(raw);
+    expect(r).not.toBeNull();
+    expect(r!.character).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+  });
+});
+
+describe('Polish-21.0.5: runClaudeAdSpecHedra system prompt (JOHN character + yapper scene)', () => {
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-video-variant.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('requests a character block with JOHN naturalistic-paragraph fields', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runClaudeAdSpecHedra');
+    const end = src.indexOf('// ---', start);
+    const promptFn = src.slice(start, end);
+    // Every required JOHN paragraph field must be in the schema
+    // Claude sees.
+    expect(promptFn).toMatch(/"hair_description":/);
+    expect(promptFn).toMatch(/"face_description":/);
+    expect(promptFn).toMatch(/"body_posture_clothing":/);
+    expect(promptFn).toMatch(/"skin_color_for_stubble":/);
+    expect(promptFn).toMatch(/"role_description":/);
+    expect(promptFn).toMatch(/"setting_description":/);
+  });
+
+  it('anti-athletic + wear-detail directives are present (JOHN pattern anchors)', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runClaudeAdSpecHedra');
+    const end = src.indexOf('// ---', start);
+    const promptFn = src.slice(start, end);
+    // Regression pin: the exact phrasing that keeps Claude from
+    // defaulting to "athletic build, pristine white t-shirt".
+    expect(promptFn).toMatch(/NEVER "athletic"/);
+    expect(promptFn).toMatch(/wear detail/);
+    expect(promptFn).toMatch(/No pristine outfits/);
+  });
+
+  it('scene_description template names the yapper anchor components (age, framing, lighting, tone, dialogue)', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runClaudeAdSpecHedra');
+    const end = src.indexOf('// ---', start);
+    const promptFn = src.slice(start, end);
+    expect(promptFn).toMatch(/dashboard-mounted phone chest-up/);
+    expect(promptFn).toMatch(/confessional TikTok energy/);
+    expect(promptFn).toMatch(/Natural micro-expressions/);
+    expect(promptFn).toMatch(/Vertical 9:16/);
+    // Yapper anchor requires "She says:" / "He says:" INSIDE the
+    // scene_description prose.
+    expect(promptFn).toMatch(/She\/He says/);
+  });
+
+  it('script field explicitly forbids speaker attribution (goes to TTS verbatim)', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runClaudeAdSpecHedra');
+    const end = src.indexOf('// ---', start);
+    const promptFn = src.slice(start, end);
+    // Scene CAN have "She says:" (narrative framing for Hedra
+    // text_prompt), but script CANNOT (ElevenLabs would speak
+    // "She says" literally).
+    expect(promptFn).toMatch(/NO stage directions, NO speaker attribution/);
+    expect(promptFn).toMatch(/verbatim to ElevenLabs TTS/);
+  });
+
+  it('drops sound_texture (Hedra + ElevenLabs handle audio natively)', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runClaudeAdSpecHedra');
+    const end = src.indexOf('// ---', start);
+    const promptFn = src.slice(start, end);
+    expect(promptFn).not.toMatch(/sound_texture/);
+  });
+
+  it('rejects bracketed Sora-era sections (Polish-20.0.3 anchor still applies)', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runClaudeAdSpecHedra');
+    const end = src.indexOf('// ---', start);
+    const promptFn = src.slice(start, end);
+    expect(promptFn).toMatch(/NO bracketed sections/);
+    expect(promptFn).toMatch(/IGNORE it — do NOT copy the structure/);
+  });
+
+  it('KEEPS Polish-19.4.2 verbatim source-script preservation (hooks + dollar amounts + ALL CAPS)', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runClaudeAdSpecHedra');
+    const end = src.indexOf('// ---', start);
+    const promptFn = src.slice(start, end);
+    expect(promptFn).toMatch(/SOURCE-SCRIPT PRESERVATION/);
+    expect(promptFn).toMatch(/hook openers/);
+    expect(promptFn).toMatch(/dollar amounts/);
+    expect(promptFn).toMatch(/ALL CAPS emphasis words/);
+  });
+});
+
+describe('Polish-21.0.5: runOneVariantHedra uses composeNanoBananaCharacterPrompt', () => {
+  const readSrc = async () => {
+    const fs = await import('node:fs/promises');
+    return fs.readFile(
+      new URL('../src/functions/generate-video-variant.ts', import.meta.url),
+      'utf8',
+    );
+  };
+
+  it('worker composes the Nano Banana prompt via composeNanoBananaCharacterPrompt(character) — not an inline template', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runOneVariantHedra');
+    const end = src.indexOf('export function pickElevenLabsVoiceForVariant');
+    const fn = src.slice(start, end);
+    // Regression pin: the JOHN composer must be called from the
+    // worker. Inlining the prompt again would regress to the
+    // Polish-21 Commit 2 AI-CGI output.
+    expect(fn).toMatch(/composeNanoBananaCharacterPrompt\(character\)/);
+    // AND the old inline "Scene: ${sceneDescription}" template
+    // MUST NOT reappear.
+    expect(fn).not.toMatch(/Photoreal amateur smartphone selfie photograph, vertical 9:16 framing/);
+  });
+
+  it('worker logs character block + Nano Banana prompt length to composite metadata (forensics)', async () => {
+    const src = await readSrc();
+    const start = src.indexOf('async function runOneVariantHedra');
+    const end = src.indexOf('export function pickElevenLabsVoiceForVariant');
+    const fn = src.slice(start, end);
+    expect(fn).toMatch(/character,/);
+    expect(fn).toMatch(/nano_banana_prompt_chars: imagePrompt\.length/);
+  });
+});
+
 describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGeneration', () => {
   const readSrc = async () => {
     const fs = await import('node:fs/promises');

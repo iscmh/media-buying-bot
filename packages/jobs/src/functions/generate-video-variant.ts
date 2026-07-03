@@ -685,12 +685,144 @@ export interface VideoAdScene {
 }
 
 /**
+ * Polish-21.0.5 hotfix: structured character schema for the Nano
+ * Banana Pro reference image call. Restores the Polish-12.x "JOHN"
+ * naturalistic paragraph pattern that produces photoreal
+ * amateur-selfie references instead of the AI-CGI look the Polish-21
+ * Commit 2 inline `imagePrompt` was producing.
+ *
+ * Naturalistic PARAGRAPH fields (hair_description,
+ * face_description, body_posture_clothing, setting_description) —
+ * NOT itemized objects. Claude has a strong tendency to
+ * bullet-list character details when given itemized JSON fields;
+ * naturalistic paragraphs beat that tendency and let
+ * casting-director copy through.
+ */
+export type SkinColorForStubble = 'grey' | 'brown' | 'black' | 'blonde' | 'red' | 'none';
+
+export interface StructuredCharacter {
+  name: string;
+  age: number;
+  nationality: string;
+  gender: 'male' | 'female';
+  /** Single flowing paragraph — length, color, styling. NOT bullet form. */
+  hair_description: string;
+  /** Single flowing paragraph — face, laugh lines, crow's feet, jowls, eye color woven together. */
+  face_description: string;
+  /** Single flowing paragraph — build, posture cued to life context, clothing with wear detail. */
+  body_posture_clothing: string;
+  /** Drives the SKIN REALISM MANDATE stubble line. */
+  skin_color_for_stubble: SkinColorForStubble;
+  /** e.g. "grandfather", "mother", "retiree", "young professional". */
+  role_description: string;
+  /** Single flowing paragraph — the scene location + daylight source. */
+  setting_description: string;
+}
+
+/**
+ * Polish-21.0.5: safe-fallback character used when Claude's output
+ * omits or fails to parse the character block. Keeps the pipeline
+ * moving with a generic everyperson instead of blowing up the
+ * whole variant. Matches the JOHN pattern's naturalistic paragraph
+ * shape.
+ */
+export const FALLBACK_STRUCTURED_CHARACTER: StructuredCharacter = {
+  name: 'Alex',
+  age: 34,
+  nationality: 'American',
+  gender: 'female',
+  hair_description:
+    'shoulder-length light brown hair, loosely pulled back with a couple of stray strands framing the face — natural texture, no salon polish',
+  face_description:
+    'warm oval face with faint laugh lines around the eyes, a natural asymmetry to the smile, subtle freckling across the nose bridge, and warm hazel eyes with soft crinkle lines at the outer corners',
+  body_posture_clothing:
+    "average build with slightly rounded shoulders suggesting a life at a desk, wearing a casual soft grey cotton crewneck that shows honest wear at the neckline — not new, not designer. Relaxed posture, elbows tucked in like she's holding the phone close for a private conversation",
+  skin_color_for_stubble: 'none',
+  role_description: 'thirty-something everyperson',
+  setting_description:
+    'casual living-room corner, late-afternoon natural daylight coming through a window off-camera, muted neutral walls behind, no visible screens or ad-tech props',
+};
+
+/**
  * Polish-21: single-scene ad spec for Character 3 (one scene per
  * variant since Character 3 is single-call). Replaces the
  * Polish-20 `VideoAdSpec.segments[]` structure.
+ *
+ * Polish-21.0.5: `character` block added for the Nano Banana Pro
+ * reference-image step (JOHN pattern). Optional on the wire —
+ * parser fills in FALLBACK_STRUCTURED_CHARACTER when Claude drops
+ * or malforms the block.
  */
 export interface VideoAdSpecHedra {
   scene: VideoAdScene;
+  character: StructuredCharacter;
+}
+
+/**
+ * Polish-21.0.5: compose the Nano Banana Pro image prompt from the
+ * structured character using the 6-block JOHN pattern:
+ *   1. Three-view lead (casting-director framing)
+ *   2. Head / face (single flowing paragraph)
+ *   3. Body / posture / clothing (single paragraph)
+ *   4. SKIN REALISM MANDATE (verbatim anchor — all three ZERO
+ *      requirements + fictional-everyperson clause)
+ *   5. Camera / setting (single line)
+ *   6. Anti-AI directive tail (verbatim from Kling 3.0 guide)
+ *
+ * The anchors are word-for-word — a future rewrite that softens
+ * "ZERO beauty filters / ZERO skin smoothing / ZERO AI plastic-skin
+ * artifacts" or drops the anti-AI directive silently degrades
+ * quality on Nano Banana output. Tests pin every anchor.
+ */
+export function composeNanoBananaCharacterPrompt(character: StructuredCharacter): string {
+  const {
+    name,
+    age,
+    nationality,
+    gender,
+    hair_description,
+    face_description,
+    body_posture_clothing,
+    skin_color_for_stubble,
+    role_description,
+    setting_description,
+  } = character;
+  const pronoun = gender === 'female' ? 'She' : 'He';
+  const stubbleClause =
+    skin_color_for_stubble === 'none'
+      ? // Female / clean-shaven face — no stubble line, but keep pore + vellus detail.
+        'Visible pores, natural sebaceous texture on nose. Natural vellus hair on forearms.'
+      : `Visible pores, natural sebaceous texture on nose, real ${skin_color_for_stubble} stubble shadow on upper lip and jaw from one day of missed shaving. Natural vellus hair on forearms.`;
+
+  const block1_threeView =
+    `Photorealistic three-view character sheet — front view, side view, back view — of a ` +
+    `${age}-year-old ${nationality} ${gender} named ${name}.`;
+
+  const block2_headFace = `${hair_description}. ${face_description}.`;
+
+  const block3_bodyPostureClothing = body_posture_clothing + '.';
+
+  const block4_skinRealism =
+    `SKIN REALISM MANDATE: Hyper-realistic unedited human skin. ${stubbleClause} ` +
+    `ZERO beauty filters. ZERO skin smoothing. ZERO AI plastic-skin artifacts. ` +
+    `${pronoun} must look like a real ${age}-year-old ${role_description}, not a model, not an actor, ` +
+    `not an AI-generated character.`;
+
+  const block5_cameraSetting =
+    `Shot on iPhone front camera, 9:16 vertical, natural daylight from ${setting_description}, ` +
+    `slightly shaky handheld feel.`;
+
+  const block6_antiAiDirective =
+    'ABSOLUTELY NO phones, cameras, screens, social media UI, floating text, or digital overlays visible anywhere in the frame.';
+
+  return [
+    block1_threeView,
+    block2_headFace,
+    block3_bodyPostureClothing,
+    block4_skinRealism,
+    block5_cameraSetting,
+    block6_antiAiDirective,
+  ].join('\n\n');
 }
 
 export function parseVideoAdSpecHedra(raw: string | unknown): VideoAdSpecHedra | null {
@@ -718,21 +850,101 @@ export function parseVideoAdSpecHedra(raw: string | unknown): VideoAdSpecHedra |
 function validateVideoAdSpecHedra(value: unknown): VideoAdSpecHedra | null {
   if (!value || typeof value !== 'object') return null;
   const v = value as Record<string, unknown>;
-  // Accept either {scene: {...}} or a flat {scene_description, script}
-  // shape. Claude occasionally emits the flat shape when only one
-  // scene is asked for.
+  // Accept either {scene: {...}, character: {...}} or a flat
+  // {scene_description, script, character?} shape. Claude
+  // occasionally emits the flat shape when only one scene is
+  // asked for.
+  const character = parseStructuredCharacter(v['character']);
   if (v.scene && typeof v.scene === 'object' && !Array.isArray(v.scene)) {
-    return validateSceneBody(v.scene as Record<string, unknown>);
+    return validateSceneBody(v.scene as Record<string, unknown>, character);
   }
-  return validateSceneBody(v);
+  return validateSceneBody(v, character);
 }
 
-function validateSceneBody(body: Record<string, unknown>): VideoAdSpecHedra | null {
+function validateSceneBody(
+  body: Record<string, unknown>,
+  character: StructuredCharacter,
+): VideoAdSpecHedra | null {
   const sd = body['scene_description'];
   const sc = body['script'];
   if (typeof sd !== 'string' || sd.length === 0) return null;
   if (typeof sc !== 'string' || sc.length === 0) return null;
-  return { scene: { scene_description: sd, script: sc } };
+  return { scene: { scene_description: sd, script: sc }, character };
+}
+
+/**
+ * Polish-21.0.5: parse a character block from Claude's output,
+ * falling back to FALLBACK_STRUCTURED_CHARACTER when the block is
+ * missing / not an object / drops required fields. The scene
+ * pipeline can still proceed with a generic everyperson if Claude
+ * flubs the character schema — better than blowing up the whole
+ * variant.
+ */
+export function parseStructuredCharacter(raw: unknown): StructuredCharacter {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return FALLBACK_STRUCTURED_CHARACTER;
+  const c = raw as Record<string, unknown>;
+  const name = typeof c['name'] === 'string' ? (c['name'] as string) : undefined;
+  const ageRaw = c['age'];
+  const age =
+    typeof ageRaw === 'number' && Number.isFinite(ageRaw) && ageRaw > 0
+      ? Math.round(ageRaw)
+      : undefined;
+  const nationality =
+    typeof c['nationality'] === 'string' ? (c['nationality'] as string) : undefined;
+  const genderRaw = c['gender'];
+  const gender: 'male' | 'female' | undefined =
+    genderRaw === 'male' || genderRaw === 'female' ? genderRaw : undefined;
+  const hair =
+    typeof c['hair_description'] === 'string' ? (c['hair_description'] as string) : undefined;
+  const face =
+    typeof c['face_description'] === 'string' ? (c['face_description'] as string) : undefined;
+  const body =
+    typeof c['body_posture_clothing'] === 'string'
+      ? (c['body_posture_clothing'] as string)
+      : undefined;
+  const stubbleRaw = c['skin_color_for_stubble'];
+  const stubble: SkinColorForStubble | undefined =
+    stubbleRaw === 'grey' ||
+    stubbleRaw === 'brown' ||
+    stubbleRaw === 'black' ||
+    stubbleRaw === 'blonde' ||
+    stubbleRaw === 'red' ||
+    stubbleRaw === 'none'
+      ? stubbleRaw
+      : undefined;
+  const role =
+    typeof c['role_description'] === 'string' ? (c['role_description'] as string) : undefined;
+  const setting =
+    typeof c['setting_description'] === 'string' ? (c['setting_description'] as string) : undefined;
+  // Any required field missing → whole-record fallback. Partial
+  // hydration risks a strange half-Claude, half-fallback character
+  // that reads worse than either shape on its own.
+  if (
+    !name ||
+    !age ||
+    !nationality ||
+    !gender ||
+    !hair ||
+    !face ||
+    !body ||
+    !stubble ||
+    !role ||
+    !setting
+  ) {
+    return FALLBACK_STRUCTURED_CHARACTER;
+  }
+  return {
+    name,
+    age,
+    nationality,
+    gender,
+    hair_description: hair,
+    face_description: face,
+    body_posture_clothing: body,
+    skin_color_for_stubble: stubble,
+    role_description: role,
+    setting_description: setting,
+  };
 }
 
 // Polish-21: Hedra Character 3 typical run is 30-90s of generation.
@@ -798,6 +1010,13 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
     return { index: variantIndex, ok: false, costUsd: cost, error: adSpecResult.error };
   }
   const { scene_description: sceneDescription, script } = adSpecResult.spec.scene;
+  const character = adSpecResult.spec.character;
+  // Polish-21.0.5: compose the Nano Banana Pro prompt from the
+  // structured character using the JOHN 6-block pattern. Old
+  // Polish-21 Commit 2 inline prompt produced AI-CGI output; the
+  // JOHN naturalistic-paragraph anchors get Nano Banana to hold
+  // photoreal amateur-selfie aesthetic.
+  const imagePrompt = composeNanoBananaCharacterPrompt(character);
 
   // Step 2: Nano Banana Pro reference image gen.
   const refImageResult = await step.run(`hedra-nano-banana-${variantIndex}`, async () => {
@@ -809,15 +1028,6 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         return { ok: false as const, error: err.message, costUsd: 0 };
       throw err;
     }
-    // Character 3 keyframe: photoreal amateur smartphone selfie
-    // framing matching the scene description. Vertical 9:16 for
-    // downstream Hedra output aspect.
-    const imagePrompt =
-      `Photoreal amateur smartphone selfie photograph, vertical 9:16 framing, ` +
-      `chest-up. Scene: ${sceneDescription}. Natural lighting, no filters, no text ` +
-      `overlays, no captions, no watermarks. Fictional everyperson with no ` +
-      `resemblance to any public figure. TikTok confessional aesthetic — raw ` +
-      `iPhone footage look, subtle handheld micro-jitter cue. Single character in frame.`;
     const gen = await callGeminiImage({
       userId,
       apiKey: keys.gemini!,
@@ -1193,6 +1403,12 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         voice_label: voice.label,
         voice_gender: voice.gender,
         voice_age: voice.age,
+        // Polish-21.0.5 hotfix: log the character block Claude
+        // produced (used to compose the Nano Banana JOHN prompt)
+        // so operators can grep for AI-CGI regressions and inspect
+        // which character shape produced a given output.
+        character,
+        nano_banana_prompt_chars: imagePrompt.length,
         text_prompt: sceneDescription,
         script,
         duration_seconds: targetSeconds,
@@ -1283,14 +1499,26 @@ async function runClaudeAdSpecHedra(input: {
   const sanitizedSourceAnalysis = sanitizeSourceAnalysisForClaude(jobMetadata);
 
   const systemPrompt =
-    `You write ${model.displayName} scene prompts for short UGC talking-head video ads. ` +
-    `Output ONLY valid JSON matching the schema below — no markdown fences, no preamble, ` +
-    `no trailing prose.\n\n` +
+    `You write ${model.displayName} scene prompts + Nano Banana character sheets for short UGC ` +
+    `talking-head video ads. Output ONLY valid JSON matching the schema below — no markdown ` +
+    `fences, no preamble, no trailing prose.\n\n` +
     `REQUIRED SCHEMA:\n` +
     `{\n` +
     `  "scene": {\n` +
-    `    "scene_description": "50-80 words describing setting + character + tone + framing + lighting. ONE paragraph, no bracketed sections.",\n` +
-    `    "script": "The words the character speaks aloud (this is TTS audio, not on-screen text)."\n` +
+    `    "scene_description": "50-80 words. ONE flowing paragraph. Yapper style — CAN contain 'She says: <hook>' inside the paragraph as narrative framing (Hedra treats scene_description as text_prompt, so speaker attribution reads as scene context, not spoken content). See ANCHOR.",\n` +
+    `    "script": "The words the character speaks aloud. NO stage directions, NO speaker attribution — this string goes verbatim to ElevenLabs TTS, so 'She says:' would be spoken literally."\n` +
+    `  },\n` +
+    `  "character": {\n` +
+    `    "name": "First name only. Fictional — no public figure.",\n` +
+    `    "age": 34,\n` +
+    `    "nationality": "American / British / Filipino / …",\n` +
+    `    "gender": "male" | "female",\n` +
+    `    "hair_description": "Single flowing paragraph — length, color, styling. Naturalistic phrasing like 'shoulder-length light brown hair loosely pulled back with a couple of stray strands'. NOT bullet form.",\n` +
+    `    "face_description": "Single flowing paragraph — face shape, laugh lines, crow's feet, jowls or lack thereof, freckling, eye color with crinkle detail. Woven together as ONE sentence, not a list.",\n` +
+    `    "body_posture_clothing": "Single flowing paragraph — build, shoulder posture tied to life context ('slightly rounded shoulders suggesting a life of desk work' — NOT athletic), specific clothing with wear detail ('soft grey cotton crewneck, honest wear at the neckline — not new, not designer'), relaxed posture cue.",\n` +
+    `    "skin_color_for_stubble": "grey" | "brown" | "black" | "blonde" | "red" | "none",\n` +
+    `    "role_description": "e.g. 'grandfather', 'mother', 'retiree', 'young professional', 'thirty-something everyperson'. Used verbatim in the SKIN REALISM MANDATE.",\n` +
+    `    "setting_description": "Single flowing paragraph — specific location + specific daylight source. e.g. 'parked dark-interior SUV, warm afternoon sunlight through the driver's side window'."\n` +
     `  }\n` +
     `}\n\n` +
     `HOW ${model.displayName} WORKS (context so you write for the model, not against it):\n` +
@@ -1302,24 +1530,52 @@ async function runClaudeAdSpecHedra(input: {
     `Those fight the model.\n` +
     `- The scene_description is a STATIC scene anchor. Describe what a photo of this ` +
     `moment would show, then trust Character 3 to animate it.\n\n` +
-    `FORMAT — HARD REQUIREMENTS:\n` +
+    `SCENE FORMAT — HARD REQUIREMENTS:\n` +
     `- scene_description is ONE flowing paragraph. NO bracketed sections. ` +
     `NO **Camera Shot:**, NO **Actions:**, NO **Dialogue:**, NO **Character:**, ` +
     `NO "Setting:"/"Lighting:"/"Framing:" labels. If source_analysis contains this ` +
     `bracketed style, IGNORE it — do NOT copy the structure.\n` +
     `- 50-80 words for scene_description. Longer = wasted tokens on choreography ` +
     `Character 3 ignores.\n` +
-    `- The scene_description weaves together (in one paragraph): setting/location, ` +
-    `character (age range, gender, ethnicity, outfit, brief persona hint), tone/energy, ` +
-    `camera framing (chest-up UGC iPhone selfie, tripod-style or hand-held), lighting mood.\n` +
-    `- script is the words spoken aloud only. NO stage directions, NO speaker attribution ` +
-    `("She says:", "He confesses:") — the whole thing IS the speech.\n\n` +
-    `WORKED EXAMPLE (Polish-21 anchor — this is the yapper-style scene + script the ` +
-    `operator manually tested on Hedra Character 3):\n` +
+    `- Template: "A {age}-year-old {gender} films herself/himself {location} — {specific ` +
+    `framing: 'dashboard-mounted phone chest-up' / 'bathroom mirror selfie' / 'kitchen ` +
+    `tripod'}. {Lighting: 'warm afternoon sunlight through the driver's side window' etc}. ` +
+    `{Character context tied to source ad emotional register: 'confessional TikTok energy, ` +
+    `like venting to a friend on FaceTime' / 'excited announcement to camera' / 'quiet ` +
+    `vulnerable moment'}. She/He says: '{verbatim source hook + variation}'. Natural ` +
+    `micro-expressions. Vertical 9:16."\n\n` +
+    `CHARACTER FORMAT — HARD REQUIREMENTS (JOHN pattern — verified working):\n` +
+    `- Naturalistic PARAGRAPHS in hair_description / face_description / ` +
+    `body_posture_clothing / setting_description. NOT itemized JSON objects. NOT bullet ` +
+    `lists. If tempted to write "{ length: '...', color: '...' }" for hair — DO NOT. Write ` +
+    `it as prose a casting director would send to a photographer.\n` +
+    `- shoulder posture MUST cue life context (desk work, retiree posture, standing waitress ` +
+    `posture, etc). NEVER "athletic" — athletic reads as stock-photo model.\n` +
+    `- Clothing MUST have wear detail: "slightly worn at the collar", "faded on the ` +
+    `sleeves", "honest wear at the neckline — not new, not dirty". No pristine outfits.\n` +
+    `- skin_color_for_stubble drives the SKIN REALISM MANDATE line downstream. Pick 'none' ` +
+    `for a smooth-shaven or female face, otherwise pick the color that matches the hair.\n` +
+    `- role_description is used inside "must look like a real {age}-year-old {role}, not a ` +
+    `model, not an actor, not an AI-generated character". Pick something a stranger would ` +
+    `say if asked "who's that in the video".\n\n` +
+    `WORKED EXAMPLE (Polish-21.0.5 anchor — the yapper scene + JOHN character the ` +
+    `operator verified working on Hedra Character 3 + Nano Banana Pro):\n` +
     `{\n` +
     `  "scene": {\n` +
-    `    "scene_description": "A 34-year-old woman with light brown hair sits in the driver's seat of a parked dark-interior SUV, chest-up dashboard-mounted phone framing, tripod-style stability. Warm afternoon sunlight through the driver's side window catches her face. Confessional TikTok tone, like venting to a friend on FaceTime. Raw iPhone selfie aesthetic, no filter, casual outfit.",\n` +
+    `    "scene_description": "A 34-year-old woman films herself in the driver's seat of a parked dark-interior SUV — dashboard-mounted phone chest-up, tripod-style stability. Warm afternoon sunlight through the driver's side window catches her face. Confessional TikTok energy, like venting to a friend on FaceTime. She says: 'I swear to god, I was spending $80 a month on face serums that did NOTHING.' Natural micro-expressions. Vertical 9:16.",\n` +
     `    "script": "I swear to god, I was spending $80 a month on face serums that did NOTHING. Zero. Nada. Like, honestly? I finally figured it out — and I wish I'd known sooner."\n` +
+    `  },\n` +
+    `  "character": {\n` +
+    `    "name": "Rachel",\n` +
+    `    "age": 34,\n` +
+    `    "nationality": "American",\n` +
+    `    "gender": "female",\n` +
+    `    "hair_description": "shoulder-length light brown hair, loosely pulled back with a couple of stray strands framing the face, natural texture without salon polish",\n` +
+    `    "face_description": "warm oval face with faint laugh lines around the eyes, a natural asymmetry to the smile, light freckling across the nose bridge, and warm hazel eyes with soft crinkle lines at the outer corners",\n` +
+    `    "body_posture_clothing": "average build with slightly rounded shoulders suggesting a life at a desk, wearing a soft grey cotton crewneck that shows honest wear at the neckline — not new, not designer, elbows tucked in like she's holding the phone close for a private conversation",\n` +
+    `    "skin_color_for_stubble": "none",\n` +
+    `    "role_description": "thirty-something everyperson",\n` +
+    `    "setting_description": "parked dark-interior SUV, warm afternoon sunlight coming through the driver's side window off-camera"\n` +
     `  }\n` +
     `}\n\n` +
     `SOURCE-SCRIPT PRESERVATION (Polish-19.4.2 rule — this is NOT verbatim quoting, ` +
@@ -1337,9 +1593,7 @@ async function runClaudeAdSpecHedra(input: {
     `- The script is what gets SPOKEN. No stage directions, no on-screen text, no captions.\n\n` +
     `THIS REQUEST: this is variant ${variantIndex} of ${variantCount} in a batch. ` +
     `Differentiate from other variants by adapting the character demographics + setting ` +
-    `+ tone while preserving the source's hooks and key phrases. Target duration is set by ` +
-    `the audio Character 3 generates from your script — aim for a script whose read ` +
-    `length matches the source ad pacing.`;
+    `+ tone while preserving the source's hooks and key phrases.`;
 
   const userMessage = JSON.stringify({
     source_script_verbatim: sourceScriptVerbatim,
@@ -1353,8 +1607,11 @@ async function runClaudeAdSpecHedra(input: {
     apiKey: keys.claude!,
     systemPrompt,
     userMessage,
-    // 50-80 word scene + a short script ≈ 300 tokens; cap modestly.
-    maxTokens: 2048,
+    // Polish-21.0.5: 50-80 word scene + short script + JOHN-pattern
+    // character block (~200-400 tokens for the naturalistic
+    // paragraphs). Bumped from 2048 to 4096 to leave headroom for
+    // Claude to write vivid character detail without truncating.
+    maxTokens: 4096,
     generationJobId: jobId,
   });
   if (!claude.ok) {
@@ -1420,7 +1677,11 @@ export const HEDRA_MIN_SCENE_DESCRIPTION_CHARS = 40;
 export const HEDRA_MIN_SCRIPT_CHARS = 8;
 
 export function validateHedraSpecMinLengths(
-  spec: VideoAdSpecHedra,
+  // Polish-21.0.5: only reads scene fields — narrow the type to
+  // `{scene: VideoAdScene}` so callers can pass a scene-only fixture
+  // without threading a full VideoAdSpecHedra (with the newly-
+  // required character block).
+  spec: { scene: VideoAdScene },
 ): { ok: true } | { ok: false; reason: string } {
   const { scene_description, script } = spec.scene;
   if (scene_description.trim().length < HEDRA_MIN_SCENE_DESCRIPTION_CHARS) {
