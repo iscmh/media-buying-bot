@@ -59,10 +59,14 @@ describe('Polish-20 Commit 4: buildConnectedProviders surviving slots', () => {
       kie_ai: { connected: false },
       // Polish-21: hedra slot added for the Character 3 pipeline.
       hedra: { connected: false },
+      // Polish-21.0.4 hotfix: elevenlabs slot added — Hedra worker
+      // uploads ElevenLabs TTS mp3 as a Hedra audio asset.
+      elevenlabs: { connected: false },
     });
-    // Legacy slots removed by Commit 4:
+    // Legacy slots removed by Commit 4 (elevenlabs came back in
+    // Polish-21.0.4 as a first-class slot, so it's NOT in the
+    // legacy-undefined list anymore):
     expect((r as unknown as Record<string, unknown>).kling).toBeUndefined();
-    expect((r as unknown as Record<string, unknown>).elevenlabs).toBeUndefined();
   });
 
   it('Polish-21: hedra slot populates from ai_provider_connections', () => {
@@ -70,10 +74,18 @@ describe('Polish-20 Commit 4: buildConnectedProviders surviving slots', () => {
     const r = buildConnectedProviders(rows, NO_TOOLS);
     expect(r.hedra.connected).toBe(true);
   });
+
+  it('Polish-21.0.4: elevenlabs slot populates from ai_provider_connections', () => {
+    const rows: AiProviderRow[] = [{ provider: 'elevenlabs', tier: null }];
+    const r = buildConnectedProviders(rows, NO_TOOLS);
+    expect(r.elevenlabs.connected).toBe(true);
+  });
 });
 
-describe('Polish-21: AI_PROVIDER_QUERY_LIST', () => {
-  it('covers heygen + openai + hedra (Polish-21 adds hedra for Character 3)', () => {
-    expect(new Set(AI_PROVIDER_QUERY_LIST)).toEqual(new Set(['heygen', 'openai', 'hedra']));
+describe('Polish-21.0.4: AI_PROVIDER_QUERY_LIST', () => {
+  it('covers heygen + openai + hedra + elevenlabs (Polish-21.0.4 adds elevenlabs for Hedra TTS)', () => {
+    expect(new Set(AI_PROVIDER_QUERY_LIST)).toEqual(
+      new Set(['heygen', 'openai', 'hedra', 'elevenlabs']),
+    );
   });
 });

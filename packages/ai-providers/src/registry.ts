@@ -1,6 +1,7 @@
 import type { AIProviderName } from '@mbb/shared';
 import { ArcadsProvider } from './arcads';
 import { CreatifyProvider } from './creatify';
+import { ElevenLabsProvider } from './elevenlabs';
 import { HedraProvider } from './hedra';
 import { HeyGenProvider } from './heygen';
 import { OpenAIProvider } from './openai-provider';
@@ -16,6 +17,10 @@ const registry = new Map<AIProviderName, AIProvider>([
   ['openai', new OpenAIProvider()],
   // Polish-21: Hedra Character 3 image-to-talking-avatar.
   ['hedra', new HedraProvider()],
+  // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK — hands audio bytes
+  // to Hedra as an audio_id asset. Replaces Hedra native TTS which
+  // was blocked on voice-UUID availability on Creator plans.
+  ['elevenlabs', new ElevenLabsProvider()],
 ]);
 
 export function getProvider(name: AIProviderName): AIProvider {

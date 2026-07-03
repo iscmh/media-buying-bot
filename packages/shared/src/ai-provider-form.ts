@@ -31,9 +31,21 @@ const OPENAI_KEY_PATTERN = /^sk-[A-Za-z0-9_-]{20,256}$/;
 // Observed shape is 20+ alphanumeric with occasional _-. — we accept a
 // wide superset since Hedra hasn't documented an exact charset.
 const HEDRA_KEY_PATTERN = /^[A-Za-z0-9_.=-]{20,256}$/;
+// Polish-21.0.4 hotfix: ElevenLabs API keys. Observed shape is
+// alphanumeric ~48-64 chars, sometimes prefixed with `sk_`. Accept a
+// wide superset — ElevenLabs hasn't published a strict format.
+const ELEVENLABS_KEY_PATTERN = /^[A-Za-z0-9_.=-]{24,256}$/;
 export const AiProviderKeyInputSchema = z
   .object({
-    provider: z.enum(['arcads', 'heygen', 'creatify', 'replicate', 'openai', 'hedra']),
+    provider: z.enum([
+      'arcads',
+      'heygen',
+      'creatify',
+      'replicate',
+      'openai',
+      'hedra',
+      'elevenlabs',
+    ]),
     apiKey: z.string().trim().min(1, 'Paste your API key.'),
   })
   .superRefine((value, ctx) => {
@@ -64,6 +76,10 @@ export const AiProviderKeyInputSchema = z
       case 'hedra':
         pattern = HEDRA_KEY_PATTERN;
         hint = 'Hedra keys are 20+ chars from hedra.com/api-profile.';
+        break;
+      case 'elevenlabs':
+        pattern = ELEVENLABS_KEY_PATTERN;
+        hint = 'ElevenLabs keys are 24+ chars from elevenlabs.io/app/settings/api-keys.';
         break;
     }
     if (!pattern.test(value.apiKey)) {
@@ -144,6 +160,14 @@ export const AI_PROVIDER_META: Record<
     apiDocsUrl: 'https://www.hedra.com/docs',
     verificationMethod: 'api',
   },
+  elevenlabs: {
+    label: 'ElevenLabs',
+    description:
+      'TTS for the Hedra pipeline. Voice diversity across variants; source-voice cloning path in Polish-22.',
+    pricingUrl: 'https://elevenlabs.io/pricing',
+    apiDocsUrl: 'https://elevenlabs.io/docs',
+    verificationMethod: 'api',
+  },
 };
 
 /**
@@ -157,10 +181,15 @@ export const AI_PROVIDER_META: Record<
 // include 'gemini' because Gemini is a tool provider in the data model.
 // The connect cards exposed here are the ones that map to ai_provider_connections rows.
 // Polish-21: hedra added as the primary video-gen provider for the
-// Character 3 pipeline. Order matters — hedra first so the connect
-// page surfaces it above the legacy heygen/replicate/openai cards.
+// Character 3 pipeline. Polish-21.0.4 hotfix: elevenlabs added
+// second — the Hedra worker needs BOTH keys connected (Hedra for
+// video generation + ElevenLabs for TTS audio uploaded as a Hedra
+// audio asset). Order matters — hedra then elevenlabs first so
+// the connect page surfaces the required pair above the legacy
+// heygen/replicate/openai cards.
 export const CONNECTABLE_AI_PROVIDERS: AIProviderName[] = [
   'hedra',
+  'elevenlabs',
   'heygen',
   'replicate',
   'openai',

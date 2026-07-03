@@ -124,7 +124,11 @@ describe('Polish-21: uploadHedraAsset', () => {
 });
 
 describe('Polish-21: submitHedraGeneration', () => {
-  it('TTS mode: audio_generation block with voice_id + text; NO audio_id', async () => {
+  it('audio_id mode: audio_id at top level, NO audio_generation (Polish-21.0.4 sole path)', async () => {
+    // Polish-21.0.4 hotfix rewrite: Hedra native TTS
+    // (audio_generation) is blocked on voice-UUID availability on
+    // Creator plans. The client's sole audio path is now audio_id
+    // pointing at an ElevenLabs-generated + Hedra-uploaded mp3.
     const calls = captureFetch({ status: 200, body: { id: 'gen-99' } });
     const { submitHedraGeneration } = await import('../src/hedra-video');
     const r = await submitHedraGeneration({
@@ -132,7 +136,7 @@ describe('Polish-21: submitHedraGeneration', () => {
       apiKey: 'k',
       aiModelId: 'd1dd37a3-e39a-4854-a298-6510289f9cf2',
       startKeyframeId: 'img-1',
-      tts: { voiceId: 'v-1', text: 'I swear to god...' },
+      audioAssetId: 'audio-asset-uuid-42',
       textPrompt: 'A 42-year-old woman in a parked SUV, tripod-style selfie framing.',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -145,12 +149,9 @@ describe('Polish-21: submitHedraGeneration', () => {
     expect(body.type).toBe('video');
     expect(body.ai_model_id).toBe('d1dd37a3-e39a-4854-a298-6510289f9cf2');
     expect(body.start_keyframe_id).toBe('img-1');
-    expect(body.audio_generation).toEqual({
-      type: 'text_to_speech',
-      voice_id: 'v-1',
-      text: 'I swear to god...',
-    });
-    expect(body.audio_id).toBeUndefined();
+    // Regression pin: audio_id at TOP level, no audio_generation field.
+    expect(body.audio_id).toBe('audio-asset-uuid-42');
+    expect(body.audio_generation).toBeUndefined();
     const gvi = body.generated_video_inputs as Record<string, unknown>;
     expect(gvi.text_prompt).toBe(
       'A 42-year-old woman in a parked SUV, tripod-style selfie framing.',
@@ -158,10 +159,6 @@ describe('Polish-21: submitHedraGeneration', () => {
     expect(gvi.resolution).toBe('720p');
     expect(gvi.aspect_ratio).toBe('9:16');
     // Polish-21.0.3 hotfix: duration_ms is REQUIRED on the wire.
-    // The Commit 1 "derive from audio" assumption was contradicted
-    // by Hedra's HTTP 422 "Field required" response. This test now
-    // pins the Polish-21.0.3 default of 15000ms — batch replace
-    // added `durationSeconds: 15` above.
     expect(gvi.duration_ms).toBe(15_000);
   });
 
@@ -198,7 +195,7 @@ describe('Polish-21: submitHedraGeneration', () => {
       apiKey: 'k',
       aiModelId: 'm',
       startKeyframeId: 'i',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -213,38 +210,24 @@ describe('Polish-21: submitHedraGeneration', () => {
     expect(body.generated_video_inputs.seed).toBe(42);
   });
 
-  it('rejects when neither audioAssetId nor tts is provided', async () => {
+  it('rejects when audioAssetId is empty (Polish-21.0.4 native-TTS path removed)', async () => {
     const { submitHedraGeneration } = await import('../src/hedra-video');
     const r = await submitHedraGeneration({
       userId: 'u',
       apiKey: 'k',
       aiModelId: 'm',
       startKeyframeId: 'i',
+      audioAssetId: '',
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',
       durationSeconds: 15,
     });
     expect(r.ok).toBe(false);
-    expect(r.errorMessage).toMatch(/audioAssetId or tts/);
-  });
-
-  it('rejects when BOTH audioAssetId AND tts are provided (ambiguous)', async () => {
-    const { submitHedraGeneration } = await import('../src/hedra-video');
-    const r = await submitHedraGeneration({
-      userId: 'u',
-      apiKey: 'k',
-      aiModelId: 'm',
-      startKeyframeId: 'i',
-      audioAssetId: 'a',
-      tts: { voiceId: 'v', text: 't' },
-      textPrompt: 's',
-      resolution: '720p',
-      aspectRatio: '9:16',
-      durationSeconds: 15,
-    });
-    expect(r.ok).toBe(false);
-    expect(r.errorMessage).toMatch(/audioAssetId OR tts/);
+    // Regression pin: fail-fast error names both the missing field
+    // and the pivot away from Hedra native TTS.
+    expect(r.errorMessage).toMatch(/audioAssetId/);
+    expect(r.errorMessage).toMatch(/ElevenLabs/);
   });
 });
 
@@ -413,7 +396,7 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
       apiKey: 'k1234567890abcd',
       aiModelId: 'd1dd37a3-e39a-4854-a298-6510289f9cf2',
       startKeyframeId: 'img-uuid',
-      tts: { voiceId: 'voice-uuid', text: 'hello' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 'A scene description.',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -441,7 +424,7 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 'Kitchen selfie, morning light.',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -461,7 +444,11 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
     expect(body.aspect_ratio).toBeUndefined();
   });
 
-  it('audio_generation TOP LEVEL with {type: "text_to_speech", voice_id, text} (not nested in generated_video_inputs)', async () => {
+  it('audio_id TOP LEVEL (not nested in generated_video_inputs); NO audio_generation field', async () => {
+    // Polish-21.0.4 hotfix: rewritten from the audio_generation
+    // shape pin. The Hedra-native-TTS audio_generation path is gone
+    // — the sole audio route is audio_id pointing at an uploaded
+    // asset (ElevenLabs mp3 mirrored to Hedra).
     captureFetch({ status: 200, body: { id: 'gen-3' } });
     const { submitHedraGeneration } = await import('../src/hedra-video');
     await submitHedraGeneration({
@@ -469,7 +456,7 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'voice-uuid-xyz', text: 'I swear to god' },
+      audioAssetId: 'audio-asset-uuid-xyz',
       textPrompt: 'Scene.',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -479,13 +466,12 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
       ((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![1] as RequestInit)
         .body as string,
     ) as Record<string, unknown>;
-    // Pin: audio_generation at TOP level, not nested.
-    expect(body.audio_generation).toEqual({
-      type: 'text_to_speech',
-      voice_id: 'voice-uuid-xyz',
-      text: 'I swear to god',
-    });
+    // Pin: audio_id at TOP level, not nested.
+    expect(body.audio_id).toBe('audio-asset-uuid-xyz');
+    // Regression pin: audio_generation field REMOVED entirely.
+    expect(body.audio_generation).toBeUndefined();
     const gvi = body.generated_video_inputs as Record<string, unknown>;
+    expect(gvi.audio_id).toBeUndefined();
     expect(gvi.audio_generation).toBeUndefined();
     expect(gvi.voice_id).toBeUndefined();
   });
@@ -498,7 +484,7 @@ describe('Polish-21.0.2: submit body byte-exact match against hedra-labs/hedra-a
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 'Scene.',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -527,7 +513,7 @@ describe('Polish-21.0.2: URL + header regression pins', () => {
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 'Scene.',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -658,7 +644,7 @@ describe('Polish-21.0.3: submit body ALWAYS carries duration_ms', () => {
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -682,7 +668,7 @@ describe('Polish-21.0.3: submit body ALWAYS carries duration_ms', () => {
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -715,7 +701,7 @@ describe('Polish-21.0.3: submit body ALWAYS carries duration_ms', () => {
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -736,7 +722,7 @@ describe('Polish-21.0.3: submit body ALWAYS carries duration_ms', () => {
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',
@@ -840,7 +826,7 @@ describe('Polish-21.0.3: 422 responses surface Hedra field-level detail (not jus
       apiKey: 'k1234567890abcd',
       aiModelId: 'ai',
       startKeyframeId: 'img',
-      tts: { voiceId: 'v', text: 't' },
+      audioAssetId: 'audio-asset-1',
       textPrompt: 's',
       resolution: '720p',
       aspectRatio: '9:16',

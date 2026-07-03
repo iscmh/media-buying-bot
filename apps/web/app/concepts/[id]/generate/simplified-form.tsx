@@ -132,7 +132,15 @@ export function SimplifiedGenerationForm({
   // the Polish-20 kie.ai gate — the form still renders even when
   // disconnected so operators can see the cost preview, but Generate
   // stays disabled with a "connect Hedra" nudge.
-  const hasProviderKey = connectedProviders.hedra.connected;
+  // Polish-21.0.4 hotfix: worker needs BOTH keys (Hedra for video
+  // generation + ElevenLabs for TTS audio uploaded as a Hedra
+  // audio asset). Generate stays disabled until both are connected.
+  const hasHedraKey = connectedProviders.hedra.connected;
+  const hasElevenLabsKey = connectedProviders.elevenlabs.connected;
+  const hasProviderKey = hasHedraKey && hasElevenLabsKey;
+  const missingKeys: string[] = [];
+  if (!hasHedraKey) missingKeys.push('Hedra');
+  if (!hasElevenLabsKey) missingKeys.push('ElevenLabs');
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -321,7 +329,7 @@ export function SimplifiedGenerationForm({
         )}
         {!hasProviderKey && modelId != null && (
           <p className="mt-1 text-xs text-[color:var(--accent-negative)]">
-            Connect your Hedra key on{' '}
+            Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
             <Link
               href="/connections/ai-provider"
               className="hover:text-fg underline underline-offset-4"
@@ -350,7 +358,7 @@ export function SimplifiedGenerationForm({
             !canSubmit
               ? 'Pick a model to generate variations.'
               : !hasProviderKey
-                ? 'Connect a Hedra key to generate.'
+                ? `Connect ${missingKeys.join(' + ')} key${missingKeys.length > 1 ? 's' : ''} to generate.`
                 : undefined
           }
         >

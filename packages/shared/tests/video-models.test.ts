@@ -225,27 +225,36 @@ describe('Polish-21: getLiveProvidersForModel + getDefaultProviderForModel', () 
   });
 });
 
-describe('Polish-21.0.1 hotfix: HEDRA_VOICE_ROSTER (single UUID) + helpers', () => {
+describe('Polish-21.0.4 hotfix: ELEVENLABS_VOICE_ROSTER (preset UUIDs) + helpers', () => {
   /**
-   * Polish-21 Commit 2 shipped a name-based roster (Jessica / Matilda
-   * / etc). Job 52923be6 diagnostic: Hedra rejects names in voice_id
-   * with HTTP 422 `invalid literal for int() with base 10: 'jessica-a'`,
-   * so voice_id requires UUIDs. Polish-21.0.1 replaced the roster
-   * with the single confirmed working voice UUID from
-   * hedra-labs/hedra-api-starter's README example. Polish-21.0.2 will
-   * expand the roster once Hedra support delivers the full UUID list.
+   * Polish-21.0.4 hotfix rewrite: Hedra native TTS is blocked on
+   * built-in voice UUIDs not being accessible on Creator plans
+   * (Hedra returned "voice asset f412c62f-... not found" at submit
+   * time). Pivot: worker generates audio via ElevenLabs BYOK and
+   * uploads the mp3 as a Hedra audio_id asset. Roster is now 5
+   * ElevenLabs preset voice UUIDs (public, available on every
+   * ElevenLabs plan).
+   *
+   * HEDRA_VOICE_ROSTER (legacy alias) points at the same
+   * ELEVENLABS_VOICE_ROSTER — downstream imports keep compiling.
    */
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const STARTER_VOICE_UUID = 'f412c62f-e94f-41c0-bfc6-97f63289941c';
+  const UUID_LIKE_RE = /^[A-Za-z0-9]{16,64}$/;
+  const ELEVEN_SARAH_UUID = 'EXAVITQu4vr4xnSDxMaL';
 
-  it('ships EXACTLY ONE roster entry — the Hedra starter UUID', () => {
-    expect(HEDRA_VOICE_ROSTER).toHaveLength(1);
-    expect(HEDRA_VOICE_ROSTER[0]!.id).toBe(STARTER_VOICE_UUID);
+  it('ships 5 preset ElevenLabs voice UUIDs at Polish-21.0.4 launch', () => {
+    expect(HEDRA_VOICE_ROSTER).toHaveLength(5);
+    expect(HEDRA_VOICE_ROSTER.map((v) => v.id)).toEqual([
+      'EXAVITQu4vr4xnSDxMaL',
+      'JBFqnCBsd6RMkjVDRZzb',
+      'XB0fDUnXU5powFXDhCwa',
+      'onwK4e9ZLuTAKqWW03F9',
+      'TxGEqnHWrfWFTfGW9XjX',
+    ]);
   });
 
-  it('every roster entry id is a valid UUID (regression pin against name-based ids)', () => {
+  it('every roster entry id is UUID-shaped (regression against name-based ids)', () => {
     for (const v of HEDRA_VOICE_ROSTER) {
-      expect(v.id, `voice ${JSON.stringify(v)} id is not a UUID`).toMatch(UUID_RE);
+      expect(v.id, `voice ${JSON.stringify(v)} id is not UUID-shaped`).toMatch(UUID_LIKE_RE);
     }
   });
 
@@ -254,32 +263,41 @@ describe('Polish-21.0.1 hotfix: HEDRA_VOICE_ROSTER (single UUID) + helpers', () 
       expect(v.id.length).toBeGreaterThan(0);
       expect(v.label.length).toBeGreaterThan(0);
       expect(v.description.length).toBeGreaterThan(0);
-      expect(['female', 'male', 'unknown']).toContain(v.gender);
-      expect(['young', 'middle_aged', 'unknown']).toContain(v.age);
+      expect(['female', 'male']).toContain(v.gender);
+      expect(['young', 'middle_aged']).toContain(v.age);
     }
   });
 
-  it('the sole entry is marked isDefault: true (safe-fallback voice)', () => {
+  it('exactly ONE entry is marked isDefault: true (Sarah — safest neutral American)', () => {
     const defaults = HEDRA_VOICE_ROSTER.filter((v) => v.isDefault === true);
     expect(defaults).toHaveLength(1);
-    expect(defaults[0]!.id).toBe(STARTER_VOICE_UUID);
+    expect(defaults[0]!.id).toBe(ELEVEN_SARAH_UUID);
+    expect(defaults[0]!.label).toBe('Sarah');
   });
 
-  it('getDefaultHedraVoice returns the starter UUID entry', () => {
-    expect(getDefaultHedraVoice()?.id).toBe(STARTER_VOICE_UUID);
+  it('gender × age spread covers all four buckets (variant diversity)', () => {
+    const buckets = new Set(HEDRA_VOICE_ROSTER.map((v) => `${v.gender}_${v.age}`));
+    expect(buckets.has('female_young')).toBe(true);
+    expect(buckets.has('male_young')).toBe(true);
+    expect(buckets.has('female_middle_aged')).toBe(true);
+    expect(buckets.has('male_middle_aged')).toBe(true);
+  });
+
+  it('getDefaultHedraVoice returns the Sarah preset UUID entry', () => {
+    expect(getDefaultHedraVoice()?.id).toBe(ELEVEN_SARAH_UUID);
   });
 
   it('getDefaultHedraVoice falls back to first entry when no isDefault flag set', () => {
     const roster: HedraVoiceRosterEntry[] = [
       {
-        id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        id: 'a1b2c3d4e5f67890abcdef1234567890',
         label: 'a',
         description: 'a',
         gender: 'female',
         age: 'young',
       },
       {
-        id: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        id: 'b1b2c3d4e5f67890abcdef1234567890',
         label: 'b',
         description: 'b',
         gender: 'male',
@@ -293,7 +311,7 @@ describe('Polish-21.0.1 hotfix: HEDRA_VOICE_ROSTER (single UUID) + helpers', () 
     expect(getDefaultHedraVoice([])).toBeUndefined();
   });
 
-  it('isHedraVoiceRosterUncurated returns false with the shipping single-UUID roster', () => {
+  it('isHedraVoiceRosterUncurated returns false with the shipping 5-preset roster', () => {
     expect(isHedraVoiceRosterUncurated()).toBe(false);
   });
 
@@ -302,7 +320,7 @@ describe('Polish-21.0.1 hotfix: HEDRA_VOICE_ROSTER (single UUID) + helpers', () 
     expect(
       isHedraVoiceRosterUncurated([
         {
-          id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+          id: 'a1b2c3d4e5f67890abcdef1234567890',
           label: 'x',
           description: 'x',
           gender: 'female',
@@ -312,43 +330,40 @@ describe('Polish-21.0.1 hotfix: HEDRA_VOICE_ROSTER (single UUID) + helpers', () 
     ).toBe(false);
   });
 
-  it('pickHedraVoicesForBatch returns N copies of the sole voice (single-roster fallback)', () => {
+  it('pickHedraVoicesForBatch returns 5 distinct voices for the 5-preset roster (Polish-21.0.4 batch diversity)', () => {
     const picks = pickHedraVoicesForBatch(5);
     expect(picks).toHaveLength(5);
-    for (const v of picks) {
-      expect(v.id).toBe(STARTER_VOICE_UUID);
-    }
-    // Polish-21.0.1 acknowledged trade-off: all variants use the same
-    // voice until Polish-21.0.2 restores multi-voice diversity.
-    expect(new Set(picks.map((v) => v.id)).size).toBe(1);
+    // Polish-21.0.4 restores the batch-diversity guarantee — the
+    // 5-preset ElevenLabs roster gives one distinct voice per
+    // variant on a 5-batch. Rotate around the roster on offset=0.
+    expect(new Set(picks.map((v) => v.id)).size).toBe(5);
   });
 
-  it('pickHedraVoicesForBatch wraps consistently — every call returns the sole entry', () => {
+  it('pickHedraVoicesForBatch wraps when N > roster.length (variant 5 == roster[0])', () => {
     const picks = pickHedraVoicesForBatch(9);
     expect(picks).toHaveLength(9);
-    for (const v of picks) {
-      expect(v.id).toBe(HEDRA_VOICE_ROSTER[0]!.id);
-    }
+    // Regression pin: index 5 (6th call) wraps to roster[0].
+    expect(picks[5]?.id).toBe(HEDRA_VOICE_ROSTER[0]!.id);
   });
 
   it('offset shifts the start position deterministically (multi-voice fixture roster)', () => {
     const roster: HedraVoiceRosterEntry[] = [
       {
-        id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        id: 'a1b2c3d4e5f67890abcdef1234567890',
         label: 'a',
         description: 'a',
         gender: 'female',
         age: 'young',
       },
       {
-        id: 'b1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        id: 'b1b2c3d4e5f67890abcdef1234567890',
         label: 'b',
         description: 'b',
         gender: 'male',
         age: 'young',
       },
       {
-        id: 'c1b2c3d4-e5f6-7890-abcd-ef1234567890',
+        id: 'c1b2c3d4e5f67890abcdef1234567890',
         label: 'c',
         description: 'c',
         gender: 'female',

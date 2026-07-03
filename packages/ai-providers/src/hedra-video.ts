@@ -91,6 +91,11 @@ export interface HedraUploadAssetResult {
   errorMessage?: string;
 }
 
+/**
+ * @deprecated Polish-21.0.4 hotfix removed Hedra native TTS from
+ * the pipeline (see submitHedraGeneration JSDoc). Type kept for
+ * downstream type imports; nothing in the client consumes it.
+ */
 export interface HedraTtsInput {
   voiceId: string;
   text: string;
@@ -103,9 +108,14 @@ export interface HedraSubmitGenerationInput {
   aiModelId: string;
   /** Uploaded image asset id (Nano Banana Pro reference frame). */
   startKeyframeId: string;
-  /** One of: uploaded audio asset id OR native-TTS input. */
-  audioAssetId?: string;
-  tts?: HedraTtsInput;
+  /**
+   * REQUIRED as of Polish-21.0.4 hotfix. Hedra's native TTS
+   * (audio_generation.type='text_to_speech') is blocked on
+   * voice-UUID availability on Creator plans, so the worker
+   * generates audio via ElevenLabs BYOK and uploads the mp3 as a
+   * Hedra audio asset. audioAssetId is that asset id.
+   */
+  audioAssetId: string;
   /** Short scene-description prompt (Polish-21 Character 3 style — ~50-80 words). */
   textPrompt: string;
   resolution: '540p' | '720p';
@@ -160,17 +170,14 @@ interface HedraGenerationSubmitBody {
   type: 'video';
   ai_model_id: string;
   start_keyframe_id: string;
-  audio_id?: string;
-  audio_generation?: {
-    type: 'text_to_speech';
-    voice_id: string;
-    text: string;
-  };
+  // Polish-21.0.4 hotfix: audio_id is REQUIRED now. audio_generation
+  // union member removed alongside Hedra native TTS.
+  audio_id: string;
   generated_video_inputs: {
     text_prompt: string;
     resolution: '540p' | '720p';
     aspect_ratio: '9:16' | '16:9' | '1:1';
-    duration_ms?: number;
+    duration_ms: number;
     seed?: number;
   };
 }
@@ -413,18 +420,16 @@ export async function uploadHedraAsset(
 export async function submitHedraGeneration(
   input: HedraSubmitGenerationInput,
 ): Promise<HedraSubmitGenerationResult> {
-  if (!input.audioAssetId && !input.tts) {
+  // Polish-21.0.4 hotfix: audioAssetId is required (native TTS path
+  // via audio_generation is gone). Fail-fast on empty input so a
+  // caller bug surfaces as a clear error instead of a Hedra 422.
+  if (!input.audioAssetId) {
     return {
       ok: false,
       latencyMs: 0,
-      errorMessage: 'Hedra submit requires either audioAssetId or tts input.',
-    };
-  }
-  if (input.audioAssetId && input.tts) {
-    return {
-      ok: false,
-      latencyMs: 0,
-      errorMessage: 'Hedra submit accepts audioAssetId OR tts, not both.',
+      errorMessage:
+        'Hedra submit requires audioAssetId. Polish-21.0.4 removed native TTS — ' +
+        'generate audio via ElevenLabs (submitElevenLabsTts) and upload as a Hedra audio asset.',
     };
   }
 
@@ -432,6 +437,9 @@ export async function submitHedraGeneration(
     type: 'video',
     ai_model_id: input.aiModelId,
     start_keyframe_id: input.startKeyframeId,
+    // Polish-21.0.4: audio_id at top level (not audio_generation).
+    // Matches the hedra-labs/hedra-api-starter uploaded-audio path.
+    audio_id: input.audioAssetId,
     generated_video_inputs: {
       text_prompt: input.textPrompt,
       resolution: input.resolution,
@@ -444,13 +452,6 @@ export async function submitHedraGeneration(
       ...(input.seed != null ? { seed: input.seed } : {}),
     },
   };
-  if (input.audioAssetId) body.audio_id = input.audioAssetId;
-  if (input.tts)
-    body.audio_generation = {
-      type: 'text_to_speech',
-      voice_id: input.tts.voiceId,
-      text: input.tts.text,
-    };
 
   const submitUrl = `${HEDRA_BASE}/generations`;
   logFirstResponseIfFirstCall('generations-submit', input.aiModelId, body);
@@ -475,12 +476,11 @@ export async function submitHedraGeneration(
     requestBodyForLog: {
       ai_model_id: input.aiModelId,
       start_keyframe_id: input.startKeyframeId,
-      audio_mode: input.audioAssetId ? 'uploaded' : 'tts',
-      voice_id: input.tts?.voiceId ?? '(none)',
+      audio_id: input.audioAssetId,
       text_chars: input.textPrompt.length,
       resolution: input.resolution,
       aspect_ratio: input.aspectRatio,
-      duration_seconds: input.durationSeconds ?? '(audio-derived)',
+      duration_seconds: input.durationSeconds,
       seed: input.seed ?? '(default)',
     },
     generationJobId: input.generationJobId,

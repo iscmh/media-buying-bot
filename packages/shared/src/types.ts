@@ -7,11 +7,15 @@ export type UUID = string;
 
 export type ConnectionMethod = 'byok' | 'oauth';
 
-// Polish-20 Commit 4: elevenlabs removed alongside the legacy Kling
-// pipelines that used it. The underlying pg enum in @mbb/db still
-// carries 'elevenlabs' for stale DB rows — this application-level
-// union just stops surfacing it. arcads / creatify stay for legacy
-// DB rows. Gemini + Claude + Kie.ai live in tool_provider (see
+// Polish-20 Commit 4 removed 'elevenlabs' from the application-level
+// union alongside the legacy Kling pipelines. Polish-21.0.4 hotfix
+// brings it BACK: Hedra Character 3's native TTS is blocked on voice
+// UUIDs not available on Creator plan, so the worker generates audio
+// via ElevenLabs BYOK and hands the mp3 to Hedra as an audio_id
+// asset. The underlying pg enum in @mbb/db always carried
+// 'elevenlabs' (never dropped), so no DB migration is needed for
+// the re-add. arcads / creatify stay for legacy DB rows.
+// Gemini + Claude + Kie.ai live in tool_provider (see
 // /connections/tools), not ai_provider.
 export type AIProviderName =
   | 'arcads'
@@ -22,7 +26,11 @@ export type AIProviderName =
   // Polish-21: Hedra Character 3 image-to-talking-avatar. Replaces
   // the Polish-20 kie.ai 3-model text-to-video pipeline. BYOK key
   // stored in ai_provider_connections under provider='hedra'.
-  | 'hedra';
+  | 'hedra'
+  // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK. Worker generates
+  // audio via ElevenLabs and uploads the mp3 as a Hedra audio
+  // asset — bypasses Hedra's native TTS voice-UUID dependency.
+  | 'elevenlabs';
 
 export type CampaignObjective = 'CBO' | 'ABO';
 

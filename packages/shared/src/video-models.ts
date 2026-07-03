@@ -365,126 +365,148 @@ export const MODEL_PROVIDER_CONFIGS: readonly ModelProviderConfig[] = [
 ];
 
 // -------------------------------------------------------------------
-// Polish-21 Commit 2: Hedra voice roster (named voices)
+// Polish-21.0.4 hotfix: ElevenLabs voice roster (replaces Hedra TTS)
 // -------------------------------------------------------------------
 //
-// Native-TTS voice pool the worker rotates through for a variant
-// batch. For a 5-variant generation the worker picks 5 distinct
-// voices from this list (varied gender / age / accent) so each
-// variant lands a different voice + a different Nano Banana
-// reference image — max ad-test diversity per batch.
+// Polish-21 Commit 2 tried to use Hedra's native TTS voices.
+// Polish-21.0.1 — .0.3 iterated on the shape (UUID vs name,
+// duration_ms, poll URL) but all attempts hit Hedra returning
+// "voice_asset f412c62f-... not found" at submit time because
+// Hedra's built-in voice UUIDs aren't available on regular Creator
+// plans and support hasn't responded on providing account-scoped
+// UUIDs.
 //
-// The `id` field carries Hedra's voice NAME rather than a UUID at
-// Polish-21 launch. Operator's GET /voices returned an empty array
-// during Commit 1 investigation, so Commit 2 ships with names and
-// lets the API surface accept-or-reject on the first live call
-// (loud-logged so a rejection is obvious). If Hedra rejects names,
-// Polish-21 hotfix hunts UUIDs via browser dev tools and swaps them
-// in here.
+// Polish-21.0.4 hotfix pivots the pipeline to ElevenLabs TTS BYOK.
+// User owns the voice choice via their ElevenLabs library; worker
+// generates audio via ElevenLabs and uploads the mp3 as a Hedra
+// audio asset. This also opens the source-voice-cloning path for
+// Polish-22 (analyze source ad audio → ElevenLabs Instant Voice
+// Clone → use that voice for all variants).
 //
-// Matilda is flagged isDefault=true — the 40+ mom audience is the
-// core UGC ad-test persona and Matilda's warm-narration timbre is
-// the safest fallback when the roster shape breaks.
+// The roster below carries ElevenLabs' well-known preset voice UUIDs
+// (public, available on every plan) so a fresh operator install
+// works with zero curation. Rotate through per-variant with
+// pickElevenLabsVoicesForBatch for gender × age diversity.
 
-export interface HedraVoiceRosterEntry {
+export interface ElevenLabsVoiceRosterEntry {
   /**
-   * Hedra voice identifier. Passed as the `voice_id` field on
-   * POST /generations audio_generation. At Polish-21 launch this
-   * holds the voice NAME (Hedra API contract for names-vs-UUIDs is
-   * unverified — see file-level comment). Post-Polish-21-hotfix
-   * this will hold the UUID.
+   * ElevenLabs voice UUID. Passed as the URL path segment on
+   * POST /v1/text-to-speech/{voice_id}.
    */
   id: string;
   /** Free-form display label — used in logs and worker debug output. */
   label: string;
   /** One-sentence positioning; goes into generation metadata for forensics. */
   description: string;
-  /**
-   * Polish-21.0.1: widened to include 'unknown' because the Hedra
-   * starter voice UUID we ship in the single-entry roster has no
-   * published gender metadata. When Polish-21.0.2 lands the full
-   * UUID roster from Hedra support, per-voice gender will be known.
-   */
-  gender: 'female' | 'male' | 'unknown';
+  gender: 'female' | 'male';
   /** Rough age bracket for ad-test diversity picking. */
-  age: 'young' | 'middle_aged' | 'unknown';
+  age: 'young' | 'middle_aged';
   /** True on exactly ONE roster entry — the safe-fallback voice. */
   isDefault?: true;
 }
 
 /**
- * Polish-21.0.1 hotfix: single-entry UUID roster.
+ * Legacy alias for the Hedra-era HedraVoiceRosterEntry type.
+ * Polish-21.0.4 renamed the roster to ElevenLabs but downstream
+ * imports of the old name should continue to compile. New code
+ * should import ElevenLabsVoiceRosterEntry directly.
  *
- * Diagnostic (job 52923be6): the Commit 2 name-based roster shipped
- * "Jessica" / "Matilda" / etc. in the voice_id field, but Hedra
- * rejected the submit with HTTP 422:
- *
- *   "invalid literal for int() with base 10: 'jessica-a'"
- *
- * So Hedra's `audio_generation.voice_id` field is UUID-typed on
- * their end and doesn't accept the built-in voice name aliases we
- * assumed during Commit 2 (GET /voices returned an empty array so
- * we couldn't fetch UUIDs directly). Hedra's own starter repo
- * (hedra-labs/hedra-api-starter) publishes ONE confirmed working
- * voice UUID in its README example — we roster that until Hedra
- * support responds with the full built-in voice UUIDs.
- *
- * Cost of the single-voice roster: every variant in a 5-variant
- * batch uses the SAME voice. Acknowledged trade-off — unblocks
- * end-to-end testing today; Polish-21.0.2 restores gender × age
- * batch diversity when Hedra support delivers the UUIDs.
- *
- * TODO(polish-21.0.2): Expand roster once Hedra support provides
- * built-in voice UUIDs (contact via hedra.com/discord or Hedra
- * support). Target full roster:
- *   - young female American
- *   - young male American
- *   - middle-aged female American (Matilda equivalent, keep as
- *     isDefault)
- *   - middle-aged male American
- *   - young British female
- *   - one more diverse voice (accent / age varied)
+ * @deprecated Use ElevenLabsVoiceRosterEntry.
  */
-export const HEDRA_VOICE_ROSTER: readonly HedraVoiceRosterEntry[] = [
+export type HedraVoiceRosterEntry = ElevenLabsVoiceRosterEntry;
+
+/**
+ * Polish-21.0.4 hotfix: ElevenLabs preset voice roster.
+ *
+ * All UUIDs are public ElevenLabs voice presets — available on
+ * every plan, no account-specific voice curation required. Rotate
+ * through per-variant for gender × age diversity across a 5-variant
+ * batch.
+ *
+ * Sarah is flagged isDefault=true — most-balanced neutral American
+ * timbre that pairs cleanly with the confessional UGC ad copy
+ * Polish-19.4.2 preserves verbatim.
+ *
+ * To use custom / cloned voices, the user pastes UUIDs from their
+ * ElevenLabs voice library into a future advanced-form roster
+ * override (Polish-22 backlog).
+ */
+export const ELEVENLABS_VOICE_ROSTER: readonly ElevenLabsVoiceRosterEntry[] = [
   {
-    // Confirmed working voice UUID published in the
-    // hedra-labs/hedra-api-starter README as their example.
-    // First (and only) roster entry until Polish-21.0.2 lands
-    // the full gender × age spread.
-    id: 'f412c62f-e94f-41c0-bfc6-97f63289941c',
-    label: 'Hedra Starter — default voice',
-    description:
-      'Hedra API starter default voice, natural English cadence. Polish-21.0.1 single-roster stand-in while awaiting full UUID roster from Hedra support.',
-    gender: 'unknown',
-    age: 'unknown',
+    id: 'EXAVITQu4vr4xnSDxMaL',
+    label: 'Sarah',
+    description: 'Young female, casual conversational American.',
+    gender: 'female',
+    age: 'young',
     isDefault: true,
   },
+  {
+    id: 'JBFqnCBsd6RMkjVDRZzb',
+    label: 'George',
+    description: 'Young male, warm friendly narration.',
+    gender: 'male',
+    age: 'young',
+  },
+  {
+    id: 'XB0fDUnXU5powFXDhCwa',
+    label: 'Charlotte',
+    description: 'Middle-aged female, natural conversational.',
+    gender: 'female',
+    age: 'middle_aged',
+  },
+  {
+    id: 'onwK4e9ZLuTAKqWW03F9',
+    label: 'Daniel',
+    description: 'Middle-aged male, authoritative narration.',
+    gender: 'male',
+    age: 'middle_aged',
+  },
+  {
+    id: 'TxGEqnHWrfWFTfGW9XjX',
+    label: 'Josh',
+    description: 'Young male, deep casual.',
+    gender: 'male',
+    age: 'young',
+  },
 ];
+
+/**
+ * Legacy alias so downstream imports of HEDRA_VOICE_ROSTER don't
+ * break during the Polish-21.0.4 migration. New code imports
+ * ELEVENLABS_VOICE_ROSTER directly.
+ *
+ * @deprecated Use ELEVENLABS_VOICE_ROSTER.
+ */
+export const HEDRA_VOICE_ROSTER: readonly ElevenLabsVoiceRosterEntry[] = ELEVENLABS_VOICE_ROSTER;
 
 /**
  * Returns the entry marked `isDefault: true`. Falls back to the
  * first roster entry if the flag is missing (defensive — the roster
  * is hand-curated so the invariant should hold, but tests pin it).
  */
-export function getDefaultHedraVoice(
-  roster: readonly HedraVoiceRosterEntry[] = HEDRA_VOICE_ROSTER,
-): HedraVoiceRosterEntry | undefined {
+export function getDefaultElevenLabsVoice(
+  roster: readonly ElevenLabsVoiceRosterEntry[] = ELEVENLABS_VOICE_ROSTER,
+): ElevenLabsVoiceRosterEntry | undefined {
   if (roster.length === 0) return undefined;
   return roster.find((v) => v.isDefault === true) ?? roster[0];
 }
 
+/** @deprecated Use getDefaultElevenLabsVoice. */
+export const getDefaultHedraVoice = getDefaultElevenLabsVoice;
+
 /**
- * True when the roster is EMPTY. The Polish-21 Commit 2 roster is
- * hand-populated with named voices, so this returns false in
- * production. Kept as a defensive gate on the worker's Hedra
- * branch — a future accidental roster wipe would surface a clear
- * error instead of a silent no-op.
+ * True when the roster is EMPTY. Kept as a defensive gate on the
+ * worker's Hedra + ElevenLabs branch — a future accidental roster
+ * wipe would surface a clear error instead of a silent no-op.
  */
-export function isHedraVoiceRosterUncurated(
-  roster: readonly HedraVoiceRosterEntry[] = HEDRA_VOICE_ROSTER,
+export function isElevenLabsVoiceRosterUncurated(
+  roster: readonly ElevenLabsVoiceRosterEntry[] = ELEVENLABS_VOICE_ROSTER,
 ): boolean {
   return roster.length === 0;
 }
+
+/** @deprecated Use isElevenLabsVoiceRosterUncurated. */
+export const isHedraVoiceRosterUncurated = isElevenLabsVoiceRosterUncurated;
 
 /**
  * Deterministic voice picker: for a batch of N variants, returns N
@@ -494,13 +516,13 @@ export function isHedraVoiceRosterUncurated(
  * `offset` position — used to shuffle across concurrent batches so
  * the same voice doesn't always win variant 0.
  */
-export function pickHedraVoicesForBatch(
+export function pickElevenLabsVoicesForBatch(
   variantCount: number,
   offset: number = 0,
-  roster: readonly HedraVoiceRosterEntry[] = HEDRA_VOICE_ROSTER,
-): HedraVoiceRosterEntry[] {
+  roster: readonly ElevenLabsVoiceRosterEntry[] = ELEVENLABS_VOICE_ROSTER,
+): ElevenLabsVoiceRosterEntry[] {
   if (variantCount <= 0 || roster.length === 0) return [];
-  const picks: HedraVoiceRosterEntry[] = [];
+  const picks: ElevenLabsVoiceRosterEntry[] = [];
   const start = ((offset % roster.length) + roster.length) % roster.length;
   for (let i = 0; i < variantCount; i++) {
     picks.push(roster[(start + i) % roster.length]!);
@@ -508,20 +530,26 @@ export function pickHedraVoicesForBatch(
   return picks;
 }
 
+/** @deprecated Use pickElevenLabsVoicesForBatch. */
+export const pickHedraVoicesForBatch = pickElevenLabsVoicesForBatch;
+
 /**
- * Deterministic offset for pickHedraVoicesForBatch derived from the
- * job id. Two concurrent batches with different job ids land
+ * Deterministic offset for pickElevenLabsVoicesForBatch derived from
+ * the job id. Two concurrent batches with different job ids land
  * different voices on variant 0 → more test surface across the
  * operator's rolling batches. Same job id retried → identical
  * picks, so an Inngest retry produces the same output.
  */
-export function computeHedraVoiceOffsetForJob(jobId: string): number {
+export function computeElevenLabsVoiceOffsetForJob(jobId: string): number {
   let hash = 0;
   for (let i = 0; i < jobId.length; i++) {
     hash = (hash * 31 + jobId.charCodeAt(i)) | 0;
   }
   return Math.abs(hash);
 }
+
+/** @deprecated Use computeElevenLabsVoiceOffsetForJob. */
+export const computeHedraVoiceOffsetForJob = computeElevenLabsVoiceOffsetForJob;
 
 // -------------------------------------------------------------------
 // Lookup + math helpers

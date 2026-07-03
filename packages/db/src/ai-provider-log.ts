@@ -36,7 +36,9 @@ export async function logAiProviderApiCall(input: {
     | 'replicate'
     | 'openai'
     // Polish-21: Hedra Character 3 image-to-talking-avatar audit tag.
-    | 'hedra';
+    | 'hedra'
+    // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK audit tag.
+    | 'elevenlabs';
   endpoint: string;
   method: string;
   requestBody?: Record<string, unknown>;

@@ -27,6 +27,12 @@ export interface DecryptedKeys {
   // Polish-21: Hedra Character 3 BYOK. Lives in
   // ai_provider_connections under provider='hedra'.
   hedra?: string;
+  // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK. Worker generates
+  // audio via ElevenLabs and hands the mp3 to Hedra as an
+  // audio_id asset. Lives in ai_provider_connections under
+  // provider='elevenlabs'. The pg enum always carried this value
+  // (Polish-20 Commit 4 only removed the application-level union).
+  elevenlabs?: string;
 }
 
 export type ProviderKey = keyof DecryptedKeys;

@@ -8,6 +8,22 @@ export { ReplicateProvider } from './replicate';
 export { OpenAIProvider } from './openai-provider';
 // Polish-21: Hedra Character 3 BYOK verify card.
 export { HedraProvider } from './hedra';
+// Polish-21.0.4 hotfix: ElevenLabs TTS BYOK verify card + client.
+export {
+  ElevenLabsProvider,
+  submitElevenLabsTts,
+  verifyElevenLabsKey,
+  translateElevenLabsErrorStatus,
+  extractElevenLabsErrorMessage,
+  redactElevenLabsApiKey,
+  logElevenLabsRequest,
+  logElevenLabsResponse,
+  bytesToBuffer,
+  ELEVENLABS_DEFAULT_MODEL_ID,
+  ELEVENLABS_UGC_VOICE_SETTINGS,
+  type ElevenLabsTtsInput,
+  type ElevenLabsTtsResult,
+} from './elevenlabs';
 
 // Phase 3b: real provider clients used by the Inngest generation jobs.
 // These bypass the Phase 1 `AIProvider` interface (which was scoped to

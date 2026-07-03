@@ -30,6 +30,11 @@ export interface ConnectedProviders {
   // simplified form's Generate button just like kie.ai did in
   // Polish-20.
   hedra: { connected: boolean };
+  // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK. The Hedra worker
+  // needs BOTH keys — Hedra for video generation + ElevenLabs
+  // for TTS mp3 (uploaded as a Hedra audio asset). Simplified
+  // form gate requires both.
+  elevenlabs: { connected: boolean };
 }
 
 export interface AiProviderRow {
@@ -52,6 +57,7 @@ export function buildConnectedProviders(
     claude: { connected: toolProviders.has('claude') },
     kie_ai: { connected: toolProviders.has('kie_ai') },
     hedra: { connected: byAi.has('hedra') },
+    elevenlabs: { connected: byAi.has('elevenlabs') },
   };
 }
 
@@ -59,5 +65,6 @@ export function buildConnectedProviders(
  * ai_provider DB enum values the loader queries for. Only the
  * providers the surviving pipelines still consult are listed.
  * Polish-21: hedra added for the Character 3 pipeline.
+ * Polish-21.0.4: elevenlabs added for the Hedra TTS pipeline.
  */
-export const AI_PROVIDER_QUERY_LIST = ['heygen', 'openai', 'hedra'] as const;
+export const AI_PROVIDER_QUERY_LIST = ['heygen', 'openai', 'hedra', 'elevenlabs'] as const;

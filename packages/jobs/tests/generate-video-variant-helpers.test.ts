@@ -836,50 +836,55 @@ describe('Polish-21 Commit 2: parseVideoAdSpecHedra', () => {
   });
 });
 
-describe('Polish-21 Commit 2: pickHedraVoiceForVariant (worker helper)', () => {
-  it('returns a valid roster entry for every variant in a 5-batch', async () => {
-    const { pickHedraVoiceForVariant } = await import('../src/functions/generate-video-variant');
+describe('Polish-21.0.4: pickElevenLabsVoiceForVariant (worker helper)', () => {
+  it('returns 5 distinct roster entries for a 5-batch (Polish-21.0.4 batch diversity restored)', async () => {
+    const { pickElevenLabsVoiceForVariant } =
+      await import('../src/functions/generate-video-variant');
     const jobId = 'job-abc-xyz-42';
     const picks = Array.from({ length: 5 }, (_, i) =>
-      pickHedraVoiceForVariant({ variantIndex: i, variantCount: 5, jobId }),
+      pickElevenLabsVoiceForVariant({ variantIndex: i, variantCount: 5, jobId }),
     );
     expect(picks).toHaveLength(5);
     for (const v of picks) {
       expect(v.id.length).toBeGreaterThan(0);
-      expect(['female', 'male', 'unknown']).toContain(v.gender);
+      expect(['female', 'male']).toContain(v.gender);
     }
-    // Polish-21.0.1 hotfix: single-entry roster (Hedra starter UUID)
-    // collapses batch diversity — every variant lands the same voice.
-    // Polish-21.0.2 restores multi-voice diversity when Hedra support
-    // delivers the full UUID roster. The mechanism (pickHedraVoicesForBatch
-    // + rotation) still holds under a multi-entry fixture roster —
-    // the shared-package tests exercise that path.
-    expect(new Set(picks.map((v) => v.id)).size).toBe(1);
+    // Polish-21.0.4 restores batch diversity — the 5-preset
+    // ElevenLabs roster lands one distinct voice per variant on a
+    // 5-batch (single wrap around the whole roster).
+    expect(new Set(picks.map((v) => v.id)).size).toBe(5);
   });
 
   it('same jobId + variantCount + variantIndex returns identical voice (Inngest retry safe)', async () => {
-    const { pickHedraVoiceForVariant } = await import('../src/functions/generate-video-variant');
-    const a = pickHedraVoiceForVariant({ variantIndex: 2, variantCount: 5, jobId: 'j-1' });
-    const b = pickHedraVoiceForVariant({ variantIndex: 2, variantCount: 5, jobId: 'j-1' });
+    const { pickElevenLabsVoiceForVariant } =
+      await import('../src/functions/generate-video-variant');
+    const a = pickElevenLabsVoiceForVariant({ variantIndex: 2, variantCount: 5, jobId: 'j-1' });
+    const b = pickElevenLabsVoiceForVariant({ variantIndex: 2, variantCount: 5, jobId: 'j-1' });
     expect(a.id).toBe(b.id);
   });
 
-  it('single-entry roster hands every jobId + variantIndex the same voice (Polish-21.0.1 trade-off)', async () => {
-    const { pickHedraVoiceForVariant } = await import('../src/functions/generate-video-variant');
-    // Polish-21 Commit 2 pinned batch-level diversity here — but the
-    // Commit 2 roster was 6 voices. Polish-21.0.1 collapses to 1
-    // pending Hedra support. Regression pin flips: with a single-
-    // entry roster, EVERY jobId + variantIndex tuple lands the same
-    // voice. Polish-21.0.2 replaces this test with the diversity
-    // pin against the restored multi-voice roster.
+  it('different jobIds land different variant-0 voices (batch-level diversity across concurrent batches)', async () => {
+    const { pickElevenLabsVoiceForVariant } =
+      await import('../src/functions/generate-video-variant');
     const ids = ['j-a', 'j-b', 'j-c', 'j-d', 'j-e', 'j-f'];
-    const picks = ids.flatMap((jobId) =>
-      Array.from(
-        { length: 3 },
-        (_, i) => pickHedraVoiceForVariant({ variantIndex: i, variantCount: 3, jobId }).id,
-      ),
+    const firstPicks = ids.map(
+      (jobId) => pickElevenLabsVoiceForVariant({ variantIndex: 0, variantCount: 5, jobId }).id,
     );
-    expect(new Set(picks).size).toBe(1);
+    // Regression pin: with a 5-preset roster and offset derived
+    // from jobId hash, variant 0 across the fixture jobIds MUST
+    // land at least 2 distinct voices (usually more; the ceiling
+    // is 5 = roster size).
+    expect(new Set(firstPicks).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('legacy pickHedraVoiceForVariant alias still resolves (backward-compat during migration)', async () => {
+    const { pickHedraVoiceForVariant, pickElevenLabsVoiceForVariant } =
+      await import('../src/functions/generate-video-variant');
+    // Polish-21.0.4 renamed pickHedraVoiceForVariant to
+    // pickElevenLabsVoiceForVariant. The old name is kept as a
+    // deprecated alias so downstream imports don't break during
+    // the migration window.
+    expect(pickHedraVoiceForVariant).toBe(pickElevenLabsVoiceForVariant);
   });
 });
 
@@ -904,13 +909,17 @@ describe('Polish-21 Commit 2: worker dispatch tripwires', () => {
 
   it('runOneVariantHedra is defined and calls Claude → Nano Banana → asset → submit → poll → download → insert in that order', async () => {
     const src = await readSrc();
-    // Pin the 9-step Polish-21 Commit 2 flow via step.run identifier
-    // ordering. Regressions that skip Nano Banana or run the poll
-    // before submit will fail this ordering check.
+    // Polish-21.0.4 hotfix: 11-step flow now includes ElevenLabs TTS
+    // + Hedra audio asset upload. Regressions that skip any step or
+    // run TTS after the Hedra submit will fail this ordering check.
     const orderedStepLabels = [
       'hedra-claude-',
       'hedra-nano-banana-',
       'hedra-image-asset-',
+      // Polish-21.0.4 added:
+      'elevenlabs-tts-',
+      'hedra-audio-asset-',
+      // /Polish-21.0.4
       'hedra-submit-',
       'hedra-poll-',
       'hedra-upload-video-',
@@ -925,46 +934,48 @@ describe('Polish-21 Commit 2: worker dispatch tripwires', () => {
     }
   });
 
-  it('runOneVariantHedra checks isHedraVoiceRosterUncurated FIRST (fail-fast before spending)', async () => {
+  it('runOneVariantHedra checks isElevenLabsVoiceRosterUncurated FIRST (fail-fast before spending)', async () => {
     const src = await readSrc();
     // Roster gate must run before any paid API call so an empty
-    // roster doesn't burn Claude/Nano Banana credits before erroring.
-    const rosterGateIdx = src.indexOf('isHedraVoiceRosterUncurated()');
+    // roster doesn't burn Claude / Nano Banana / ElevenLabs credits
+    // before erroring.
+    const rosterGateIdx = src.indexOf('isElevenLabsVoiceRosterUncurated()');
     const claudeIdx = src.indexOf('hedra-claude-');
     expect(rosterGateIdx).toBeGreaterThan(-1);
     expect(claudeIdx).toBeGreaterThan(-1);
     expect(rosterGateIdx).toBeLessThan(claudeIdx);
   });
 
-  it('runOneVariantHedra loads the hedra BYOK key (not kie_ai)', async () => {
+  it('runOneVariantHedra loads the hedra + elevenlabs + gemini BYOK keys (not kie_ai)', async () => {
     const src = await readSrc();
-    // Regression against copy-paste from the kie.ai branch — the
-    // Hedra flow must call loadDecryptedKeys(..., ['hedra']) at each
-    // step boundary (fresh decrypt per step keeps plaintext short-
-    // lived, matches the Polish-3 chokepoint rationale).
+    // Polish-21.0.4 hotfix: the Hedra flow needs THREE BYOK keys —
+    // hedra (video generation + asset upload), elevenlabs (TTS),
+    // gemini (Nano Banana Pro reference image). NO kie_ai.
     const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
-    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const runOneVariantHedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     expect(runOneVariantHedraStart).toBeGreaterThan(-1);
     expect(runOneVariantHedraEnd).toBeGreaterThan(runOneVariantHedraStart);
     const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
     expect(hedraFn).toMatch(/loadDecryptedKeys\(userId, \['hedra'\]\)/);
-    // Nano Banana still uses gemini — that's expected.
+    expect(hedraFn).toMatch(/loadDecryptedKeys\(userId, \['elevenlabs'\]\)/);
     expect(hedraFn).toMatch(/loadDecryptedKeys\(userId, \['gemini'\]\)/);
-    // NO kie_ai lookups in the Hedra branch.
+    // Regression pin: NO kie_ai lookups.
     expect(hedraFn).not.toMatch(/loadDecryptedKeys\(userId, \['kie_ai'\]\)/);
   });
 
-  it('Hedra submit uses tts { voiceId, text } (name in voiceId field, not audio_id)', async () => {
+  it('Hedra submit uses audioAssetId (uploaded ElevenLabs mp3); NO native tts block', async () => {
     const src = await readSrc();
-    // Polish-21 Commit 2 ships native TTS (roster voice NAME in the
-    // voice_id field). Uploaded-audio mode is exposed on the client
-    // but the worker doesn't use it at launch. Regression pin: an
-    // accidental audio_id path would silently swap voices.
+    // Polish-21.0.4 hotfix: Hedra native TTS is gone. The worker
+    // uploads ElevenLabs-generated audio as a Hedra audio asset
+    // and references it via audio_id. Regression pin: an accidental
+    // tts:{voiceId,text} path would 404 on Hedra Creator plans
+    // because built-in voice UUIDs aren't accessible.
     const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
-    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const runOneVariantHedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
-    expect(hedraFn).toMatch(/tts: \{ voiceId: voice\.id, text: script \}/);
-    expect(hedraFn).not.toMatch(/audioAssetId:/);
+    expect(hedraFn).toMatch(/audioAssetId,/);
+    // Native TTS shape MUST NOT appear.
+    expect(hedraFn).not.toMatch(/tts: \{ voiceId: voice\.id, text: script \}/);
   });
 
   it('Hedra composite row carries voice + generation metadata for forensics', async () => {
@@ -974,7 +985,7 @@ describe('Polish-21 Commit 2: worker dispatch tripwires', () => {
     // diagnostics. Pin them so a future rewrite doesn't silently
     // drop forensic surface.
     const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
-    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const runOneVariantHedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
     expect(hedraFn).toMatch(/hedra_generation_id: generationId/);
     expect(hedraFn).toMatch(/hedra_input_asset_id: startKeyframeId/);
@@ -1183,7 +1194,7 @@ describe('Polish-21.0.1: worker text_prompt threading + pre-submit log', () => {
     // mapping, voice-id-vs-name confusion) shows up in Inngest
     // logs immediately without needing a fresh cold-start.
     const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
-    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const runOneVariantHedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
     expect(hedraFn).toMatch(/pre-submit: `/);
     expect(hedraFn).toMatch(/voice_id=\$\{voice\.id\}/);
@@ -1204,7 +1215,7 @@ describe('Polish-21.0.1: worker text_prompt threading + pre-submit log', () => {
     // into text_prompt. Only sceneDescription (destructured from
     // adSpecResult.spec.scene) may occupy this slot.
     const runOneVariantHedraStart = src.indexOf('async function runOneVariantHedra');
-    const runOneVariantHedraEnd = src.indexOf('export function pickHedraVoiceForVariant');
+    const runOneVariantHedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     const hedraFn = src.slice(runOneVariantHedraStart, runOneVariantHedraEnd);
     expect(hedraFn).toMatch(/textPrompt: sceneDescription,/);
     expect(hedraFn).toMatch(

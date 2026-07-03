@@ -40,7 +40,11 @@ export type ProviderName =
   | 'replicate'
   | 'openai'
   // Polish-21: Hedra Character 3 image-to-talking-avatar.
-  | 'hedra';
+  | 'hedra'
+  // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK. Re-added after
+  // Polish-20 Commit 4 removed it — see AIProviderName JSDoc for
+  // the ElevenLabs-as-Hedra-audio-source architecture rationale.
+  | 'elevenlabs';
 
 export interface CallProviderInput {
   userId: string;

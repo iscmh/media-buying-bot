@@ -8,20 +8,21 @@ import {
   isVideoConcatEnabled,
   pollHedraGeneration,
   pollKieVideo,
+  submitElevenLabsTts,
   submitHedraGeneration,
   submitKieVideo,
   submitReplicateConcat,
   uploadHedraAsset,
 } from '@mbb/ai-providers';
 import {
-  computeHedraVoiceOffsetForJob,
+  computeElevenLabsVoiceOffsetForJob,
   computeSegmentCountForModel,
-  getDefaultHedraVoice,
+  getDefaultElevenLabsVoice,
   getModelProviderConfig,
   getVideoModel,
-  isHedraVoiceRosterUncurated,
-  pickHedraVoicesForBatch,
-  type HedraVoiceRosterEntry,
+  isElevenLabsVoiceRosterUncurated,
+  pickElevenLabsVoicesForBatch,
+  type ElevenLabsVoiceRosterEntry,
   type ModelProviderConfig,
   type VideoModel,
   type VideoModelId,
@@ -773,17 +774,18 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   } = input;
   let cost = 0;
 
-  // Voice roster gate — Polish-21 Commit 2 ships with named voices,
-  // so this returns false. Kept as a defensive check in case a
-  // future accidental roster wipe would silently no-op the batch.
-  if (isHedraVoiceRosterUncurated()) {
+  // Voice roster gate — Polish-21.0.4 hotfix ships with 5 preset
+  // ElevenLabs voice UUIDs, so this returns false. Kept as a
+  // defensive check in case a future accidental roster wipe would
+  // silently no-op the batch.
+  if (isElevenLabsVoiceRosterUncurated()) {
     return {
       index: variantIndex,
       ok: false,
       costUsd: 0,
       error:
-        'Hedra voice roster is empty. Populate HEDRA_VOICE_ROSTER in ' +
-        'packages/shared/src/video-models.ts via scripts/hedra-list-voices.mjs.',
+        'ElevenLabs voice roster is empty. Populate ELEVENLABS_VOICE_ROSTER in ' +
+        'packages/shared/src/video-models.ts.',
     };
   }
 
@@ -907,27 +909,111 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   const startKeyframeId = assetResult.assetId;
 
   // Voice pick (deterministic per (jobId, variantIndex, variantCount)).
-  const voice = pickHedraVoiceForVariant({ variantIndex, variantCount, jobId });
+  const voice = pickElevenLabsVoiceForVariant({ variantIndex, variantCount, jobId });
 
-  // Polish-21.0.1 hardening (job 52923be6 diagnostic): loud-log the
-  // exact text_prompt + script + voice_id we're about to send to
-  // Hedra. The hedra-video client already logs a first-call
-  // diagnostic per (kind, aiModelId) tuple, but that fires only
-  // ONCE per worker cold-start — subsequent submits are silent.
-  // This per-variant log fires on EVERY submit so a future
-  // regression (short scene_description, wrong field mapping,
-  // voice-id-vs-name confusion) surfaces in Inngest logs without
-  // needing to re-run for a first-call fire.
+  // Polish-21.0.4 hotfix: generate TTS audio via ElevenLabs BYOK
+  // (replaces Hedra native TTS blocked on voice-UUID availability).
+  const ttsResult = await step.run(`elevenlabs-tts-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['elevenlabs']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+    const tts = await submitElevenLabsTts({
+      userId,
+      apiKey: keys.elevenlabs!,
+      voiceId: voice.id,
+      text: script,
+      generationJobId: jobId,
+    });
+    if (!tts.ok || !tts.audio) {
+      return {
+        ok: false as const,
+        error: tts.errorMessage ?? 'ElevenLabs TTS failed',
+      };
+    }
+    // Inngest step.run serializes return values — Uint8Array
+    // survives as a base64 string round-trip via JSON.stringify.
+    // Encode explicitly here so the downstream step can decode.
+    return {
+      ok: true as const,
+      audioBase64: Buffer.from(tts.audio).toString('base64'),
+      contentType: tts.contentType ?? 'audio/mpeg',
+      audioBytes: tts.audio.byteLength,
+    };
+  });
+  if (!ttsResult.ok) {
+    return { index: variantIndex, ok: false, costUsd: cost, error: ttsResult.error };
+  }
+
+  // Polish-21.0.4 hardening: loud-log the exact voice + text_prompt +
+  // script we're about to send to Hedra + how many audio bytes
+  // ElevenLabs produced. Per-variant unconditional log survives
+  // first-call diagnostic memoization and is exactly the payload
+  // to paste into a Hedra / ElevenLabs support ticket if a submit
+  // fails downstream.
   console.log(
     `[generate-video-variant] variant ${variantIndex} (hedra) pre-submit: ` +
       `voice_id=${voice.id} voice_label=${voice.label} ` +
+      `audio_bytes=${ttsResult.audioBytes} ` +
       `text_prompt_chars=${sceneDescription.length} ` +
       `text_prompt_head=${JSON.stringify(sceneDescription.slice(0, 200))} ` +
       `script_chars=${script.length} ` +
       `script_head=${JSON.stringify(script.slice(0, 200))}`,
   );
 
-  // Step 6: submit generation.
+  // Polish-21.0.4: upload the ElevenLabs mp3 as a Hedra audio asset.
+  // Two API calls: POST /assets (create) + POST /assets/{id}/upload
+  // (multipart bytes). Bundled into one step.run so the Inngest
+  // retry boundary matches image asset creation.
+  const audioAssetResult = await step.run(`hedra-audio-asset-${variantIndex}`, async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['hedra']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
+      throw err;
+    }
+    const create = await createHedraAsset({
+      userId,
+      apiKey: keys.hedra!,
+      name: `variant-${variantIndex}.mp3`,
+      type: 'audio',
+      generationJobId: jobId,
+    });
+    if (!create.ok || !create.assetId) {
+      return {
+        ok: false as const,
+        error: create.errorMessage ?? 'Hedra createHedraAsset (audio) failed',
+      };
+    }
+    const audioBytes = Buffer.from(ttsResult.audioBase64, 'base64');
+    const upload = await uploadHedraAsset({
+      userId,
+      apiKey: keys.hedra!,
+      assetId: create.assetId,
+      filename: `variant-${variantIndex}.mp3`,
+      contentType: ttsResult.contentType,
+      bytes: new Uint8Array(audioBytes),
+      generationJobId: jobId,
+    });
+    if (!upload.ok) {
+      return {
+        ok: false as const,
+        error: upload.errorMessage ?? 'Hedra uploadHedraAsset (audio) failed',
+      };
+    }
+    return { ok: true as const, assetId: create.assetId };
+  });
+  if (!audioAssetResult.ok) {
+    return { index: variantIndex, ok: false, costUsd: cost, error: audioAssetResult.error };
+  }
+  const audioAssetId = audioAssetResult.assetId;
+
+  // Submit generation with start_keyframe_id + audio_id (Polish-21.0.4
+  // no longer sends audio_generation).
   const submitResult = await step.run(`hedra-submit-${variantIndex}`, async () => {
     let keys;
     try {
@@ -941,15 +1027,12 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       apiKey: keys.hedra!,
       aiModelId: config.modelParam,
       startKeyframeId,
-      // Polish-21.0.1 hotfix: `voiceId` field carries a Hedra voice
-      // UUID (from HEDRA_VOICE_ROSTER). Commit 2 mistakenly sent
-      // names ("Jessica", "Matilda") in this field and Hedra 422'd
-      // with `invalid literal for int() with base 10: 'jessica-a'`.
-      // The single-entry Polish-21.0.1 roster carries the confirmed
-      // hedra-labs/hedra-api-starter UUID; Polish-21.0.2 restores
-      // the multi-voice batch diversity once Hedra support delivers
-      // the full built-in UUID list.
-      tts: { voiceId: voice.id, text: script },
+      // Polish-21.0.4 hotfix: audio_id path (ElevenLabs mp3
+      // uploaded as Hedra audio asset). Replaces the .0.1/.0.2/.0.3
+      // native-TTS tts:{voiceId,text} attempts — those failed on
+      // Hedra's `voice_asset ... not found` because built-in voice
+      // UUIDs aren't available on Creator plans.
+      audioAssetId,
       textPrompt: sceneDescription,
       resolution: '720p',
       aspectRatio: '9:16',
@@ -1099,8 +1182,13 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         provider_id: config.providerId,
         hedra_generation_id: generationId,
         hedra_input_asset_id: startKeyframeId,
+        hedra_audio_asset_id: audioAssetId,
         hedra_output_asset_id: outputAssetId ?? null,
         reference_image_url: referenceImageUrl ?? null,
+        // Polish-21.0.4 hotfix: voice source is ElevenLabs, not
+        // Hedra native TTS. Voice metadata below refers to the
+        // ElevenLabs voice used for the uploaded audio asset.
+        tts_provider: 'elevenlabs',
         voice_id: voice.id,
         voice_label: voice.label,
         voice_gender: voice.gender,
@@ -1121,25 +1209,32 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
 /**
  * Pick a voice for this variant. Deterministic per (jobId, variantCount)
  * — retries of the same job produce identical picks. Falls back to
- * `getDefaultHedraVoice()` when pickHedraVoicesForBatch returns fewer
- * entries than expected (defensive; the roster is fixed at 6).
+ * `getDefaultElevenLabsVoice()` when pickElevenLabsVoicesForBatch
+ * returns fewer entries than expected (defensive; the roster is
+ * fixed at 5 preset ElevenLabs voices).
+ *
+ * Polish-21.0.4 hotfix: renamed from pickHedraVoiceForVariant.
+ * The roster is now ElevenLabs preset UUIDs (not Hedra native).
  */
-export function pickHedraVoiceForVariant(input: {
+export function pickElevenLabsVoiceForVariant(input: {
   variantIndex: number;
   variantCount: number;
   jobId: string;
-}): HedraVoiceRosterEntry {
-  const offset = computeHedraVoiceOffsetForJob(input.jobId);
-  const picks = pickHedraVoicesForBatch(Math.max(1, input.variantCount), offset);
+}): ElevenLabsVoiceRosterEntry {
+  const offset = computeElevenLabsVoiceOffsetForJob(input.jobId);
+  const picks = pickElevenLabsVoicesForBatch(Math.max(1, input.variantCount), offset);
   if (picks.length > 0) {
     return picks[input.variantIndex % picks.length]!;
   }
-  const fallback = getDefaultHedraVoice();
+  const fallback = getDefaultElevenLabsVoice();
   if (!fallback) {
-    throw new Error('Hedra voice roster returned no voices and no default is set.');
+    throw new Error('ElevenLabs voice roster returned no voices and no default is set.');
   }
   return fallback;
 }
+
+/** @deprecated Use pickElevenLabsVoiceForVariant. */
+export const pickHedraVoiceForVariant = pickElevenLabsVoiceForVariant;
 
 /**
  * Polish-21 Commit 2: Claude ad-spec for Hedra Character 3.
