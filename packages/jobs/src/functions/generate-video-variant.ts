@@ -759,9 +759,12 @@ export interface VideoAdSpecHedra {
 }
 
 /**
- * Polish-21.0.5: compose the Nano Banana Pro image prompt from the
- * structured character using the 6-block JOHN pattern:
- *   1. Three-view lead (casting-director framing)
+ * Polish-21.0.5 → Polish-21.0.6: compose the Nano Banana Pro image
+ * prompt from the structured character using the 6-block pattern:
+ *   1. Single UGC iPhone selfie lead (Polish-21.0.6 — replaces the
+ *      Polish-21.0.5 three-view character sheet, which Hedra
+ *      Character 3 interpreted as three separate characters and
+ *      then animated as three different people in one video)
  *   2. Head / face (single flowing paragraph)
  *   3. Body / posture / clothing (single paragraph)
  *   4. SKIN REALISM MANDATE (verbatim anchor — all three ZERO
@@ -788,15 +791,22 @@ export function composeNanoBananaCharacterPrompt(character: StructuredCharacter)
     setting_description,
   } = character;
   const pronoun = gender === 'female' ? 'She' : 'He';
+  const reflexivePronoun = gender === 'female' ? 'herself' : 'himself';
   const stubbleClause =
     skin_color_for_stubble === 'none'
       ? // Female / clean-shaven face — no stubble line, but keep pore + vellus detail.
         'Visible pores, natural sebaceous texture on nose. Natural vellus hair on forearms.'
       : `Visible pores, natural sebaceous texture on nose, real ${skin_color_for_stubble} stubble shadow on upper lip and jaw from one day of missed shaving. Natural vellus hair on forearms.`;
 
-  const block1_threeView =
-    `Photorealistic three-view character sheet — front view, side view, back view — of a ` +
-    `${age}-year-old ${nationality} ${gender} named ${name}.`;
+  // Polish-21.0.6 hotfix: single UGC iPhone selfie lead. Character 3
+  // takes ONE image and animates ONE character; a three-view sheet
+  // was being interpreted as three separate people. Chest-up
+  // front-facing framing produces the correct single-character
+  // reference for the downstream Hedra generation.
+  const block1_selfieLead =
+    `Photorealistic iPhone selfie photo of a ${age}-year-old ${nationality} ${gender} named ${name}, ` +
+    `filming ${reflexivePronoun} holding ${gender === 'female' ? 'her' : 'his'} phone at chest height. ` +
+    `Front-facing chest-up framing, natural handheld micro-jitter, 9:16 vertical.`;
 
   const block2_headFace = `${hair_description}. ${face_description}.`;
 
@@ -816,7 +826,7 @@ export function composeNanoBananaCharacterPrompt(character: StructuredCharacter)
     'ABSOLUTELY NO phones, cameras, screens, social media UI, floating text, or digital overlays visible anywhere in the frame.';
 
   return [
-    block1_threeView,
+    block1_selfieLead,
     block2_headFace,
     block3_bodyPostureClothing,
     block4_skinRealism,

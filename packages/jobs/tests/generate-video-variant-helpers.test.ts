@@ -1256,18 +1256,48 @@ describe('Polish-21.0.5: composeNanoBananaCharacterPrompt (JOHN pattern)', () =>
     return FALLBACK_STRUCTURED_CHARACTER;
   };
 
-  it('emits the three-view casting-director lead as block 1', async () => {
+  it('emits the single UGC iPhone selfie lead as block 1 (Polish-21.0.6)', async () => {
     const { composeNanoBananaCharacterPrompt } =
       await import('../src/functions/generate-video-variant');
     const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
-    // Regression pin: verbatim JOHN-pattern lead. Softening this to
-    // "portrait of a..." or "photo of a..." silently degrades
-    // Nano Banana's likelihood of holding a consistent identity
-    // across gestures.
-    expect(p).toMatch(
-      /Photorealistic three-view character sheet — front view, side view, back view/,
-    );
+    // Regression pin: single-character UGC framing. Polish-21.0.5
+    // shipped a three-view character sheet ("front view, side view,
+    // back view") that Hedra Character 3 interpreted as three
+    // separate people and animated as three different characters
+    // in one video. Polish-21.0.6 replaces it with a single
+    // front-facing iPhone selfie photo — matches Character 3's
+    // single-image single-character architecture.
+    expect(p).toMatch(/Photorealistic iPhone selfie photo of a/);
     expect(p).toMatch(/-year-old American female named Alex/);
+    // Character framing: front-facing, chest-up, held at chest
+    // height (the exact UGC selfie geometry).
+    expect(p).toMatch(/filming herself holding her phone at chest height/);
+    expect(p).toMatch(/Front-facing chest-up framing/);
+    expect(p).toMatch(/9:16 vertical/);
+  });
+
+  it('Polish-21.0.6 tripwire: three-view character-sheet framing must NOT appear', async () => {
+    const { composeNanoBananaCharacterPrompt } =
+      await import('../src/functions/generate-video-variant');
+    const p = composeNanoBananaCharacterPrompt(await sampleCharacter());
+    // Regression pin against reverting to the Polish-21.0.5 three-
+    // view lead. Character 3 rendered that as three different
+    // characters talking — broke every live variant. Any revert
+    // that re-introduces "three-view" or the specific "front view,
+    // side view, back view" enumeration MUST fail this pin.
+    expect(p).not.toMatch(/three-view/i);
+    expect(p).not.toMatch(/character sheet/i);
+    expect(p).not.toMatch(/front view, side view, back view/i);
+  });
+
+  it('male character gets his/himself pronouns in the selfie lead (not her/herself)', async () => {
+    const { composeNanoBananaCharacterPrompt, FALLBACK_STRUCTURED_CHARACTER } =
+      await import('../src/functions/generate-video-variant');
+    const male = { ...FALLBACK_STRUCTURED_CHARACTER, gender: 'male' as const };
+    const p = composeNanoBananaCharacterPrompt(male);
+    expect(p).toMatch(/filming himself holding his phone at chest height/);
+    expect(p).not.toMatch(/filming herself/);
+    expect(p).not.toMatch(/holding her phone/);
   });
 
   it('emits the SKIN REALISM MANDATE with ALL THREE ZERO anchors (verbatim)', async () => {
