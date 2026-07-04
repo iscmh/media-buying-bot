@@ -995,3 +995,252 @@ describe('Polish-21.0.9: resolveHedraModelIdForVideoModel dispatches by VideoMod
     );
   });
 });
+
+// ===================================================================
+// Polish-21.0.10 hotfix: enhance_prompt gating via
+// extraGeneratedVideoInputs
+// ===================================================================
+//
+// Job 305a9d15 (first live Kling Avatar v2 Standard submit) returned
+// terminal `status: error, error_message: "unrecognized_arguments:
+// enhance_prompt"`. Character 3 accepts the field; Kling backends
+// reject it. Fix threads model-specific extras through
+// submitHedraGeneration.extraGeneratedVideoInputs.
+
+describe('Polish-21.0.10: extraGeneratedVideoInputs merges into generated_video_inputs', () => {
+  it('Character 3 caller passes {enhance_prompt: false} → present in submit body', async () => {
+    const calls = captureFetch({ status: 200, body: { id: 'gen-1010a' } });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k',
+      aiModelId: 'char-3',
+      startKeyframeId: 'img-1',
+      audioAssetId: 'aud-1',
+      textPrompt: 'scene text',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 15,
+      extraGeneratedVideoInputs: { enhance_prompt: false },
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string) as {
+      generated_video_inputs: Record<string, unknown>;
+    };
+    expect(body.generated_video_inputs.enhance_prompt).toBe(false);
+    // Regression pin: extras did NOT overwrite base fields.
+    expect(body.generated_video_inputs.text_prompt).toBe('scene text');
+    expect(body.generated_video_inputs.resolution).toBe('720p');
+    expect(body.generated_video_inputs.aspect_ratio).toBe('9:16');
+    expect(body.generated_video_inputs.duration_ms).toBe(15_000);
+  });
+
+  it('Kling caller passes undefined → NO enhance_prompt in submit body (regression pin against job 305a9d15)', async () => {
+    const calls = captureFetch({ status: 200, body: { id: 'gen-1010b' } });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k',
+      aiModelId: 'kling-standard',
+      startKeyframeId: 'img-1',
+      audioAssetId: 'aud-1',
+      textPrompt: 'scene text',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 15,
+      // extraGeneratedVideoInputs omitted intentionally
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string) as {
+      generated_video_inputs: Record<string, unknown>;
+    };
+    // Regression pin: submit body MUST NOT contain enhance_prompt on
+    // Kling. Hedra returns terminal-error status with
+    // `unrecognized_arguments: enhance_prompt` when it appears.
+    expect(Object.keys(body.generated_video_inputs)).not.toContain('enhance_prompt');
+  });
+
+  it('Kling caller passes empty extras object → still no enhance_prompt (defensive)', async () => {
+    const calls = captureFetch({ status: 200, body: { id: 'gen-1010c' } });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k',
+      aiModelId: 'kling-pro',
+      startKeyframeId: 'img-1',
+      audioAssetId: 'aud-1',
+      textPrompt: 'scene',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 15,
+      extraGeneratedVideoInputs: {},
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string) as {
+      generated_video_inputs: Record<string, unknown>;
+    };
+    expect(Object.keys(body.generated_video_inputs)).not.toContain('enhance_prompt');
+  });
+
+  it('extras CANNOT overwrite base fields (text_prompt / resolution / aspect_ratio / duration_ms)', async () => {
+    // Defensive spec pin: even if a future config accidentally puts
+    // `duration_ms: 999_999` in the extras block, the base spread
+    // MUST clobber it so we don't ship malformed submits.
+    const calls = captureFetch({ status: 200, body: { id: 'gen-1010d' } });
+    const { submitHedraGeneration } = await import('../src/hedra-video');
+    await submitHedraGeneration({
+      userId: 'u',
+      apiKey: 'k',
+      aiModelId: 'char-3',
+      startKeyframeId: 'img-1',
+      audioAssetId: 'aud-1',
+      textPrompt: 'real prompt',
+      resolution: '720p',
+      aspectRatio: '9:16',
+      durationSeconds: 15,
+      extraGeneratedVideoInputs: {
+        // All four base fields with bogus values — MUST be overridden.
+        text_prompt: 'HACKED',
+        resolution: '1080p',
+        aspect_ratio: '4:3',
+        duration_ms: 999_999,
+        // Legitimate extension.
+        enhance_prompt: false,
+      },
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string) as {
+      generated_video_inputs: Record<string, unknown>;
+    };
+    expect(body.generated_video_inputs.text_prompt).toBe('real prompt');
+    expect(body.generated_video_inputs.resolution).toBe('720p');
+    expect(body.generated_video_inputs.aspect_ratio).toBe('9:16');
+    expect(body.generated_video_inputs.duration_ms).toBe(15_000);
+    // The legitimate extra survives.
+    expect(body.generated_video_inputs.enhance_prompt).toBe(false);
+  });
+});
+
+describe('Polish-21.0.10: ModelProviderConfig.hedraExtraGeneratedVideoInputs regression pins', () => {
+  it('Character 3 config carries {enhance_prompt: false}', async () => {
+    const { getModelProviderConfig } = await import('@mbb/shared');
+    const config = getModelProviderConfig('hedra_character_3', 'hedra');
+    expect(config?.hedraExtraGeneratedVideoInputs).toEqual({ enhance_prompt: false });
+  });
+
+  it('Kling Avatar v2 Standard config OMITS enhance_prompt (undefined extras)', async () => {
+    // Regression pin: any accidental copy-paste of the Character 3
+    // config that carries enhance_prompt onto Kling would fail this
+    // and the live-submit would fail with `unrecognized_arguments:
+    // enhance_prompt` (job 305a9d15).
+    const { getModelProviderConfig } = await import('@mbb/shared');
+    const config = getModelProviderConfig('hedra_kling_avatar_v2_standard', 'hedra');
+    expect(config?.hedraExtraGeneratedVideoInputs).toBeUndefined();
+  });
+
+  it('Kling Avatar v2 Pro config OMITS enhance_prompt (undefined extras)', async () => {
+    const { getModelProviderConfig } = await import('@mbb/shared');
+    const config = getModelProviderConfig('hedra_kling_avatar_v2_pro', 'hedra');
+    expect(config?.hedraExtraGeneratedVideoInputs).toBeUndefined();
+  });
+});
+
+// ===================================================================
+// Polish-21.0.10 hardening: terminal-state guards for the poll loop
+// ===================================================================
+
+describe('Polish-21.0.10: normalizeHedraStatus + terminal-state guards', () => {
+  it('normalizeHedraStatus maps cancelled + canceled → "cancelled" (US-spelled alias)', async () => {
+    const { normalizeHedraStatus } = await import('../src/hedra-video');
+    expect(normalizeHedraStatus('cancelled')).toBe('cancelled');
+    expect(normalizeHedraStatus('canceled')).toBe('cancelled');
+    expect(normalizeHedraStatus('CANCELLED')).toBe('cancelled');
+    expect(normalizeHedraStatus('Canceled')).toBe('cancelled');
+  });
+
+  it('normalizeHedraStatus keeps failed / failure → "error" (Polish-21.0.2 alias)', async () => {
+    const { normalizeHedraStatus } = await import('../src/hedra-video');
+    expect(normalizeHedraStatus('failed')).toBe('error');
+    expect(normalizeHedraStatus('failure')).toBe('error');
+  });
+
+  it('isTerminalHedraStatus: complete + error + cancelled are terminal; queued/processing/pending/finalizing are NOT', async () => {
+    const { isTerminalHedraStatus } = await import('../src/hedra-video');
+    expect(isTerminalHedraStatus('complete')).toBe(true);
+    expect(isTerminalHedraStatus('error')).toBe(true);
+    expect(isTerminalHedraStatus('cancelled')).toBe(true);
+    expect(isTerminalHedraStatus('queued')).toBe(false);
+    expect(isTerminalHedraStatus('processing')).toBe(false);
+    expect(isTerminalHedraStatus('pending')).toBe(false);
+    expect(isTerminalHedraStatus('finalizing')).toBe(false);
+  });
+
+  it('isFailedHedraStatus: only error + cancelled are failures (NOT complete)', async () => {
+    const { isFailedHedraStatus } = await import('../src/hedra-video');
+    expect(isFailedHedraStatus('error')).toBe(true);
+    expect(isFailedHedraStatus('cancelled')).toBe(true);
+    expect(isFailedHedraStatus('complete')).toBe(false);
+    expect(isFailedHedraStatus('queued')).toBe(false);
+    expect(isFailedHedraStatus('processing')).toBe(false);
+    expect(isFailedHedraStatus('pending')).toBe(false);
+    expect(isFailedHedraStatus('finalizing')).toBe(false);
+  });
+});
+
+describe('Polish-21.0.10: pollHedraGeneration surfaces terminal failed states', () => {
+  it('status: "error" surfaces error_message (verbatim regression pin against job 305a9d15)', async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        status: 'error',
+        error_message: 'unrecognized_arguments: enhance_prompt',
+      },
+    });
+    const { pollHedraGeneration } = await import('../src/hedra-video');
+    const r = await pollHedraGeneration({
+      userId: 'u',
+      apiKey: 'k',
+      generationId: 'bca5f85d-2190-4edd-95cf-9ad214a0090a',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.status).toBe('error');
+    expect(r.errorMessage).toBe('unrecognized_arguments: enhance_prompt');
+    // Regression pin: NO downloadUrl on failed terminal state.
+    expect(r.downloadUrl).toBeUndefined();
+  });
+
+  it('status: "cancelled" surfaces the same shape as error (defensive alias)', async () => {
+    captureFetch({
+      status: 200,
+      body: { status: 'cancelled', error_message: 'user cancelled' },
+    });
+    const { pollHedraGeneration } = await import('../src/hedra-video');
+    const r = await pollHedraGeneration({
+      userId: 'u',
+      apiKey: 'k',
+      generationId: 'g',
+    });
+    expect(r.status).toBe('cancelled');
+    expect(r.errorMessage).toBe('user cancelled');
+    expect(r.downloadUrl).toBeUndefined();
+  });
+
+  it('cancelled status without error_message falls back to a synthesized message', async () => {
+    captureFetch({ status: 200, body: { status: 'cancelled' } });
+    const { pollHedraGeneration } = await import('../src/hedra-video');
+    const r = await pollHedraGeneration({
+      userId: 'u',
+      apiKey: 'k',
+      generationId: 'g',
+    });
+    expect(r.status).toBe('cancelled');
+    expect(r.errorMessage).toMatch(/cancelled/);
+  });
+
+  it('intermediate statuses (queued / processing / pending / finalizing) stay non-terminal', async () => {
+    // Regression pin against the operator-facing bug: the poll
+    // budget MUST still fire for legitimately-running generations.
+    // isFailedHedraStatus returns false for these so the worker
+    // keeps polling.
+    const { isFailedHedraStatus } = await import('../src/hedra-video');
+    for (const s of ['queued', 'processing', 'pending', 'finalizing'] as const) {
+      expect(isFailedHedraStatus(s)).toBe(false);
+    }
+  });
+});

@@ -188,6 +188,10 @@ export {
   getHedraKlingV2StandardModelId,
   getHedraKlingV2ProModelId,
   resolveHedraModelIdForVideoModel,
+  // Polish-21.0.10: terminal-state guards used by the worker's
+  // Hedra poll loop.
+  isTerminalHedraStatus,
+  isFailedHedraStatus,
   redactHedraApiKey,
   logHedraRequest,
   logHedraResponse,

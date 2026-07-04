@@ -5,6 +5,7 @@ import {
   callGeminiImage,
   checkReplicateConcat,
   createHedraAsset,
+  isFailedHedraStatus,
   isVideoConcatEnabled,
   pollHedraGeneration,
   pollKieVideo,
@@ -1101,7 +1102,16 @@ export function parseStructuredCharacter(raw: unknown): StructuredCharacter {
 // wall-clock on the happy path.
 const HEDRA_POLL_WARMUP_SECONDS = 15;
 const HEDRA_POLL_INTERVAL_SECONDS = 5;
-const HEDRA_POLL_MAX_ATTEMPTS = 80;
+/**
+ * Polish-21.0.10: default poll budget when a VideoModel doesn't
+ * specify `hedraPollMaxAttempts`. Every launcher-visible Hedra
+ * model in Polish-21.0.10 sets its own budget (Character 3 = 80,
+ * Kling Std = 150, Kling Pro = 200); this constant only fires
+ * for a hypothetical future Hedra model that ships without a
+ * per-model budget. Kept conservative to avoid runaway Inngest
+ * cost on a mis-configured model.
+ */
+export const HEDRA_POLL_MAX_ATTEMPTS = 80;
 /**
  * Polish-21.0.2: the number of consecutive 404s during the initial
  * post-submit window that we treat as "generation not queryable yet,
@@ -1383,6 +1393,13 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       userId,
       apiKey: keys.hedra!,
       aiModelId,
+      // Polish-21.0.10 hotfix: per-model extras merged into
+      // generated_video_inputs. Character 3 opts into
+      // `{enhance_prompt: false}` via ModelProviderConfig; Kling
+      // Avatar v2 variants pass undefined so Hedra's Kling backend
+      // doesn't reject the submit with `unrecognized_arguments:
+      // enhance_prompt`.
+      extraGeneratedVideoInputs: config.hedraExtraGeneratedVideoInputs,
       startKeyframeId,
       // Polish-21.0.4 hotfix: audio_id path (ElevenLabs mp3
       // uploaded as Hedra audio asset). Replaces the .0.1/.0.2/.0.3
@@ -1430,7 +1447,12 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   // and status endpoints. We absorb the window here so a single
   // early 404 doesn't fail the variant.
   let consecutive404s = 0;
-  for (let attempt = 0; attempt < HEDRA_POLL_MAX_ATTEMPTS; attempt++) {
+  // Polish-21.0.10: per-model poll budget from the descriptor.
+  // Character 3 finishes 30-90s (80 polls plenty); Kling Avatar
+  // v2 Standard/Pro run 5-6 minutes and need more headroom or
+  // they time out on generations that would have succeeded.
+  const pollMaxAttempts = model.hedraPollMaxAttempts ?? HEDRA_POLL_MAX_ATTEMPTS;
+  for (let attempt = 0; attempt < pollMaxAttempts; attempt++) {
     const poll = await step.run(`hedra-poll-${variantIndex}-${attempt}`, async () => {
       let keys;
       try {
@@ -1473,8 +1495,19 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       pollError = poll.errorMessage ?? 'Hedra poll failed';
       break;
     }
-    if (poll.status === 'error') {
-      pollError = poll.errorMessage ?? 'Hedra reported error';
+    // Polish-21.0.10 hardening: use the shared terminal-error
+    // predicate so `cancelled` short-circuits the loop the same
+    // way `error` does. Also loud-log the exact Hedra
+    // error_message + status BEFORE breaking so the operator sees
+    // the failure attribution on the very first Inngest log line
+    // rather than only in the aggregated variant error.
+    if (poll.status && isFailedHedraStatus(poll.status)) {
+      pollError = poll.errorMessage ?? `Hedra reported ${poll.status}`;
+      console.log(
+        `[generate-video-variant] variant ${variantIndex} (hedra): terminal ${poll.status} ` +
+          `after ${attempt + 1} poll(s). generationId=${generationId} ` +
+          `hedra_error_message=${JSON.stringify(poll.errorMessage ?? '(none)')}`,
+      );
       break;
     }
     if (poll.status === 'complete') {
@@ -1486,7 +1519,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       pollError = poll.errorMessage ?? 'Hedra complete without download URL';
       break;
     }
-    // queued / processing / pending → keep polling
+    // queued / processing / pending / finalizing → keep polling
     await step.sleep(`hedra-wait-${variantIndex}-${attempt}`, `${HEDRA_POLL_INTERVAL_SECONDS}s`);
   }
 
@@ -1497,7 +1530,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   if (!downloadUrl) {
     console.log(
       `[generate-video-variant] variant ${variantIndex} (hedra): timed out after ` +
-        `${HEDRA_POLL_MAX_ATTEMPTS} polls. generationId=${generationId} ` +
+        `${pollMaxAttempts} polls (model=${model.id}). generationId=${generationId} ` +
         `last_error=${pollError ?? 'unset'}`,
     );
     return {
@@ -1506,7 +1539,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       costUsd: cost,
       error:
         `Hedra generation ${generationId} did not reach terminal state within ` +
-        `${HEDRA_POLL_MAX_ATTEMPTS} polls.` +
+        `${pollMaxAttempts} polls (${model.displayName}).` +
         (pollError ? ` Last error: ${pollError}` : ''),
     };
   }

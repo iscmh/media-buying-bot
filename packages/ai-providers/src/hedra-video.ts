@@ -142,6 +142,20 @@ export interface HedraSubmitGenerationInput {
   durationSeconds: number;
   /** Optional deterministic seed. */
   seed?: number;
+  /**
+   * Polish-21.0.10 hotfix: extra fields merged into
+   * generated_video_inputs before the base fields (text_prompt /
+   * resolution / aspect_ratio / duration_ms) are spread on top —
+   * base fields ALWAYS win, so `enhance_prompt: false` here can't
+   * accidentally overwrite `duration_ms`.
+   *
+   * Sourced per-model from ModelProviderConfig
+   * .hedraExtraGeneratedVideoInputs: Character 3 opts in with
+   * `{enhance_prompt: false}`; Kling Avatar v2 variants pass
+   * undefined because Hedra's Kling backend rejects the field
+   * (`unrecognized_arguments: enhance_prompt` — job 305a9d15).
+   */
+  extraGeneratedVideoInputs?: Record<string, unknown>;
   generationJobId?: string;
   generatedCreativeId?: string;
 }
@@ -236,12 +250,18 @@ interface HedraGenerationSubmitBody {
   // Polish-21.0.4 hotfix: audio_id is REQUIRED now. audio_generation
   // union member removed alongside Hedra native TTS.
   audio_id: string;
+  // Polish-21.0.10 hotfix: allow model-specific extras
+  // (`enhance_prompt: false` for Character 3, nothing for Kling)
+  // by widening this block to an index signature. The client
+  // spreads extras BEFORE base fields so text_prompt / resolution
+  // / aspect_ratio / duration_ms always win.
   generated_video_inputs: {
     text_prompt: string;
     resolution: '540p' | '720p';
     aspect_ratio: '9:16' | '16:9' | '1:1';
     duration_ms: number;
     seed?: number;
+    [key: string]: unknown;
   };
 }
 
@@ -256,6 +276,17 @@ interface HedraSubmitResponse {
  * enum omitted `finalizing`; a poll response with that value would
  * fall through normalizeHedraStatus and surface as
  * "Hedra status response missing status" mid-generation.
+ *
+ * Polish-21.0.10: `cancelled` added as a defensive terminal-error
+ * alias. Job 305a9d15 diagnosed a case where Hedra returned
+ * `status: error, error_message: "unrecognized_arguments:
+ * enhance_prompt"` after ~1 poll but the worker's poll loop
+ * exhausted its whole budget before quitting. Root cause was
+ * NOT `cancelled` handling (the codepath for 'error' already
+ * short-circuits), but the operator-facing spec asked us to
+ * make terminal detection robust across `error` / `failed` /
+ * `cancelled` string variants Hedra might surface. See
+ * isTerminalHedraStatus below.
  */
 export type HedraGenerationStatus =
   | 'queued'
@@ -263,7 +294,33 @@ export type HedraGenerationStatus =
   | 'pending'
   | 'finalizing'
   | 'complete'
-  | 'error';
+  | 'error'
+  | 'cancelled';
+
+/**
+ * Polish-21.0.10 hardening: `true` for any status the worker
+ * should immediately terminate the poll loop on. Complete +
+ * error + cancelled are terminal; queued/processing/pending/
+ * finalizing are all "keep polling".
+ *
+ * Exported so both the client (early-return in
+ * pollHedraGeneration) and the worker's poll-loop guard use
+ * the SAME table. Prevents drift where the client says a
+ * status is terminal but the worker keeps calling.
+ */
+export function isTerminalHedraStatus(status: HedraGenerationStatus): boolean {
+  return status === 'complete' || status === 'error' || status === 'cancelled';
+}
+
+/**
+ * Polish-21.0.10: `true` for statuses that mean the generation
+ * FAILED (Hedra emitted a terminal state that is NOT complete).
+ * Used by the worker's poll loop to attribute the failure with
+ * Hedra's error_message and stop retrying.
+ */
+export function isFailedHedraStatus(status: HedraGenerationStatus): boolean {
+  return status === 'error' || status === 'cancelled';
+}
 
 export interface HedraPollStatusInput {
   userId: string;
@@ -504,6 +561,15 @@ export async function submitHedraGeneration(
     // Matches the hedra-labs/hedra-api-starter uploaded-audio path.
     audio_id: input.audioAssetId,
     generated_video_inputs: {
+      // Polish-21.0.10 hotfix: extras go FIRST so the base fields
+      // (text_prompt/resolution/aspect_ratio/duration_ms) always
+      // win the spread. Character 3 opts into `enhance_prompt: false`
+      // via ModelProviderConfig.hedraExtraGeneratedVideoInputs;
+      // Kling Avatar v2 variants pass undefined here because Hedra
+      // returns `status: error, error_message:
+      // "unrecognized_arguments: enhance_prompt"` on their Kling
+      // backend (job 305a9d15 diagnosed on first live submit).
+      ...(input.extraGeneratedVideoInputs ?? {}),
       text_prompt: input.textPrompt,
       resolution: input.resolution,
       aspect_ratio: input.aspectRatio,
@@ -663,13 +729,19 @@ export async function pollHedraGeneration(
     typeof result.data.progress === 'number' && Number.isFinite(result.data.progress)
       ? result.data.progress
       : undefined;
-  if (status === 'error') {
+  // Polish-21.0.10 hardening: surface every FAILED terminal state
+  // (currently `error` + `cancelled`) with the SAME shape so the
+  // worker's poll loop has ONE check to write. Keeps the "ok: true"
+  // convention (transport succeeded) while carrying Hedra's
+  // error_message forward — the worker attributes the failure and
+  // stops calling.
+  if (isFailedHedraStatus(status)) {
     return {
       ok: true,
       status,
       latencyMs: result.latencyMs,
       progress,
-      errorMessage: result.data.error_message ?? 'Hedra reported error without a message.',
+      errorMessage: result.data.error_message ?? `Hedra reported ${status} without a message.`,
     };
   }
   if (status === 'complete') {
@@ -713,6 +785,11 @@ export function normalizeHedraStatus(raw: unknown): HedraGenerationStatus | unde
   const lower = raw.toLowerCase();
   if (lower === 'complete' || lower === 'completed') return 'complete';
   if (lower === 'error' || lower === 'failed' || lower === 'failure') return 'error';
+  // Polish-21.0.10: `cancelled` (+ US-spelled `canceled`) surface
+  // as a terminal-error alias. Character 3 hasn't been observed
+  // emitting this state, but Kling backends can — the spec calls
+  // for defensive coverage across `error` / `failed` / `cancelled`.
+  if (lower === 'cancelled' || lower === 'canceled') return 'cancelled';
   if (lower === 'processing' || lower === 'running' || lower === 'in_progress') return 'processing';
   if (lower === 'pending') return 'pending';
   if (lower === 'queued') return 'queued';

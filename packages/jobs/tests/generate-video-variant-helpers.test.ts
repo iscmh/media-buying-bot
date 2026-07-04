@@ -1828,4 +1828,40 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     const submitCall = src.slice(submitStart, submitEnd);
     expect(submitCall).toMatch(/durationSeconds: targetSeconds,/);
   });
+
+  it('Polish-21.0.10: submit threads config.hedraExtraGeneratedVideoInputs into extraGeneratedVideoInputs', async () => {
+    // Regression pin: Character 3 config carries
+    // {enhance_prompt: false}; Kling configs carry undefined. This
+    // pin ensures the worker actually reads from
+    // ModelProviderConfig instead of hardcoding the field, so a
+    // future model that opts in / out via config doesn't need a
+    // worker code change.
+    const src = await readSrc();
+    const submitStart = src.indexOf('return submitHedraGeneration({');
+    const submitEnd = src.indexOf('});', submitStart);
+    const submitCall = src.slice(submitStart, submitEnd);
+    expect(submitCall).toMatch(
+      /extraGeneratedVideoInputs: config\.hedraExtraGeneratedVideoInputs,/,
+    );
+  });
+
+  it('Polish-21.0.10: worker imports isFailedHedraStatus for terminal-error detection', async () => {
+    // Regression pin against a future refactor that inlines a
+    // status === 'error' check and quietly drops `cancelled`.
+    const src = await readSrc();
+    expect(src).toMatch(/isFailedHedraStatus/);
+    // AND: used inside the poll loop, not just imported.
+    expect(src).toMatch(/if \(poll\.status && isFailedHedraStatus\(poll\.status\)\)/);
+  });
+
+  it('Polish-21.0.10: poll loop uses model.hedraPollMaxAttempts (per-model budget) not the shared constant directly', async () => {
+    // Regression pin against Character 3's 80-poll budget being
+    // reintroduced hardcoded — Kling variants need 150/200.
+    const src = await readSrc();
+    expect(src).toMatch(
+      /const pollMaxAttempts = model\.hedraPollMaxAttempts \?\? HEDRA_POLL_MAX_ATTEMPTS;/,
+    );
+    // AND: the loop's for-condition reads from pollMaxAttempts.
+    expect(src).toMatch(/for \(let attempt = 0; attempt < pollMaxAttempts; attempt\+\+\)/);
+  });
 });

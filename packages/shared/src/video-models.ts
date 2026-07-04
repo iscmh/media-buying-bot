@@ -120,6 +120,22 @@ export interface VideoModel {
    * (visible in the picker) when omitted.
    */
   hiddenFromLauncher?: boolean;
+  /**
+   * Polish-21.0.10: per-model Hedra poll budget (max /status
+   * attempts before the worker gives up). Character 3 typically
+   * finishes in 30-90s (80 polls × ~5s = ~7min headroom); Kling
+   * Avatar v2 Standard/Pro run materially longer (Hedra /models
+   * eta_ms says Standard ≈ 5.3min, Pro ≈ 6.3min) so a Character-3
+   * budget times out mid-generation on Kling.
+   *
+   *   Character 3           : 80 polls (~7 min headroom)
+   *   Kling Avatar v2 Std   : 150 polls (~12.5 min headroom)
+   *   Kling Avatar v2 Pro   : 200 polls (~16.7 min headroom)
+   *
+   * Ignored on non-Hedra models (kie.ai path has its own budget).
+   * Undefined → worker uses HEDRA_POLL_MAX_ATTEMPTS default.
+   */
+  hedraPollMaxAttempts?: number;
 }
 
 export interface VideoProvider {
@@ -152,6 +168,22 @@ export interface ModelProviderConfig {
   /** Exact string sent in the request body's `model` field. */
   modelParam: string;
   inputShape: VideoModelInputShape;
+  /**
+   * Polish-21.0.10 hotfix: extra fields merged into Hedra's
+   * `generated_video_inputs` block on submit. Model-specific
+   * extension point — Character 3 opts into `enhance_prompt: false`
+   * (Hedra accepts it and it prevents server-side prompt drift),
+   * Kling Avatar v2 variants OMIT the field entirely because
+   * Hedra's Kling backend rejects it with
+   * `unrecognized_arguments: enhance_prompt` (job 305a9d15
+   * diagnosed on first live Kling submit).
+   *
+   * Client-side (hedra-video.ts) does an object spread with the
+   * base fields so nothing here can override text_prompt /
+   * resolution / aspect_ratio / duration_ms. Ignored on non-Hedra
+   * configs (kie.ai path builds its body from inputShape).
+   */
+  hedraExtraGeneratedVideoInputs?: Record<string, unknown>;
 }
 
 // -------------------------------------------------------------------
@@ -225,6 +257,9 @@ export const VIDEO_MODELS: readonly VideoModel[] = [
     supportedAspectRatios: ['9:16', '16:9', '1:1'],
     requiresReferenceImage: true,
     supportsAudio: true,
+    // Polish-21.0.10: Character 3 typically finishes 30-90s; 80
+    // polls × 5s = ~7 minutes headroom, well past the tail.
+    hedraPollMaxAttempts: 80,
   },
   {
     // Polish-21.0.9: Kling AI Avatar v2 Standard on Hedra.
@@ -248,6 +283,10 @@ export const VIDEO_MODELS: readonly VideoModel[] = [
     supportedAspectRatios: ['9:16', '16:9', '1:1'],
     requiresReferenceImage: true,
     supportsAudio: true,
+    // Polish-21.0.10: Kling Avatar v2 Standard runs materially
+    // longer than Character 3 (Hedra /models eta_ms ≈ 5.3 min).
+    // 150 polls × 5s = ~12.5 min headroom.
+    hedraPollMaxAttempts: 150,
   },
   {
     // Polish-21.0.9: Kling AI Avatar v2 Pro on Hedra.
@@ -271,6 +310,10 @@ export const VIDEO_MODELS: readonly VideoModel[] = [
     supportedAspectRatios: ['9:16', '16:9', '1:1'],
     requiresReferenceImage: true,
     supportsAudio: true,
+    // Polish-21.0.10: Kling Avatar v2 Pro runs even longer than
+    // Standard (Hedra /models eta_ms ≈ 6.3 min at 60s output).
+    // 200 polls × 5s = ~16.7 min headroom.
+    hedraPollMaxAttempts: 200,
   },
 ];
 
@@ -440,6 +483,15 @@ export const MODEL_PROVIDER_CONFIGS: readonly ModelProviderConfig[] = [
       extras: {
         resolution: '720p',
       },
+    },
+    // Polish-21.0.10 hotfix: Character 3 accepts (and benefits
+    // from) `enhance_prompt: false` to prevent Hedra's server-side
+    // prompt-enhancer from rewriting our carefully-composed scene
+    // description. Kling Avatar v2 REJECTS this field with
+    // `unrecognized_arguments: enhance_prompt` (job 305a9d15
+    // diagnosed), so it MUST stay off Kling configs.
+    hedraExtraGeneratedVideoInputs: {
+      enhance_prompt: false,
     },
   },
   {

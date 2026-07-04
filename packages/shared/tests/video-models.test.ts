@@ -121,6 +121,28 @@ describe('Polish-21.0.9: VIDEO_MODELS launcher-visible set (3-card picker restor
     expect(getVideoModel('hedra_kling_avatar_v2_pro')!.supportedResolutions).toEqual(['720p']);
   });
 
+  it('Polish-21.0.10: per-model Hedra poll budgets — C3=80, Kling Std=150, Kling Pro=200', () => {
+    // Kling Avatar v2 runs materially longer than Character 3
+    // (Hedra /models eta_ms Std ≈ 5.3min, Pro ≈ 6.3min). Sharing
+    // Character 3's 80-poll budget times out mid-generation on
+    // Kling variants that would otherwise succeed.
+    expect(getVideoModel('hedra_character_3')!.hedraPollMaxAttempts).toBe(80);
+    expect(getVideoModel('hedra_kling_avatar_v2_standard')!.hedraPollMaxAttempts).toBe(150);
+    expect(getVideoModel('hedra_kling_avatar_v2_pro')!.hedraPollMaxAttempts).toBe(200);
+  });
+
+  it('Polish-21.0.10: Kling poll budgets are strictly larger than Character 3 (regression pin)', () => {
+    // Any accidental copy-paste that gives Kling the C3 budget
+    // would surface as intermittent "did not reach terminal
+    // state" failures on 60s Kling generations. Ratio is what
+    // matters — pin the direction, not the exact numbers.
+    const c3 = getVideoModel('hedra_character_3')!.hedraPollMaxAttempts!;
+    const std = getVideoModel('hedra_kling_avatar_v2_standard')!.hedraPollMaxAttempts!;
+    const pro = getVideoModel('hedra_kling_avatar_v2_pro')!.hedraPollMaxAttempts!;
+    expect(std).toBeGreaterThan(c3);
+    expect(pro).toBeGreaterThan(std);
+  });
+
   it('legacy models do NOT require a reference image (text-to-video native)', () => {
     for (const m of HIDDEN_LEGACY_MODELS) {
       expect(m.requiresReferenceImage).toBe(false);
@@ -200,6 +222,24 @@ describe('Polish-21: MODEL_PROVIDER_CONFIGS launch coverage', () => {
         'https://api.hedra.com/web-app/public',
       );
     }
+  });
+
+  it('Polish-21.0.10: Character 3 config carries {enhance_prompt: false}; Kling configs OMIT it', () => {
+    // Regression pin against job 305a9d15: Kling backends reject
+    // enhance_prompt with `unrecognized_arguments: enhance_prompt`.
+    // Character 3 accepts + benefits from the field. Config-level
+    // separation is the only correct place to gate it — a runtime
+    // if/else in the client would drift.
+    expect(
+      getModelProviderConfig('hedra_character_3', 'hedra')!.hedraExtraGeneratedVideoInputs,
+    ).toEqual({ enhance_prompt: false });
+    expect(
+      getModelProviderConfig('hedra_kling_avatar_v2_standard', 'hedra')!
+        .hedraExtraGeneratedVideoInputs,
+    ).toBeUndefined();
+    expect(
+      getModelProviderConfig('hedra_kling_avatar_v2_pro', 'hedra')!.hedraExtraGeneratedVideoInputs,
+    ).toBeUndefined();
   });
 
   it('Hedra per-second pricing: Character 3 + Kling v2 Standard = $0.033/sec, Kling v2 Pro = $0.099/sec', () => {
