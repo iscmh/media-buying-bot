@@ -845,3 +845,153 @@ describe('Polish-21.0.3: 422 responses surface Hedra field-level detail (not jus
 // packages/jobs/tests/generate-video-variant-helpers.test.ts —
 // direct file access to generate-video-variant.ts source is cleaner
 // from that package than crossing package boundaries here.
+
+// ===================================================================
+// Polish-21.0.9: env-override resolvers for the three Hedra model UUIDs
+// ===================================================================
+//
+// Mirrors the Polish-21.0.8 NANO_BANANA_MODEL_ID env-override pattern:
+// env is read at CALL TIME so operators can rotate a Hedra model UUID
+// via HEDRA_{CHARACTER_3,KLING_V2_STANDARD,KLING_V2_PRO}_MODEL_ID
+// without a redeploy.
+
+describe('Polish-21.0.9: getHedraCharacter3ModelId + env override', () => {
+  const KEY = 'HEDRA_CHARACTER_3_MODEL_ID';
+  const originalEnv = process.env[KEY];
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env[KEY];
+    else process.env[KEY] = originalEnv;
+  });
+
+  it('defaults to d1dd37a3-… (Character 3 UUID verified from live GET /models)', async () => {
+    delete process.env[KEY];
+    const { getHedraCharacter3ModelId } = await import('../src/hedra-video');
+    expect(getHedraCharacter3ModelId()).toBe('d1dd37a3-e39a-4854-a298-6510289f9cf2');
+  });
+
+  it('HEDRA_CHARACTER_3_MODEL_ID env override wins at call time (no restart needed)', async () => {
+    process.env[KEY] = 'ffffffff-aaaa-bbbb-cccc-000000000001';
+    const { getHedraCharacter3ModelId } = await import('../src/hedra-video');
+    expect(getHedraCharacter3ModelId()).toBe('ffffffff-aaaa-bbbb-cccc-000000000001');
+  });
+
+  it('whitespace-only env override falls through to the default', async () => {
+    process.env[KEY] = '   ';
+    const { getHedraCharacter3ModelId } = await import('../src/hedra-video');
+    expect(getHedraCharacter3ModelId()).toBe('d1dd37a3-e39a-4854-a298-6510289f9cf2');
+  });
+});
+
+describe('Polish-21.0.9: getHedraKlingV2StandardModelId + env override', () => {
+  const KEY = 'HEDRA_KLING_V2_STANDARD_MODEL_ID';
+  const originalEnv = process.env[KEY];
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env[KEY];
+    else process.env[KEY] = originalEnv;
+  });
+
+  it('defaults to d7eb3b2e-… (Kling v2 Standard UUID verified from live GET /models)', async () => {
+    delete process.env[KEY];
+    const { getHedraKlingV2StandardModelId } = await import('../src/hedra-video');
+    expect(getHedraKlingV2StandardModelId()).toBe('d7eb3b2e-c8f8-45f9-83db-34f18dd0ba85');
+  });
+
+  it('HEDRA_KLING_V2_STANDARD_MODEL_ID env override wins at call time', async () => {
+    process.env[KEY] = 'ffffffff-aaaa-bbbb-cccc-000000000002';
+    const { getHedraKlingV2StandardModelId } = await import('../src/hedra-video');
+    expect(getHedraKlingV2StandardModelId()).toBe('ffffffff-aaaa-bbbb-cccc-000000000002');
+  });
+
+  it('empty string falls through to the default', async () => {
+    process.env[KEY] = '';
+    const { getHedraKlingV2StandardModelId } = await import('../src/hedra-video');
+    expect(getHedraKlingV2StandardModelId()).toBe('d7eb3b2e-c8f8-45f9-83db-34f18dd0ba85');
+  });
+});
+
+describe('Polish-21.0.9: getHedraKlingV2ProModelId + env override', () => {
+  const KEY = 'HEDRA_KLING_V2_PRO_MODEL_ID';
+  const originalEnv = process.env[KEY];
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env[KEY];
+    else process.env[KEY] = originalEnv;
+  });
+
+  it('defaults to 0451ceea-… (Kling v2 Pro UUID verified from live GET /models)', async () => {
+    delete process.env[KEY];
+    const { getHedraKlingV2ProModelId } = await import('../src/hedra-video');
+    expect(getHedraKlingV2ProModelId()).toBe('0451ceea-a7b5-4275-a970-82bf4ef38055');
+  });
+
+  it('HEDRA_KLING_V2_PRO_MODEL_ID env override wins at call time', async () => {
+    process.env[KEY] = 'ffffffff-aaaa-bbbb-cccc-000000000003';
+    const { getHedraKlingV2ProModelId } = await import('../src/hedra-video');
+    expect(getHedraKlingV2ProModelId()).toBe('ffffffff-aaaa-bbbb-cccc-000000000003');
+  });
+});
+
+describe('Polish-21.0.9: resolveHedraModelIdForVideoModel dispatches by VideoModelId', () => {
+  // Preserve every env key we might touch.
+  const KEYS = [
+    'HEDRA_CHARACTER_3_MODEL_ID',
+    'HEDRA_KLING_V2_STANDARD_MODEL_ID',
+    'HEDRA_KLING_V2_PRO_MODEL_ID',
+  ] as const;
+  const originalEnv: Record<string, string | undefined> = Object.fromEntries(
+    KEYS.map((k) => [k, process.env[k]]),
+  );
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (originalEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = originalEnv[k]!;
+    }
+  });
+
+  it('routes hedra_character_3 → getHedraCharacter3ModelId (env or default)', async () => {
+    process.env['HEDRA_CHARACTER_3_MODEL_ID'] = 'char3-override';
+    const { resolveHedraModelIdForVideoModel } = await import('../src/hedra-video');
+    expect(resolveHedraModelIdForVideoModel('hedra_character_3', 'descriptor-fallback')).toBe(
+      'char3-override',
+    );
+  });
+
+  it('routes hedra_kling_avatar_v2_standard → getHedraKlingV2StandardModelId', async () => {
+    process.env['HEDRA_KLING_V2_STANDARD_MODEL_ID'] = 'kling-std-override';
+    const { resolveHedraModelIdForVideoModel } = await import('../src/hedra-video');
+    expect(
+      resolveHedraModelIdForVideoModel('hedra_kling_avatar_v2_standard', 'descriptor-fallback'),
+    ).toBe('kling-std-override');
+  });
+
+  it('routes hedra_kling_avatar_v2_pro → getHedraKlingV2ProModelId', async () => {
+    process.env['HEDRA_KLING_V2_PRO_MODEL_ID'] = 'kling-pro-override';
+    const { resolveHedraModelIdForVideoModel } = await import('../src/hedra-video');
+    expect(
+      resolveHedraModelIdForVideoModel('hedra_kling_avatar_v2_pro', 'descriptor-fallback'),
+    ).toBe('kling-pro-override');
+  });
+
+  it('unknown / non-Hedra videoModelId → returns descriptorDefault untouched (defensive fallback)', async () => {
+    const { resolveHedraModelIdForVideoModel } = await import('../src/hedra-video');
+    expect(resolveHedraModelIdForVideoModel('seedance_1_5_pro', 'descriptor-fallback')).toBe(
+      'descriptor-fallback',
+    );
+    expect(resolveHedraModelIdForVideoModel('nope', 'descriptor-fallback')).toBe(
+      'descriptor-fallback',
+    );
+  });
+
+  it('no env set → each Hedra model resolves to its verified default UUID', async () => {
+    for (const k of KEYS) delete process.env[k];
+    const { resolveHedraModelIdForVideoModel } = await import('../src/hedra-video');
+    expect(resolveHedraModelIdForVideoModel('hedra_character_3', 'ignored')).toBe(
+      'd1dd37a3-e39a-4854-a298-6510289f9cf2',
+    );
+    expect(resolveHedraModelIdForVideoModel('hedra_kling_avatar_v2_standard', 'ignored')).toBe(
+      'd7eb3b2e-c8f8-45f9-83db-34f18dd0ba85',
+    );
+    expect(resolveHedraModelIdForVideoModel('hedra_kling_avatar_v2_pro', 'ignored')).toBe(
+      '0451ceea-a7b5-4275-a970-82bf4ef38055',
+    );
+  });
+});

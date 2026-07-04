@@ -36,7 +36,15 @@ export type VideoModelId =
   // user-facing model at launch — the seedance/kling entries stay
   // in the descriptor through Polish-21 Commit 3 for backwards
   // compat, then vanish alongside kie-video.ts.
-  | 'hedra_character_3';
+  | 'hedra_character_3'
+  // Polish-21.0.9: Kling AI Avatar v2 hosted on Hedra platform.
+  // Same image-to-talking-avatar API shape as Character 3 (start
+  // keyframe + audio asset + text prompt) but a different Hedra-
+  // hosted model UUID. Standard is the new default (Recommended
+  // tier); Pro is the Premium tier upgrade. Character 3 moves to
+  // Budget tier — kept live so operators can compare outputs.
+  | 'hedra_kling_avatar_v2_standard'
+  | 'hedra_kling_avatar_v2_pro';
 export type VideoProviderId = 'kie_ai' | 'fal_ai' | 'wavespeed' | 'atlas_cloud' | 'hedra';
 export type VideoModelQualityTier = 'budget' | 'recommended' | 'premium';
 
@@ -197,17 +205,69 @@ export const VIDEO_MODELS: readonly VideoModel[] = [
   {
     // Polish-21: Hedra Character 3. Image-to-talking-avatar. Single
     // call, up to 90s, no character drift, tight lip-sync. Reference
-    // image comes from Nano Banana Pro; audio comes from Hedra native
-    // TTS (Polish-21 launch) or ElevenLabs BYOK (Polish-22). Because
-    // it's single-call the worker skips the multi-segment fan-out +
-    // Replicate concat entirely.
+    // image comes from Nano Banana 2; audio from ElevenLabs BYOK
+    // (Polish-21.0.4). Because it's single-call the worker skips
+    // the multi-segment fan-out + Replicate concat entirely.
+    //
+    // Polish-21.0.9: demoted from `recommended` → `budget` tier
+    // after Hedra's own /models catalog reclassified it as their
+    // "last generation" avatar model (description: "Please use
+    // Hedra Avatar instead"). Kept LIVE and launcher-visible so
+    // operators can compare Kling v2 output against the working
+    // Character 3 baseline before switching over.
     id: 'hedra_character_3',
     displayName: 'Hedra Character 3',
-    qualityTier: 'recommended',
+    qualityTier: 'budget',
     description:
-      'AI-generated talking avatar from a character reference image. Natural body movement, tight lip-sync, no character drift across variants.',
+      'Hedra prior-gen talking-avatar model. Reliable lip-sync + character continuity from a single reference image; use as a budget baseline.',
     maxSingleCallSeconds: 90,
     supportedResolutions: ['540p', '720p'],
+    supportedAspectRatios: ['9:16', '16:9', '1:1'],
+    requiresReferenceImage: true,
+    supportsAudio: true,
+  },
+  {
+    // Polish-21.0.9: Kling AI Avatar v2 Standard on Hedra.
+    // Verified from live GET /models: id
+    // `d7eb3b2e-c8f8-45f9-83db-34f18dd0ba85`, 720p only,
+    // 60s max duration, 8 credits/sec (same base rate as
+    // Character 3 — Hedra passes Kling through at their standard
+    // credit rate, not fal.ai's $0.0562/sec passthrough).
+    //
+    // New RECOMMENDED tier default. Better character consistency
+    // than Character 3 at the same per-second price on the
+    // operator's Hedra plan.
+    id: 'hedra_kling_avatar_v2_standard',
+    displayName: 'Kling Avatar v2 Standard',
+    qualityTier: 'recommended',
+    description:
+      'Kling v2 talking-avatar on Hedra. Better character consistency than Character 3 at the same price. Default pick for most UGC.',
+    // 60s hard cap on Hedra (Kling Avatar v2 max_duration_ms).
+    maxSingleCallSeconds: 60,
+    supportedResolutions: ['720p'],
+    supportedAspectRatios: ['9:16', '16:9', '1:1'],
+    requiresReferenceImage: true,
+    supportsAudio: true,
+  },
+  {
+    // Polish-21.0.9: Kling AI Avatar v2 Pro on Hedra.
+    // Verified from live GET /models: id
+    // `0451ceea-a7b5-4275-a970-82bf4ef38055`, 720p only (Hedra
+    // does NOT expose 1080p for Kling variants despite fal.ai's
+    // direct passthrough listing 1080p), 60s max, 24 credits/sec
+    // = ~$0.099/sec at the operator's Hedra rate ($0.033/8 =
+    // $0.004125 per credit — same rate anchor as Character 3's
+    // usdPerSecond).
+    //
+    // PREMIUM tier. Higher-fidelity motion + facial detail vs
+    // Standard for hero variants.
+    id: 'hedra_kling_avatar_v2_pro',
+    displayName: 'Kling Avatar v2 Pro',
+    qualityTier: 'premium',
+    description:
+      'Kling v2 Pro talking-avatar on Hedra. Sharper facial detail + smoother motion than Standard. Best for hero variants.',
+    maxSingleCallSeconds: 60,
+    supportedResolutions: ['720p'],
     supportedAspectRatios: ['9:16', '16:9', '1:1'],
     requiresReferenceImage: true,
     supportsAudio: true,
@@ -253,6 +313,23 @@ export const VIDEO_PROVIDERS: readonly VideoProvider[] = [
     requiredCredentialProvider: 'hedra',
   },
 ];
+
+// -------------------------------------------------------------------
+// Polish-21.0.9: default Hedra model UUID constants
+// -------------------------------------------------------------------
+//
+// Verified from live GET https://api.hedra.com/web-app/public/models
+// on 2026-07-04. Declared ahead of MODEL_PROVIDER_CONFIGS so the
+// ModelProviderConfig entries can reference them by name (no
+// duplicated UUID strings). The env resolver
+// (getHedraModelIdWithEnvOverride in hedra-video.ts) takes ONE of
+// these as its fallback argument and returns either the env
+// override or the default.
+//
+// This module stays PURE (no env reads here).
+export const DEFAULT_HEDRA_CHARACTER_3_MODEL_ID = 'd1dd37a3-e39a-4854-a298-6510289f9cf2';
+export const DEFAULT_HEDRA_KLING_V2_STANDARD_MODEL_ID = 'd7eb3b2e-c8f8-45f9-83db-34f18dd0ba85';
+export const DEFAULT_HEDRA_KLING_V2_PRO_MODEL_ID = '0451ceea-a7b5-4275-a970-82bf4ef38055';
 
 export const MODEL_PROVIDER_CONFIGS: readonly ModelProviderConfig[] = [
   {
@@ -337,19 +414,74 @@ export const MODEL_PROVIDER_CONFIGS: readonly ModelProviderConfig[] = [
     // populated so the ModelProviderConfig type check passes and the
     // per-model cost math still resolves the entry.
     //
-    // ai_model_id is hardcoded here (matches the official
-    // hedra-labs/hedra-api-starter override, line 139). If Hedra
-    // rotates the Character 3 UUID, edit this string.
+    // ai_model_id verified from live GET
+    // https://api.hedra.com/web-app/public/models
+    // (see Polish-21.0.9 investigation).
     //
     // usdPerSecond: 0.033 per Polish-21 spec — base rate at Hedra Pro
-    // tier (~6 credits/sec × $0.0055/credit). Actual per-credit rate
-    // depends on the user's Hedra plan; the estimator surfaces a
-    // range hint in the UI so operators aren't quoted a false number.
+    // tier (~8 credits/sec × ~$0.004125/credit). Actual per-credit
+    // rate depends on the user's Hedra plan; the estimator surfaces
+    // a range hint in the UI so operators aren't quoted a false
+    // number. The Kling v2 entries below anchor to the SAME
+    // $0.004125/credit rate so cross-model cost comparisons stay
+    // apples-to-apples for the operator.
     modelId: 'hedra_character_3',
     providerId: 'hedra',
     usdPerSecond: 0.033,
     endpointUrl: 'https://api.hedra.com/web-app/public',
-    modelParam: 'd1dd37a3-e39a-4854-a298-6510289f9cf2',
+    modelParam: DEFAULT_HEDRA_CHARACTER_3_MODEL_ID,
+    inputShape: {
+      promptField: 'text_prompt',
+      imageField: 'start_keyframe_id',
+      audioField: '(hedra_manages_audio)',
+      durationField: 'duration_ms',
+      durationFormat: 'number',
+      aspectRatioField: 'aspect_ratio',
+      extras: {
+        resolution: '720p',
+      },
+    },
+  },
+  {
+    // Polish-21.0.9: Kling AI Avatar v2 Standard on Hedra. 8
+    // credits/sec at the same $0.004125/credit rate anchor as
+    // Character 3 → $0.033/sec identical passthrough. Motion +
+    // character consistency both step up materially over
+    // Character 3 for the same money, which is why this becomes
+    // the new Recommended-tier default.
+    //
+    // Kling v2 on Hedra is 720p-only (does NOT expose 1080p even
+    // though fal.ai's direct passthrough lists it); the client
+    // pins '720p' at the submit call site.
+    modelId: 'hedra_kling_avatar_v2_standard',
+    providerId: 'hedra',
+    usdPerSecond: 0.033,
+    endpointUrl: 'https://api.hedra.com/web-app/public',
+    modelParam: DEFAULT_HEDRA_KLING_V2_STANDARD_MODEL_ID,
+    inputShape: {
+      promptField: 'text_prompt',
+      imageField: 'start_keyframe_id',
+      audioField: '(hedra_manages_audio)',
+      durationField: 'duration_ms',
+      durationFormat: 'number',
+      aspectRatioField: 'aspect_ratio',
+      extras: {
+        resolution: '720p',
+      },
+    },
+  },
+  {
+    // Polish-21.0.9: Kling AI Avatar v2 Pro on Hedra. 24
+    // credits/sec × $0.004125/credit = $0.099/sec.
+    //
+    // Sub-$0.115 fal.ai direct passthrough — Hedra bundles Kling
+    // Pro at their standard credit rate, so operators on Hedra
+    // Pro plans get Pro fidelity ~14% cheaper than fal.ai direct.
+    modelId: 'hedra_kling_avatar_v2_pro',
+    providerId: 'hedra',
+    usdPerSecond: 0.099,
+    endpointUrl: 'https://api.hedra.com/web-app/public',
+    modelParam: DEFAULT_HEDRA_KLING_V2_PRO_MODEL_ID,
     inputShape: {
       promptField: 'text_prompt',
       imageField: 'start_keyframe_id',

@@ -897,14 +897,33 @@ describe('Polish-21 Commit 2: worker dispatch tripwires', () => {
     );
   };
 
-  it('runOneVariant dispatches to runOneVariantHedra when model.id === "hedra_character_3"', async () => {
+  it('runOneVariant dispatches to runOneVariantHedra when config.providerId === "hedra" (Polish-21.0.9: broadened from modelId check)', async () => {
     const src = await readSrc();
     // Layout regression: the Hedra branch must be the FIRST decision
     // in runOneVariant. Without it, the kie.ai fan-out runs on Hedra
     // jobs and crashes on getKieVideoUsdPerSecond / submitKieVideo.
+    //
+    // Polish-21.0.9 broadened the dispatch from the model-specific
+    // `input.model.id === 'hedra_character_3'` check to the
+    // provider-based `input.config.providerId === 'hedra'` so all
+    // three Hedra-hosted models (Character 3 + Kling v2 Standard +
+    // Kling v2 Pro) route to the same Hedra runner without adding
+    // a new branch per model.
     expect(src).toMatch(
-      /async function runOneVariant\(input: RunOneVariantInput\): Promise<VideoVariantResult> \{[\s\S]*?if \(input\.model\.id === 'hedra_character_3'\) \{[\s\S]*?return runOneVariantHedra\(input\);/,
+      /async function runOneVariant\(input: RunOneVariantInput\): Promise<VideoVariantResult> \{[\s\S]*?if \(input\.config\.providerId === 'hedra'\) \{[\s\S]*?return runOneVariantHedra\(input\);/,
     );
+    // Regression pin: the OLD model-specific check must NOT reappear
+    // anywhere in runOneVariant. A future model addition should
+    // route by providerId, not by re-introducing model-id branches.
+    const runOneVariantStart = src.indexOf(
+      'async function runOneVariant(input: RunOneVariantInput)',
+    );
+    const runOneVariantEnd = src.indexOf(
+      '// -------------------------------------------------------------------',
+      runOneVariantStart + 1,
+    );
+    const runOneVariantBody = src.slice(runOneVariantStart, runOneVariantEnd);
+    expect(runOneVariantBody).not.toMatch(/input\.model\.id === 'hedra_character_3'/);
   });
 
   it('runOneVariantHedra is defined and calls Claude → Nano Banana → asset → submit → poll → download → insert in that order', async () => {

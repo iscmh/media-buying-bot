@@ -326,13 +326,18 @@ function estimateByVideoModel(input: EstimateByVideoModelInput): CostEstimate {
     return { estimateUsd: 0, breakdown: [] };
   }
 
-  // Polish-21: Hedra Character 3 bills by ACTUAL audio duration, not
-  // by the per-call cap. maxSingleCallSeconds=90 is a hard limit, not
-  // a billing unit. The rest of the descriptor (seedance / kling)
-  // charges the full per-call cap even when the target is shorter,
-  // so we branch on modelId here rather than adding a
-  // billsByActualDuration flag to VideoModel.
-  const billsByActualDuration = modelId === 'hedra_character_3';
+  // Polish-21: Hedra models bill by ACTUAL audio duration, not by
+  // the per-call cap. maxSingleCallSeconds is a hard limit, not a
+  // billing unit for Hedra. The rest of the descriptor (seedance /
+  // kling on kie.ai) charges the full per-call cap even when the
+  // target is shorter, so we branch on the provider here rather
+  // than adding a billsByActualDuration flag to VideoModel.
+  //
+  // Polish-21.0.9: broadened from modelId === 'hedra_character_3'
+  // to providerId === 'hedra' so both Kling Avatar v2 variants
+  // (Standard + Pro) get the same actual-duration billing +
+  // Nano Banana 2 reference-image cost line as Character 3.
+  const billsByActualDuration = config.providerId === 'hedra';
 
   const segmentCount = computeSegmentCountForModel(model, target);
   const billedSecondsPerVariant = billsByActualDuration

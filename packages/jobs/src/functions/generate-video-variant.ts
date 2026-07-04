@@ -8,6 +8,7 @@ import {
   isVideoConcatEnabled,
   pollHedraGeneration,
   pollKieVideo,
+  resolveHedraModelIdForVideoModel,
   submitElevenLabsTts,
   submitHedraGeneration,
   submitKieVideo,
@@ -483,11 +484,13 @@ interface RunOneVariantInput {
 }
 
 async function runOneVariant(input: RunOneVariantInput): Promise<VideoVariantResult> {
-  // Polish-21 Commit 2: dispatch. Hedra Character 3 is single-call
-  // image-to-talking-avatar — completely different flow (asset upload,
-  // native TTS, no segments, no concat). Legacy kie.ai path stays
-  // through Commit 3 for backwards-compat with in-flight jobs.
-  if (input.model.id === 'hedra_character_3') {
+  // Polish-21 Commit 2 → Polish-21.0.9: dispatch. ALL Hedra-provider
+  // models (Character 3, Kling Avatar v2 Standard, Kling Avatar v2
+  // Pro) are single-call image-to-talking-avatar generations — same
+  // asset-upload + ElevenLabs TTS + /generations submit flow, only
+  // the ai_model_id UUID differs. Route by PROVIDER, not model id,
+  // so a future Hedra-hosted model lands here for free.
+  if (input.config.providerId === 'hedra') {
     return runOneVariantHedra(input);
   }
   const {
@@ -1370,10 +1373,16 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       if (err instanceof MissingProviderKeyError) return { ok: false as const, error: err.message };
       throw err;
     }
+    // Polish-21.0.9: env-override resolver reads
+    // HEDRA_{CHARACTER_3,KLING_V2_STANDARD,KLING_V2_PRO}_MODEL_ID
+    // at call time. Passing config.modelParam as the fallback so a
+    // future descriptor UUID rotation propagates without a config
+    // re-read here.
+    const aiModelId = resolveHedraModelIdForVideoModel(model.id, config.modelParam);
     return submitHedraGeneration({
       userId,
       apiKey: keys.hedra!,
-      aiModelId: config.modelParam,
+      aiModelId,
       startKeyframeId,
       // Polish-21.0.4 hotfix: audio_id path (ElevenLabs mp3
       // uploaded as Hedra audio asset). Replaces the .0.1/.0.2/.0.3

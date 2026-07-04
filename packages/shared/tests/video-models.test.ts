@@ -5,6 +5,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  DEFAULT_HEDRA_CHARACTER_3_MODEL_ID,
+  DEFAULT_HEDRA_KLING_V2_PRO_MODEL_ID,
+  DEFAULT_HEDRA_KLING_V2_STANDARD_MODEL_ID,
   HEDRA_VOICE_ROSTER,
   MODEL_PROVIDER_CONFIGS,
   VIDEO_DURATION_PRESETS,
@@ -36,9 +39,13 @@ import {
 const LAUNCHER_MODELS = VIDEO_MODELS.filter((m) => !m.hiddenFromLauncher);
 const HIDDEN_LEGACY_MODELS = VIDEO_MODELS.filter((m) => m.hiddenFromLauncher);
 
-describe('Polish-21: VIDEO_MODELS launcher-visible set', () => {
-  it('ships exactly one launcher-visible model: Hedra Character 3', () => {
-    expect(LAUNCHER_MODELS.map((m) => m.id)).toEqual(['hedra_character_3']);
+describe('Polish-21.0.9: VIDEO_MODELS launcher-visible set (3-card picker restore)', () => {
+  it('ships exactly three launcher-visible models: Character 3 + Kling v2 Standard + Kling v2 Pro', () => {
+    expect(LAUNCHER_MODELS.map((m) => m.id)).toEqual([
+      'hedra_character_3',
+      'hedra_kling_avatar_v2_standard',
+      'hedra_kling_avatar_v2_pro',
+    ]);
   });
 
   it('retains three hidden legacy models for backwards compat: seedance_1_5_pro / kling_3_standard / seedance_2', () => {
@@ -52,8 +59,16 @@ describe('Polish-21: VIDEO_MODELS launcher-visible set', () => {
     ]);
   });
 
-  it('launcher-visible models are all recommended-tier (single sole model at launch)', () => {
-    expect(LAUNCHER_MODELS.map((m) => m.qualityTier)).toEqual(['recommended']);
+  it('launcher tier layout: Character 3 = budget, Kling v2 Standard = recommended, Kling v2 Pro = premium', () => {
+    expect(getVideoModel('hedra_character_3')!.qualityTier).toBe('budget');
+    expect(getVideoModel('hedra_kling_avatar_v2_standard')!.qualityTier).toBe('recommended');
+    expect(getVideoModel('hedra_kling_avatar_v2_pro')!.qualityTier).toBe('premium');
+  });
+
+  it('exactly ONE launcher-visible model is Recommended tier (drives the "Recommended" badge)', () => {
+    const recommended = LAUNCHER_MODELS.filter((m) => m.qualityTier === 'recommended');
+    expect(recommended).toHaveLength(1);
+    expect(recommended[0]!.id).toBe('hedra_kling_avatar_v2_standard');
   });
 
   it('every launcher-visible model supports 9:16 (vertical UGC is the product spine)', () => {
@@ -68,14 +83,16 @@ describe('Polish-21: VIDEO_MODELS launcher-visible set', () => {
     }
   });
 
-  it('every launcher-visible model supports audio (Hedra Character 3 handles TTS natively)', () => {
+  it('every launcher-visible model supports audio (Hedra hosts every avatar model)', () => {
     for (const m of LAUNCHER_MODELS) {
       expect(m.supportsAudio).toBe(true);
     }
   });
 
-  it('per-call cap: Hedra Character 3 = 90s (single-call full video)', () => {
+  it('per-call caps: Character 3 = 90s (Hedra-native long-form), Kling v2 Standard/Pro = 60s (Kling on Hedra hard cap)', () => {
     expect(getVideoModel('hedra_character_3')!.maxSingleCallSeconds).toBe(90);
+    expect(getVideoModel('hedra_kling_avatar_v2_standard')!.maxSingleCallSeconds).toBe(60);
+    expect(getVideoModel('hedra_kling_avatar_v2_pro')!.maxSingleCallSeconds).toBe(60);
   });
 
   it('legacy models retain their Polish-20 per-call caps: Seedance 1.5 Pro = 12s, Kling 3.0 = 15s, Seedance 2 = 15s', () => {
@@ -84,8 +101,24 @@ describe('Polish-21: VIDEO_MODELS launcher-visible set', () => {
     expect(getVideoModel('seedance_2')!.maxSingleCallSeconds).toBe(15);
   });
 
-  it('Hedra Character 3 REQUIRES a reference image (Nano Banana keyframe)', () => {
-    expect(getVideoModel('hedra_character_3')!.requiresReferenceImage).toBe(true);
+  it('every Hedra model REQUIRES a reference image (Nano Banana 2 keyframe)', () => {
+    for (const id of [
+      'hedra_character_3',
+      'hedra_kling_avatar_v2_standard',
+      'hedra_kling_avatar_v2_pro',
+    ] as const) {
+      expect(getVideoModel(id)!.requiresReferenceImage).toBe(true);
+    }
+  });
+
+  it('Kling v2 variants list ONLY 720p (Hedra does NOT expose 1080p for Kling despite fal.ai passthrough)', () => {
+    // Regression pin: Hedra's /models response for Kling v2
+    // Standard AND Pro lists resolutions: ["720p"]. A future
+    // widening to include 1080p must be verified against a fresh
+    // GET /models fetch — silently allowing 1080p here would
+    // route submits into a 422 from Hedra.
+    expect(getVideoModel('hedra_kling_avatar_v2_standard')!.supportedResolutions).toEqual(['720p']);
+    expect(getVideoModel('hedra_kling_avatar_v2_pro')!.supportedResolutions).toEqual(['720p']);
   });
 
   it('legacy models do NOT require a reference image (text-to-video native)', () => {
@@ -125,22 +158,62 @@ describe('Polish-21: VIDEO_PROVIDERS launch matrix', () => {
 });
 
 describe('Polish-21: MODEL_PROVIDER_CONFIGS launch coverage', () => {
-  it('Hedra Character 3 has exactly one hedra config', () => {
-    const configs = MODEL_PROVIDER_CONFIGS.filter((c) => c.modelId === 'hedra_character_3');
-    expect(configs).toHaveLength(1);
-    expect(configs[0]!.providerId).toBe('hedra');
+  it('every Hedra model has exactly one hedra config (Character 3 + Kling v2 Standard + Kling v2 Pro)', () => {
+    for (const id of [
+      'hedra_character_3',
+      'hedra_kling_avatar_v2_standard',
+      'hedra_kling_avatar_v2_pro',
+    ] as const) {
+      const configs = MODEL_PROVIDER_CONFIGS.filter((c) => c.modelId === id);
+      expect(configs).toHaveLength(1);
+      expect(configs[0]!.providerId).toBe('hedra');
+    }
   });
 
-  it('Character 3 modelParam is the hardcoded ai_model_id UUID from hedra-labs/hedra-api-starter', () => {
+  it('Hedra model UUIDs verified against live GET /models on 2026-07-04', () => {
+    // Regression pins: any UUID rotation on Hedra's side must
+    // update these three constants + refetch /models. Silently
+    // shipping a bad UUID would surface as HTTP 422 "model not
+    // found" on submit, which is louder than a wrong-model output
+    // but still a delay in the operator's live loop.
     expect(getModelProviderConfig('hedra_character_3', 'hedra')!.modelParam).toBe(
       'd1dd37a3-e39a-4854-a298-6510289f9cf2',
     );
+    expect(DEFAULT_HEDRA_CHARACTER_3_MODEL_ID).toBe('d1dd37a3-e39a-4854-a298-6510289f9cf2');
+    expect(getModelProviderConfig('hedra_kling_avatar_v2_standard', 'hedra')!.modelParam).toBe(
+      'd7eb3b2e-c8f8-45f9-83db-34f18dd0ba85',
+    );
+    expect(DEFAULT_HEDRA_KLING_V2_STANDARD_MODEL_ID).toBe('d7eb3b2e-c8f8-45f9-83db-34f18dd0ba85');
+    expect(getModelProviderConfig('hedra_kling_avatar_v2_pro', 'hedra')!.modelParam).toBe(
+      '0451ceea-a7b5-4275-a970-82bf4ef38055',
+    );
+    expect(DEFAULT_HEDRA_KLING_V2_PRO_MODEL_ID).toBe('0451ceea-a7b5-4275-a970-82bf4ef38055');
   });
 
-  it('Character 3 posts to the public Hedra API base URL', () => {
-    expect(getModelProviderConfig('hedra_character_3', 'hedra')!.endpointUrl).toBe(
-      'https://api.hedra.com/web-app/public',
+  it('all Hedra models post to the same public Hedra API base URL', () => {
+    for (const id of [
+      'hedra_character_3',
+      'hedra_kling_avatar_v2_standard',
+      'hedra_kling_avatar_v2_pro',
+    ] as const) {
+      expect(getModelProviderConfig(id, 'hedra')!.endpointUrl).toBe(
+        'https://api.hedra.com/web-app/public',
+      );
+    }
+  });
+
+  it('Hedra per-second pricing: Character 3 + Kling v2 Standard = $0.033/sec, Kling v2 Pro = $0.099/sec', () => {
+    // Anchored at Hedra's $0.004125/credit rate (the per-credit
+    // rate implied by Character 3's usdPerSecond=0.033 at 8
+    // credits/sec).
+    //   Character 3            : 8 credits/sec × $0.004125 = $0.033/sec
+    //   Kling v2 Standard      : 8 credits/sec × $0.004125 = $0.033/sec
+    //   Kling v2 Pro           : 24 credits/sec × $0.004125 = $0.099/sec
+    expect(getModelProviderConfig('hedra_character_3', 'hedra')!.usdPerSecond).toBe(0.033);
+    expect(getModelProviderConfig('hedra_kling_avatar_v2_standard', 'hedra')!.usdPerSecond).toBe(
+      0.033,
     );
+    expect(getModelProviderConfig('hedra_kling_avatar_v2_pro', 'hedra')!.usdPerSecond).toBe(0.099);
   });
 
   it('legacy models retain their kie.ai configs pending Commit 3 deletion', () => {
@@ -208,11 +281,17 @@ describe('Polish-20: per-model input-shape tripwires', () => {
 });
 
 describe('Polish-21: getLiveProvidersForModel + getDefaultProviderForModel', () => {
-  it('Hedra Character 3 returns the hedra provider', () => {
-    const live = getLiveProvidersForModel('hedra_character_3');
-    expect(live).toHaveLength(1);
-    expect(live[0]!.id).toBe('hedra');
-    expect(getDefaultProviderForModel('hedra_character_3')?.id).toBe('hedra');
+  it('every launcher-visible Hedra model returns the hedra provider', () => {
+    for (const id of [
+      'hedra_character_3',
+      'hedra_kling_avatar_v2_standard',
+      'hedra_kling_avatar_v2_pro',
+    ] as const) {
+      const live = getLiveProvidersForModel(id);
+      expect(live).toHaveLength(1);
+      expect(live[0]!.id).toBe('hedra');
+      expect(getDefaultProviderForModel(id)?.id).toBe('hedra');
+    }
   });
 
   it('legacy models return the kie.ai provider (until Commit 3 removes them)', () => {

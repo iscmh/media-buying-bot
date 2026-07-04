@@ -182,6 +182,12 @@ export {
   HEDRA_DEFAULT_DURATION_MS,
   HEDRA_MIN_DURATION_MS,
   HEDRA_MAX_DURATION_MS,
+  // Polish-21.0.9: env-override resolvers for the three Hedra
+  // model UUIDs (Character 3 + Kling Avatar v2 Standard + Pro).
+  getHedraCharacter3ModelId,
+  getHedraKlingV2StandardModelId,
+  getHedraKlingV2ProModelId,
+  resolveHedraModelIdForVideoModel,
   redactHedraApiKey,
   logHedraRequest,
   logHedraResponse,

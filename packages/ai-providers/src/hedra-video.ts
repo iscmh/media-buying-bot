@@ -1,5 +1,10 @@
 import { Buffer } from 'node:buffer';
 import { logAiProviderApiCall } from '@mbb/db';
+import {
+  DEFAULT_HEDRA_CHARACTER_3_MODEL_ID,
+  DEFAULT_HEDRA_KLING_V2_PRO_MODEL_ID,
+  DEFAULT_HEDRA_KLING_V2_STANDARD_MODEL_ID,
+} from '@mbb/shared';
 import { callProvider } from './chokepoint';
 
 /**
@@ -157,6 +162,64 @@ export function clampHedraDurationMs(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) return HEDRA_DEFAULT_DURATION_MS;
   const raw = Math.round(seconds * 1000);
   return Math.max(HEDRA_MIN_DURATION_MS, Math.min(HEDRA_MAX_DURATION_MS, raw));
+}
+
+// -------------------------------------------------------------------
+// Polish-21.0.9: per-model UUID env override
+// -------------------------------------------------------------------
+//
+// Mirrors the Polish-21.0.8 getNanoBananaModelId pattern in
+// gemini-client.ts: env is read at CALL TIME (not module-load time)
+// so setting HEDRA_*_MODEL_ID at deploy time picks up without a
+// bundle rebuild. Whitespace-only overrides fall through to the
+// default so a blank env var doesn't wire a nonsense UUID.
+//
+// One env name per model:
+//   HEDRA_CHARACTER_3_MODEL_ID          → hedra_character_3
+//   HEDRA_KLING_V2_STANDARD_MODEL_ID    → hedra_kling_avatar_v2_standard
+//   HEDRA_KLING_V2_PRO_MODEL_ID         → hedra_kling_avatar_v2_pro
+//
+// The worker calls resolveHedraModelIdWithEnv(descriptorDefault,
+// videoModelId) right before submitHedraGeneration so descriptor
+// UUIDs are used as fallbacks, not baked into the wire body.
+
+export function getHedraCharacter3ModelId(): string {
+  return readEnvUuidOrDefault('HEDRA_CHARACTER_3_MODEL_ID', DEFAULT_HEDRA_CHARACTER_3_MODEL_ID);
+}
+
+export function getHedraKlingV2StandardModelId(): string {
+  return readEnvUuidOrDefault(
+    'HEDRA_KLING_V2_STANDARD_MODEL_ID',
+    DEFAULT_HEDRA_KLING_V2_STANDARD_MODEL_ID,
+  );
+}
+
+export function getHedraKlingV2ProModelId(): string {
+  return readEnvUuidOrDefault('HEDRA_KLING_V2_PRO_MODEL_ID', DEFAULT_HEDRA_KLING_V2_PRO_MODEL_ID);
+}
+
+/**
+ * Resolve the Hedra ai_model_id for a given VideoModelId at call
+ * time, honoring per-model env overrides. Returns the descriptor
+ * default when the VideoModelId isn't Hedra-hosted (defensive — the
+ * dispatcher already routes non-Hedra models elsewhere).
+ */
+export function resolveHedraModelIdForVideoModel(
+  videoModelId: string,
+  descriptorDefault: string,
+): string {
+  if (videoModelId === 'hedra_character_3') return getHedraCharacter3ModelId();
+  if (videoModelId === 'hedra_kling_avatar_v2_standard') return getHedraKlingV2StandardModelId();
+  if (videoModelId === 'hedra_kling_avatar_v2_pro') return getHedraKlingV2ProModelId();
+  return descriptorDefault;
+}
+
+function readEnvUuidOrDefault(envName: string, fallback: string): string {
+  const raw = process.env[envName];
+  if (typeof raw !== 'string') return fallback;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return fallback;
+  return trimmed;
 }
 
 export interface HedraSubmitGenerationResult {

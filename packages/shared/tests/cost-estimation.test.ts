@@ -403,3 +403,109 @@ describe('Polish-21.0.8: Nano Banana 2 cost line on Hedra Character 3 estimates'
     expect(VIDEO_MODEL_NANO_BANANA_PER_VARIANT_USD).not.toBe(0.15);
   });
 });
+
+describe('Polish-21.0.9: Kling Avatar v2 Standard + Pro cost estimates on Hedra', () => {
+  // Cost formula per variant on Hedra models (bills by ACTUAL
+  // duration since Polish-21.0.9 broadened billsByActualDuration
+  // to providerId === 'hedra'):
+  //   $0.05 Claude script + duration × $/sec + $0.08 Nano Banana 2 ref image
+  //
+  // Kling v2 Standard @ 30s = 0.05 + 30×0.033 + 0.08 = $1.12/variant
+  // Kling v2 Pro      @ 30s = 0.05 + 30×0.099 + 0.08 = $3.10/variant
+
+  it('Kling v2 Standard 30s single variant = $0.05 Claude + $0.99 video + $0.08 ref = $1.12', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'hedra_kling_avatar_v2_standard',
+      videoProviderId: 'hedra',
+      sourceDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.05 + 30 * 0.033 + 0.08, 4);
+    expect(r.breakdown.some((b) => /Kling Avatar v2 Standard/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Nano Banana 2 reference image/.test(b.item))).toBe(true);
+    // Bills by ACTUAL duration, not by per-call cap × segments.
+    expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(false);
+  });
+
+  it('Kling v2 Pro 30s single variant = $0.05 Claude + $2.97 video + $0.08 ref = $3.10', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'hedra_kling_avatar_v2_pro',
+      videoProviderId: 'hedra',
+      sourceDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.05 + 30 * 0.099 + 0.08, 4);
+    expect(r.breakdown.some((b) => /Kling Avatar v2 Pro/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Nano Banana 2 reference image/.test(b.item))).toBe(true);
+  });
+
+  it('Kling v2 Pro is exactly 3× the per-second video cost of Kling v2 Standard', () => {
+    // 24 credits/sec vs 8 credits/sec on Hedra — regression pin
+    // catches any accidental usdPerSecond swap between the two
+    // configs.
+    const std = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'hedra_kling_avatar_v2_standard',
+      videoProviderId: 'hedra',
+      sourceDurationSeconds: 10,
+    });
+    const pro = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      videoModelId: 'hedra_kling_avatar_v2_pro',
+      videoProviderId: 'hedra',
+      sourceDurationSeconds: 10,
+    });
+    // Isolate the video-only line (strip Claude script + Nano
+    // Banana ref, which are model-independent constants) and
+    // check the 3× ratio directly.
+    const stdVideoLine = std.breakdown.find((b) => /Kling Avatar v2 Standard/.test(b.item))!;
+    const proVideoLine = pro.breakdown.find((b) => /Kling Avatar v2 Pro/.test(b.item))!;
+    expect(proVideoLine.cost / stdVideoLine.cost).toBeCloseTo(3, 4);
+  });
+
+  it('Kling v2 Standard = same per-variant cost as Character 3 at the same duration (Hedra passes both through at 8 credits/sec)', () => {
+    // Both anchor to $0.033/sec on the operator's Hedra plan —
+    // Kling v2 Standard is a strict quality upgrade over
+    // Character 3 at the same price, which is why the descriptor
+    // moves Character 3 to Budget tier and puts Standard as the
+    // new Recommended default.
+    const c3 = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 5,
+      videoModelId: 'hedra_character_3',
+      videoProviderId: 'hedra',
+      sourceDurationSeconds: 30,
+    });
+    const klingStd = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 5,
+      videoModelId: 'hedra_kling_avatar_v2_standard',
+      videoProviderId: 'hedra',
+      sourceDurationSeconds: 30,
+    });
+    expect(klingStd.estimateUsd).toBeCloseTo(c3.estimateUsd, 4);
+  });
+
+  it('every Hedra model bills the $0.08 Nano Banana 2 reference-image line (broadened from modelId-specific to providerId-based)', () => {
+    for (const modelId of [
+      'hedra_character_3',
+      'hedra_kling_avatar_v2_standard',
+      'hedra_kling_avatar_v2_pro',
+    ] as const) {
+      const r = estimateGenerationCost({
+        conceptType: 'ugc',
+        variantCount: 3,
+        videoModelId: modelId,
+        videoProviderId: 'hedra',
+        sourceDurationSeconds: 30,
+      });
+      const nanoLine = r.breakdown.find((b) => /Nano Banana 2 reference image/.test(b.item));
+      expect(nanoLine, `${modelId} missing Nano Banana 2 line`).toBeDefined();
+      expect(nanoLine!.cost).toBeCloseTo(3 * 0.08, 4);
+    }
+  });
+});
