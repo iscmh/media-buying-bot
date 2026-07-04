@@ -536,6 +536,106 @@ describe('Polish-21.0.4 hotfix: ELEVENLABS_VOICE_ROSTER (preset UUIDs) + helpers
   });
 });
 
+describe('Polish-21.0.11: pickElevenLabsVoicesForBatch — gender-aware filtering', () => {
+  // Job 1feb8b33 diagnosed a female voice (Sarah) landing on a male
+  // character because the picker rotated the full 5-voice roster
+  // without checking Claude's character.gender output. The fix
+  // filters by gender BEFORE the offset rotation.
+  //
+  // Current shipping roster (see ELEVENLABS_VOICE_ROSTER):
+  //   Sarah      female young      isDefault
+  //   George     male   young
+  //   Charlotte  female middle_aged
+  //   Daniel     male   middle_aged
+  //   Josh       male   young
+  const FEMALE_UUIDS = ['EXAVITQu4vr4xnSDxMaL', 'XB0fDUnXU5powFXDhCwa'];
+  const MALE_UUIDS = ['JBFqnCBsd6RMkjVDRZzb', 'onwK4e9ZLuTAKqWW03F9', 'TxGEqnHWrfWFTfGW9XjX'];
+
+  it('characterGender omitted: rotates full roster (legacy behavior preserved)', () => {
+    const picks = pickHedraVoicesForBatch(5);
+    expect(picks.map((v) => v.id)).toEqual([
+      'EXAVITQu4vr4xnSDxMaL',
+      'JBFqnCBsd6RMkjVDRZzb',
+      'XB0fDUnXU5powFXDhCwa',
+      'onwK4e9ZLuTAKqWW03F9',
+      'TxGEqnHWrfWFTfGW9XjX',
+    ]);
+  });
+
+  it('characterGender=male: every pick is a MALE voice (never Sarah or Charlotte)', () => {
+    // Regression pin against job 1feb8b33.
+    const picks = pickHedraVoicesForBatch(10, 0, undefined, 'male');
+    for (const pick of picks) {
+      expect(pick.gender).toBe('male');
+      expect(FEMALE_UUIDS).not.toContain(pick.id);
+      expect(MALE_UUIDS).toContain(pick.id);
+    }
+  });
+
+  it('characterGender=female: every pick is a FEMALE voice (never George, Daniel, or Josh)', () => {
+    const picks = pickHedraVoicesForBatch(10, 0, undefined, 'female');
+    for (const pick of picks) {
+      expect(pick.gender).toBe('female');
+      expect(MALE_UUIDS).not.toContain(pick.id);
+      expect(FEMALE_UUIDS).toContain(pick.id);
+    }
+  });
+
+  it('deterministic per (offset, gender): same call → same picks (retry safety)', () => {
+    const a = pickHedraVoicesForBatch(5, 42, undefined, 'male').map((v) => v.id);
+    const b = pickHedraVoicesForBatch(5, 42, undefined, 'male').map((v) => v.id);
+    expect(a).toEqual(b);
+  });
+
+  it('offset shifts the start position within the gender-filtered subset', () => {
+    // 3 male voices in the shipping roster: George, Daniel, Josh
+    // (in that order). offset=0 starts at index 0; offset=1 starts
+    // at index 1.
+    const at0 = pickHedraVoicesForBatch(3, 0, undefined, 'male').map((v) => v.label);
+    const at1 = pickHedraVoicesForBatch(3, 1, undefined, 'male').map((v) => v.label);
+    expect(at0).toEqual(['George', 'Daniel', 'Josh']);
+    expect(at1).toEqual(['Daniel', 'Josh', 'George']);
+  });
+
+  it('defensive fallback: if roster has ZERO matching-gender voices, falls back to the full roster (batch still ships)', () => {
+    const femaleOnlyRoster: HedraVoiceRosterEntry[] = [
+      {
+        id: 'aa1b2c3d4e5f67890abcdef1234567890',
+        label: 'Anna',
+        description: 'Only voice in this roster.',
+        gender: 'female',
+        age: 'young',
+      },
+    ];
+    // No male entries at all — the fix must not crash or return
+    // an empty array; it falls back to the full roster.
+    const picks = pickHedraVoicesForBatch(2, 0, femaleOnlyRoster, 'male');
+    expect(picks).toHaveLength(2);
+    expect(picks[0]!.id).toBe(femaleOnlyRoster[0]!.id);
+  });
+
+  it('roster diversity pin: 2 female + 3 male entries at Polish-21.0.11 launch', () => {
+    // Documented via the operator's spec + the roster comments.
+    // Any future edit shifting the balance should update this pin
+    // deliberately, not silently.
+    const femaleCount = HEDRA_VOICE_ROSTER.filter((v) => v.gender === 'female').length;
+    const maleCount = HEDRA_VOICE_ROSTER.filter((v) => v.gender === 'male').length;
+    expect(femaleCount).toBe(2);
+    expect(maleCount).toBe(3);
+    expect(femaleCount + maleCount).toBe(HEDRA_VOICE_ROSTER.length);
+  });
+
+  it('regression pin: every roster entry carries a non-empty gender field (schema invariant)', () => {
+    // The gender-aware picker relies on every entry having gender.
+    // A future edit that adds an entry without a gender (or with
+    // an empty string) would slip past TypeScript at the roster
+    // literal but break at runtime — pin it here.
+    for (const v of HEDRA_VOICE_ROSTER) {
+      expect(['male', 'female']).toContain(v.gender);
+    }
+  });
+});
+
 describe('Polish-20: getVideoModel / getVideoProvider / getModelProviderConfig lookups', () => {
   it('returns undefined for unknown ids without throwing', () => {
     // Cast to sidestep the compile-time enum guard so we exercise the

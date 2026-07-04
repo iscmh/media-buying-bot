@@ -1864,4 +1864,54 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     // AND: the loop's for-condition reads from pollMaxAttempts.
     expect(src).toMatch(/for \(let attempt = 0; attempt < pollMaxAttempts; attempt\+\+\)/);
   });
+
+  it('Polish-21.0.11: voice picker call threads character.gender from the Claude ad-spec', async () => {
+    // Regression pin against job 1feb8b33: female voice (Sarah)
+    // landed on a male character because the picker rotated the
+    // full 5-voice roster blind to character.gender. Fix threads
+    // character.gender through the picker's characterGender param.
+    const src = await readSrc();
+    const hedraStart = src.indexOf('async function runOneVariantHedra');
+    const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
+    expect(hedraStart).toBeGreaterThan(-1);
+    expect(hedraEnd).toBeGreaterThan(hedraStart);
+    const body = src.slice(hedraStart, hedraEnd);
+    // Voice pick call MUST include characterGender: character.gender.
+    // Positive match is sufficient — a future regression would drop
+    // the field, failing this pin. A negative pin against the
+    // pre-fix single-line shape got flaky under Prettier reflow.
+    expect(body).toMatch(
+      /pickElevenLabsVoiceForVariant\(\{[\s\S]*?characterGender: character\.gender/,
+    );
+  });
+
+  it('Polish-21.0.11: Hedra upload step opts into ffmpeg compression', async () => {
+    // Regression pin: the Supabase 50MB bucket cap rejects
+    // uncompressed Kling Avatar v2 output (job 1feb8b33). The
+    // upload step MUST pass compress: true so the video-compress
+    // helper runs before Supabase sees the buffer.
+    const src = await readSrc();
+    const hedraUploadStart = src.indexOf('step.run(`hedra-upload-video-');
+    expect(hedraUploadStart).toBeGreaterThan(-1);
+    const uploadCallStart = src.indexOf('uploadGeneratedVideoFromUrl({', hedraUploadStart);
+    expect(uploadCallStart).toBeGreaterThan(-1);
+    const uploadCallEnd = src.indexOf('}),', uploadCallStart);
+    const uploadCall = src.slice(uploadCallStart, uploadCallEnd);
+    expect(uploadCall).toMatch(/compress: true/);
+  });
+
+  it('Polish-21.0.11: generation_metadata carries upload compression forensics', async () => {
+    // Regression pin: the composite row logs original + final
+    // sizes + wasCompressed + any compression error so operators
+    // can tune the CRF preset without redeploying.
+    const src = await readSrc();
+    const insertStart = src.indexOf('step.run(`hedra-insert-composite-');
+    expect(insertStart).toBeGreaterThan(-1);
+    const insertEnd = src.indexOf('});', insertStart);
+    const insertBlock = src.slice(insertStart, insertEnd);
+    expect(insertBlock).toMatch(/upload_original_bytes:/);
+    expect(insertBlock).toMatch(/upload_final_bytes:/);
+    expect(insertBlock).toMatch(/upload_was_compressed:/);
+    expect(insertBlock).toMatch(/upload_compression_error:/);
+  });
 });

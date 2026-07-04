@@ -693,23 +693,57 @@ export function isElevenLabsVoiceRosterUncurated(
 export const isHedraVoiceRosterUncurated = isElevenLabsVoiceRosterUncurated;
 
 /**
+ * Character gender values the Nano Banana / Hedra character shape
+ * emits. Kept narrow so a future roster or picker widening (adding
+ * a 'neutral' timbre voice) surfaces via a compile error — TS won't
+ * let a caller accidentally pass a raw string like 'nonbinary'.
+ *
+ * The ElevenLabs roster only carries 'male' | 'female' entries at
+ * Polish-21.0.11 launch; `pickElevenLabsVoicesForBatch` matches
+ * character gender to voice gender directly. A future 'neutral'
+ * character (or 'neutral' voice on the roster) would need to
+ * decide the match rule — kept out of scope here.
+ */
+export type CharacterVoiceGender = 'male' | 'female';
+
+/**
  * Deterministic voice picker: for a batch of N variants, returns N
  * voice entries rotating through the roster (wraps if N > roster
  * length). Same variantCount + roster → same picks, so retries of
  * the same job produce identical output. First entry starts at the
  * `offset` position — used to shuffle across concurrent batches so
  * the same voice doesn't always win variant 0.
+ *
+ * Polish-21.0.11 hotfix: `characterGender` filters the roster to
+ * matching-gender voices BEFORE the offset rotation, so a male
+ * character never lands Sarah / Charlotte and a female character
+ * never lands George / Daniel / Josh. Defensive fallback: when the
+ * roster contains ZERO voices matching characterGender, we return
+ * to the full roster — better than crashing the batch if a future
+ * roster edit accidentally drops one gender.
  */
 export function pickElevenLabsVoicesForBatch(
   variantCount: number,
   offset: number = 0,
   roster: readonly ElevenLabsVoiceRosterEntry[] = ELEVENLABS_VOICE_ROSTER,
+  characterGender?: CharacterVoiceGender,
 ): ElevenLabsVoiceRosterEntry[] {
   if (variantCount <= 0 || roster.length === 0) return [];
+  // Polish-21.0.11: filter by gender first. Empty-match → fall
+  // through to full roster so the batch still ships (loud-log
+  // handled by the caller in the worker).
+  const effectiveRoster =
+    characterGender != null
+      ? (() => {
+          const filtered = roster.filter((v) => v.gender === characterGender);
+          return filtered.length > 0 ? filtered : roster;
+        })()
+      : roster;
   const picks: ElevenLabsVoiceRosterEntry[] = [];
-  const start = ((offset % roster.length) + roster.length) % roster.length;
+  const start =
+    ((offset % effectiveRoster.length) + effectiveRoster.length) % effectiveRoster.length;
   for (let i = 0; i < variantCount; i++) {
-    picks.push(roster[(start + i) % roster.length]!);
+    picks.push(effectiveRoster[(start + i) % effectiveRoster.length]!);
   }
   return picks;
 }

@@ -24,6 +24,7 @@ import {
   getVideoModel,
   isElevenLabsVoiceRosterUncurated,
   pickElevenLabsVoicesForBatch,
+  type CharacterVoiceGender,
   type ElevenLabsVoiceRosterEntry,
   type ModelProviderConfig,
   type VideoModel,
@@ -1270,7 +1271,18 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   const startKeyframeId = assetResult.assetId;
 
   // Voice pick (deterministic per (jobId, variantIndex, variantCount)).
-  const voice = pickElevenLabsVoiceForVariant({ variantIndex, variantCount, jobId });
+  //
+  // Polish-21.0.11 hotfix: threads the StructuredCharacter's gender
+  // into the roster filter so a male character never lands a female
+  // voice and vice versa. Job 1feb8b33 diagnosed Sarah (female)
+  // being picked for a male character — the picker rotated the
+  // full 5-voice roster blind to character.gender.
+  const voice = pickElevenLabsVoiceForVariant({
+    variantIndex,
+    variantCount,
+    jobId,
+    characterGender: character.gender,
+  });
 
   // Polish-21.0.4 hotfix: generate TTS audio via ElevenLabs BYOK
   // (replaces Hedra native TTS blocked on voice-UUID availability).
@@ -1545,12 +1557,22 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   }
 
   // Step 8: mirror the mp4 to Supabase Storage.
+  //
+  // Polish-21.0.11 hotfix: compress via ffmpeg (libx264 CRF 25 +
+  // aac 128kbps + faststart) BEFORE the Supabase upload. Kling
+  // Avatar v2 Standard 30s 720p output is ~60-100MB — well past
+  // the operator's 50MB Supabase bucket cap. Character 3 outputs
+  // are smaller but the same compression step is a strict win
+  // (lower egress, faster page loads). Missing ffmpeg or a
+  // non-zero exit falls back to the raw buffer gracefully — see
+  // compressVideoBuffer's contract.
   const upload = await step.run(`hedra-upload-video-${variantIndex}`, async () =>
     uploadGeneratedVideoFromUrl({
       userId,
       jobId,
       remoteUrl: downloadUrl,
       filename: `video-${model.id}-${variantIndex}-composite`,
+      compress: true,
     }),
   );
 
@@ -1595,6 +1617,13 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         segment_count_requested: 1,
         segment_count_generated: 1,
         stitched: false,
+        // Polish-21.0.11: compression forensics. Lets an operator
+        // tune the CRF preset per-model or diagnose a 50MB
+        // Supabase cap regression.
+        upload_original_bytes: upload.originalBytes,
+        upload_final_bytes: upload.sizeBytes,
+        upload_was_compressed: upload.wasCompressed,
+        upload_compression_error: upload.compressionError ?? null,
       },
     });
   });
@@ -1611,14 +1640,32 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
  *
  * Polish-21.0.4 hotfix: renamed from pickHedraVoiceForVariant.
  * The roster is now ElevenLabs preset UUIDs (not Hedra native).
+ *
+ * Polish-21.0.11 hotfix: `characterGender` filters the roster to
+ * matching-gender voices FIRST — job 1feb8b33 diagnosed a female
+ * voice (Sarah) landing on a male character because the picker
+ * rotated the full roster blind to Claude's character.gender
+ * output. Filter → rotate → pick.
  */
 export function pickElevenLabsVoiceForVariant(input: {
   variantIndex: number;
   variantCount: number;
   jobId: string;
+  /**
+   * Polish-21.0.11: character gender from the StructuredCharacter
+   * block Claude emits in the Hedra ad spec. Undefined = no
+   * filtering (legacy callers). Character 3 + Kling paths always
+   * pass it now.
+   */
+  characterGender?: CharacterVoiceGender;
 }): ElevenLabsVoiceRosterEntry {
   const offset = computeElevenLabsVoiceOffsetForJob(input.jobId);
-  const picks = pickElevenLabsVoicesForBatch(Math.max(1, input.variantCount), offset);
+  const picks = pickElevenLabsVoicesForBatch(
+    Math.max(1, input.variantCount),
+    offset,
+    undefined,
+    input.characterGender,
+  );
   if (picks.length > 0) {
     return picks[input.variantIndex % picks.length]!;
   }

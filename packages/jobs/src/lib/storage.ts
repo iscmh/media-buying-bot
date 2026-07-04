@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { compressVideoBuffer } from './video-compress';
 
 /**
  * Service-role Supabase client for Inngest job use. Runs from a trusted
@@ -133,7 +134,30 @@ export async function uploadGeneratedVideoFromUrl(input: {
   maxBytes?: number;
   /** Headers forwarded to the upstream GET. Use for Files-API-style private URIs. */
   fetchHeaders?: Record<string, string>;
-}): Promise<{ path: string; publicUrl: string; sizeBytes: number }> {
+  /**
+   * Polish-21.0.11: run the downloaded mp4 through libx264 / CRF 25
+   * / aac 128kbps compression BEFORE the Supabase upload. Kling
+   * Avatar v2 Standard 30s 720p output is ~60-100MB and blows past
+   * the operator's Supabase 50MB cap; Character 3 outputs are
+   * smaller but benefit from the same pass.
+   *
+   * Fallback: if ffmpeg is unavailable or exits non-zero, the
+   * helper uploads the ORIGINAL buffer and logs the compression
+   * failure. See compressVideoBuffer for the graceful-degrade
+   * contract.
+   */
+  compress?: boolean;
+}): Promise<{
+  path: string;
+  publicUrl: string;
+  sizeBytes: number;
+  /** Polish-21.0.11: bytes before compression (== sizeBytes when compress=false). */
+  originalBytes: number;
+  /** Polish-21.0.11: true when compression actually shrank the file. */
+  wasCompressed: boolean;
+  /** Polish-21.0.11: set only when compression was attempted and failed. */
+  compressionError?: string;
+}> {
   const supabase = getServiceRoleSupabase();
   const stem = input.filename ?? 'output';
   const path = `${input.userId}/generated/${input.jobId}/${stem}.mp4`;
@@ -147,20 +171,49 @@ export async function uploadGeneratedVideoFromUrl(input: {
   if (!res.ok) {
     throw new Error(`Remote video fetch failed: HTTP ${res.status} for ${input.remoteUrl}`);
   }
-  const buffer = Buffer.from(await res.arrayBuffer());
-  if (input.maxBytes != null && buffer.byteLength > input.maxBytes) {
+  const rawBuffer = Buffer.from(await res.arrayBuffer());
+  if (input.maxBytes != null && rawBuffer.byteLength > input.maxBytes) {
     throw new Error(
-      `Remote video ${input.remoteUrl} is ${buffer.byteLength} bytes; max allowed is ${input.maxBytes}`,
+      `Remote video ${input.remoteUrl} is ${rawBuffer.byteLength} bytes; max allowed is ${input.maxBytes}`,
+    );
+  }
+  // Polish-21.0.11: optional compression BEFORE the Supabase upload.
+  // Ratio + wasCompressed logged so an operator can tune the CRF
+  // preset for a run's specific model without redeploying.
+  //
+  // Explicit `Buffer` widening on the binding: TS otherwise infers
+  // `Buffer<ArrayBuffer>` from `rawBuffer` and rejects the assign
+  // from `compressVideoBuffer`'s `Buffer<ArrayBufferLike>` return.
+  let uploadBuffer: Buffer = rawBuffer;
+  let wasCompressed = false;
+  let compressionError: string | undefined;
+  if (input.compress) {
+    const result = await compressVideoBuffer(rawBuffer);
+    uploadBuffer = result.buffer;
+    wasCompressed = result.wasCompressed;
+    compressionError = result.error;
+    console.log(
+      `[storage.uploadGeneratedVideoFromUrl] path=${path} ` +
+        `original_bytes=${result.originalBytes} compressed_bytes=${result.compressedBytes} ` +
+        `was_compressed=${result.wasCompressed}` +
+        (result.error ? ` compress_error=${JSON.stringify(result.error)}` : ''),
     );
   }
   const { error } = await supabase.storage
     .from('generated-creatives')
-    .upload(path, buffer, { contentType: 'video/mp4', upsert: true });
+    .upload(path, uploadBuffer, { contentType: 'video/mp4', upsert: true });
   if (error) {
     throw new Error(`Video upload failed for ${path}: ${error.message}`);
   }
   const { data } = supabase.storage.from('generated-creatives').getPublicUrl(path);
-  return { path, publicUrl: data.publicUrl, sizeBytes: buffer.byteLength };
+  return {
+    path,
+    publicUrl: data.publicUrl,
+    sizeBytes: uploadBuffer.byteLength,
+    originalBytes: rawBuffer.byteLength,
+    wasCompressed,
+    ...(compressionError ? { compressionError } : {}),
+  };
 }
 
 /**
