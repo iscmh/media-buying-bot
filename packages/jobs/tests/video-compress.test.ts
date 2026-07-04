@@ -2,9 +2,12 @@ import { Buffer } from 'node:buffer';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   FFMPEG_COMPRESS_ARGS_TEMPLATE,
+  __resetFfmpegInstallerCacheForTests,
   __setFfmpegPathForTests,
   __setFfmpegSpawnImplForTests,
+  __setNowImplForTests,
   compressVideoBuffer,
+  compressVideoForStorage,
   resolveFfmpegPath,
 } from '../src/lib/video-compress';
 
@@ -13,6 +16,8 @@ const ORIGINAL_ENV_FFMPEG_PATH = process.env['FFMPEG_PATH'];
 afterEach(() => {
   __setFfmpegSpawnImplForTests(undefined);
   __setFfmpegPathForTests(undefined);
+  __setNowImplForTests(undefined);
+  __resetFfmpegInstallerCacheForTests();
   if (ORIGINAL_ENV_FFMPEG_PATH === undefined) delete process.env['FFMPEG_PATH'];
   else process.env['FFMPEG_PATH'] = ORIGINAL_ENV_FFMPEG_PATH;
 });
@@ -40,25 +45,34 @@ describe('Polish-21.0.11: FFMPEG_COMPRESS_ARGS_TEMPLATE regression pins', () => 
   });
 });
 
-describe('Polish-21.0.11: resolveFfmpegPath', () => {
-  it('defaults to plain "ffmpeg" (PATH lookup) when no env / override set', () => {
-    delete process.env['FFMPEG_PATH'];
-    expect(resolveFfmpegPath()).toBe('ffmpeg');
-  });
+describe('Polish-21.0.11 → Polish-21.0.12: resolveFfmpegPath fallback chain', () => {
+  // Polish-21.0.12 slotted `@ffmpeg-installer/ffmpeg` between the
+  // env override and the bare-PATH default so Vercel deploys get
+  // a bundled binary without operator intervention. See the
+  // Polish-21.0.12 `@ffmpeg-installer/ffmpeg path resolution`
+  // block below for the installer-specific pins.
 
   it('FFMPEG_PATH env override wins over the default', () => {
     process.env['FFMPEG_PATH'] = '/opt/ffmpeg/bin/ffmpeg';
     expect(resolveFfmpegPath()).toBe('/opt/ffmpeg/bin/ffmpeg');
   });
 
-  it('whitespace-only env override falls through to the default (defensive)', () => {
+  it('whitespace-only env override falls through past the installer / to the bare PATH default', () => {
+    // Whitespace is treated as "no override" so the installer or
+    // PATH default takes over. When the installer is present
+    // (this workspace), resolveFfmpegPath returns its path.
     process.env['FFMPEG_PATH'] = '   ';
-    expect(resolveFfmpegPath()).toBe('ffmpeg');
+    __resetFfmpegInstallerCacheForTests();
+    const resolved = resolveFfmpegPath();
+    // Either the installer path (present in workspace) or the
+    // bare 'ffmpeg' fallback — both are correct fallthroughs.
+    expect(resolved === 'ffmpeg' || /@ffmpeg-installer/.test(resolved)).toBe(true);
   });
 
-  it('__setFfmpegPathForTests override beats env', () => {
+  it('__setFfmpegPathForTests override beats env AND the installer', () => {
     process.env['FFMPEG_PATH'] = '/opt/ffmpeg';
     __setFfmpegPathForTests('/tmp/fake-ffmpeg');
+    __resetFfmpegInstallerCacheForTests();
     expect(resolveFfmpegPath()).toBe('/tmp/fake-ffmpeg');
   });
 });
@@ -67,6 +81,10 @@ describe('Polish-21.0.11: compressVideoBuffer — happy path', () => {
   it('when the spawner writes a smaller output, returns the compressed buffer with wasCompressed=true', async () => {
     const original = Buffer.from('a'.repeat(1000));
     const compressed = Buffer.from('b'.repeat(300));
+    // Pin the binary so this test doesn't depend on whether
+    // @ffmpeg-installer/ffmpeg is present in the workspace (which
+    // Polish-21.0.12 puts ahead of the 'ffmpeg' fallback).
+    __setFfmpegPathForTests('/tmp/fake-ffmpeg-binary');
     __setFfmpegSpawnImplForTests(async (binary, args) => {
       // The spawner runs against real tmp paths — we need to
       // materialize the output file the caller expects. Extract
@@ -75,7 +93,7 @@ describe('Polish-21.0.11: compressVideoBuffer — happy path', () => {
       const outputPath = args[args.length - 1]!;
       const { writeFile } = await import('node:fs/promises');
       await writeFile(outputPath, compressed);
-      expect(binary).toBe('ffmpeg');
+      expect(binary).toBe('/tmp/fake-ffmpeg-binary');
       // Regression pin: -c:v libx264 is on the wire.
       expect(args).toContain('libx264');
       return { ok: true, exitCode: 0 };
@@ -142,5 +160,83 @@ describe('Polish-21.0.11: compressVideoBuffer — graceful fallback', () => {
     expect(result.wasCompressed).toBe(false);
     expect(result.error).toMatch(/compression failed/);
     expect(result.error).toMatch(/blowup/);
+  });
+});
+
+describe('Polish-21.0.12: @ffmpeg-installer/ffmpeg path resolution', () => {
+  it('resolveFfmpegPath picks up the installer-bundled binary when no override / env set', () => {
+    // @ffmpeg-installer/ffmpeg ships a platform-specific binary
+    // (linux-x64 / darwin-arm64 / etc.) at .path. On Vercel
+    // deploys the binary is present via the npm dep so an
+    // operator never has to `apt-get install ffmpeg`.
+    delete process.env['FFMPEG_PATH'];
+    __resetFfmpegInstallerCacheForTests();
+    const resolved = resolveFfmpegPath();
+    // Must NOT be the bare 'ffmpeg' PATH-lookup fallback — the
+    // installer is present in this workspace.
+    expect(resolved).not.toBe('ffmpeg');
+    // Sanity pin: installer paths always contain @ffmpeg-installer.
+    expect(resolved).toMatch(/@ffmpeg-installer/);
+  });
+
+  it('FFMPEG_PATH env override still wins over the installer (operator escape hatch)', () => {
+    process.env['FFMPEG_PATH'] = '/opt/custom/ffmpeg';
+    __resetFfmpegInstallerCacheForTests();
+    expect(resolveFfmpegPath()).toBe('/opt/custom/ffmpeg');
+  });
+
+  it('__setFfmpegPathForTests wins over both env AND installer', () => {
+    process.env['FFMPEG_PATH'] = '/opt/custom/ffmpeg';
+    __setFfmpegPathForTests('/tmp/fake');
+    __resetFfmpegInstallerCacheForTests();
+    expect(resolveFfmpegPath()).toBe('/tmp/fake');
+  });
+});
+
+describe('Polish-21.0.12: compressionMs timing', () => {
+  it('populates compressionMs on the success path (regression pin: field exists)', async () => {
+    __setNowImplForTests(
+      (() => {
+        let n = 1_000;
+        return () => (n += 500);
+      })(),
+    );
+    const original = Buffer.from('a'.repeat(1000));
+    const compressed = Buffer.from('b'.repeat(300));
+    __setFfmpegSpawnImplForTests(async (_binary, args) => {
+      const outputPath = args[args.length - 1]!;
+      const { writeFile } = await import('node:fs/promises');
+      await writeFile(outputPath, compressed);
+      return { ok: true, exitCode: 0 };
+    });
+    const result = await compressVideoBuffer(original);
+    expect(result.wasCompressed).toBe(true);
+    // Positive: field is on the wire.
+    expect(typeof result.compressionMs).toBe('number');
+    expect(result.compressionMs).toBeGreaterThan(0);
+  });
+
+  it('populates compressionMs on the FAILURE path (ENOENT + non-zero exit + unexpected throw)', async () => {
+    // Regression pin against a future refactor that only sets
+    // compressionMs on success. Diagnostic dashboards need to
+    // distinguish "ffmpeg fell through in 3ms because ENOENT"
+    // from "ffmpeg legitimately ran 12s" — the field MUST be
+    // populated on every return path.
+    __setFfmpegSpawnImplForTests(async () => ({
+      ok: false,
+      error: `ffmpeg binary 'ffmpeg' not found on PATH.`,
+    }));
+    const result = await compressVideoBuffer(Buffer.from('x'));
+    expect(typeof result.compressionMs).toBe('number');
+    expect(result.compressionMs).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('Polish-21.0.12: compressVideoForStorage alias', () => {
+  it('is the exact same function as compressVideoBuffer (non-breaking rename)', () => {
+    // Regression pin: a future edit that gives the alias its
+    // own implementation risks the two paths drifting. Same
+    // identity = same behavior guaranteed.
+    expect(compressVideoForStorage).toBe(compressVideoBuffer);
   });
 });

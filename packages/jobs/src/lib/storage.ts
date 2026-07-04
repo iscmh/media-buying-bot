@@ -155,6 +155,13 @@ export async function uploadGeneratedVideoFromUrl(input: {
   originalBytes: number;
   /** Polish-21.0.11: true when compression actually shrank the file. */
   wasCompressed: boolean;
+  /**
+   * Polish-21.0.12: wall-clock ms spent in the compress attempt
+   * (populated on both success + failure paths when compress=true;
+   * 0 when compress=false). Lets operators disambiguate ffmpeg-
+   * missing-fast-fail from ffmpeg-legitimately-running by size.
+   */
+  compressionMs: number;
   /** Polish-21.0.11: set only when compression was attempted and failed. */
   compressionError?: string;
 }> {
@@ -187,15 +194,20 @@ export async function uploadGeneratedVideoFromUrl(input: {
   let uploadBuffer: Buffer = rawBuffer;
   let wasCompressed = false;
   let compressionError: string | undefined;
+  // Polish-21.0.12: track compressionMs even when compress=false so
+  // the return shape has a stable schema — 0 signals "no compress
+  // attempt", not "compress ran in 0 ms".
+  let compressionMs = 0;
   if (input.compress) {
     const result = await compressVideoBuffer(rawBuffer);
     uploadBuffer = result.buffer;
     wasCompressed = result.wasCompressed;
     compressionError = result.error;
+    compressionMs = result.compressionMs;
     console.log(
       `[storage.uploadGeneratedVideoFromUrl] path=${path} ` +
         `original_bytes=${result.originalBytes} compressed_bytes=${result.compressedBytes} ` +
-        `was_compressed=${result.wasCompressed}` +
+        `compression_ms=${result.compressionMs} was_compressed=${result.wasCompressed}` +
         (result.error ? ` compress_error=${JSON.stringify(result.error)}` : ''),
     );
   }
@@ -212,6 +224,7 @@ export async function uploadGeneratedVideoFromUrl(input: {
     sizeBytes: uploadBuffer.byteLength,
     originalBytes: rawBuffer.byteLength,
     wasCompressed,
+    compressionMs,
     ...(compressionError ? { compressionError } : {}),
   };
 }

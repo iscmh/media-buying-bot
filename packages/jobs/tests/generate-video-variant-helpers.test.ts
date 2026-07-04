@@ -1900,18 +1900,28 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     expect(uploadCall).toMatch(/compress: true/);
   });
 
-  it('Polish-21.0.11: generation_metadata carries upload compression forensics', async () => {
-    // Regression pin: the composite row logs original + final
-    // sizes + wasCompressed + any compression error so operators
-    // can tune the CRF preset without redeploying.
+  it('Polish-21.0.12: generation_metadata nests compression forensics under compression: {} block with timing', async () => {
+    // Polish-21.0.12 reshape: metadata dashboards grep one
+    // `compression.*` path per variant instead of hunting flat
+    // `upload_*` fields. Job 0a382842 diagnosed the row missing
+    // ALL compression telemetry — the pin ensures every field the
+    // operator's spec names is on the wire.
     const src = await readSrc();
     const insertStart = src.indexOf('step.run(`hedra-insert-composite-');
     expect(insertStart).toBeGreaterThan(-1);
     const insertEnd = src.indexOf('});', insertStart);
     const insertBlock = src.slice(insertStart, insertEnd);
-    expect(insertBlock).toMatch(/upload_original_bytes:/);
-    expect(insertBlock).toMatch(/upload_final_bytes:/);
-    expect(insertBlock).toMatch(/upload_was_compressed:/);
-    expect(insertBlock).toMatch(/upload_compression_error:/);
+    expect(insertBlock).toMatch(/compression: \{/);
+    expect(insertBlock).toMatch(/original_size_bytes:/);
+    expect(insertBlock).toMatch(/compressed_size_bytes:/);
+    expect(insertBlock).toMatch(/compression_ms:/);
+    expect(insertBlock).toMatch(/was_compressed:/);
+    expect(insertBlock).toMatch(/compression_error:/);
+    // Polish-21.0.12 regression pin: the OLD flat `upload_*`
+    // shape must NOT reappear (dashboards would double-count).
+    expect(insertBlock).not.toMatch(/upload_original_bytes:/);
+    expect(insertBlock).not.toMatch(/upload_final_bytes:/);
+    expect(insertBlock).not.toMatch(/upload_was_compressed:/);
+    expect(insertBlock).not.toMatch(/upload_compression_error:/);
   });
 });

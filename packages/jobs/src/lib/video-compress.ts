@@ -37,12 +37,65 @@ export function __setFfmpegPathForTests(path: string | undefined): void {
   _ffmpegPathOverride = path;
 }
 
-/** Resolve the ffmpeg binary path with the override → env → default fallback chain. */
+/**
+ * Resolve the ffmpeg binary path with the override → env →
+ * `@ffmpeg-installer/ffmpeg` → default fallback chain.
+ *
+ * Polish-21.0.12 hotfix: `@ffmpeg-installer/ffmpeg` slotted in
+ * ahead of the raw PATH lookup so Vercel deployments (where
+ * `ffmpeg` is NOT on PATH by default) find the bundled static
+ * binary without operator intervention. Job 0a382842 diagnosed
+ * Supabase's 50MB cap rejecting an uncompressed Kling upload —
+ * root cause was compression never running because the CLI
+ * spawn hit ENOENT and fell back to raw upload silently. This
+ * chain guarantees a binary when the npm dep is installed.
+ *
+ * Fallback chain (first non-empty wins):
+ *   1. __setFfmpegPathForTests()          test-only injection
+ *   2. process.env.FFMPEG_PATH             operator override
+ *   3. @ffmpeg-installer/ffmpeg .path      npm-bundled binary
+ *   4. 'ffmpeg'                            system PATH lookup
+ */
 export function resolveFfmpegPath(): string {
   if (_ffmpegPathOverride) return _ffmpegPathOverride;
   const fromEnv = process.env['FFMPEG_PATH'];
   if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) return fromEnv.trim();
+  const fromInstaller = tryFfmpegInstallerPath();
+  if (fromInstaller) return fromInstaller;
   return 'ffmpeg';
+}
+
+/**
+ * Polish-21.0.12: probe `@ffmpeg-installer/ffmpeg` at runtime.
+ * Wrapped in a soft try/catch so a deploy that intentionally
+ * omits the dep still works via the PATH fallback — the module
+ * is an OPTIONAL runtime dep, not a hard require.
+ *
+ * Result is memoized because require() succeeds on subsequent
+ * calls anyway but ships one less `try` per compress attempt.
+ * Set to `null` after a probe failure so we don't keep retrying.
+ */
+let _installerPathCached: string | null | undefined;
+
+function tryFfmpegInstallerPath(): string | null {
+  if (_installerPathCached !== undefined) return _installerPathCached;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require('@ffmpeg-installer/ffmpeg') as { path?: string };
+    if (mod && typeof mod.path === 'string' && mod.path.length > 0) {
+      _installerPathCached = mod.path;
+      return _installerPathCached;
+    }
+  } catch {
+    // Missing dep is fine — fall through to PATH lookup.
+  }
+  _installerPathCached = null;
+  return null;
+}
+
+/** TEST-ONLY: reset the installer-path memoization between tests. */
+export function __resetFfmpegInstallerCacheForTests(): void {
+  _installerPathCached = undefined;
 }
 
 export interface CompressVideoResult {
@@ -50,6 +103,14 @@ export interface CompressVideoResult {
   wasCompressed: boolean;
   originalBytes: number;
   compressedBytes: number;
+  /**
+   * Polish-21.0.12: wall-clock milliseconds spent inside the
+   * compress attempt (ffmpeg spawn + file I/O). Populated on
+   * BOTH success + failure paths so the operator's diagnostic
+   * dashboard can flag "ffmpeg quietly failing in <100ms" as
+   * ENOENT vs "ffmpeg legitimately running 12s per variant".
+   */
+  compressionMs: number;
   /** Set only when wasCompressed === false. Human-readable reason. */
   error?: string;
 }
@@ -120,6 +181,10 @@ export const FFMPEG_COMPRESS_TIMEOUT_MS = 90_000;
 export async function compressVideoBuffer(input: Buffer): Promise<CompressVideoResult> {
   const originalBytes = input.byteLength;
   const ffmpegPath = resolveFfmpegPath();
+  // Polish-21.0.12 hotfix: track wall-clock time so the operator
+  // can distinguish "ffmpeg legitimately ran 12s" from "ffmpeg
+  // fell through in 3ms because ENOENT" in Inngest metadata.
+  const t0 = nowMs();
   let workDir: string | undefined;
   try {
     workDir = await mkdtemp(join(tmpdir(), 'mbb-vc-'));
@@ -135,6 +200,7 @@ export async function compressVideoBuffer(input: Buffer): Promise<CompressVideoR
         wasCompressed: false,
         originalBytes,
         compressedBytes: originalBytes,
+        compressionMs: nowMs() - t0,
         error: spawnResult.error,
       };
     }
@@ -148,6 +214,7 @@ export async function compressVideoBuffer(input: Buffer): Promise<CompressVideoR
         wasCompressed: false,
         originalBytes,
         compressedBytes: originalBytes,
+        compressionMs: nowMs() - t0,
         error:
           `ffmpeg output (${compressed.byteLength} bytes) not smaller than input ` +
           `(${input.byteLength} bytes); keeping original`,
@@ -158,6 +225,7 @@ export async function compressVideoBuffer(input: Buffer): Promise<CompressVideoR
       wasCompressed: true,
       originalBytes,
       compressedBytes: compressed.byteLength,
+      compressionMs: nowMs() - t0,
     };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -166,6 +234,7 @@ export async function compressVideoBuffer(input: Buffer): Promise<CompressVideoR
       wasCompressed: false,
       originalBytes,
       compressedBytes: originalBytes,
+      compressionMs: nowMs() - t0,
       error: `video compression failed: ${msg}`,
     };
   } finally {
@@ -177,6 +246,39 @@ export async function compressVideoBuffer(input: Buffer): Promise<CompressVideoR
     }
   }
 }
+
+/**
+ * Polish-21.0.12: `Date.now()` seam so tests can pin exact
+ * durations without mocking global time. Default is the real
+ * monotonic clock via performance.now() when available (avoids
+ * NTP jitter mid-compress), otherwise Date.now().
+ */
+let _nowImpl: () => number = () =>
+  typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+
+/** TEST-ONLY: override the monotonic clock. Pass undefined to restore. */
+export function __setNowImplForTests(impl: (() => number) | undefined): void {
+  _nowImpl =
+    impl ??
+    (() =>
+      typeof performance !== 'undefined' && typeof performance.now === 'function'
+        ? performance.now()
+        : Date.now());
+}
+
+function nowMs(): number {
+  return _nowImpl();
+}
+
+/**
+ * Polish-21.0.12: named alias for the compression helper matching
+ * the operator's spec-facing name (`compressVideoForStorage`).
+ * Preserves `compressVideoBuffer` for existing imports so the
+ * rename is non-breaking. Semantics identical.
+ */
+export const compressVideoForStorage = compressVideoBuffer;
 
 interface FfmpegSpawnResult {
   ok: boolean;

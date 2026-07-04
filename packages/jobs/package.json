@@ -16,6 +16,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@mbb/ai-providers": "workspace:*",
     "@mbb/db": "workspace:*",
     "@mbb/meta-api": "workspace:*",

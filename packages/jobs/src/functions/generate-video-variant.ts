@@ -1566,6 +1566,28 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   // (lower egress, faster page loads). Missing ffmpeg or a
   // non-zero exit falls back to the raw buffer gracefully — see
   // compressVideoBuffer's contract.
+  //
+  // Polish-21.0.12: fetch + compress + upload live in ONE
+  // step.run boundary on purpose. Splitting the compress out to
+  // its own step (per the Polish-21.0.12 spec's initial proposal)
+  // would require serializing the compressed buffer (~5-30MB
+  // post-compress, ~60-100MB pre-compress) across the Inngest
+  // step boundary — Inngest step outputs are JSON-serialized and
+  // size-capped (~4MB per step). Passing a Buffer between steps
+  // would either OOM the serialization or need an intermediate
+  // storage backend (Blob store, unbounded-cap bucket). Keeping
+  // the three phases inside one step.run:
+  //   - preserves the retry unit (transient Hedra CDN blips
+  //     retry the whole download → compress → upload chain,
+  //     which is idempotent)
+  //   - avoids the buffer-serialization cliff
+  //   - keeps the ffmpeg-installer binary + tmpdir local to one
+  //     Inngest step handler execution
+  // Compression telemetry (original_size_bytes /
+  // compressed_size_bytes / compression_ms / was_compressed /
+  // compression_error) still lands on the composite row so the
+  // operator's dashboard can pivot on the compress phase without
+  // needing a separate step.
   const upload = await step.run(`hedra-upload-video-${variantIndex}`, async () =>
     uploadGeneratedVideoFromUrl({
       userId,
@@ -1617,13 +1639,22 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         segment_count_requested: 1,
         segment_count_generated: 1,
         stitched: false,
-        // Polish-21.0.11: compression forensics. Lets an operator
-        // tune the CRF preset per-model or diagnose a 50MB
-        // Supabase cap regression.
-        upload_original_bytes: upload.originalBytes,
-        upload_final_bytes: upload.sizeBytes,
-        upload_was_compressed: upload.wasCompressed,
-        upload_compression_error: upload.compressionError ?? null,
+        // Polish-21.0.11 → Polish-21.0.12: compression forensics.
+        // Nested `compression: {}` block per operator spec so the
+        // metadata dashboard can pull one path from every variant
+        // row instead of grepping flat upload_* fields. `was_
+        // compressed=false` + `compression_error` set means the
+        // helper fell back to raw upload — most common cause is
+        // ffmpeg binary missing on Vercel runtime (fixed in
+        // Polish-21.0.12 by @ffmpeg-installer/ffmpeg dep +
+        // resolveFfmpegPath chain).
+        compression: {
+          original_size_bytes: upload.originalBytes,
+          compressed_size_bytes: upload.sizeBytes,
+          compression_ms: upload.compressionMs,
+          was_compressed: upload.wasCompressed,
+          compression_error: upload.compressionError ?? null,
+        },
       },
     });
   });

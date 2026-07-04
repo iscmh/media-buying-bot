@@ -139,6 +139,9 @@ describe('Polish-21.0.11: uploadGeneratedVideoFromUrl — compression before Sup
     expect(result.sizeBytes).toBe(COMPRESSED_BYTES.byteLength);
     expect(result.wasCompressed).toBe(true);
     expect(result.compressionError).toBeUndefined();
+    // Polish-21.0.12: compressionMs on the wire.
+    expect(typeof result.compressionMs).toBe('number');
+    expect(result.compressionMs).toBeGreaterThanOrEqual(0);
     __setFfmpegSpawnImplForTests(undefined);
   });
 
