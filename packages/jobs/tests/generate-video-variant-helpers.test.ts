@@ -2057,7 +2057,7 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     const hedraStart = src.indexOf('async function runOneVariantHedra');
     const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     const body = src.slice(hedraStart, hedraEnd);
-    expect(body).toMatch(/voice-pick \[Polish-21\.0\.14\]:/);
+    expect(body).toMatch(/voice-pick \[Polish-\$\{POLISH_VERSION\}\]:/);
     expect(body).toMatch(/input\.character_gender=/);
     expect(body).toMatch(/output\.voice_gender=/);
     expect(body).toMatch(/match=\$\{voiceMatchesCharacter \? 'OK' : 'MISMATCH'\}/);
@@ -2072,8 +2072,8 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     const hedraStart = src.indexOf('async function runOneVariantHedra');
     const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     const body = src.slice(hedraStart, hedraEnd);
-    expect(body).toMatch(/compress-upload BEGIN \[Polish-21\.0\.14\]:/);
-    expect(body).toMatch(/compress-upload END \[Polish-21\.0\.14\]:/);
+    expect(body).toMatch(/compress-upload BEGIN \[Polish-\$\{POLISH_VERSION\}\]:/);
+    expect(body).toMatch(/compress-upload END \[Polish-\$\{POLISH_VERSION\}\]:/);
     // END log includes the full stats so a single log line
     // answers original / compressed / ms / was_compressed.
     expect(body).toMatch(/original_size_bytes=/);
@@ -2099,7 +2099,9 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     //   - include enough detail to diagnose (voice_id, label,
     //     variantIndex, jobId)
     expect(body).toMatch(/if \(!voiceMatchesCharacter\)/);
-    expect(body).toMatch(/throw new Error\(\s*`\[Polish-21\.0\.14\] voice-pick mismatch/);
+    expect(body).toMatch(
+      /throw new Error\(\s*`\[Polish-\$\{POLISH_VERSION\}\] voice-pick mismatch/,
+    );
     expect(body).toMatch(/voice_id=\$\{voice\.id\}/);
     expect(body).toMatch(/variantIndex=\$\{variantIndex\}/);
     expect(body).toMatch(/jobId=\$\{jobId\}/);
@@ -2140,6 +2142,43 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     expect(insertBlock).toMatch(
       /voice_matches_character_gender:\s*[\s\S]*?voice\.gender === character\.gender\s*\|\|\s*voice\.gender === 'neutral'/,
     );
-    expect(insertBlock).toMatch(/polish_version: '21\.0\.14'/);
+    // Polish-21.0.15: the literal is now `polish_version:
+    // POLISH_VERSION` from @mbb/shared instead of a hard-coded
+    // string so a version bump cascades every downstream package
+    // automatically. Pin the identifier form.
+    expect(insertBlock).toMatch(/polish_version: POLISH_VERSION/);
+  });
+
+  it('Polish-21.0.15: worker imports POLISH_VERSION from @mbb/shared (single source of truth)', async () => {
+    // Regression pin: version literals hard-coded in worker
+    // source (like the pre-Polish-21.0.15 `polish_version:
+    // '21.0.14'`) were the exact drift that made deploy
+    // verification unreliable — bumping the tag in one file left
+    // the metadata write emitting an old value. All log tags and
+    // metadata writes now derive from POLISH_VERSION.
+    const src = await readSrc();
+    expect(src).toMatch(/import\s*\{[\s\S]*?POLISH_VERSION[\s\S]*?\}\s*from\s*'@mbb\/shared'/);
+    // No hardcoded Polish-21.0.14 literal survives in the file.
+    // (Historical version strings inside JSDoc comments are OK —
+    // they're not runtime strings.)
+    const runtimeSlice = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    expect(runtimeSlice).not.toMatch(/'21\.0\.14'/);
+  });
+
+  it('Polish-21.0.15: cold-start log fires at module-load time with POLISH_VERSION (deploy-freshness signal)', async () => {
+    // Regression pin: fresh deploys can be verified by grepping
+    // Inngest logs for the cold-start line. If it's missing OR
+    // shows a stale version, the code isn't loading — even if
+    // Vercel dashboard says the SHA is deployed.
+    const src = await readSrc();
+    expect(src).toMatch(
+      /console\.log\(\s*`\[jobs\.generate-video-variant\] cold start — POLISH_VERSION=\$\{POLISH_VERSION\}`,?\s*\)/,
+    );
+    // AND: the log line lives OUTSIDE any function body (module
+    // scope) so it fires on serverless function boot.
+    const moduleScopeSlice = src.slice(0, src.indexOf('export const generateVideoVariant'));
+    expect(moduleScopeSlice).toMatch(
+      /console\.log\(\s*`\[jobs\.generate-video-variant\] cold start/,
+    );
   });
 });

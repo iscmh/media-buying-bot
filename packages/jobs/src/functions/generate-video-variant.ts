@@ -24,6 +24,7 @@ import {
   getVideoModel,
   isElevenLabsVoiceRosterUncurated,
   pickElevenLabsVoicesForBatch,
+  POLISH_VERSION,
   type CharacterVoiceGender,
   type ElevenLabsVoiceRosterEntry,
   type ModelProviderConfig,
@@ -37,6 +38,19 @@ import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
+
+// Polish-21.0.15 hotfix: cold-start diagnostic log. Fires ONCE
+// per serverless function boot (module-load time) so operators
+// can grep Inngest logs after a redeploy and confirm the fresh
+// build's version. Prevents the Polish-21.0.14 confusion where
+// composite rows carried `polish_version: null` because the
+// Inngest job was frozen on the pre-Polish-21.0.14 function
+// version (Inngest's documented retry-pinning behavior). If this
+// line appears with the expected version on a fresh cold start,
+// the deploy stuck; if it doesn't appear at all, the module
+// isn't loading and the Inngest handler is stale.
+// eslint-disable-next-line no-console
+console.log(`[jobs.generate-video-variant] cold start — POLISH_VERSION=${POLISH_VERSION}`);
 
 /**
  * Polish-20: unified video-variant worker.
@@ -1300,7 +1314,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   const voiceMatchesCharacter = voice.gender === character.gender || voice.gender === 'neutral';
   console.log(
     `[generate-video-variant] variant ${variantIndex} (hedra) ` +
-      `voice-pick [Polish-21.0.14]: ` +
+      `voice-pick [Polish-${POLISH_VERSION}]: ` +
       `input.character_gender=${JSON.stringify(character.gender)} ` +
       `input.variant_index=${variantIndex} ` +
       `input.variant_count=${variantCount} ` +
@@ -1322,7 +1336,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   // ad ships. Neutral voices are exempt (they match either).
   if (!voiceMatchesCharacter) {
     throw new Error(
-      `[Polish-21.0.14] voice-pick mismatch: character.gender=${JSON.stringify(
+      `[Polish-${POLISH_VERSION}] voice-pick mismatch: character.gender=${JSON.stringify(
         character.gender,
       )} but picker returned voice.gender=${JSON.stringify(voice.gender)} ` +
         `(voice_id=${voice.id} label=${voice.label}). This should be impossible ` +
@@ -1645,7 +1659,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   // and the post-log stamps the exact stats + fallback state.
   console.log(
     `[generate-video-variant] variant ${variantIndex} (hedra) ` +
-      `compress-upload BEGIN [Polish-21.0.14]: ` +
+      `compress-upload BEGIN [Polish-${POLISH_VERSION}]: ` +
       `model_id=${model.id} remote_url_host=${(() => {
         try {
           return new URL(downloadUrl).host;
@@ -1665,7 +1679,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   );
   console.log(
     `[generate-video-variant] variant ${variantIndex} (hedra) ` +
-      `compress-upload END [Polish-21.0.14]: ` +
+      `compress-upload END [Polish-${POLISH_VERSION}]: ` +
       `model_id=${model.id} ` +
       `original_size_bytes=${upload.originalBytes} ` +
       `compressed_size_bytes=${upload.sizeBytes} ` +
@@ -1724,7 +1738,11 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         // to prove the deploy carrying the aggressive ffmpeg
         // preset + voice failsafe actually reached prod. No more
         // "did the redeploy stick?" guessing after a diagnostic.
-        polish_version: '21.0.14',
+        // Polish-21.0.15: read from the shared @mbb/shared
+        // constant so the version bump cascades every downstream
+        // (worker + /api/health + /api/version) without hand-
+        // editing string literals in three places.
+        polish_version: POLISH_VERSION,
         // Polish-21.0.5 hotfix: log the character block Claude
         // produced (used to compose the Nano Banana JOHN prompt)
         // so operators can grep for AI-CGI regressions and inspect

@@ -16,4 +16,7 @@ export * from './actual-cost';
 export * from './prompts';
 export * from './decision-engine';
 export * from './currency';
+// Polish-21.0.15: shipped-version constants (import chain forces
+// cross-package rebuild on version bump).
+export * from './polish-version';
 export * as env from './env';
