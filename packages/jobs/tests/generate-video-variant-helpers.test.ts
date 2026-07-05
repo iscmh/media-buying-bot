@@ -2049,31 +2049,31 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     expect(dispatchBody).not.toMatch(/model\.id === 'hedra_character_3'/);
   });
 
-  it('Polish-21.0.13: voice-pick emits a version-stamped diagnostic log with match=OK|MISMATCH', async () => {
-    // Regression pin: the tag `Polish-21.0.13` must be on the
+  it('Polish-21.0.14: voice-pick emits a version-stamped diagnostic log with match=OK|MISMATCH', async () => {
+    // Regression pin: the tag `Polish-21.0.14` must be on the
     // voice-pick log line. If it disappears, the operator can no
     // longer prove from prod logs which build handled the variant.
     const src = await readSrc();
     const hedraStart = src.indexOf('async function runOneVariantHedra');
     const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     const body = src.slice(hedraStart, hedraEnd);
-    expect(body).toMatch(/voice-pick \[Polish-21\.0\.13\]:/);
+    expect(body).toMatch(/voice-pick \[Polish-21\.0\.14\]:/);
     expect(body).toMatch(/input\.character_gender=/);
     expect(body).toMatch(/output\.voice_gender=/);
     expect(body).toMatch(/match=\$\{voiceMatchesCharacter \? 'OK' : 'MISMATCH'\}/);
   });
 
-  it('Polish-21.0.13: compress-upload step emits BEGIN + END version-stamped diagnostic logs', async () => {
+  it('Polish-21.0.14: compress-upload step emits BEGIN + END version-stamped diagnostic logs', async () => {
     // Regression pin: the operator's next diagnostic answers
     // "was compression attempted?" from `compress-upload BEGIN`
     // and "what did it produce?" from `compress-upload END` — one
-    // pair per variant, both tagged Polish-21.0.13.
+    // pair per variant, both tagged Polish-21.0.14.
     const src = await readSrc();
     const hedraStart = src.indexOf('async function runOneVariantHedra');
     const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
     const body = src.slice(hedraStart, hedraEnd);
-    expect(body).toMatch(/compress-upload BEGIN \[Polish-21\.0\.13\]:/);
-    expect(body).toMatch(/compress-upload END \[Polish-21\.0\.13\]:/);
+    expect(body).toMatch(/compress-upload BEGIN \[Polish-21\.0\.14\]:/);
+    expect(body).toMatch(/compress-upload END \[Polish-21\.0\.14\]:/);
     // END log includes the full stats so a single log line
     // answers original / compressed / ms / was_compressed.
     expect(body).toMatch(/original_size_bytes=/);
@@ -2082,16 +2082,64 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     expect(body).toMatch(/was_compressed=/);
   });
 
-  it('Polish-21.0.13: composite metadata carries voice_matches_character_gender (durable dashboard-queryable flag)', async () => {
+  it('Polish-21.0.14: STRUCTURAL failsafe — voice-pick mismatch throws BEFORE the TTS submit', async () => {
+    // Regression pin against job 8fc23e4d: a gender mismatch is
+    // mathematically impossible under the shipped picker, but if
+    // ANY future refactor slips one through, the assertion must
+    // fire BEFORE we spend ElevenLabs/Hedra credits + before a
+    // wrong-voice ad ships. Neutral voices exempt (they match
+    // either character gender).
+    const src = await readSrc();
+    const hedraStart = src.indexOf('async function runOneVariantHedra');
+    const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
+    const body = src.slice(hedraStart, hedraEnd);
+    // The throw must:
+    //   - be tagged Polish-21.0.14
+    //   - fire on !voiceMatchesCharacter
+    //   - include enough detail to diagnose (voice_id, label,
+    //     variantIndex, jobId)
+    expect(body).toMatch(/if \(!voiceMatchesCharacter\)/);
+    expect(body).toMatch(/throw new Error\(\s*`\[Polish-21\.0\.14\] voice-pick mismatch/);
+    expect(body).toMatch(/voice_id=\$\{voice\.id\}/);
+    expect(body).toMatch(/variantIndex=\$\{variantIndex\}/);
+    expect(body).toMatch(/jobId=\$\{jobId\}/);
+    // Regression: the assertion must appear BEFORE the
+    // elevenlabs-tts step.run so credits are never spent on a
+    // mismatched variant.
+    const mismatchThrowIdx = body.indexOf('voice-pick mismatch');
+    const ttsStepIdx = body.indexOf('elevenlabs-tts-${variantIndex}');
+    expect(mismatchThrowIdx).toBeGreaterThan(-1);
+    expect(ttsStepIdx).toBeGreaterThan(-1);
+    expect(mismatchThrowIdx).toBeLessThan(ttsStepIdx);
+  });
+
+  it('Polish-21.0.14: voiceMatchesCharacter treats neutral voices as a match for EITHER character gender', async () => {
+    // Regression pin: the widened match rule is
+    // `voice.gender === character.gender || voice.gender === 'neutral'`.
+    // A future revert to strict equality would falsely throw
+    // MISMATCH on neutral cloned voices paired with either
+    // gender.
+    const src = await readSrc();
+    const hedraStart = src.indexOf('async function runOneVariantHedra');
+    const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
+    const body = src.slice(hedraStart, hedraEnd);
+    expect(body).toMatch(
+      /const voiceMatchesCharacter\s*=\s*[\s\S]*?voice\.gender === character\.gender\s*\|\|\s*voice\.gender === 'neutral'/,
+    );
+  });
+
+  it('Polish-21.0.14: composite metadata carries voice_matches_character_gender + polish_version stamp', async () => {
     // Regression pin: SQL / dashboards can filter
     // `voice_matches_character_gender = false` without needing
-    // to scrape Inngest logs.
+    // to scrape Inngest logs, AND grep for `polish_version =
+    // '21.0.14'` to prove which build wrote each row.
     const src = await readSrc();
     const insertStart = src.indexOf('step.run(`hedra-insert-composite-');
     const insertEnd = src.indexOf('});', insertStart);
     const insertBlock = src.slice(insertStart, insertEnd);
     expect(insertBlock).toMatch(
-      /voice_matches_character_gender: voice\.gender === character\.gender,/,
+      /voice_matches_character_gender:\s*[\s\S]*?voice\.gender === character\.gender\s*\|\|\s*voice\.gender === 'neutral'/,
     );
+    expect(insertBlock).toMatch(/polish_version: '21\.0\.14'/);
   });
 });

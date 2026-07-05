@@ -22,17 +22,46 @@ afterEach(() => {
   else process.env['FFMPEG_PATH'] = ORIGINAL_ENV_FFMPEG_PATH;
 });
 
-describe('Polish-21.0.11: FFMPEG_COMPRESS_ARGS_TEMPLATE regression pins', () => {
-  it('carries libx264 + preset medium + CRF 25 + aac 128k + faststart (operator spec pin)', () => {
-    // Regression pin against silent quality-preset drift. A future
-    // edit that drops `-preset medium` or bumps CRF must update
-    // this test deliberately.
+describe('Polish-21.0.11 → Polish-21.0.14: FFMPEG_COMPRESS_ARGS_TEMPLATE regression pins', () => {
+  it('Polish-21.0.14: aggressive settings — libx264 + preset faster + CRF 30 + maxrate 1500k + bufsize 3000k + aac 96k + faststart', () => {
+    // Regression pin against silent quality-preset drift. Job
+    // 8fc23e4d diagnosed 78MB → 74MB (only 5% reduction) under
+    // the Polish-21.0.11 `medium` / CRF 25 / aac 128k defaults.
+    // Aggressive settings target 4-8MB output for a 30s 720p
+    // Kling clip so upload stays well under Vercel Pro's 50MB
+    // serverless function body cap.
     expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('libx264');
-    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('medium');
-    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('25');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('faster');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('30');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('-maxrate');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('1500k');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('-bufsize');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('3000k');
     expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('aac');
-    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('128k');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('96k');
     expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).toContain('+faststart');
+    // Regression pin: the OLD Polish-21.0.11 settings must NOT
+    // reappear. A future revert would blow past the Vercel body
+    // cap on 30s Kling output.
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).not.toContain('medium');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).not.toContain('25');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE).not.toContain('128k');
+  });
+
+  it('Polish-21.0.14: bitrate cap ordering — -maxrate comes BEFORE its value, -bufsize BEFORE its value', () => {
+    // ffmpeg arg order matters: `-maxrate 1500k -bufsize 3000k`
+    // is a rate-control pair; either flag by itself is silently
+    // ignored. Pin the ordering so a future edit that reorders
+    // args (or drops one half of the pair) fails loudly.
+    const maxrateIdx = FFMPEG_COMPRESS_ARGS_TEMPLATE.indexOf('-maxrate');
+    const bufsizeIdx = FFMPEG_COMPRESS_ARGS_TEMPLATE.indexOf('-bufsize');
+    expect(maxrateIdx).toBeGreaterThan(-1);
+    expect(bufsizeIdx).toBeGreaterThan(-1);
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE[maxrateIdx + 1]).toBe('1500k');
+    expect(FFMPEG_COMPRESS_ARGS_TEMPLATE[bufsizeIdx + 1]).toBe('3000k');
+    // Buffer must be 2× maxrate for x264's rate-control math to
+    // work well.
+    expect(bufsizeIdx).toBeGreaterThan(maxrateIdx);
   });
 
   it('overwrite flag -y set (idempotent retries)', () => {

@@ -1297,10 +1297,10 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   // between characterGender and voice.gender surfaces
   // immediately as `MISMATCH` in the log so future gender
   // regressions can't slip past a passive scan.
-  const voiceMatchesCharacter = voice.gender === character.gender;
+  const voiceMatchesCharacter = voice.gender === character.gender || voice.gender === 'neutral';
   console.log(
     `[generate-video-variant] variant ${variantIndex} (hedra) ` +
-      `voice-pick [Polish-21.0.13]: ` +
+      `voice-pick [Polish-21.0.14]: ` +
       `input.character_gender=${JSON.stringify(character.gender)} ` +
       `input.variant_index=${variantIndex} ` +
       `input.variant_count=${variantCount} ` +
@@ -1308,6 +1308,29 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       `output.voice_gender=${voice.gender} ` +
       `match=${voiceMatchesCharacter ? 'OK' : 'MISMATCH'}`,
   );
+
+  // Polish-21.0.14 hotfix: STRUCTURAL failsafe. Job 8fc23e4d
+  // (post-Polish-21.0.13 deploy) still landed George (male) on a
+  // Julia (female) character with `voice_matches_character_gender:
+  // false` written to the row. That's mathematically impossible
+  // with the shipped picker — either the deploy was still stale
+  // OR a subtle bug lets `voice.gender !== character.gender`
+  // slip past the filter. The assertion below makes the failure
+  // mode STRUCTURALLY impossible: any future regression that
+  // lets a mismatch reach the TTS submit call throws BEFORE we
+  // spend on ElevenLabs + Hedra credits + before a wrong-voice
+  // ad ships. Neutral voices are exempt (they match either).
+  if (!voiceMatchesCharacter) {
+    throw new Error(
+      `[Polish-21.0.14] voice-pick mismatch: character.gender=${JSON.stringify(
+        character.gender,
+      )} but picker returned voice.gender=${JSON.stringify(voice.gender)} ` +
+        `(voice_id=${voice.id} label=${voice.label}). This should be impossible ` +
+        `with the shipped roster filter — check for a stale deploy or a picker ` +
+        `refactor that dropped the gender filter. variantIndex=${variantIndex} ` +
+        `jobId=${jobId}`,
+    );
+  }
 
   // Polish-21.0.4 hotfix: generate TTS audio via ElevenLabs BYOK
   // (replaces Hedra native TTS blocked on voice-UUID availability).
@@ -1622,7 +1645,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   // and the post-log stamps the exact stats + fallback state.
   console.log(
     `[generate-video-variant] variant ${variantIndex} (hedra) ` +
-      `compress-upload BEGIN [Polish-21.0.13]: ` +
+      `compress-upload BEGIN [Polish-21.0.14]: ` +
       `model_id=${model.id} remote_url_host=${(() => {
         try {
           return new URL(downloadUrl).host;
@@ -1642,7 +1665,7 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   );
   console.log(
     `[generate-video-variant] variant ${variantIndex} (hedra) ` +
-      `compress-upload END [Polish-21.0.13]: ` +
+      `compress-upload END [Polish-21.0.14]: ` +
       `model_id=${model.id} ` +
       `original_size_bytes=${upload.originalBytes} ` +
       `compressed_size_bytes=${upload.sizeBytes} ` +
@@ -1686,7 +1709,22 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         // outcome on every variant row. Lets the operator SQL /
         // dashboard-query for `voice_matches_character_gender =
         // false` across every job without scraping Inngest logs.
-        voice_matches_character_gender: voice.gender === character.gender,
+        //
+        // Polish-21.0.14: broadened to accept neutral voices as
+        // "match" (they pair with either character gender). The
+        // structural-failsafe assertion above already throws on a
+        // real mismatch, so this column being `false` on ANY
+        // shipped row now indicates a stale deploy — every row
+        // that reaches the insert step must have passed the
+        // failsafe.
+        voice_matches_character_gender:
+          voice.gender === character.gender || voice.gender === 'neutral',
+        // Polish-21.0.14: durable version stamp per composite
+        // row. Lets operators SQL for `polish_version = '21.0.14'`
+        // to prove the deploy carrying the aggressive ffmpeg
+        // preset + voice failsafe actually reached prod. No more
+        // "did the redeploy stick?" guessing after a diagnostic.
+        polish_version: '21.0.14',
         // Polish-21.0.5 hotfix: log the character block Claude
         // produced (used to compose the Nano Banana JOHN prompt)
         // so operators can grep for AI-CGI regressions and inspect

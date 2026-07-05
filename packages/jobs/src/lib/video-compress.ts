@@ -116,19 +116,40 @@ export interface CompressVideoResult {
 }
 
 /**
- * Polish-21.0.11: ffmpeg CLI args pinned as an exported constant so
- * a test can regression-pin the exact command shape. Any accidental
- * silent quality change (dropping `-preset medium`, bumping CRF)
- * fails the pin.
+ * Polish-21.0.11 → Polish-21.0.14: ffmpeg CLI args pinned as an
+ * exported constant so a test can regression-pin the exact command
+ * shape. Any accidental silent quality change fails the pin.
+ *
+ * Polish-21.0.14 hotfix — AGGRESSIVE settings after job 8fc23e4d
+ * diagnosed only a 5% reduction on Kling Avatar v2 Standard output
+ * (78MB → 74MB) with the Polish-21.0.11 medium/CRF-25 preset. Root
+ * cause is Vercel Pro's 50MB serverless function request body cap
+ * (mis-diagnosed as Supabase bucket size); we need output under
+ * 30MB for safe margin against that ceiling.
+ *
+ * Changes vs Polish-21.0.11:
+ *   -preset medium → faster    (~3× faster encode, small quality trade)
+ *   -crf 25        → 30        (materially smaller file; still fine
+ *                               for 9:16 mobile playback)
+ *   -maxrate 1500k             (NEW: hard cap on video bitrate)
+ *   -bufsize 3000k             (NEW: 2×maxrate rate-control buffer)
+ *   -b:a 128k      → 96k       (voice-only audio doesn't need 128kbps)
+ *
+ * Expected output for a 30s 720p Kling clip: 4-8 MB (vs 74 MB pre-
+ * fix). Falls well under Vercel Pro's 50MB body cap with room for
+ * the request envelope.
  *
  * Notes:
  *   -y                       overwrite output (idempotent retries)
  *   -i INPUT                 input filename
  *   -c:v libx264             widely-compatible video codec
- *   -preset medium           encode speed vs size trade-off
- *   -crf 25                  constant-quality target (~visually
- *                            transparent for UGC-style output)
- *   -c:a aac -b:a 128k       reasonable voice audio
+ *   -preset faster           encode speed vs size trade
+ *   -crf 30                  constant-quality target (aggressive
+ *                            but still visually acceptable for
+ *                            9:16 mobile UGC playback)
+ *   -maxrate 1500k           hard cap on video bitrate
+ *   -bufsize 3000k           rate-control buffer (2× maxrate)
+ *   -c:a aac -b:a 96k        voice-only audio (dialogue, no music)
  *   -movflags +faststart     progressive mp4 (streams before fully
  *                            downloaded)
  *   OUTPUT                   output filename
@@ -140,13 +161,17 @@ export const FFMPEG_COMPRESS_ARGS_TEMPLATE: readonly string[] = [
   '-c:v',
   'libx264',
   '-preset',
-  'medium',
+  'faster',
   '-crf',
-  '25',
+  '30',
+  '-maxrate',
+  '1500k',
+  '-bufsize',
+  '3000k',
   '-c:a',
   'aac',
   '-b:a',
-  '128k',
+  '96k',
   '-movflags',
   '+faststart',
   '$OUTPUT',
