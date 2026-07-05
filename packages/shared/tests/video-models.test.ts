@@ -382,7 +382,9 @@ describe('Polish-21.0.4 hotfix: ELEVENLABS_VOICE_ROSTER (preset UUIDs) + helpers
       expect(v.id.length).toBeGreaterThan(0);
       expect(v.label.length).toBeGreaterThan(0);
       expect(v.description.length).toBeGreaterThan(0);
-      expect(['female', 'male']).toContain(v.gender);
+      // Polish-21.0.13 widened the gender union to include
+      // 'neutral' for androgynous / voice-cloned entries.
+      expect(['female', 'male', 'neutral']).toContain(v.gender);
       expect(['young', 'middle_aged']).toContain(v.age);
     }
   });
@@ -631,7 +633,8 @@ describe('Polish-21.0.11: pickElevenLabsVoicesForBatch — gender-aware filterin
     // an empty string) would slip past TypeScript at the roster
     // literal but break at runtime — pin it here.
     for (const v of HEDRA_VOICE_ROSTER) {
-      expect(['male', 'female']).toContain(v.gender);
+      // Polish-21.0.13 widened the union to include 'neutral'.
+      expect(['male', 'female', 'neutral']).toContain(v.gender);
     }
   });
 
@@ -663,6 +666,79 @@ describe('Polish-21.0.11: pickElevenLabsVoicesForBatch — gender-aware filterin
         ).toBe('male');
       }
     }
+  });
+
+  it('Polish-21.0.13: neutral-gender voices match EITHER character gender', () => {
+    // Voice-cloned / androgynous timbre entries pair cleanly with
+    // BOTH male and female characters via the widened filter rule
+    // `voice.gender === characterGender || voice.gender === 'neutral'`.
+    const rosterWithNeutral: HedraVoiceRosterEntry[] = [
+      {
+        id: 'nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn',
+        label: 'Nova',
+        description: 'Voice-cloned androgynous timbre.',
+        gender: 'neutral',
+        age: 'young',
+      },
+      {
+        id: 'mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm',
+        label: 'Marcus',
+        description: 'Male narration.',
+        gender: 'male',
+        age: 'young',
+      },
+      {
+        id: 'ffffffffffffffffffffffffffffffff',
+        label: 'Fiona',
+        description: 'Female casual.',
+        gender: 'female',
+        age: 'young',
+      },
+    ];
+    // Female character: Nova AND Fiona are eligible; Marcus is not.
+    const female = pickHedraVoicesForBatch(6, 0, rosterWithNeutral, 'female');
+    for (const p of female) {
+      expect(['female', 'neutral']).toContain(p.gender);
+      expect(p.label).not.toBe('Marcus');
+    }
+    // Male character: Nova AND Marcus are eligible; Fiona is not.
+    const male = pickHedraVoicesForBatch(6, 0, rosterWithNeutral, 'male');
+    for (const p of male) {
+      expect(['male', 'neutral']).toContain(p.gender);
+      expect(p.label).not.toBe('Fiona');
+    }
+    // Nova is reachable from BOTH filters — the neutral voice
+    // isn't excluded by the tighter match rule.
+    expect(new Set(female.map((p) => p.label)).has('Nova')).toBe(true);
+    expect(new Set(male.map((p) => p.label)).has('Nova')).toBe(true);
+  });
+
+  it('Polish-21.0.13: neutral-only roster still ships voices for EITHER character gender', () => {
+    // Defensive pin: a roster made entirely of neutral voices
+    // MUST NOT trip the "no matching-gender voices" fallback
+    // branch. Both queries return the full roster.
+    const neutralOnly: HedraVoiceRosterEntry[] = [
+      {
+        id: 'n1n1n1n1n1n1n1n1n1n1n1n1n1n1n1n1',
+        label: 'N1',
+        description: 'neutral',
+        gender: 'neutral',
+        age: 'young',
+      },
+      {
+        id: 'n2n2n2n2n2n2n2n2n2n2n2n2n2n2n2n2',
+        label: 'N2',
+        description: 'neutral',
+        gender: 'neutral',
+        age: 'middle_aged',
+      },
+    ];
+    const male = pickHedraVoicesForBatch(3, 0, neutralOnly, 'male');
+    const female = pickHedraVoicesForBatch(3, 0, neutralOnly, 'female');
+    expect(male).toHaveLength(3);
+    expect(female).toHaveLength(3);
+    for (const p of male) expect(p.gender).toBe('neutral');
+    for (const p of female) expect(p.gender).toBe('neutral');
   });
 });
 

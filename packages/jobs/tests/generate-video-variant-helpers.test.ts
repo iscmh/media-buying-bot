@@ -836,45 +836,108 @@ describe('Polish-21 Commit 2: parseVideoAdSpecHedra', () => {
   });
 });
 
-describe('Polish-21.0.4: pickElevenLabsVoiceForVariant (worker helper)', () => {
-  it('returns 5 distinct roster entries for a 5-batch (Polish-21.0.4 batch diversity restored)', async () => {
+describe('Polish-21.0.4 → Polish-21.0.13: pickElevenLabsVoiceForVariant (worker helper)', () => {
+  // Polish-21.0.13 made characterGender a required runtime param
+  // (throws when undefined). Tests thread a concrete gender to
+  // exercise the picker under the gender-aware code path.
+
+  it('returns gendered voices for a 5-batch (shipping roster: 2F, 3M — batch diversity within gender)', async () => {
     const { pickElevenLabsVoiceForVariant } =
       await import('../src/functions/generate-video-variant');
     const jobId = 'job-abc-xyz-42';
-    const picks = Array.from({ length: 5 }, (_, i) =>
-      pickElevenLabsVoiceForVariant({ variantIndex: i, variantCount: 5, jobId }),
+    // Male character → picker filters to [George, Daniel, Josh]
+    // (3 voices), wraps for the 5-batch.
+    const male = Array.from({ length: 5 }, (_, i) =>
+      pickElevenLabsVoiceForVariant({
+        variantIndex: i,
+        variantCount: 5,
+        jobId,
+        characterGender: 'male',
+      }),
     );
-    expect(picks).toHaveLength(5);
-    for (const v of picks) {
-      expect(v.id.length).toBeGreaterThan(0);
-      expect(['female', 'male']).toContain(v.gender);
-    }
-    // Polish-21.0.4 restores batch diversity — the 5-preset
-    // ElevenLabs roster lands one distinct voice per variant on a
-    // 5-batch (single wrap around the whole roster).
-    expect(new Set(picks.map((v) => v.id)).size).toBe(5);
+    expect(male).toHaveLength(5);
+    for (const v of male) expect(v.gender).toBe('male');
+    // Diversity within the male subset: at least 3 distinct
+    // (the whole male roster). Polish-21.0.13 gender filter
+    // narrows the pool but does not collapse it.
+    expect(new Set(male.map((v) => v.id)).size).toBe(3);
+    // Female character → picker filters to [Sarah, Charlotte].
+    const female = Array.from({ length: 5 }, (_, i) =>
+      pickElevenLabsVoiceForVariant({
+        variantIndex: i,
+        variantCount: 5,
+        jobId,
+        characterGender: 'female',
+      }),
+    );
+    for (const v of female) expect(v.gender).toBe('female');
+    expect(new Set(female.map((v) => v.id)).size).toBe(2);
   });
 
-  it('same jobId + variantCount + variantIndex returns identical voice (Inngest retry safe)', async () => {
+  it('same jobId + variantCount + variantIndex + characterGender returns identical voice (Inngest retry safe)', async () => {
     const { pickElevenLabsVoiceForVariant } =
       await import('../src/functions/generate-video-variant');
-    const a = pickElevenLabsVoiceForVariant({ variantIndex: 2, variantCount: 5, jobId: 'j-1' });
-    const b = pickElevenLabsVoiceForVariant({ variantIndex: 2, variantCount: 5, jobId: 'j-1' });
+    const a = pickElevenLabsVoiceForVariant({
+      variantIndex: 2,
+      variantCount: 5,
+      jobId: 'j-1',
+      characterGender: 'female',
+    });
+    const b = pickElevenLabsVoiceForVariant({
+      variantIndex: 2,
+      variantCount: 5,
+      jobId: 'j-1',
+      characterGender: 'female',
+    });
     expect(a.id).toBe(b.id);
   });
 
-  it('different jobIds land different variant-0 voices (batch-level diversity across concurrent batches)', async () => {
+  it('different jobIds land different variant-0 voices within the gender pool (batch-level diversity across concurrent batches)', async () => {
     const { pickElevenLabsVoiceForVariant } =
       await import('../src/functions/generate-video-variant');
     const ids = ['j-a', 'j-b', 'j-c', 'j-d', 'j-e', 'j-f'];
     const firstPicks = ids.map(
-      (jobId) => pickElevenLabsVoiceForVariant({ variantIndex: 0, variantCount: 5, jobId }).id,
+      (jobId) =>
+        pickElevenLabsVoiceForVariant({
+          variantIndex: 0,
+          variantCount: 5,
+          jobId,
+          characterGender: 'male',
+        }).id,
     );
-    // Regression pin: with a 5-preset roster and offset derived
-    // from jobId hash, variant 0 across the fixture jobIds MUST
-    // land at least 2 distinct voices (usually more; the ceiling
-    // is 5 = roster size).
+    // Regression pin: variant 0 across fixture jobIds lands at
+    // least 2 distinct MALE voices — offset diversifies the
+    // starting point in the 3-voice male pool.
     expect(new Set(firstPicks).size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('Polish-21.0.13: characterGender is REQUIRED at runtime — undefined throws with a clear error message', async () => {
+    // Regression pin against job 0bb2d35d: silent fall-through to
+    // the full 5-voice rotation is what landed George (male) on a
+    // female character. The throw guarantees any future
+    // regression that lets character.gender be undefined at the
+    // call site surfaces IMMEDIATELY, not after shipping a
+    // wrong-voice ad batch.
+    const { pickElevenLabsVoiceForVariant } =
+      await import('../src/functions/generate-video-variant');
+    expect(() =>
+      // Cast to sidestep the TS optional signature so we exercise
+      // the runtime throw — this is exactly what would happen if
+      // Claude output dropped the gender field.
+      pickElevenLabsVoiceForVariant({
+        variantIndex: 0,
+        variantCount: 5,
+        jobId: 'j-1',
+        // characterGender omitted intentionally
+      }),
+    ).toThrow(/characterGender is required/);
+    expect(() =>
+      pickElevenLabsVoiceForVariant({
+        variantIndex: 0,
+        variantCount: 5,
+        jobId: 'j-1',
+      }),
+    ).toThrow(/Polish-21\.0\.13/);
   });
 
   it('legacy pickHedraVoiceForVariant alias still resolves (backward-compat during migration)', async () => {
@@ -1569,6 +1632,43 @@ describe('Polish-21.0.7: parseStructuredCharacter (Linda block parser)', () => {
       setting_description: 'x',
     };
     expect(parseStructuredCharacter(badGender)).toEqual(FALLBACK_STRUCTURED_CHARACTER);
+  });
+
+  it('Polish-21.0.13: preserves gender on the returned StructuredCharacter for BOTH male and female (regression pin — job 0bb2d35d root-cause claim)', async () => {
+    // The Polish-21.0.13 spec called out `parseVideoAdSpecHedra
+    // correctly reads character.gender from Claude output but
+    // never plumbs it back` as a root-cause hypothesis. Even
+    // though the current parser already threads gender through,
+    // pin the invariant BOTH directions so any future refactor
+    // that accidentally drops the field (or normalizes it to a
+    // fixed value) surfaces immediately.
+    const { parseStructuredCharacter } = await import('../src/functions/generate-video-variant');
+    const wellFormed = (gender: 'male' | 'female') => ({
+      name: 'Julia',
+      age: 34,
+      nationality: 'American',
+      gender,
+      demographic_role: 'young mom',
+      hair_bullet: 'Shoulder-length brown hair, slightly messy, NOT styled',
+      eye_asymmetry_bullet: 'Slightly uneven eye line — right lid droops slightly',
+      nose_bullet: 'Ordinary nose with a small bump on the bridge',
+      mouth_bullet: 'Thin lips, slightly asymmetric mouth',
+      eye_color_and_age_detail: "Warm hazel eyes with faint crow's feet",
+      jaw_bullet: 'Soft jawline with mild jowls (age-appropriate)',
+      face_shape_bullet: 'Oval face, NOT chiseled',
+      clothing_bullet: 'Faded navy cotton crewneck with honest wear at the neckline',
+      setting_paragraph:
+        'Kitchen table with warm morning window light and a cluttered coffee mug behind her.',
+      skin_age_appropriate_detail: 'faint age spots on cheekbones, natural pore texture',
+      skin_color_for_stubble: gender === 'male' ? ('brown' as const) : ('none' as const),
+      anti_celeb_actress_examples: ['Meryl Streep', 'Helen Mirren', 'Jane Fonda', 'Diane Keaton'],
+      anti_celeb_news_examples: ['Barbara Walters', 'Diane Sawyer'],
+      anti_celeb_politician_examples: ['Nancy Pelosi', 'Hillary Clinton'],
+    });
+    const female = parseStructuredCharacter(wellFormed('female'));
+    expect(female.gender).toBe('female');
+    const male = parseStructuredCharacter(wellFormed('male'));
+    expect(male.gender).toBe('male');
   });
 
   it('rejects non-positive / non-finite age (falls back)', async () => {

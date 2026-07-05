@@ -582,7 +582,20 @@ export interface ElevenLabsVoiceRosterEntry {
   label: string;
   /** One-sentence positioning; goes into generation metadata for forensics. */
   description: string;
-  gender: 'female' | 'male';
+  /**
+   * Polish-21.0.13 hotfix: widened to include `'neutral'` for
+   * androgynous / voice-cloned timbres that pair cleanly with
+   * EITHER a male or a female character. `pickElevenLabsVoicesForBatch`
+   * treats a neutral voice as matching any character gender —
+   * lets an operator seed the roster with a Polish-22 cloned
+   * voice without having to fork the picker.
+   *
+   * Character gender (from the Claude ad-spec block) stays
+   * `'male' | 'female'` via `CharacterVoiceGender` — the Nano
+   * Banana image needs a definite gender to render; only the
+   * OUTPUT voice can be neutral.
+   */
+  gender: 'female' | 'male' | 'neutral';
   /** Rough age bracket for ad-test diversity picking. */
   age: 'young' | 'middle_aged';
   /** True on exactly ONE roster entry — the safe-fallback voice. */
@@ -729,13 +742,20 @@ export function pickElevenLabsVoicesForBatch(
   characterGender?: CharacterVoiceGender,
 ): ElevenLabsVoiceRosterEntry[] {
   if (variantCount <= 0 || roster.length === 0) return [];
-  // Polish-21.0.11: filter by gender first. Empty-match → fall
-  // through to full roster so the batch still ships (loud-log
-  // handled by the caller in the worker).
+  // Polish-21.0.11: filter by gender first.
+  // Polish-21.0.13: neutral-gender voices match EITHER character
+  // gender (androgynous / voice-cloned timbres). Exact-match rule
+  // is `voice.gender === characterGender || voice.gender ===
+  // 'neutral'`. Empty-match → fall through to the full roster so
+  // the batch still ships (loud-log handled by the caller in the
+  // worker). Callers that never want the fall-through can pass
+  // undefined characterGender and get the legacy rotation.
   const effectiveRoster =
     characterGender != null
       ? (() => {
-          const filtered = roster.filter((v) => v.gender === characterGender);
+          const filtered = roster.filter(
+            (v) => v.gender === characterGender || v.gender === 'neutral',
+          );
           return filtered.length > 0 ? filtered : roster;
         })()
       : roster;

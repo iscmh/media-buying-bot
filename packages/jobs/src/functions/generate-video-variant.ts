@@ -1744,12 +1744,32 @@ export function pickElevenLabsVoiceForVariant(input: {
   jobId: string;
   /**
    * Polish-21.0.11: character gender from the StructuredCharacter
-   * block Claude emits in the Hedra ad spec. Undefined = no
-   * filtering (legacy callers). Character 3 + Kling paths always
-   * pass it now.
+   * block Claude emits in the Hedra ad spec.
+   *
+   * Polish-21.0.13 hotfix: NO LONGER OPTIONAL at the runtime
+   * layer. Job 0bb2d35d symptom (female character got George,
+   * male voice) matches the failure mode where `character.gender`
+   * is silently undefined at the call site — a silent fall-
+   * through would rotate the full 5-voice roster and land George
+   * on variant 0 for many jobId hashes. Callers MUST pass
+   * character.gender; undefined throws with a clear message so
+   * the regression surfaces on the first variant instead of
+   * shipping wrong-voice ads. The typescript signature is kept
+   * optional so legacy tests without a character block still
+   * compile, but the runtime check fires either way.
    */
   characterGender?: CharacterVoiceGender;
 }): ElevenLabsVoiceRosterEntry {
+  // Polish-21.0.13 hardening: fail-loud on missing characterGender.
+  // No silent default.
+  if (input.characterGender == null) {
+    throw new Error(
+      'pickElevenLabsVoiceForVariant: characterGender is required (Polish-21.0.13). ' +
+        'A silent fall-through to the full roster rotation is what caused job 0bb2d35d ' +
+        `to land a male voice on a female character. ` +
+        `variantIndex=${input.variantIndex} jobId=${input.jobId}`,
+    );
+  }
   const offset = computeElevenLabsVoiceOffsetForJob(input.jobId);
   const picks = pickElevenLabsVoicesForBatch(
     Math.max(1, input.variantCount),
