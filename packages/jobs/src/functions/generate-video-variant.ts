@@ -1284,6 +1284,31 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
     characterGender: character.gender,
   });
 
+  // Polish-21.0.13 hotfix: version-stamped diagnostic log so the
+  // next production diagnostic answers "did the deploy pick up the
+  // gender-aware voice picker?" from a single log line. Job
+  // 0bb2d35d confirmed the pre-21.0.11 build was still live in
+  // prod (composite row missing compression:{} block + gendered
+  // voice pick) — the tag guarantees the operator can spot a
+  // stale deploy without needing to grep source revisions.
+  //
+  // Emits input (variantIndex + characterGender) AND output
+  // (picked voice_id / label / gender) on ONE line — mismatch
+  // between characterGender and voice.gender surfaces
+  // immediately as `MISMATCH` in the log so future gender
+  // regressions can't slip past a passive scan.
+  const voiceMatchesCharacter = voice.gender === character.gender;
+  console.log(
+    `[generate-video-variant] variant ${variantIndex} (hedra) ` +
+      `voice-pick [Polish-21.0.13]: ` +
+      `input.character_gender=${JSON.stringify(character.gender)} ` +
+      `input.variant_index=${variantIndex} ` +
+      `input.variant_count=${variantCount} ` +
+      `output.voice_id=${voice.id} output.voice_label=${voice.label} ` +
+      `output.voice_gender=${voice.gender} ` +
+      `match=${voiceMatchesCharacter ? 'OK' : 'MISMATCH'}`,
+  );
+
   // Polish-21.0.4 hotfix: generate TTS audio via ElevenLabs BYOK
   // (replaces Hedra native TTS blocked on voice-UUID availability).
   const ttsResult = await step.run(`elevenlabs-tts-${variantIndex}`, async () => {
@@ -1588,6 +1613,24 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
   // compression_error) still lands on the composite row so the
   // operator's dashboard can pivot on the compress phase without
   // needing a separate step.
+  // Polish-21.0.13: version-stamped log BEFORE + AFTER the
+  // compress+upload step so the operator can prove from
+  // production logs whether (a) the deploy is on the compressing
+  // build and (b) whether ffmpeg-installer's binary was actually
+  // resolved at runtime. Job 0bb2d35d landed a NULL compression
+  // block in the composite row — the pre-log stamps "attempt"
+  // and the post-log stamps the exact stats + fallback state.
+  console.log(
+    `[generate-video-variant] variant ${variantIndex} (hedra) ` +
+      `compress-upload BEGIN [Polish-21.0.13]: ` +
+      `model_id=${model.id} remote_url_host=${(() => {
+        try {
+          return new URL(downloadUrl).host;
+        } catch {
+          return '(unparseable)';
+        }
+      })()} compress=true`,
+  );
   const upload = await step.run(`hedra-upload-video-${variantIndex}`, async () =>
     uploadGeneratedVideoFromUrl({
       userId,
@@ -1596,6 +1639,18 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
       filename: `video-${model.id}-${variantIndex}-composite`,
       compress: true,
     }),
+  );
+  console.log(
+    `[generate-video-variant] variant ${variantIndex} (hedra) ` +
+      `compress-upload END [Polish-21.0.13]: ` +
+      `model_id=${model.id} ` +
+      `original_size_bytes=${upload.originalBytes} ` +
+      `compressed_size_bytes=${upload.sizeBytes} ` +
+      `compression_ms=${upload.compressionMs} ` +
+      `was_compressed=${upload.wasCompressed}` +
+      (upload.compressionError
+        ? ` compression_error=${JSON.stringify(upload.compressionError)}`
+        : ''),
   );
 
   // Step 9: write generated_creatives composite row. Hedra is
@@ -1627,6 +1682,11 @@ async function runOneVariantHedra(input: RunOneVariantInput): Promise<VideoVaria
         voice_label: voice.label,
         voice_gender: voice.gender,
         voice_age: voice.age,
+        // Polish-21.0.13: durable record of the gender-match
+        // outcome on every variant row. Lets the operator SQL /
+        // dashboard-query for `voice_matches_character_gender =
+        // false` across every job without scraping Inngest logs.
+        voice_matches_character_gender: voice.gender === character.gender,
         // Polish-21.0.5 hotfix: log the character block Claude
         // produced (used to compose the Nano Banana JOHN prompt)
         // so operators can grep for AI-CGI regressions and inspect

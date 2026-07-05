@@ -634,6 +634,36 @@ describe('Polish-21.0.11: pickElevenLabsVoicesForBatch — gender-aware filterin
       expect(['male', 'female']).toContain(v.gender);
     }
   });
+
+  it('Polish-21.0.13 regression pin (job 0bb2d35d): female character across a 5-variant batch NEVER picks a male voice', () => {
+    // The operator diagnosed variants[0] with
+    // character.gender=female landing voice=George (male) on
+    // job 0bb2d35d. Mathematically impossible with the current
+    // filter, but explicitly test the full 5-variant × N-offset
+    // combinatorial to catch any future regression that widens
+    // the filter (e.g., "match by age instead of gender").
+    for (let offset = 0; offset < 20; offset++) {
+      const picks = pickHedraVoicesForBatch(5, offset, undefined, 'female');
+      for (const [i, pick] of picks.entries()) {
+        expect(
+          pick.gender,
+          `offset=${offset} variant=${i} picked ${pick.label} (${pick.gender})`,
+        ).toBe('female');
+      }
+    }
+  });
+
+  it('Polish-21.0.13 regression pin: male character across a 5-variant batch NEVER picks a female voice', () => {
+    for (let offset = 0; offset < 20; offset++) {
+      const picks = pickHedraVoicesForBatch(5, offset, undefined, 'male');
+      for (const [i, pick] of picks.entries()) {
+        expect(
+          pick.gender,
+          `offset=${offset} variant=${i} picked ${pick.label} (${pick.gender})`,
+        ).toBe('male');
+      }
+    }
+  });
 });
 
 describe('Polish-20: getVideoModel / getVideoProvider / getModelProviderConfig lookups', () => {

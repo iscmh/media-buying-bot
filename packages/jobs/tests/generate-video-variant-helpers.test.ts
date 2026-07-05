@@ -1924,4 +1924,74 @@ describe('Polish-21.0.3: worker threads durationSeconds into submitHedraGenerati
     expect(insertBlock).not.toMatch(/upload_was_compressed:/);
     expect(insertBlock).not.toMatch(/upload_compression_error:/);
   });
+
+  it('Polish-21.0.13: runOneVariant dispatches to runOneVariantHedra by PROVIDER (uniform Character 3 + Kling v2 Std + Kling v2 Pro)', async () => {
+    // Job 0bb2d35d hypothesis (C): "changes shipped to a code path
+    // that doesn't cover Kling Avatar v2 Standard". Rule that out
+    // by pinning the dispatch AT SOURCE — a provider-based check
+    // guarantees every Hedra-hosted model routes through the same
+    // gender-aware voice pick + compress+upload path. If a future
+    // refactor reintroduces a model-id branch (Kling gets its own
+    // runOneVariantKling), this test fails.
+    const src = await readSrc();
+    const dispatchStart = src.indexOf('async function runOneVariant(input: RunOneVariantInput)');
+    expect(dispatchStart).toBeGreaterThan(-1);
+    // Pull the dispatch body (through the first "// --- " header
+    // that terminates the function).
+    const dispatchBody = src.slice(dispatchStart, dispatchStart + 2000);
+    expect(dispatchBody).toMatch(/if \(input\.config\.providerId === 'hedra'\)/);
+    expect(dispatchBody).toMatch(/return runOneVariantHedra\(input\);/);
+    // Regression: dispatch MUST NOT model-id-branch on hedra
+    // variants (which is what would let a Kling ship without the
+    // Character 3 fixes).
+    expect(dispatchBody).not.toMatch(/model\.id === 'hedra_kling_avatar_v2_standard'/);
+    expect(dispatchBody).not.toMatch(/model\.id === 'hedra_kling_avatar_v2_pro'/);
+    expect(dispatchBody).not.toMatch(/model\.id === 'hedra_character_3'/);
+  });
+
+  it('Polish-21.0.13: voice-pick emits a version-stamped diagnostic log with match=OK|MISMATCH', async () => {
+    // Regression pin: the tag `Polish-21.0.13` must be on the
+    // voice-pick log line. If it disappears, the operator can no
+    // longer prove from prod logs which build handled the variant.
+    const src = await readSrc();
+    const hedraStart = src.indexOf('async function runOneVariantHedra');
+    const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
+    const body = src.slice(hedraStart, hedraEnd);
+    expect(body).toMatch(/voice-pick \[Polish-21\.0\.13\]:/);
+    expect(body).toMatch(/input\.character_gender=/);
+    expect(body).toMatch(/output\.voice_gender=/);
+    expect(body).toMatch(/match=\$\{voiceMatchesCharacter \? 'OK' : 'MISMATCH'\}/);
+  });
+
+  it('Polish-21.0.13: compress-upload step emits BEGIN + END version-stamped diagnostic logs', async () => {
+    // Regression pin: the operator's next diagnostic answers
+    // "was compression attempted?" from `compress-upload BEGIN`
+    // and "what did it produce?" from `compress-upload END` — one
+    // pair per variant, both tagged Polish-21.0.13.
+    const src = await readSrc();
+    const hedraStart = src.indexOf('async function runOneVariantHedra');
+    const hedraEnd = src.indexOf('export function pickElevenLabsVoiceForVariant');
+    const body = src.slice(hedraStart, hedraEnd);
+    expect(body).toMatch(/compress-upload BEGIN \[Polish-21\.0\.13\]:/);
+    expect(body).toMatch(/compress-upload END \[Polish-21\.0\.13\]:/);
+    // END log includes the full stats so a single log line
+    // answers original / compressed / ms / was_compressed.
+    expect(body).toMatch(/original_size_bytes=/);
+    expect(body).toMatch(/compressed_size_bytes=/);
+    expect(body).toMatch(/compression_ms=/);
+    expect(body).toMatch(/was_compressed=/);
+  });
+
+  it('Polish-21.0.13: composite metadata carries voice_matches_character_gender (durable dashboard-queryable flag)', async () => {
+    // Regression pin: SQL / dashboards can filter
+    // `voice_matches_character_gender = false` without needing
+    // to scrape Inngest logs.
+    const src = await readSrc();
+    const insertStart = src.indexOf('step.run(`hedra-insert-composite-');
+    const insertEnd = src.indexOf('});', insertStart);
+    const insertBlock = src.slice(insertStart, insertEnd);
+    expect(insertBlock).toMatch(
+      /voice_matches_character_gender: voice\.gender === character\.gender,/,
+    );
+  });
 });
