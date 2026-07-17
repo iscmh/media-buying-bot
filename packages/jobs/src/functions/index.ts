@@ -4,6 +4,7 @@ import { manualDailySummary } from './manual-daily-summary';
 import { generateVideoVariant } from './generate-video-variant';
 import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
+import { generatePolish23VeoLite } from './generate-polish23-veo-lite';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -62,6 +63,12 @@ export const functions = [
   // Polish-20: unified descriptor-driven video-variant worker
   // (Seedance 1.5 Pro / Kling 3.0 Standard / Seedance 2).
   generateVideoVariant,
+  // Polish-23 Commit 3: Higgsfield Soul + kie.ai Veo 3.1 Lite
+  // end-to-end UGC pipeline. Event reserved in Commit 1's
+  // REGISTERED_GENERATION_WORKER_EVENTS tripwire; this line
+  // completes the registration by adding the function to the
+  // dispatch array.
+  generatePolish23VeoLite,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

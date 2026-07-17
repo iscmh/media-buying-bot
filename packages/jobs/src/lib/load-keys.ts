@@ -33,6 +33,9 @@ export interface DecryptedKeys {
   // provider='elevenlabs'. The pg enum always carried this value
   // (Polish-20 Commit 4 only removed the application-level union).
   elevenlabs?: string;
+  // Polish-23 Commit 3: WaveSpeedAI BYOK (Higgsfield Soul host).
+  // Lives in ai_provider_connections under provider='wavespeed_ai'.
+  wavespeed_ai?: string;
 }
 
 export type ProviderKey = keyof DecryptedKeys;
