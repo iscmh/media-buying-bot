@@ -2,20 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { POLISH_RELEASE_NAME, POLISH_RELEASE_SHA, POLISH_VERSION } from '../src/polish-version';
 
 describe('Polish-21.0.15: POLISH_VERSION constant', () => {
-  it('is a MAJOR.MINOR.PATCH string in the 21.0.* series', () => {
-    // Regression pin: any typo (`21..0.15`, `21.0.15-beta`,
-    // trailing whitespace) breaks downstream string-format
-    // consumers. Keep the schema tight so a future bump can only
-    // land clean values.
-    expect(POLISH_VERSION).toMatch(/^21\.0\.\d+$/);
+  it('is a MAJOR.MINOR.PATCH string in the Polish-21/23 series', () => {
+    // Regression pin: any typo (`23..0.2`, `23.0.2-beta`, trailing
+    // whitespace) breaks downstream string-format consumers. Keep
+    // the schema tight so a future bump can only land clean values.
+    expect(POLISH_VERSION).toMatch(/^2(1|3)\.0\.\d+$/);
   });
 
-  it('is currently 21.0.15 (bump this pin deliberately on the next hotfix)', () => {
+  it('is currently 23.0.2 (Polish-23 Commit 1.1 hotfix — bump this pin deliberately on the next hotfix)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('21.0.15');
+    expect(POLISH_VERSION).toBe('23.0.2');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

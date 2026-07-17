@@ -6,15 +6,15 @@ import {
 } from '../src/ai-provider-form';
 
 describe('Polish-23 Commit 1: wavespeed_ai BYOK schema + connect card', () => {
-  it('accepts a valid wsp_ key (base62 tail ≥ 24 chars)', () => {
+  it('accepts a valid wsk_ key (base62 tail ≥ 24 chars)', () => {
     const r = AiProviderKeyInputSchema.safeParse({
       provider: 'wavespeed_ai',
-      apiKey: 'wsp_' + 'A'.repeat(24),
+      apiKey: 'wsk_' + 'A'.repeat(24),
     });
     expect(r.success).toBe(true);
   });
 
-  it('rejects keys without the wsp_ prefix', () => {
+  it('rejects keys without the wsk_ prefix', () => {
     const r = AiProviderKeyInputSchema.safeParse({
       provider: 'wavespeed_ai',
       apiKey: 'sk_' + 'B'.repeat(24),
@@ -25,7 +25,7 @@ describe('Polish-23 Commit 1: wavespeed_ai BYOK schema + connect card', () => {
   it('rejects keys with a too-short tail (<24 chars)', () => {
     const r = AiProviderKeyInputSchema.safeParse({
       provider: 'wavespeed_ai',
-      apiKey: 'wsp_short',
+      apiKey: 'wsk_short',
     });
     expect(r.success).toBe(false);
   });
@@ -33,7 +33,7 @@ describe('Polish-23 Commit 1: wavespeed_ai BYOK schema + connect card', () => {
   it('rejects keys with special characters in the tail (base62 only)', () => {
     const r = AiProviderKeyInputSchema.safeParse({
       provider: 'wavespeed_ai',
-      apiKey: 'wsp_' + 'A'.repeat(23) + '!',
+      apiKey: 'wsk_' + 'A'.repeat(23) + '!',
     });
     expect(r.success).toBe(false);
   });
