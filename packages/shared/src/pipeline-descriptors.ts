@@ -34,9 +34,22 @@ export interface PipelineDescriptor {
   workerEvent:
     | 'generation/ugc.requested'
     | 'generation/sora.requested'
-    | 'generation/nano-banana.requested';
+    | 'generation/nano-banana.requested'
+    // Polish-23 Commit 1: reserved for the Polish-23 Commit-3
+    // kie.ai Veo 3.1 Lite + Higgsfield Soul worker. Named here so
+    // the descriptor + estimator + form pickers type-check even
+    // though the worker file doesn't land until Commit 3.
+    | 'generation/polish23-veo-lite.requested';
   /** providers the user MUST have connected for this pipeline to work. */
-  requiredProviders: Array<'heygen' | 'openai' | 'gemini' | 'claude' | 'kie_ai'>;
+  requiredProviders: Array<
+    | 'heygen'
+    | 'openai'
+    | 'gemini'
+    | 'claude'
+    | 'kie_ai'
+    // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul.
+    | 'wavespeed_ai'
+  >;
 }
 
 const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
@@ -63,6 +76,19 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     format: 'nano_banana_static_image',
     workerEvent: 'generation/nano-banana.requested',
     requiredProviders: ['gemini'],
+  },
+  // Polish-23 Commit 1: reserved descriptor for the kie.ai Veo
+  // 3.1 Lite + Higgsfield Soul pipeline that Commit 3 wires. The
+  // form picker doesn't surface this yet (worker isn't registered);
+  // the entry is here so estimator lookups + tests share the
+  // shape from day one.
+  polish23_higgsfield_veo_lite: {
+    pipeline: 'polish23_higgsfield_veo_lite',
+    label: 'UGC ad (Higgsfield Soul + kie.ai Veo 3.1 Lite — Polish-23)',
+    providerChoice: 'gemini',
+    format: 'polish23_higgsfield_veo_lite',
+    workerEvent: 'generation/polish23-veo-lite.requested',
+    requiredProviders: ['claude', 'gemini', 'kie_ai', 'wavespeed_ai'],
   },
 };
 
@@ -99,4 +125,7 @@ export const ALL_PIPELINES: PipelineType[] = [
   'heygen_avatar_talking_head',
   'sora_2_single_shot',
   'nano_banana_static_image',
+  // Polish-23 Commit 1: reserved; not surfaced in the form until
+  // Commit 3 wires the worker.
+  'polish23_higgsfield_veo_lite',
 ];

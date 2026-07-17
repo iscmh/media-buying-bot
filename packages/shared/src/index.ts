@@ -19,4 +19,9 @@ export * from './currency';
 // Polish-21.0.15: shipped-version constants (import chain forces
 // cross-package rebuild on version bump).
 export * from './polish-version';
+// Polish-23 Commit 1: persistent character-lock schema. Written
+// once by the Claude ad-spec step onto
+// generation_jobs.metadata.character_lock, then re-injected into
+// every per-clip Veo 3.1 Lite prompt.
+export * from './polish23-character-lock';
 export * as env from './env';

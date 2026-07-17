@@ -44,7 +44,11 @@ export type ProviderName =
   // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK. Re-added after
   // Polish-20 Commit 4 removed it — see AIProviderName JSDoc for
   // the ElevenLabs-as-Hedra-audio-source architecture rationale.
-  | 'elevenlabs';
+  | 'elevenlabs'
+  // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul
+  // image-to-image endpoint. Reference-image seed for the
+  // Polish-23 kie.ai Veo 3.1 Lite pipeline.
+  | 'wavespeed_ai';
 
 export interface CallProviderInput {
   userId: string;

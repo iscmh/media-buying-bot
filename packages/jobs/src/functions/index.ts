@@ -43,6 +43,11 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // provider_id from job.metadata and dispatches through the
   // descriptor-driven kie-video client.
   'generation/video-variant.requested',
+  // Polish-23 Commit 1: reserved event for the Higgsfield Soul +
+  // kie.ai Veo 3.1 Lite pipeline. Worker file lands in Commit 3;
+  // event is registered here now so the descriptor-coverage
+  // tripwire and cost-estimator stay in lockstep.
+  'generation/polish23-veo-lite.requested',
 ] as const);
 
 export const functions = [

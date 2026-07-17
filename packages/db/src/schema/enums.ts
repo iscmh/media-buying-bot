@@ -30,6 +30,11 @@ export const aiProviderEnum = pgEnum('ai_provider', [
   // Polish-21: Hedra Character 3 image-to-talking-avatar. Migration
   // 0032 adds the value on the DB side.
   'hedra',
+  // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul
+  // image-to-image endpoint. Migration 0034 adds the value on the
+  // DB side. Reference-image seed for the new Polish-23 kie.ai
+  // Veo 3.1 Lite pipeline.
+  'wavespeed_ai',
 ]);
 
 // Polish-4: tier label per provider. nullable on the connection row —

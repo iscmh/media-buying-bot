@@ -35,6 +35,11 @@ const HEDRA_KEY_PATTERN = /^[A-Za-z0-9_.=-]{20,256}$/;
 // alphanumeric ~48-64 chars, sometimes prefixed with `sk_`. Accept a
 // wide superset — ElevenLabs hasn't published a strict format.
 const ELEVENLABS_KEY_PATTERN = /^[A-Za-z0-9_.=-]{24,256}$/;
+// Polish-23 Commit 1: WaveSpeedAI keys carry a `wsp_` prefix per
+// their published examples. The tail is base62 (letters+digits)
+// ≥24 chars — permissive enough that a rotation to longer secrets
+// doesn't need a schema bump.
+const WAVESPEED_AI_KEY_PATTERN = /^wsp_[A-Za-z0-9]{24,128}$/;
 export const AiProviderKeyInputSchema = z
   .object({
     provider: z.enum([
@@ -45,6 +50,8 @@ export const AiProviderKeyInputSchema = z
       'openai',
       'hedra',
       'elevenlabs',
+      // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul.
+      'wavespeed_ai',
     ]),
     apiKey: z.string().trim().min(1, 'Paste your API key.'),
   })
@@ -80,6 +87,10 @@ export const AiProviderKeyInputSchema = z
       case 'elevenlabs':
         pattern = ELEVENLABS_KEY_PATTERN;
         hint = 'ElevenLabs keys are 24+ chars from elevenlabs.io/app/settings/api-keys.';
+        break;
+      case 'wavespeed_ai':
+        pattern = WAVESPEED_AI_KEY_PATTERN;
+        hint = 'WaveSpeedAI keys start with wsp_ followed by 24+ chars.';
         break;
     }
     if (!pattern.test(value.apiKey)) {
@@ -168,6 +179,14 @@ export const AI_PROVIDER_META: Record<
     apiDocsUrl: 'https://elevenlabs.io/docs',
     verificationMethod: 'api',
   },
+  wavespeed_ai: {
+    label: 'WaveSpeedAI',
+    description:
+      'Higgsfield Soul reference-image generation ($0.09-0.23/run) for the Polish-23 kie.ai Veo 3.1 Lite pipeline. Pay-per-run, no subscription.',
+    pricingUrl: 'https://wavespeed.ai/pricing',
+    apiDocsUrl: 'https://wavespeed.ai/docs/docs-api/higgsfield/higgsfield-soul-image-to-image',
+    verificationMethod: 'api',
+  },
 };
 
 /**
@@ -190,6 +209,13 @@ export const AI_PROVIDER_META: Record<
 export const CONNECTABLE_AI_PROVIDERS: AIProviderName[] = [
   'hedra',
   'elevenlabs',
+  // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul lands
+  // as a first-class connect card. Placed above the legacy
+  // heygen/replicate/openai cards so operators pre-paste the
+  // Polish-23 pair (kie.ai already lives in tool_connections;
+  // wavespeed_ai lands here). Polish-23 Commit 5 will drop
+  // hedra + elevenlabs when the pipeline pivot completes.
+  'wavespeed_ai',
   'heygen',
   'replicate',
   'openai',

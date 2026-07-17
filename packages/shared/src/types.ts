@@ -30,7 +30,13 @@ export type AIProviderName =
   // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK. Worker generates
   // audio via ElevenLabs and uploads the mp3 as a Hedra audio
   // asset — bypasses Hedra's native TTS voice-UUID dependency.
-  | 'elevenlabs';
+  | 'elevenlabs'
+  // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul
+  // image-to-image endpoint. Reference-image seed for the
+  // Polish-23 kie.ai Veo 3.1 Lite pipeline. BYOK key lives in
+  // ai_provider_connections under provider='wavespeed_ai'.
+  // Migration 0034 adds the value on the DB side.
+  | 'wavespeed_ai';
 
 export type CampaignObjective = 'CBO' | 'ABO';
 

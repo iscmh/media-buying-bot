@@ -319,13 +319,17 @@ export const analyzeConcept = inngest.createFunction(
  *     path surfaces a clear "Missing provider_id" error rather than
  *     silently routing to the wrong worker
  */
-async function loadJobRoutingEvent(
-  jobId: string,
-): Promise<
+async function loadJobRoutingEvent(jobId: string): Promise<
   | 'generation/ugc.requested'
   | 'generation/sora.requested'
   | 'generation/nano-banana.requested'
   | 'generation/video-variant.requested'
+  // Polish-23 Commit 1: reserved for the Commit-3 kie.ai Veo 3.1
+  // Lite + Higgsfield Soul worker. Descriptor lookup in
+  // pipeline-descriptors.ts already returns this string; typing
+  // the union here now keeps analyze-concept in lockstep before
+  // Commit 3 lands the worker.
+  | 'generation/polish23-veo-lite.requested'
 > {
   try {
     const db = getDb();

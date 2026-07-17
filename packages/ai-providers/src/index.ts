@@ -251,3 +251,26 @@ export {
   getCharacterReplacePrompt,
   getPromptsBundleSize,
 } from './prompt-loader';
+
+// Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul
+// image-to-image client. Reference-image seed for the new
+// kie.ai Veo 3.1 Lite pipeline. Commit 3 wires the worker;
+// the client + BYOK card + estimator branch land here at
+// Commit 1.
+export {
+  submitWavespeedSoul,
+  pollWavespeedSoul,
+  verifyWavespeedKey,
+  normalizeWavespeedStatus,
+  translateWavespeedErrorStatus,
+  estimateWavespeedSoulCostUsd,
+  WAVESPEED_SOUL_USD_PER_RUN,
+  WAVESPEED_SOUL_DEFAULT_QUALITY,
+  type WavespeedQuality,
+  type WavespeedSoulSubmitInput,
+  type WavespeedSoulSubmitResult,
+  type WavespeedSoulPollInput,
+  type WavespeedSoulPollResult,
+  type WavespeedPredictionStatus,
+} from './wavespeed';
+export { composeHiggsfieldSoulReferencePrompt } from './higgsfield-soul-prompt';

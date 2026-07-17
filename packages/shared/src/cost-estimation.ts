@@ -60,6 +60,23 @@ const PRICING = {
   // Polish-6: Nano Banana static image
   nanoBananaPerVariantUsd: 0.04,
   nanoBananaClaudeUsd: 0.02,
+  // Polish-23 Commit 1: Higgsfield Soul via WaveSpeedAI + kie.ai
+  // Veo 3.1 Lite. ONE Soul reference per BATCH (not per variant)
+  // — the same PNG URL is threaded into every 8s Veo clip so
+  // the character stays locked across the composite. Veo Lite
+  // runs 35 credits × $0.005/credit at 1080p × 8 clips per 60s
+  // = $1.40 per 60s ad (BCH's math). Higgsfield Soul at `high`
+  // ($0.23/run) buys the locked-character-detail advantage the
+  // operator explicitly requested. Batches larger than one
+  // variant reuse the Soul reference — cost line lists the
+  // batch-fixed items as `1 ×`.
+  polish23HiggsfieldSoulHighUsdPerRun: 0.23,
+  polish23HiggsfieldSoulMediumUsdPerRun: 0.09,
+  polish23NanoBananaSeedUsd: 0.04,
+  polish23ClaudeScriptUsd: 0.02,
+  polish23VeoLite1080pUsdPerClip: 0.175,
+  polish23VeoClipSeconds: 8,
+  polish23ReplicateConcatUsd: 0.15,
 } as const;
 
 export interface CostBreakdownItem {
@@ -78,7 +95,12 @@ export interface CostEstimate {
 export type PipelineType =
   | 'heygen_avatar_talking_head'
   | 'sora_2_single_shot'
-  | 'nano_banana_static_image';
+  | 'nano_banana_static_image'
+  // Polish-23 Commit 1: Higgsfield Soul via WaveSpeedAI + kie.ai
+  // Veo 3.1 Lite 1080p × 8 clips per 60s composite. Reserved
+  // here so the estimator + descriptor + form pickers stay in
+  // lockstep before Commit 3 wires the worker.
+  | 'polish23_higgsfield_veo_lite';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -261,6 +283,45 @@ function estimateByPipeline(
         cost: round4(variantCount * PRICING.nanoBananaPerVariantUsd),
       });
       break;
+    case 'polish23_higgsfield_veo_lite': {
+      // Polish-23 pipeline: ONE Higgsfield Soul reference PNG per
+      // BATCH (not per variant) — same reference URL fed into
+      // every Veo 3.1 Lite clip's imageUrls[0] so the character
+      // stays locked across the composite.
+      //
+      //   Nano Banana seed (batch-fixed)          $0.04
+      //   Higgsfield Soul high (batch-fixed)      $0.23
+      //   Claude ad-spec × variantCount           $0.02 × N
+      //   Veo Lite × ceil(target/8) × variantCount $0.175 × clips × N
+      //   Replicate concat × variantCount         $0.15 × N
+      //
+      // 1 variant × 60s = $1.84 = $0.04 + $0.23 + $0.02 + $1.40 + $0.15.
+      // BCH's $1.40 anchor lands on the Veo-only line.
+      const target = _estimatedDurationSeconds ?? 60;
+      const clipCount = Math.max(1, Math.ceil(target / PRICING.polish23VeoClipSeconds));
+      const veoPerVariant = round4(clipCount * PRICING.polish23VeoLite1080pUsdPerClip);
+      breakdown.push({
+        item: `Nano Banana 2 seed image (1 × $${PRICING.polish23NanoBananaSeedUsd.toFixed(2)})`,
+        cost: PRICING.polish23NanoBananaSeedUsd,
+      });
+      breakdown.push({
+        item: `Higgsfield Soul reference (high, 1 × $${PRICING.polish23HiggsfieldSoulHighUsdPerRun.toFixed(2)})`,
+        cost: PRICING.polish23HiggsfieldSoulHighUsdPerRun,
+      });
+      breakdown.push({
+        item: `Claude ad-spec (${variantCount} × $${PRICING.polish23ClaudeScriptUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.polish23ClaudeScriptUsd),
+      });
+      breakdown.push({
+        item: `Veo 3.1 Lite 1080p (${clipCount} clips × $${PRICING.polish23VeoLite1080pUsdPerClip.toFixed(3)}, ${variantCount} variants)`,
+        cost: round4(variantCount * veoPerVariant),
+      });
+      breakdown.push({
+        item: `Replicate ffmpeg-concat (${variantCount} × $${PRICING.polish23ReplicateConcatUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.polish23ReplicateConcatUsd),
+      });
+      break;
+    }
   }
   const estimateUsd = round4(breakdown.reduce((sum, b) => sum + b.cost, 0));
   return { estimateUsd, breakdown };

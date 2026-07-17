@@ -38,7 +38,9 @@ export async function logAiProviderApiCall(input: {
     // Polish-21: Hedra Character 3 image-to-talking-avatar audit tag.
     | 'hedra'
     // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK audit tag.
-    | 'elevenlabs';
+    | 'elevenlabs'
+    // Polish-23 Commit 1: WaveSpeedAI Higgsfield Soul audit tag.
+    | 'wavespeed_ai';
   endpoint: string;
   method: string;
   requestBody?: Record<string, unknown>;

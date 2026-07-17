@@ -78,12 +78,18 @@ describe('Polish-20 Commit 4: defaultPipeline throws — no pipeline-level defau
   });
 });
 
-describe('Polish-20 Commit 4: ALL_PIPELINES coverage post-legacy-purge', () => {
-  it('covers exactly the 3 legacy survivors (HeyGen / Sora / Nano Banana)', () => {
+describe('Polish-20 Commit 4 → Polish-23 Commit 1: ALL_PIPELINES coverage', () => {
+  it('covers the 3 legacy survivors + the Polish-23 reserved pipeline', () => {
+    // Polish-23 Commit 1 added polish23_higgsfield_veo_lite as a
+    // reserved descriptor. The form picker doesn't surface it yet
+    // (worker isn't registered until Commit 3), but ALL_PIPELINES
+    // must include it so descriptor lookups + cost estimator
+    // coverage tests stay in lockstep.
     const expected: PipelineType[] = [
       'heygen_avatar_talking_head',
       'sora_2_single_shot',
       'nano_banana_static_image',
+      'polish23_higgsfield_veo_lite',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
   });

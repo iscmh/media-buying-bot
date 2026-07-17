@@ -509,3 +509,114 @@ describe('Polish-21.0.9: Kling Avatar v2 Standard + Pro cost estimates on Hedra'
     }
   });
 });
+
+describe('Polish-23 Commit 1: polish23_higgsfield_veo_lite cost model', () => {
+  // ONE Higgsfield Soul reference per BATCH (batch-fixed), Claude
+  // + Veo + concat scale with variantCount. BCH's $1.40/60s claim
+  // (video-only, 8 clips × $0.175) lands on the Veo line.
+  //
+  // 1 variant × 60s (default):
+  //   Nano Banana seed  (batch)         $0.04
+  //   Higgsfield Soul high (batch)      $0.23
+  //   Claude ad-spec × 1                $0.02
+  //   Veo Lite × 8 × 1                  $1.40
+  //   Replicate concat × 1              $0.15
+  //   ------------------------------------
+  //   TOTAL                             $1.84
+
+  it('1 variant × 60s (default): full breakdown lands at $1.84', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'polish23_higgsfield_veo_lite',
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.84, 4);
+    expect(r.breakdown.some((b) => /Nano Banana 2 seed image/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Higgsfield Soul reference \(high/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Claude ad-spec/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Veo 3\.1 Lite 1080p \(8 clips/.test(b.item))).toBe(true);
+    expect(r.breakdown.some((b) => /Replicate ffmpeg-concat/.test(b.item))).toBe(true);
+  });
+
+  it("BCH's Veo-only anchor: 8 clips × $0.175 = $1.40 EXACTLY", () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'polish23_higgsfield_veo_lite',
+    });
+    const veoLine = r.breakdown.find((b) => /Veo 3\.1 Lite/.test(b.item));
+    expect(veoLine).toBeDefined();
+    expect(veoLine!.cost).toBeCloseTo(1.4, 4);
+  });
+
+  it('5 variants × 60s: Soul + seed emit ONCE (batch-fixed), Claude + Veo + concat scale linearly → $8.12', () => {
+    // Soul + seed = $0.27 batch-fixed;
+    // Claude 5 × $0.02 = $0.10; Veo 5 × $1.40 = $7.00;
+    // concat 5 × $0.15 = $0.75; total $8.12.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 5,
+      pipeline: 'polish23_higgsfield_veo_lite',
+    });
+    expect(r.estimateUsd).toBeCloseTo(8.12, 4);
+    // Regression pin: seed + Soul rows list `1 ×` (batch-fixed
+    // math is transparent in the UI card).
+    expect(r.breakdown.find((b) => /Nano Banana 2 seed image/.test(b.item))!.item).toMatch(/1 ×/);
+    expect(r.breakdown.find((b) => /Higgsfield Soul reference/.test(b.item))!.item).toMatch(/1 ×/);
+    // Per-variant rows scale.
+    expect(r.breakdown.find((b) => /Claude ad-spec/.test(b.item))!.item).toMatch(/5 ×/);
+    expect(r.breakdown.find((b) => /Veo 3\.1 Lite/.test(b.item))!.item).toMatch(/5 variants/);
+    expect(r.breakdown.find((b) => /Replicate ffmpeg-concat/.test(b.item))!.item).toMatch(/5 ×/);
+  });
+
+  it('30s target: Veo clip count rounds up (30 / 8 = ceil → 4 clips)', () => {
+    // 4 clips × $0.175 = $0.70 Veo per variant.
+    // Total: $0.04 seed + $0.23 Soul + $0.02 Claude + $0.70 Veo + $0.15 concat = $1.14.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'polish23_higgsfield_veo_lite',
+      estimatedDurationSeconds: 30,
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.14, 4);
+    expect(r.breakdown.find((b) => /Veo 3\.1 Lite/.test(b.item))!.item).toMatch(/4 clips/);
+  });
+
+  it('8s target: exactly 1 clip', () => {
+    // 1 clip × $0.175 = $0.175.
+    // Total: $0.04 + $0.23 + $0.02 + $0.175 + $0.15 = $0.615.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'polish23_higgsfield_veo_lite',
+      estimatedDurationSeconds: 8,
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.615, 4);
+    expect(r.breakdown.find((b) => /Veo 3\.1 Lite/.test(b.item))!.item).toMatch(/1 clips/);
+  });
+
+  it('sub-8s target still bills ≥ 1 clip (floor)', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'polish23_higgsfield_veo_lite',
+      estimatedDurationSeconds: 5,
+    });
+    expect(r.breakdown.find((b) => /Veo 3\.1 Lite/.test(b.item))!.item).toMatch(/1 clips/);
+  });
+
+  it('Higgsfield Soul line names the `high` quality tier explicitly (Polish-23 spec anchor)', () => {
+    // The operator explicitly picked HIGH ($0.23/run) over MEDIUM
+    // for character consistency. If a future edit silently swaps
+    // to medium, the estimator drops $0.14 per ad AND the operator
+    // loses the locked-detail advantage.
+    const r = estimateGenerationCost({
+      conceptType: 'ugc',
+      variantCount: 1,
+      pipeline: 'polish23_higgsfield_veo_lite',
+    });
+    const soulLine = r.breakdown.find((b) => /Higgsfield Soul/.test(b.item));
+    expect(soulLine!.item).toContain('(high, 1 × $0.23)');
+    expect(soulLine!.cost).toBeCloseTo(0.23, 4);
+  });
+});
