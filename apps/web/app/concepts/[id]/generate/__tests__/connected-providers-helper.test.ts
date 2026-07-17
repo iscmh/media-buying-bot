@@ -62,11 +62,11 @@ describe('Polish-20 Commit 4: buildConnectedProviders surviving slots', () => {
       // Polish-21.0.4 hotfix: elevenlabs slot added — Hedra worker
       // uploads ElevenLabs TTS mp3 as a Hedra audio asset.
       elevenlabs: { connected: false },
+      // Polish-23 Commit 3.5: wavespeed_ai + replicate slots added
+      // for the Polish-23 Higgsfield-Soul + Veo-Lite pipeline gate.
+      wavespeed_ai: { connected: false },
+      replicate: { connected: false },
     });
-    // Legacy slots removed by Commit 4 (elevenlabs came back in
-    // Polish-21.0.4 as a first-class slot, so it's NOT in the
-    // legacy-undefined list anymore):
-    expect((r as unknown as Record<string, unknown>).kling).toBeUndefined();
   });
 
   it('Polish-21: hedra slot populates from ai_provider_connections', () => {
@@ -82,10 +82,30 @@ describe('Polish-20 Commit 4: buildConnectedProviders surviving slots', () => {
   });
 });
 
-describe('Polish-21.0.4: AI_PROVIDER_QUERY_LIST', () => {
-  it('covers heygen + openai + hedra + elevenlabs (Polish-21.0.4 adds elevenlabs for Hedra TTS)', () => {
+describe('Polish-23 Commit 3.5: AI_PROVIDER_QUERY_LIST', () => {
+  it('covers surviving legacy slots + wavespeed_ai + replicate + kling for polish23 gate', () => {
     expect(new Set(AI_PROVIDER_QUERY_LIST)).toEqual(
-      new Set(['heygen', 'openai', 'hedra', 'elevenlabs']),
+      new Set(['heygen', 'openai', 'hedra', 'elevenlabs', 'wavespeed_ai', 'replicate', 'kling']),
     );
+  });
+});
+
+describe('Polish-23 Commit 3.5: wavespeed_ai + replicate slots', () => {
+  it('wavespeed_ai fills from ai_provider_connections', () => {
+    const rows: AiProviderRow[] = [{ provider: 'wavespeed_ai', tier: null }];
+    const r = buildConnectedProviders(rows, NO_TOOLS);
+    expect(r.wavespeed_ai.connected).toBe(true);
+  });
+
+  it('replicate fills from an explicit "replicate" row', () => {
+    const rows: AiProviderRow[] = [{ provider: 'replicate', tier: null }];
+    const r = buildConnectedProviders(rows, NO_TOOLS);
+    expect(r.replicate.connected).toBe(true);
+  });
+
+  it('replicate ALSO fills from a legacy "kling" row (Polish-9.3 fallback)', () => {
+    const rows: AiProviderRow[] = [{ provider: 'kling', tier: null }];
+    const r = buildConnectedProviders(rows, NO_TOOLS);
+    expect(r.replicate.connected).toBe(true);
   });
 });

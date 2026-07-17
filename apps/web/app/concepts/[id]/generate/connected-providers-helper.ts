@@ -35,6 +35,14 @@ export interface ConnectedProviders {
   // for TTS mp3 (uploaded as a Hedra audio asset). Simplified
   // form gate requires both.
   elevenlabs: { connected: boolean };
+  // Polish-23 Commit 3.5: gate the Polish-23 Higgsfield-Soul +
+  // Veo Lite pipeline on wavespeed_ai + replicate (in addition
+  // to claude + kie_ai which the ConnectedProviders shape
+  // already surfaces). Replicate hosts the ffmpeg-concat step;
+  // fall-back to Polish-9.3's 'kling' → 'replicate' lookup
+  // covers operators who connected under the older card label.
+  wavespeed_ai: { connected: boolean };
+  replicate: { connected: boolean };
 }
 
 export interface AiProviderRow {
@@ -58,6 +66,12 @@ export function buildConnectedProviders(
     kie_ai: { connected: toolProviders.has('kie_ai') },
     hedra: { connected: byAi.has('hedra') },
     elevenlabs: { connected: byAi.has('elevenlabs') },
+    wavespeed_ai: { connected: byAi.has('wavespeed_ai') },
+    // Polish-9.3 lookup fallback: operators who connected the
+    // Replicate key under the older 'kling' card land on the
+    // 'kling' enum value. Either row satisfies the polish23
+    // ffmpeg-concat gate.
+    replicate: { connected: byAi.has('replicate') || byAi.has('kling') },
   };
 }
 
@@ -67,4 +81,17 @@ export function buildConnectedProviders(
  * Polish-21: hedra added for the Character 3 pipeline.
  * Polish-21.0.4: elevenlabs added for the Hedra TTS pipeline.
  */
-export const AI_PROVIDER_QUERY_LIST = ['heygen', 'openai', 'hedra', 'elevenlabs'] as const;
+export const AI_PROVIDER_QUERY_LIST = [
+  'heygen',
+  'openai',
+  'hedra',
+  'elevenlabs',
+  // Polish-23 Commit 3.5: added for the Higgsfield Soul + Veo
+  // Lite pipeline gate. Also querying 'replicate' + 'kling'
+  // covers the ffmpeg-concat step's BYOK — Polish-9.3 accepts
+  // either enum row when the worker calls
+  // loadDecryptedKeys(userId, ['kling']).
+  'wavespeed_ai',
+  'replicate',
+  'kling',
+] as const;

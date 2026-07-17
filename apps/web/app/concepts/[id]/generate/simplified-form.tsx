@@ -19,6 +19,8 @@ import { acknowledgeLiveGenerationAction } from './ack-action';
 import { createGenerationJobAction, type ConnectedProviders } from './actions';
 import {
   LAUNCHER_VISIBLE_MODELS,
+  POLISH23_DESCRIPTION,
+  POLISH23_DISPLAY_NAME,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
@@ -26,6 +28,7 @@ import {
   buildSubmissionFormData,
   canSubmitState,
   clampVariantCount,
+  estimatePolish23CostPerVariantUsd,
   formatModelCostHintPerVariant,
   getDefaultProviderForModel,
   getSoleLauncherModel,
@@ -91,6 +94,10 @@ export function SimplifiedGenerationForm({
   const [modelId, setModelId] = React.useState<VideoModelId | null>(
     soleModel ? soleModel.id : null,
   );
+  // Polish-23 Commit 3.5: alternative "picked" state that bypasses
+  // the VideoModel descriptor system. Picking Polish-23 clears
+  // modelId; picking any classic model clears polish23Selected.
+  const [polish23Selected, setPolish23Selected] = React.useState(false);
   const [variantCount, setVariantCount] = React.useState<number>(SIMPLIFIED_DEFAULT_VARIANTS);
 
   const [error, setError] = React.useState<string | null>(null);
@@ -106,6 +113,7 @@ export function SimplifiedGenerationForm({
     modelId,
     providerId,
     variantCount,
+    polish23Selected,
   };
   const canSubmit = canSubmitState(state);
 
@@ -116,14 +124,24 @@ export function SimplifiedGenerationForm({
   // number is a preview only.
   const previewSeconds = detectedSourceSeconds ?? SIMPLIFIED_DEFAULT_DURATION_SECONDS;
   const detectionPending = detectedSourceSeconds == null;
-  const estimate = modelId
-    ? estimateGenerationCost({
-        conceptType: 'ugc',
-        variantCount,
-        videoModelId: modelId,
-        sourceDurationSeconds: previewSeconds,
-      })
+  // Polish-23 Commit 3.5: polish23 cost preview is a per-variant
+  // constant (Commit 3 pipeline runs a fixed 8-clip Veo Lite chain).
+  // Duration doesn't scale it; the multiplier is variantCount only.
+  const polish23Estimate = polish23Selected
+    ? {
+        estimateUsd: variantCount * estimatePolish23CostPerVariantUsd(detectedSourceSeconds).usd,
+      }
     : null;
+  const estimate = polish23Estimate
+    ? polish23Estimate
+    : modelId
+      ? estimateGenerationCost({
+          conceptType: 'ugc',
+          variantCount,
+          videoModelId: modelId,
+          sourceDurationSeconds: previewSeconds,
+        })
+      : null;
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate != null && estimate.estimateUsd > remaining;
@@ -137,10 +155,24 @@ export function SimplifiedGenerationForm({
   // audio asset). Generate stays disabled until both are connected.
   const hasHedraKey = connectedProviders.hedra.connected;
   const hasElevenLabsKey = connectedProviders.elevenlabs.connected;
-  const hasProviderKey = hasHedraKey && hasElevenLabsKey;
-  const missingKeys: string[] = [];
-  if (!hasHedraKey) missingKeys.push('Hedra');
-  if (!hasElevenLabsKey) missingKeys.push('ElevenLabs');
+  // Polish-23 Commit 3.5: polish23 has a different key gate. Needs
+  // Claude (Anthropic ad-spec) + WaveSpeedAI (Higgsfield Soul) +
+  // kie.ai (Veo Lite) + Replicate (ffmpeg-concat). Any missing key
+  // surfaces its label in the disabled-Generate tooltip.
+  const polish23MissingKeys: string[] = [];
+  if (!connectedProviders.claude.connected) polish23MissingKeys.push('Claude');
+  if (!connectedProviders.wavespeed_ai.connected) polish23MissingKeys.push('WaveSpeedAI');
+  if (!connectedProviders.kie_ai.connected) polish23MissingKeys.push('kie.ai');
+  if (!connectedProviders.replicate.connected) polish23MissingKeys.push('Replicate');
+  const hasPolish23Keys = polish23MissingKeys.length === 0;
+
+  const legacyMissingKeys: string[] = [];
+  if (!hasHedraKey) legacyMissingKeys.push('Hedra');
+  if (!hasElevenLabsKey) legacyMissingKeys.push('ElevenLabs');
+  const hasLegacyKeys = hasHedraKey && hasElevenLabsKey;
+
+  const hasProviderKey = polish23Selected ? hasPolish23Keys : hasLegacyKeys;
+  const missingKeys = polish23Selected ? polish23MissingKeys : legacyMissingKeys;
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -212,6 +244,19 @@ export function SimplifiedGenerationForm({
         )}
       </section>
 
+      {/* Polish-23 Commit 3.5: new "recommended" pipeline card
+          above the classic model picker. Selecting it clears the
+          classic modelId; picking a classic card clears it. */}
+      <Polish23PickerCard
+        picked={polish23Selected}
+        disabled={isPending}
+        variantCount={variantCount}
+        onPick={() => {
+          setPolish23Selected(true);
+          setModelId(null);
+        }}
+      />
+
       {/* Polish-20 → Polish-21: model picker. Hidden when a single
           model is launcher-visible (Hedra Character 3 alone). The
           model + provider line still surfaces so operators know what
@@ -243,7 +288,10 @@ export function SimplifiedGenerationForm({
                 picked={modelId === model.id}
                 disabled={isPending}
                 targetSeconds={previewSeconds}
-                onPick={() => setModelId(model.id)}
+                onPick={() => {
+                  setModelId(model.id);
+                  setPolish23Selected(false);
+                }}
               />
             ))}
           </div>
@@ -327,14 +375,14 @@ export function SimplifiedGenerationForm({
             reduce variants, or pick a cheaper model.
           </p>
         )}
-        {!hasProviderKey && modelId != null && (
+        {!hasProviderKey && (modelId != null || polish23Selected) && (
           <p className="mt-1 text-xs text-[color:var(--accent-negative)]">
             Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
             <Link
-              href="/connections/ai-provider"
+              href={polish23Selected ? '/connections' : '/connections/ai-provider'}
               className="hover:text-fg underline underline-offset-4"
             >
-              /connections/ai-provider
+              /connections
             </Link>{' '}
             to generate.
           </p>
@@ -399,6 +447,53 @@ interface ModelCardProps {
   disabled: boolean;
   targetSeconds: number;
   onPick: () => void;
+}
+
+interface Polish23PickerCardProps {
+  picked: boolean;
+  disabled: boolean;
+  variantCount: number;
+  onPick: () => void;
+}
+
+function Polish23PickerCard({ picked, disabled, variantCount, onPick }: Polish23PickerCardProps) {
+  const perVariantUsd = estimatePolish23CostPerVariantUsd(null).usd;
+  const totalUsd = perVariantUsd * variantCount;
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      disabled={disabled}
+      aria-pressed={picked}
+      className={cn(
+        'group relative flex w-full flex-col gap-2 rounded-md border p-4 text-left transition-colors',
+        picked
+          ? 'border-fg bg-fg/5'
+          : 'border-[color:var(--accent-positive)]/50 bg-bg-surface hover:border-fg/50',
+        disabled && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <span
+        className={cn(
+          'absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+          'bg-[color:var(--accent-positive)]/15 text-[color:var(--accent-positive)]',
+        )}
+      >
+        New — Recommended
+      </span>
+      {picked && (
+        <CheckCircle2 className="text-fg absolute right-24 top-3 h-4 w-4" aria-hidden="true" />
+      )}
+      <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
+        Polish-23 pipeline
+      </div>
+      <div className="text-fg text-sm font-semibold">{POLISH23_DISPLAY_NAME}</div>
+      <div className="text-fg-muted text-xs leading-relaxed">{POLISH23_DESCRIPTION}</div>
+      <div className="text-fg-subtle mt-1 font-mono text-xs">
+        ~${perVariantUsd.toFixed(2)}/variant × {variantCount} = ${totalUsd.toFixed(2)}
+      </div>
+    </button>
+  );
 }
 
 function ModelCard({ model, picked, disabled, targetSeconds, onPick }: ModelCardProps) {

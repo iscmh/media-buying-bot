@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  POLISH23_PIPELINE_ID,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
@@ -14,6 +15,7 @@ import {
   buildSubmissionFormData,
   canSubmitState,
   clampVariantCount,
+  estimatePolish23CostPerVariantUsd,
   isRecommendedTier,
 } from '../simplified-form-helpers';
 
@@ -180,6 +182,82 @@ describe('Polish-20.0.1: buildSubmissionFormData clean shape', () => {
 describe('Polish-20.0.1: SIMPLIFIED_DEFAULT_DURATION_SECONDS', () => {
   it('duration default is 30s (matches the worker resolveAutoVideoDuration fallback)', () => {
     expect(SIMPLIFIED_DEFAULT_DURATION_SECONDS).toBe(30);
+  });
+});
+
+describe('Polish-23 Commit 3.5: polish23Selected — pipeline picker path', () => {
+  const base = {
+    modelId: null,
+    providerId: null,
+    variantCount: 3,
+  };
+
+  it('canSubmitState is TRUE when polish23Selected is true even without a modelId', () => {
+    expect(canSubmitState({ ...base, polish23Selected: true })).toBe(true);
+  });
+
+  it('canSubmitState is FALSE when neither polish23Selected nor modelId is set', () => {
+    expect(canSubmitState({ ...base, polish23Selected: false })).toBe(false);
+    expect(canSubmitState(base)).toBe(false);
+  });
+
+  it("buildSubmissionFormData sets pipeline='polish23_higgsfield_veo_lite' and OMITS modelId/providerId when polish23Selected", () => {
+    const fd = buildSubmissionFormData({
+      conceptId: 'concept_polish23',
+      state: {
+        modelId: 'kling_3_standard', // Should be ignored when polish23Selected wins.
+        providerId: 'kie_ai',
+        variantCount: 2,
+        polish23Selected: true,
+      },
+    });
+    expect(fd.get('pipeline')).toBe(POLISH23_PIPELINE_ID);
+    expect(fd.get('pipeline')).toBe('polish23_higgsfield_veo_lite');
+    // Critical: modelId + providerId must NOT survive — analyze-concept's
+    // dispatch chain would otherwise route to the Polish-20 unified
+    // video-variant worker instead of the Polish-23 worker.
+    expect(fd.has('modelId')).toBe(false);
+    expect(fd.has('providerId')).toBe(false);
+    // Shared fields still populated.
+    expect(fd.get('conceptId')).toBe('concept_polish23');
+    expect(fd.get('variantCount')).toBe('2');
+    expect(fd.get('intensity')).toBe('medium');
+    expect(fd.get('mode')).toBe('live');
+  });
+
+  it('buildSubmissionFormData falls back to modelId when polish23Selected is false / undefined', () => {
+    const fd = buildSubmissionFormData({
+      conceptId: 'c',
+      state: {
+        modelId: 'kling_3_standard',
+        providerId: 'kie_ai',
+        variantCount: 1,
+        polish23Selected: false,
+      },
+    });
+    expect(fd.has('pipeline')).toBe(false);
+    expect(fd.get('modelId')).toBe('kling_3_standard');
+  });
+
+  it('POLISH23_PIPELINE_ID matches the reserved PipelineType descriptor from Commit 1', () => {
+    // Regression pin: a rename here would silently break the
+    // analyze-concept dispatch fall-through to the polish23 worker.
+    expect(POLISH23_PIPELINE_ID).toBe('polish23_higgsfield_veo_lite');
+  });
+
+  it('estimatePolish23CostPerVariantUsd = $1.84 per BCH cost math', () => {
+    // Soul $0.23 + 8 × Veo Lite $0.175 + Claude $0.02 + Nano Banana
+    // seed $0.04 + Replicate concat $0.15 = $1.84.
+    const est = estimatePolish23CostPerVariantUsd(null);
+    expect(est.usd).toBeCloseTo(1.84, 5);
+  });
+
+  it('per-variant cost is duration-independent (Commit 3 pipeline runs fixed 8 clips)', () => {
+    const a = estimatePolish23CostPerVariantUsd(30).usd;
+    const b = estimatePolish23CostPerVariantUsd(60).usd;
+    const c = estimatePolish23CostPerVariantUsd(null).usd;
+    expect(a).toBe(b);
+    expect(a).toBe(c);
   });
 });
 

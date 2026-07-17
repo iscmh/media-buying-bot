@@ -83,10 +83,29 @@ export function isRecommendedTier(modelId: VideoModelId): boolean {
 }
 
 /**
+ * Polish-23 Commit 3.5: Polish-23 pipeline picker anchors. When the
+ * form's polish23Selected flag is true, the picker bypasses the
+ * VideoModel descriptor system entirely and routes through the
+ * PipelineType layer instead (pickedPipeline column on the job row →
+ * analyze-concept dispatch → generation/polish23-veo-lite.requested).
+ */
+export const POLISH23_PIPELINE_ID = 'polish23_higgsfield_veo_lite' as const;
+export const POLISH23_DISPLAY_NAME = 'Polish-23 UGC (Higgsfield Soul + Veo Lite)';
+export const POLISH23_DESCRIPTION =
+  'Higgsfield Soul reference PNG threaded into a Veo 3.1 Lite 8-clip chain. ' +
+  'Best character consistency at ~$1.65 per 60s ad. Recommended default.';
+
+/**
  * Polish-20.0.1: form state shape. Model picker is REQUIRED (per spec
  * user MUST pick), represented as `modelId | null`. Generate button
  * stays disabled until non-null. `providerId` defaults to the model's
  * cheapest live provider (kie.ai at Polish-20 launch).
+ *
+ * Polish-23 Commit 3.5: added `polish23Selected` as an alternative
+ * "picked" signal. When true, modelId is cleared and the form
+ * routes through the pipeline-descriptor path instead of the video-
+ * model path. Both cannot be selected simultaneously — the picker
+ * clears whichever wasn't just chosen.
  *
  * NO duration field — the simplified form is duration-less; the
  * worker's Polish-19.3.1 resolveAutoVideoDuration fallback chain
@@ -97,6 +116,7 @@ export interface SimplifiedFormState {
   modelId: VideoModelId | null;
   providerId: VideoProviderId | null;
   variantCount: number;
+  polish23Selected?: boolean;
 }
 
 /**
@@ -105,7 +125,10 @@ export interface SimplifiedFormState {
  * required from the form — the worker resolves it server-side.
  */
 export function canSubmitState(state: SimplifiedFormState): boolean {
-  if (state.modelId == null) return false;
+  // Polish-23 Commit 3.5: polish23Selected is an alternative "picked"
+  // signal that bypasses the modelId requirement. Either polish23 OR
+  // a modelId satisfies the gate — never both at once.
+  if (state.polish23Selected !== true && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
     return false;
   }
@@ -165,7 +188,50 @@ export function buildSubmissionFormData(input: {
   ) {
     fd.set('sourceDurationSeconds', String(Math.round(input.detectedSourceSeconds)));
   }
+  // Polish-23 Commit 3.5: when the operator selects the Polish-23
+  // card, we set `pipeline` instead of `modelId`. The action's
+  // pipelineFromString('polish23_higgsfield_veo_lite') resolves to
+  // the descriptor; analyze-concept's dispatch chain routes via the
+  // descriptor's workerEvent (generation/polish23-veo-lite.requested)
+  // because no metadata.model_id is set. Cleaner than adding
+  // polish23 as a synthetic VideoModelId, which would tangle two
+  // descriptor systems.
+  if (input.state.polish23Selected === true) {
+    fd.set('pipeline', POLISH23_PIPELINE_ID);
+    return fd;
+  }
   if (input.state.modelId) fd.set('modelId', input.state.modelId);
   if (input.state.providerId) fd.set('providerId', input.state.providerId);
   return fd;
+}
+
+/**
+ * Polish-23 Commit 3.5: cost preview for the Polish-23 pipeline card.
+ * Wraps estimateGenerationCost with the polish23 descriptor branch
+ * so the form's cost line can render inline without importing the
+ * shared estimator directly. Ceiling anchor: 60s = $1.84 per BCH's
+ * validated math (Higgsfield Soul $0.23 + 8 × Veo Lite $0.175 +
+ * Claude $0.02 + Nano Banana seed $0.04 + Replicate concat $0.15).
+ */
+export interface Polish23CostEstimate {
+  usd: number;
+}
+export function estimatePolish23CostPerVariantUsd(
+  sourceDurationSeconds: number | null,
+): Polish23CostEstimate {
+  // Anchored to BCH's cost math without importing the shared
+  // estimator (keeps the form's client bundle small). Duration
+  // doesn't currently affect the polish23 line because segment
+  // count is fixed at 8 for Commit 3; a Polish-24+ variable-N
+  // pipeline would thread duration through here.
+  void sourceDurationSeconds;
+  const SOUL = 0.23;
+  const VEO_LITE_PER_CLIP = 0.175;
+  const CLAUDE = 0.02;
+  const NANO_BANANA_SEED = 0.04;
+  const REPLICATE_CONCAT = 0.15;
+  const CLIP_COUNT = 8;
+  return {
+    usd: SOUL + CLIP_COUNT * VEO_LITE_PER_CLIP + CLAUDE + NANO_BANANA_SEED + REPLICATE_CONCAT,
+  };
 }
