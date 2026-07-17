@@ -274,3 +274,43 @@ export {
   type WavespeedPredictionStatus,
 } from './wavespeed';
 export { composeHiggsfieldSoulReferencePrompt } from './higgsfield-soul-prompt';
+// Polish-23 Commit 2: kie.ai Veo 3.1 Lite client + per-segment
+// prompt composer with CHARACTER LOCK prefix.
+export {
+  submitKieVeoLite,
+  pollKieVeoLite,
+  extractVeoOutputUrl,
+  translateKieVeoErrorStatus,
+  detectKieVeoRateLimit,
+  computeKieVeoRateLimitBackoffMs,
+  getKieVeoRateLimitMaxRetries,
+  getVeoLiteModelId,
+  getKieVeoLiteUsdPerClip,
+  estimateKieVeoLiteClipCostUsd,
+  VEO_LITE_DEFAULT_MODEL_ID,
+  KIE_VEO_LITE_DEFAULT_USD_PER_CLIP,
+  KIE_VEO_LITE_DEFAULT_CLIP_SECONDS,
+  KIE_VEO_LITE_DEFAULT_CREDITS_PER_CLIP,
+  KIE_VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES,
+  __setKieVeoSleepImplForTests,
+  __restoreKieVeoSleepImplForTests,
+  __resetKieVeoFirstCallLogForTests,
+  type KieVeoState,
+  type KieVeoSubmitInput,
+  type KieVeoSubmitResult,
+  type KieVeoPollInput,
+  type KieVeoPollResult,
+} from './kie-veo';
+export {
+  composeVeoLiteSegmentPrompt,
+  composeCharacterLockPrefix,
+  countDialogueWords,
+  checkDialogueWordCount,
+  VEO_LITE_WPM,
+  VEO_LITE_CLIP_SECONDS,
+  VEO_LITE_MIN_DIALOGUE_WORDS,
+  VEO_LITE_MAX_DIALOGUE_WORDS,
+  type VeoLiteSegmentSpec,
+  type DialogueWordCountCheck,
+  type ComposedVeoLiteSegmentPrompt,
+} from './veo-lite-segment-prompt';

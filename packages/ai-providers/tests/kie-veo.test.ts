@@ -1,0 +1,361 @@
+/**
+ * Polish-23 Commit 2: kie.ai Veo 3.1 Lite client tests.
+ * Pins:
+ *   - endpoint URL (/veo/generate) + Bearer auth
+ *   - request body shape (model, input.prompt, input.aspectRatio,
+ *     input.duration, optional input.imageUrls)
+ *   - default model string = 'veo3_lite' (BCH anchor)
+ *   - poll response parsing (waiting / success / fail)
+ *   - success extracts outputUrl from either resultUrls[0] OR
+ *     JSON-encoded resultJson (drift tolerance)
+ *   - error translation (400/401/402/404/422/429/5xx)
+ *   - rate-limit retry (429 body / substring surfaces)
+ *   - cost constants match Polish-23 spec ($0.175/clip, 35 credits, 8s)
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@mbb/db', () => ({
+  logAiProviderApiCall: vi.fn().mockResolvedValue(undefined),
+}));
+
+import {
+  __resetKieVeoFirstCallLogForTests,
+  __restoreKieVeoSleepImplForTests,
+  __setKieVeoSleepImplForTests,
+  computeKieVeoRateLimitBackoffMs,
+  detectKieVeoRateLimit,
+  estimateKieVeoLiteClipCostUsd,
+  extractVeoOutputUrl,
+  getKieVeoLiteUsdPerClip,
+  getKieVeoRateLimitMaxRetries,
+  getVeoLiteModelId,
+  KIE_VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES,
+  KIE_VEO_LITE_DEFAULT_CLIP_SECONDS,
+  KIE_VEO_LITE_DEFAULT_CREDITS_PER_CLIP,
+  KIE_VEO_LITE_DEFAULT_USD_PER_CLIP,
+  pollKieVeoLite,
+  submitKieVeoLite,
+  translateKieVeoErrorStatus,
+  VEO_LITE_DEFAULT_MODEL_ID,
+} from '../src/kie-veo';
+
+const realFetch = globalThis.fetch;
+beforeEach(() => {
+  __resetKieVeoFirstCallLogForTests();
+  __setKieVeoSleepImplForTests(async () => {});
+});
+afterEach(() => {
+  globalThis.fetch = realFetch;
+  __restoreKieVeoSleepImplForTests();
+  vi.clearAllMocks();
+});
+
+interface CapturedCall {
+  url: string;
+  init?: RequestInit;
+}
+function captureFetch(response: { status: number; body: unknown }): CapturedCall[] {
+  const calls: CapturedCall[] = [];
+  globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    return {
+      status: response.status,
+      ok: response.status >= 200 && response.status < 300,
+      json: async () => response.body,
+      text: async () => JSON.stringify(response.body),
+    } as Response;
+  }) as typeof globalThis.fetch;
+  return calls;
+}
+
+describe('Polish-23 Commit 2: submitKieVeoLite — endpoint + auth + body shape', () => {
+  it('POSTs the dedicated /veo/generate URL with Bearer auth', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, data: { taskId: 'task-abc' } },
+    });
+    const r = await submitKieVeoLite({
+      userId: 'u',
+      apiKey: 'sk-kie-example',
+      prompt: 'CHARACTER LOCK — Linda talking selfie…',
+      imageUrls: ['https://cdn.example/higgsfield-linda.png'],
+    });
+    expect(r.ok).toBe(true);
+    expect(r.taskId).toBe('task-abc');
+    expect(calls[0]!.url).toBe('https://api.kie.ai/api/v1/veo/generate');
+    const headers = calls[0]!.init!.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer sk-kie-example');
+    expect(headers['content-type']).toBe('application/json');
+  });
+
+  it('body carries model=veo3_lite + prompt + aspectRatio + duration + imageUrls', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, data: { taskId: 'task-1' } },
+    });
+    await submitKieVeoLite({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      imageUrls: ['https://cdn/x.png'],
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.model).toBe('veo3_lite');
+    expect(body.input.prompt).toBe('p');
+    expect(body.input.aspectRatio).toBe('9:16');
+    expect(body.input.duration).toBe(8);
+    expect(body.input.imageUrls).toEqual(['https://cdn/x.png']);
+  });
+
+  it('omits imageUrls when caller passes none (text-only Veo clip is legal)', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, data: { taskId: 'task-1' } },
+    });
+    await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.input).not.toHaveProperty('imageUrls');
+  });
+
+  it('accepts task_id alias in the response (kie.ai has drifted the field name)', async () => {
+    captureFetch({ status: 200, body: { code: 200, data: { task_id: 'task-snake' } } });
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(true);
+    expect(r.taskId).toBe('task-snake');
+  });
+
+  it('surfaces missing-taskId as an ok:false error (defensive against shape drift)', async () => {
+    captureFetch({ status: 200, body: { code: 200, data: {} } });
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errorMessage).toMatch(/missing taskId/i);
+  });
+
+  it('soft failure: code=402 (insufficient balance) translates to a re-topup hint', async () => {
+    captureFetch({ status: 200, body: { code: 402, msg: 'balance too low' } });
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errorMessage).toMatch(/insufficient kie\.ai balance/i);
+  });
+});
+
+describe('Polish-23 Commit 2: pollKieVeoLite — terminal states', () => {
+  it('waiting → ok:true, no outputUrl', async () => {
+    captureFetch({ status: 200, body: { code: 200, data: { state: 'waiting' } } });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('waiting');
+    expect(r.outputUrl).toBeUndefined();
+  });
+
+  it('success + resultUrls[] → outputUrl extracted', async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: { state: 'success', resultUrls: ['https://cdn.kie/veo/clip.mp4'], costTime: 47000 },
+      },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('success');
+    expect(r.outputUrl).toBe('https://cdn.kie/veo/clip.mp4');
+    expect(r.costTimeMs).toBe(47000);
+  });
+
+  it('success + JSON-encoded resultJson (legacy kie-video shape) → outputUrl extracted', async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          state: 'success',
+          resultJson: JSON.stringify({ resultUrls: ['https://cdn.kie/veo/legacy.mp4'] }),
+        },
+      },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(true);
+    expect(r.outputUrl).toBe('https://cdn.kie/veo/legacy.mp4');
+  });
+
+  it('fail → ok:true (poll succeeded) but state=fail with failCode + failMsg', async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: { state: 'fail', failCode: 'BAD_INPUT', failMsg: 'prompt too short' },
+      },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('fail');
+    expect(r.failCode).toBe('BAD_INPUT');
+    expect(r.failMsg).toBe('prompt too short');
+  });
+
+  it('success with no output URLs → ok:true but errorMessage set (drift signal)', async () => {
+    captureFetch({
+      status: 200,
+      body: { code: 200, data: { state: 'success' } },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(true);
+    expect(r.errorMessage).toMatch(/no output URL/i);
+  });
+
+  it('missing state → ok:false (shape drift)', async () => {
+    captureFetch({ status: 200, body: { code: 200, data: {} } });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errorMessage).toMatch(/missing state/i);
+  });
+
+  it('GET URL uses /veo/record-info?taskId=…', async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, data: { state: 'waiting' } },
+    });
+    await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't with spaces' });
+    expect(calls[0]!.url).toBe(
+      'https://api.kie.ai/api/v1/veo/record-info?taskId=t%20with%20spaces',
+    );
+    const headers = calls[0]!.init!.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer k');
+  });
+});
+
+describe('Polish-23 Commit 2: extractVeoOutputUrl — dual shape tolerance', () => {
+  it('prefers resultUrls[0] when both are present', () => {
+    const u = extractVeoOutputUrl(
+      ['https://a.mp4'],
+      JSON.stringify({ resultUrls: ['https://b.mp4'] }),
+    );
+    expect(u).toBe('https://a.mp4');
+  });
+
+  it('falls back to resultJson when resultUrls is null / empty', () => {
+    expect(extractVeoOutputUrl(null, JSON.stringify({ resultUrls: ['https://b.mp4'] }))).toBe(
+      'https://b.mp4',
+    );
+    expect(extractVeoOutputUrl([], JSON.stringify({ resultUrls: ['https://b.mp4'] }))).toBe(
+      'https://b.mp4',
+    );
+  });
+
+  it('returns undefined when resultJson is malformed', () => {
+    expect(extractVeoOutputUrl(null, '{not json')).toBeUndefined();
+  });
+
+  it('returns undefined when both surfaces are empty', () => {
+    expect(extractVeoOutputUrl(null, null)).toBeUndefined();
+    expect(extractVeoOutputUrl(undefined, undefined)).toBeUndefined();
+  });
+});
+
+describe('Polish-23 Commit 2: translateKieVeoErrorStatus', () => {
+  it('402 mentions the 35-credit Veo Lite cost + kie.ai/api-key top-up path', () => {
+    const m = translateKieVeoErrorStatus(402, 'balance too low');
+    expect(m).toMatch(/insufficient kie\.ai balance/i);
+    expect(m).toMatch(/35 credits/);
+  });
+
+  it('401 sends the operator to /connections/tools (not /connections/ai-provider)', () => {
+    expect(translateKieVeoErrorStatus(401, undefined)).toMatch(/\/connections\/tools/);
+  });
+
+  it('5xx surfaces status code and passes fallback through', () => {
+    expect(translateKieVeoErrorStatus(503, 'service_unavailable')).toMatch(
+      /Veo upstream error \(HTTP 503: service_unavailable\)/,
+    );
+  });
+
+  it('unknown status uses fallback when provided', () => {
+    expect(translateKieVeoErrorStatus(undefined, 'boom')).toBe('boom');
+  });
+});
+
+describe('Polish-23 Commit 2: rate-limit primitives (Polish-19.4.3 pattern)', () => {
+  it('default retries = 5', () => {
+    expect(KIE_VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES).toBe(5);
+    expect(getKieVeoRateLimitMaxRetries()).toBe(5);
+  });
+
+  it('backoff curve: [10, 20, 40, 60, 60]s (2^n capped at 60s)', () => {
+    expect(computeKieVeoRateLimitBackoffMs(0)).toBe(10_000);
+    expect(computeKieVeoRateLimitBackoffMs(1)).toBe(20_000);
+    expect(computeKieVeoRateLimitBackoffMs(2)).toBe(40_000);
+    expect(computeKieVeoRateLimitBackoffMs(3)).toBe(60_000);
+    expect(computeKieVeoRateLimitBackoffMs(4)).toBe(60_000);
+  });
+
+  it('detects rate limits via HTTP 429, kie body code 429, and message substrings', () => {
+    expect(detectKieVeoRateLimit(429, undefined, undefined)).toBe(true);
+    expect(detectKieVeoRateLimit(undefined, 429, undefined)).toBe(true);
+    expect(detectKieVeoRateLimit(undefined, undefined, 'rate limit hit')).toBe(true);
+    expect(detectKieVeoRateLimit(undefined, undefined, 'Quota exceeded for you')).toBe(true);
+    expect(detectKieVeoRateLimit(undefined, undefined, 'Too many requests')).toBe(true);
+    expect(detectKieVeoRateLimit(500, undefined, 'boom')).toBe(false);
+  });
+
+  it('submitKieVeoLite retries on soft-429 body code then succeeds', async () => {
+    let attempt = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      attempt++;
+      const body =
+        attempt < 3
+          ? { code: 429, msg: 'rate limit' }
+          : { code: 200, data: { taskId: 'task-late' } };
+      return {
+        status: 200,
+        ok: true,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      } as Response;
+    }) as typeof globalThis.fetch;
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(true);
+    expect(r.taskId).toBe('task-late');
+    expect(attempt).toBe(3);
+  });
+
+  it('non-rate-limit failures return immediately (no retry)', async () => {
+    let attempt = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async () => {
+      attempt++;
+      const body = { code: 400, msg: 'bad prompt' };
+      return {
+        status: 200,
+        ok: true,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      } as Response;
+    }) as typeof globalThis.fetch;
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    expect(attempt).toBe(1);
+  });
+});
+
+describe('Polish-23 Commit 2: model + cost constants (BCH anchors)', () => {
+  it('default model string is veo3_lite (BCH-verified)', () => {
+    expect(VEO_LITE_DEFAULT_MODEL_ID).toBe('veo3_lite');
+    expect(getVeoLiteModelId()).toBe('veo3_lite');
+  });
+
+  it('default cost is $0.175 per 8s clip (35 credits × $0.005)', () => {
+    expect(KIE_VEO_LITE_DEFAULT_USD_PER_CLIP).toBe(0.175);
+    expect(KIE_VEO_LITE_DEFAULT_CLIP_SECONDS).toBe(8);
+    expect(KIE_VEO_LITE_DEFAULT_CREDITS_PER_CLIP).toBe(35);
+    expect(getKieVeoLiteUsdPerClip()).toBe(0.175);
+  });
+
+  it("BCH's 60s-ad Veo-only anchor: 8 clips × $0.175 = $1.40", () => {
+    expect(estimateKieVeoLiteClipCostUsd(8)).toBeCloseTo(1.4, 5);
+  });
+
+  it('estimator floors negative / fractional clip counts safely', () => {
+    expect(estimateKieVeoLiteClipCostUsd(-3)).toBe(0);
+    expect(estimateKieVeoLiteClipCostUsd(2.9)).toBeCloseTo(0.35, 5);
+  });
+});

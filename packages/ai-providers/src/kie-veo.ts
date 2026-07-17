@@ -1,0 +1,463 @@
+/**
+ * Polish-23 Commit 2: kie.ai Veo 3.1 Lite client (dedicated
+ * `/veo/generate` product surface).
+ *
+ * Not a resurrection of the Polish-19.4.x veo.ts file (that one
+ * hit Google's Gemini Developer API via
+ * generativelanguage.googleapis.com/…/predictLongRunning). This
+ * client targets kie.ai's dedicated Veo product endpoint, which
+ * wraps Google's Veo behind kie.ai's credit-metered API surface.
+ *
+ * Endpoints (per kie.ai Veo product docs):
+ *   - Submit: POST https://api.kie.ai/api/v1/veo/generate
+ *   - Poll:   GET  https://api.kie.ai/api/v1/veo/record-info?taskId=<id>
+ *
+ * Auth: `Authorization: Bearer <apiKey>` (same header as kie-video.ts).
+ *
+ * Response wrapping (Polish-20 Commit 2 pattern): kie.ai wraps every
+ * response body in `{code, msg, data}`. HTTP-level 200 with `code !=
+ * 200` is a soft failure that translates through
+ * translateKieVeoErrorStatus.
+ *
+ * Model string: `veo3_lite` (BCH-verified for Veo 3.1 Lite 1080p
+ * mode). Env override VEO_LITE_MODEL_ID_OVERRIDE flips it without
+ * a redeploy if kie.ai renames.
+ *
+ * Cost: 35 credits ≈ $0.175 per 8s clip (BCH-verified 2026-07-15).
+ * Env-tunable via KIE_VEO_LITE_USD_PER_CLIP_OVERRIDE.
+ *
+ * Ratelimit + poll patterns adapted from the Polish-19.4.3 Google-
+ * Gemini veo.ts (exponential backoff [10, 20, 40, 60, 60]s over 5
+ * retries) — kept independent so Kling/Seedance retry tunings on
+ * kie-video.ts don't couple to this module.
+ *
+ * First-live drift diagnostic: FULL request body loud-logged on
+ * the first submit + poll per (kind, model) tuple so response-shape
+ * drift surfaces in Inngest without a redeploy.
+ */
+import { callProvider } from './chokepoint';
+
+const KIE_BASE = 'https://api.kie.ai/api/v1';
+const KIE_VEO_SUBMIT_URL = `${KIE_BASE}/veo/generate`;
+const kieVeoPollUrl = (taskId: string) =>
+  `${KIE_BASE}/veo/record-info?taskId=${encodeURIComponent(taskId)}`;
+
+const SUBMIT_TIMEOUT_MS = 30_000;
+const CHECK_TIMEOUT_MS = 15_000;
+
+export const VEO_LITE_DEFAULT_MODEL_ID = 'veo3_lite';
+
+export function getVeoLiteModelId(): string {
+  return process.env['VEO_LITE_MODEL_ID_OVERRIDE']?.trim() || VEO_LITE_DEFAULT_MODEL_ID;
+}
+
+export const KIE_VEO_LITE_DEFAULT_USD_PER_CLIP = 0.175;
+export const KIE_VEO_LITE_DEFAULT_CLIP_SECONDS = 8;
+export const KIE_VEO_LITE_DEFAULT_CREDITS_PER_CLIP = 35;
+
+export function getKieVeoLiteUsdPerClip(): number {
+  const raw = process.env['KIE_VEO_LITE_USD_PER_CLIP_OVERRIDE']?.trim();
+  if (!raw) return KIE_VEO_LITE_DEFAULT_USD_PER_CLIP;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : KIE_VEO_LITE_DEFAULT_USD_PER_CLIP;
+}
+
+export function estimateKieVeoLiteClipCostUsd(clipCount = 1): number {
+  return Math.max(0, Math.floor(clipCount)) * getKieVeoLiteUsdPerClip();
+}
+
+// -------------------------------------------------------------------
+// Rate-limit primitives (Polish-19.4.3 pattern, per-module namespace)
+// -------------------------------------------------------------------
+
+export const KIE_VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES = 5;
+
+export function computeKieVeoRateLimitBackoffMs(attempt: number): number {
+  if (!Number.isFinite(attempt) || attempt < 0) return 10_000;
+  const raw = 10_000 * Math.pow(2, attempt);
+  return Math.min(60_000, raw);
+}
+
+export function getKieVeoRateLimitMaxRetries(): number {
+  const raw = process.env['KIE_VEO_RATE_LIMIT_MAX_RETRIES']?.trim();
+  if (!raw) return KIE_VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < 0) {
+    console.log(
+      `[kie-veo] ignoring KIE_VEO_RATE_LIMIT_MAX_RETRIES=${JSON.stringify(raw)} — ` +
+        `not a non-negative integer; falling back to default (${KIE_VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES}).`,
+    );
+    return KIE_VEO_DEFAULT_RATE_LIMIT_MAX_RETRIES;
+  }
+  return n;
+}
+
+/**
+ * kie.ai rate-limit surfaces on the Veo product endpoint:
+ *   - HTTP 429 on the transport
+ *   - `{code: 429}` in the wrapped body
+ *   - message substrings "rate limit" / "quota exceeded" / "too many requests"
+ */
+export function detectKieVeoRateLimit(
+  status: number | undefined,
+  kieCode: number | undefined,
+  errorMessage: string | undefined,
+): boolean {
+  if (status === 429) return true;
+  if (kieCode === 429) return true;
+  if (typeof errorMessage === 'string') {
+    const lower = errorMessage.toLowerCase();
+    if (lower.includes('rate limit')) return true;
+    if (lower.includes('quota exceeded')) return true;
+    if (lower.includes('too many requests')) return true;
+  }
+  return false;
+}
+
+let sleepImpl: (ms: number) => Promise<void> = (ms) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+export function __setKieVeoSleepImplForTests(fn: (ms: number) => Promise<void>): void {
+  sleepImpl = fn;
+}
+
+export function __restoreKieVeoSleepImplForTests(): void {
+  sleepImpl = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// -------------------------------------------------------------------
+// Submit
+// -------------------------------------------------------------------
+
+export interface KieVeoSubmitInput {
+  userId: string;
+  apiKey: string;
+  /** Fully-composed per-clip prompt (see composeVeoLiteSegmentPrompt). */
+  prompt: string;
+  /** Aspect ratio wire value; defaults to '9:16'. */
+  aspectRatio?: '9:16' | '16:9' | '1:1';
+  /**
+   * Reference image URLs (Higgsfield Soul PNG, one per batch). Threaded
+   * into imageUrls[] on the submit so every clip anchors to the same
+   * character. Optional so the client stays usable outside the Polish-23
+   * flow (e.g. a text-only Veo clip for debugging).
+   */
+  imageUrls?: string[];
+  /** Per-clip duration seconds; kie.ai Veo Lite = 8s (fixed). */
+  durationSeconds?: number;
+  generationJobId?: string;
+  generatedCreativeId?: string;
+}
+
+export interface KieVeoSubmitResult {
+  ok: boolean;
+  taskId?: string;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+interface KieVeoSubmitResponse {
+  code?: number;
+  msg?: string;
+  data?: { taskId?: string; task_id?: string };
+}
+
+export async function submitKieVeoLite(input: KieVeoSubmitInput): Promise<KieVeoSubmitResult> {
+  return retryKieVeoSubmit(() => submitKieVeoLiteOnce(input));
+}
+
+async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSubmitResult> {
+  const modelParam = getVeoLiteModelId();
+  const durationSeconds = input.durationSeconds ?? KIE_VEO_LITE_DEFAULT_CLIP_SECONDS;
+
+  const inputBody: Record<string, unknown> = {
+    prompt: input.prompt,
+    aspectRatio: input.aspectRatio ?? '9:16',
+    duration: durationSeconds,
+  };
+  if (input.imageUrls && input.imageUrls.length > 0) {
+    inputBody['imageUrls'] = input.imageUrls;
+  }
+
+  const body = { model: modelParam, input: inputBody };
+  logFirstIfFirstCall('submit', modelParam, body);
+
+  const result = await callProvider<KieVeoSubmitResponse>({
+    userId: input.userId,
+    provider: 'kie_ai',
+    url: KIE_VEO_SUBMIT_URL,
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${input.apiKey}`,
+      'content-type': 'application/json',
+    },
+    body,
+    timeoutMs: SUBMIT_TIMEOUT_MS,
+    requestBodyForLog: {
+      model: modelParam,
+      prompt_chars: input.prompt.length,
+      duration_seconds: durationSeconds,
+      aspect_ratio: inputBody['aspectRatio'],
+      image_count: input.imageUrls?.length ?? 0,
+    },
+    generationJobId: input.generationJobId,
+    generatedCreativeId: input.generatedCreativeId,
+  });
+
+  if (!result.ok) {
+    console.log(
+      `[kie-veo] submit transport failure: model=${modelParam} status=${result.status} ` +
+        `err=${result.errorMessage ?? 'unknown'}`,
+    );
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateKieVeoErrorStatus(result.status, result.errorMessage),
+    };
+  }
+  const code = result.data.code;
+  if (code !== undefined && code !== 200) {
+    console.log(
+      `[kie-veo] submit soft failure: model=${modelParam} code=${code} ` +
+        `msg=${result.data.msg ?? 'unknown'} body=${JSON.stringify(result.data).slice(0, 1500)}`,
+    );
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateKieVeoErrorStatus(code, result.data.msg),
+    };
+  }
+  const taskId = result.data.data?.taskId ?? result.data.data?.task_id;
+  if (!taskId) {
+    console.log(
+      `[kie-veo] submit succeeded but missing taskId; body=${JSON.stringify(result.data).slice(0, 1500)}`,
+    );
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: 'kie.ai Veo submit response missing taskId',
+    };
+  }
+  return { ok: true, taskId, latencyMs: result.latencyMs };
+}
+
+// -------------------------------------------------------------------
+// Poll
+// -------------------------------------------------------------------
+
+export type KieVeoState = 'waiting' | 'success' | 'fail';
+
+export interface KieVeoPollInput {
+  userId: string;
+  apiKey: string;
+  taskId: string;
+  generationJobId?: string;
+  generatedCreativeId?: string;
+}
+
+export interface KieVeoPollResult {
+  ok: boolean;
+  state?: KieVeoState;
+  outputUrl?: string;
+  failCode?: string;
+  failMsg?: string;
+  costTimeMs?: number;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+interface KieVeoPollResponse {
+  code?: number;
+  msg?: string;
+  data?: {
+    taskId?: string;
+    state?: KieVeoState;
+    /** kie.ai Veo product surface returns URLs either as an array... */
+    resultUrls?: string[] | null;
+    /** ...or nested inside a JSON-encoded string (kie-video.ts pattern). */
+    resultJson?: string | null;
+    failCode?: string | null;
+    failMsg?: string | null;
+    costTime?: number | null;
+  };
+}
+
+export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPollResult> {
+  const result = await callProvider<KieVeoPollResponse>({
+    userId: input.userId,
+    provider: 'kie_ai',
+    url: kieVeoPollUrl(input.taskId),
+    method: 'GET',
+    headers: { Authorization: `Bearer ${input.apiKey}` },
+    timeoutMs: CHECK_TIMEOUT_MS,
+    requestBodyForLog: { taskId: input.taskId },
+    generationJobId: input.generationJobId,
+    generatedCreativeId: input.generatedCreativeId,
+  });
+  logFirstIfFirstCall('poll', 'veo3_lite', { model: 'veo3_lite', input: { taskId: input.taskId } });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateKieVeoErrorStatus(result.status, result.errorMessage),
+    };
+  }
+  const code = result.data.code;
+  if (code !== undefined && code !== 200) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: translateKieVeoErrorStatus(code, result.data.msg),
+    };
+  }
+  const data = result.data.data;
+  const state = data?.state;
+  if (!state) {
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: 'kie.ai Veo record-info missing state field',
+    };
+  }
+  if (state === 'fail') {
+    return {
+      ok: true,
+      state,
+      failCode: data.failCode ?? undefined,
+      failMsg: data.failMsg ?? undefined,
+      latencyMs: result.latencyMs,
+    };
+  }
+  if (state === 'success') {
+    const outputUrl = extractVeoOutputUrl(data.resultUrls, data.resultJson);
+    if (!outputUrl) {
+      console.log(
+        `[kie-veo] poll done but no outputUrl; taskId=${input.taskId} ` +
+          `body=${JSON.stringify(result.data).slice(0, 2000)}`,
+      );
+      return {
+        ok: true,
+        state,
+        latencyMs: result.latencyMs,
+        errorMessage: 'kie.ai Veo reported success but no output URL in response',
+      };
+    }
+    return {
+      ok: true,
+      state,
+      outputUrl,
+      costTimeMs: data.costTime ?? undefined,
+      latencyMs: result.latencyMs,
+    };
+  }
+  return { ok: true, state, latencyMs: result.latencyMs };
+}
+
+/**
+ * kie.ai's Veo product response has drifted between two forms — a
+ * top-level `resultUrls: string[]` array and a JSON-encoded
+ * `resultJson: '{"resultUrls":["…"]}'` string (matching the
+ * legacy kie-video.ts shape). Handle both defensively so a first-
+ * live shape drift doesn't require a redeploy.
+ */
+export function extractVeoOutputUrl(
+  resultUrls: string[] | null | undefined,
+  resultJson: string | null | undefined,
+): string | undefined {
+  if (Array.isArray(resultUrls) && typeof resultUrls[0] === 'string' && resultUrls[0].length > 0) {
+    return resultUrls[0];
+  }
+  if (typeof resultJson === 'string' && resultJson.length > 0) {
+    try {
+      const parsed = JSON.parse(resultJson) as { resultUrls?: unknown };
+      const urls = parsed.resultUrls;
+      if (Array.isArray(urls) && typeof urls[0] === 'string' && urls[0].length > 0) {
+        return urls[0];
+      }
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+// -------------------------------------------------------------------
+// Error translation
+// -------------------------------------------------------------------
+
+export function translateKieVeoErrorStatus(
+  status: number | undefined,
+  fallback: string | undefined,
+): string {
+  if (status === 400)
+    return `kie.ai Veo validation failed${fallback ? `: ${fallback}` : ' (check prompt + reference image)'}.`;
+  if (status === 401)
+    return 'kie.ai authentication failed. Re-paste your key at /connections/tools.';
+  if (status === 402)
+    return 'Insufficient kie.ai balance for Veo 3.1 Lite (35 credits/clip). Top up at kie.ai/api-key.';
+  if (status === 404)
+    return `kie.ai Veo resource not found${fallback ? `: ${fallback}` : ''}. Check taskId or model string.`;
+  if (status === 422)
+    return `kie.ai Veo parameter validation failed${fallback ? `: ${fallback}` : ''}.`;
+  if (status === 429) return 'kie.ai Veo rate limit hit. Retry in a few seconds.';
+  if (typeof status === 'number' && status >= 500)
+    return `kie.ai Veo upstream error (HTTP ${status}${fallback ? `: ${fallback}` : ''}).`;
+  return fallback ?? `kie.ai Veo request failed${status ? ` (status ${status})` : ''}.`;
+}
+
+// -------------------------------------------------------------------
+// Retry wrapper + first-call diagnostic
+// -------------------------------------------------------------------
+
+async function retryKieVeoSubmit(
+  makeCall: () => Promise<KieVeoSubmitResult>,
+): Promise<KieVeoSubmitResult> {
+  const maxRetries = getKieVeoRateLimitMaxRetries();
+  let last: KieVeoSubmitResult | undefined;
+  let totalWaitMs = 0;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const r = await makeCall();
+    if (r.ok) return r;
+    const rateLimited = detectKieVeoRateLimit(undefined, undefined, r.errorMessage);
+    if (!rateLimited) return r;
+    last = r;
+    if (attempt === maxRetries) break;
+    const backoffMs = computeKieVeoRateLimitBackoffMs(attempt);
+    totalWaitMs += backoffMs;
+    console.log(
+      `[kie-veo-submit] rate-limit hit on attempt ${attempt + 1}/${maxRetries + 1}, ` +
+        `backing off ${Math.round(backoffMs / 1000)}s before retry ` +
+        `(err: ${r.errorMessage ?? 'unknown'})`,
+    );
+    await sleepImpl(backoffMs);
+  }
+  const totalWaitSec = Math.round(totalWaitMs / 1000);
+  const lastMsg = last?.errorMessage ?? 'unknown';
+  return {
+    ok: false,
+    latencyMs: last?.latencyMs ?? 0,
+    errorMessage:
+      `kie.ai Veo rate limit hit after ${maxRetries + 1} attempts over ~${totalWaitSec}s. ` +
+      `Last error: ${lastMsg}. Consider raising KIE_VEO_RATE_LIMIT_MAX_RETRIES ` +
+      `or reducing concurrent clips.`,
+  };
+}
+
+const _firstCallLogged = new Set<string>();
+function logFirstIfFirstCall(
+  kind: 'submit' | 'poll',
+  modelId: string,
+  body: { model: string; input: Record<string, unknown> },
+): void {
+  const key = `${kind}:${modelId}`;
+  if (_firstCallLogged.has(key)) return;
+  _firstCallLogged.add(key);
+  console.log(
+    `[kie-veo] first-${kind} for model=${modelId}: full body=${JSON.stringify(body).slice(0, 2000)}`,
+  );
+}
+
+export function __resetKieVeoFirstCallLogForTests(): void {
+  _firstCallLogged.clear();
+}

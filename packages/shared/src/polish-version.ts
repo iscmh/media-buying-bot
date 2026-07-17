@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.4';
+export const POLISH_VERSION = '23.0.5';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.4';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 1.3 — WavespeedProvider runtime registration hotfix';
+  'Polish-23 Commit 2 — kie.ai Veo 3.1 Lite client + CHARACTER LOCK segment composer';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
