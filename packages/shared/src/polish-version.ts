@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.2';
+export const POLISH_VERSION = '23.0.3';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -49,7 +49,7 @@ export const POLISH_VERSION = '23.0.2';
  * alongside POLISH_VERSION when the release ships a materially
  * different fix pattern.
  */
-export const POLISH_RELEASE_NAME = 'Polish-23 Commit 1.1 — WaveSpeedAI wsk_ prefix hotfix';
+export const POLISH_RELEASE_NAME = 'Polish-23 Commit 1.2 — WaveSpeedAI permissive key regex hotfix';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

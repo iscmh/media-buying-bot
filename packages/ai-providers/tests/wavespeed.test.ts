@@ -60,7 +60,7 @@ describe('Polish-23 Commit 1: submitWavespeedSoul — endpoint + auth + body sha
     });
     const r = await submitWavespeedSoul({
       userId: 'u',
-      apiKey: 'wsk_' + 'A'.repeat(24),
+      apiKey: 'wsk_live_' + 'A'.repeat(24),
       prompt: 'iPhone selfie of Linda, hyper photoreal',
       image: 'https://cdn.example/seed.png',
     });
@@ -68,7 +68,7 @@ describe('Polish-23 Commit 1: submitWavespeedSoul — endpoint + auth + body sha
     expect(r.predictionId).toBe('pred-42');
     expect(calls[0]!.url).toBe('https://api.wavespeed.ai/api/v3/higgsfield/soul/image-to-image');
     const headers = calls[0]!.init!.headers as Record<string, string>;
-    expect(headers['Authorization']).toBe('Bearer wsk_' + 'A'.repeat(24));
+    expect(headers['Authorization']).toBe('Bearer wsk_live_' + 'A'.repeat(24));
     expect(headers['content-type']).toBe('application/json');
   });
 
@@ -176,7 +176,7 @@ describe('Polish-23 Commit 1: pollWavespeedSoul + normalizeWavespeedStatus', () 
     });
     const r = await pollWavespeedSoul({
       userId: 'u',
-      apiKey: 'wsk_' + 'B'.repeat(24),
+      apiKey: 'wsk_live_' + 'B'.repeat(24),
       predictionId: 'pred-1',
     });
     expect(r.ok).toBe(true);
@@ -184,7 +184,7 @@ describe('Polish-23 Commit 1: pollWavespeedSoul + normalizeWavespeedStatus', () 
     expect(r.outputUrl).toBeUndefined();
     expect(calls[0]!.url).toBe('https://api.wavespeed.ai/api/v3/predictions/pred-1/result');
     const headers = calls[0]!.init!.headers as Record<string, string>;
-    expect(headers['Authorization']).toBe('Bearer wsk_' + 'B'.repeat(24));
+    expect(headers['Authorization']).toBe('Bearer wsk_live_' + 'B'.repeat(24));
   });
 
   it('completed status extracts data.outputs[0] as the output URL', async () => {

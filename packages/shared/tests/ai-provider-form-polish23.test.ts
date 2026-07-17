@@ -5,8 +5,32 @@ import {
   CONNECTABLE_AI_PROVIDERS,
 } from '../src/ai-provider-form';
 
-describe('Polish-23 Commit 1: wavespeed_ai BYOK schema + connect card', () => {
-  it('accepts a valid wsk_ key (base62 tail ≥ 24 chars)', () => {
+describe('Polish-23 Commit 1.2: wavespeed_ai BYOK schema (permissive) + connect card', () => {
+  it('accepts a real-shape wsk_live_ key (Stripe-pattern env sub-segment + base62 tail)', () => {
+    // Real key form observed in the operator's WaveSpeedAI
+    // dashboard, e.g. `wsk_live_9BLa6awbBLXSM...`. The Commit 1 /
+    // Commit 1.1 regexes rejected this because they refused the
+    // `_live_` sub-segment.
+    const r = AiProviderKeyInputSchema.safeParse({
+      provider: 'wavespeed_ai',
+      apiKey: 'wsk_live_9BLa6awbBLXSMabcdefghij',
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a wsk_test_ (sandbox / staging) key with the same shape', () => {
+    const r = AiProviderKeyInputSchema.safeParse({
+      provider: 'wavespeed_ai',
+      apiKey: 'wsk_test_' + 'A'.repeat(24),
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('accepts a legacy no-env-segment wsk_ key (permissive envelope tolerates it)', () => {
+    // Commit 1.2 deliberately drops the strict env-segment
+    // requirement. If WaveSpeedAI ever emits a key without
+    // `_live_` / `_test_`, we still accept it and let the real
+    // API round-trip in verifyWavespeedKey be the source of truth.
     const r = AiProviderKeyInputSchema.safeParse({
       provider: 'wavespeed_ai',
       apiKey: 'wsk_' + 'A'.repeat(24),
@@ -17,12 +41,12 @@ describe('Polish-23 Commit 1: wavespeed_ai BYOK schema + connect card', () => {
   it('rejects keys without the wsk_ prefix', () => {
     const r = AiProviderKeyInputSchema.safeParse({
       provider: 'wavespeed_ai',
-      apiKey: 'sk_' + 'B'.repeat(24),
+      apiKey: 'sk_live_' + 'B'.repeat(24),
     });
     expect(r.success).toBe(false);
   });
 
-  it('rejects keys with a too-short tail (<24 chars)', () => {
+  it('rejects keys with a too-short tail (<20 chars after wsk_)', () => {
     const r = AiProviderKeyInputSchema.safeParse({
       provider: 'wavespeed_ai',
       apiKey: 'wsk_short',
@@ -30,10 +54,13 @@ describe('Polish-23 Commit 1: wavespeed_ai BYOK schema + connect card', () => {
     expect(r.success).toBe(false);
   });
 
-  it('rejects keys with special characters in the tail (base62 only)', () => {
+  it('rejects keys with a too-long tail (>150 chars after wsk_)', () => {
+    // Upper bound guards against a paste that grabbed extra
+    // surrounding text (e.g. the entire dashboard row). 150 chars
+    // is generous — real WaveSpeedAI keys are ~40 chars.
     const r = AiProviderKeyInputSchema.safeParse({
       provider: 'wavespeed_ai',
-      apiKey: 'wsk_' + 'A'.repeat(23) + '!',
+      apiKey: 'wsk_' + 'A'.repeat(151),
     });
     expect(r.success).toBe(false);
   });

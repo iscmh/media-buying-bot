@@ -35,12 +35,17 @@ const HEDRA_KEY_PATTERN = /^[A-Za-z0-9_.=-]{20,256}$/;
 // alphanumeric ~48-64 chars, sometimes prefixed with `sk_`. Accept a
 // wide superset — ElevenLabs hasn't published a strict format.
 const ELEVENLABS_KEY_PATTERN = /^[A-Za-z0-9_.=-]{24,256}$/;
-// Polish-23 Commit 1.1 hotfix: WaveSpeedAI keys carry a `wsk_`
-// prefix (verified from the WaveSpeedAI dashboard — the earlier
-// `wsp_` guess was wrong). The tail is base62 (letters+digits)
-// ≥24 chars — permissive enough that a rotation to longer secrets
-// doesn't need a schema bump.
-const WAVESPEED_AI_KEY_PATTERN = /^wsk_[A-Za-z0-9]{24,128}$/;
+// Polish-23 Commit 1.2 hotfix: WaveSpeedAI keys follow the Stripe
+// pattern `wsk_{env}_{tail}` (env = live | test), e.g.
+// `wsk_live_9BLa6awbBLXSM...`. The strict regexes we tried in
+// Commit 1 (`wsp_...`) and Commit 1.1 (`wsk_[A-Za-z0-9]{24,128}`)
+// both rejected legitimate keys because the exact tail alphabet
+// isn't documented. Going deliberately permissive: prefix + any
+// 20–150 chars in the tail. The real gate is the live API
+// round-trip in verifyWavespeedKey (401/403 detection) — a client-
+// side regex is only there to catch obvious paste-errors, not to
+// mirror the vendor's internal format.
+const WAVESPEED_AI_KEY_PATTERN = /^wsk_.{20,150}$/;
 export const AiProviderKeyInputSchema = z
   .object({
     provider: z.enum([
@@ -91,7 +96,7 @@ export const AiProviderKeyInputSchema = z
         break;
       case 'wavespeed_ai':
         pattern = WAVESPEED_AI_KEY_PATTERN;
-        hint = 'WaveSpeedAI keys start with wsk_ followed by 24+ chars.';
+        hint = 'WaveSpeedAI keys start with wsk_live_ (or wsk_test_) followed by 20+ chars.';
         break;
     }
     if (!pattern.test(value.apiKey)) {
