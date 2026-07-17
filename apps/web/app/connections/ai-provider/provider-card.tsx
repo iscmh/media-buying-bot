@@ -247,6 +247,22 @@ function KeyHint({ provider }: { provider: AIProviderName }) {
           . Starts with <code className="font-mono">sk-</code>.
         </p>
       );
+    case 'wavespeed_ai':
+      return (
+        <p className="text-fg-muted text-xs">
+          Get a key at{' '}
+          <a
+            href="https://wavespeed.ai/dashboard"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:text-fg underline"
+          >
+            wavespeed.ai/dashboard
+          </a>
+          . Starts with <code className="font-mono">wsk_live_</code> or{' '}
+          <code className="font-mono">wsk_test_</code>.
+        </p>
+      );
     default:
       return null;
   }
