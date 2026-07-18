@@ -110,10 +110,24 @@ const CONCAT_POLL_INTERVAL_SECONDS = 5;
 const CONCAT_POLL_MAX_ATTEMPTS = 36; // ~3 min
 const HIGGSFIELD_SEED_IMAGE_URL =
   process.env['POLISH23_HIGGSFIELD_SEED_IMAGE_URL']?.trim() ||
-  // WaveSpeedAI's Higgsfield Soul is image-to-image — the seed is a
-  // neutral placeholder photo, and the prompt does the heavy lifting.
-  // Env override lets the operator swap in a preferred seed.
-  'https://storage.googleapis.com/higgsfield-public/seed-neutral.png';
+  // Polish-23 Commit 3.0.13: real root cause of the whole
+  // multi-day hotfix cycle was that the Commit-1 placeholder
+  // (storage.googleapis.com/higgsfield-public/seed-neutral.png)
+  // returned 404. WaveSpeedAI's Higgsfield Soul submit accepted the
+  // request with the broken URL, then Soul returned a broken PNG,
+  // then kie.ai's Veo generation fetched the broken PNG and
+  // returned "please enter prompt" as its generic downstream error.
+  //
+  // Corrected default: picsum.photos returns a random 1080x1920
+  // (9:16 vertical) image on every request, verified 200. Cheap +
+  // reliable + zero-auth + no rate-limit concerns for a seed. The
+  // prompt does the character work; the seed only conditions
+  // Higgsfield Soul on composition + lighting anchors.
+  //
+  // Operator can override via POLISH23_HIGGSFIELD_SEED_IMAGE_URL env
+  // to swap in a preferred reference (e.g. a stored Supabase image
+  // matching a specific niche).
+  'https://picsum.photos/1080/1920';
 
 export interface Polish23ProgressStep {
   step: string;
@@ -464,6 +478,69 @@ export const generatePolish23VeoLite = inngest.createFunction(
         );
       }
     }
+
+    // -------- Step B pre-check: Higgsfield seed URL health --------
+    // Polish-23 Commit 3.0.13: the real root cause of the whole
+    // multi-day debug cycle was that the Commit-1 placeholder seed
+    // URL returned 404. Higgsfield Soul accepted the broken URL,
+    // produced a broken PNG, then kie.ai's Veo fetched the broken
+    // PNG and returned an opaque "Please enter prompt" — surface
+    // that class of failure HERE with a definitive error message
+    // so the operator can flip the env var in 30 seconds instead
+    // of chasing symptoms downstream.
+    //
+    // Runs BEFORE any WaveSpeedAI credit is spent. HEAD-only so the
+    // check itself is free (no image download).
+    await step.run('higgsfield-seed-url-health-check', async () => {
+      let statusCode: number | null = null;
+      let networkError: string | null = null;
+      try {
+        const head = await fetch(HIGGSFIELD_SEED_IMAGE_URL, { method: 'HEAD' });
+        statusCode = head.status;
+      } catch (err) {
+        networkError = err instanceof Error ? err.message : String(err);
+      }
+      const checkResult = {
+        url: HIGGSFIELD_SEED_IMAGE_URL,
+        statusCode,
+        networkError,
+        ok: networkError === null && statusCode !== null && statusCode >= 200 && statusCode < 300,
+        at: new Date().toISOString(),
+      };
+      const db = getDb();
+      const meta = (job.metadata ?? {}) as Record<string, unknown>;
+      await db
+        .update(schema.generationJobs)
+        .set({
+          metadata: {
+            ...meta,
+            character_lock: adSpec.character_lock,
+            polish23_segments: adSpec.segments,
+            ...metadataExtras,
+            polish23_higgsfield_seed_url_check: checkResult,
+          },
+        })
+        .where(eq(schema.generationJobs.id, jobId));
+      if (networkError !== null) {
+        throw new NonRetriableError(
+          `Higgsfield seed URL unreachable: ${HIGGSFIELD_SEED_IMAGE_URL} — ` +
+            `network error: ${networkError}. ` +
+            `Set POLISH23_HIGGSFIELD_SEED_IMAGE_URL to a valid image URL (e.g. ` +
+            `https://picsum.photos/1080/1920) on Vercel and redeploy.`,
+        );
+      }
+      if (statusCode === null || statusCode < 200 || statusCode >= 300) {
+        throw new NonRetriableError(
+          `Higgsfield seed URL unreachable: ${HIGGSFIELD_SEED_IMAGE_URL} returned ${statusCode}. ` +
+            `Set POLISH23_HIGGSFIELD_SEED_IMAGE_URL to a valid image URL (e.g. ` +
+            `https://picsum.photos/1080/1920) on Vercel and redeploy.`,
+        );
+      }
+      console.log(
+        `[polish-23-worker] higgsfield-seed-url-health-check: ` +
+          `${HIGGSFIELD_SEED_IMAGE_URL} → ${statusCode} OK`,
+      );
+    });
 
     // -------- Step B: Higgsfield Soul reference PNG --------
     const soulRefUrl = await step.run('higgsfield-soul', async () => {
