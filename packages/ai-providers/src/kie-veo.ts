@@ -319,11 +319,15 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
     console.log(
       `[kie-veo] submit succeeded but missing taskId; body=${JSON.stringify(result.data).slice(0, 1500)}`,
     );
+    // Polish-23 Commit 3.0.16: missing taskId on submit is now
+    // TRANSIENT (was terminal). Per operator: kie.ai could return
+    // an incomplete envelope during upstream flakiness; retrying
+    // the whole submit is cheap and safe (no task was created).
     return {
       ok: false,
       latencyMs: result.latencyMs,
-      errorMessage: 'kie.ai Veo submit response missing taskId',
-      errorKind: 'terminal',
+      errorMessage: 'kie.ai Veo submit response missing taskId — treating as transient',
+      errorKind: 'transient',
       rawErrorBody: result.data,
     };
   }
@@ -501,6 +505,13 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       : null);
 
   if (state === null) {
+    // Polish-23 Commit 3.0.16: missing successFlag is now TRANSIENT
+    // (was terminal). Per operator: an unknown-state response from
+    // kie.ai during a legitimate long-running Veo generation should
+    // let the poll loop retry rather than fire NonRetriableError.
+    // If kie.ai actually drifted the schema, the transient loop will
+    // still exit after VEO_POLL_MAX_ATTEMPTS with a definitive
+    // signal in metadata.polish23_veo_poll_responses.
     console.error(
       `[kie-veo] poll response missing recognizable successFlag / state; ` +
         `taskId=${input.taskId} body=${JSON.stringify(result.data).slice(0, 2000)}`,
@@ -508,8 +519,9 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
     return {
       ok: false,
       latencyMs: result.latencyMs,
-      errorMessage: 'kie.ai Veo record-info missing successFlag (and no legacy state field)',
-      errorKind: 'terminal',
+      errorMessage:
+        'kie.ai Veo record-info missing successFlag (and no legacy state field) — treating as transient',
+      errorKind: 'transient',
       rawErrorBody: result.data,
       rawResponseBody: result.data,
     };
@@ -626,6 +638,16 @@ export function classifyKieVeoErrorKind(
   kieCode: number | undefined,
   errorMessage: string | undefined,
 ): 'terminal' | 'transient' {
+  // Polish-23 Commit 3.0.16: network / socket-drop errors surface
+  // as status=0 or status=undefined via chokepoint's transport
+  // catch. Retrying makes sense — the request never reached kie.ai.
+  if (status === 0) return 'transient';
+  if (typeof errorMessage === 'string') {
+    const lower = errorMessage.toLowerCase();
+    if (lower.includes('timeout') || lower.includes('econnreset') || lower.includes('etimedout')) {
+      return 'transient';
+    }
+  }
   if (status === 429) return 'transient';
   if (typeof status === 'number' && status >= 500) return 'transient';
   if (status === 400 || status === 401 || status === 402 || status === 404 || status === 422) {

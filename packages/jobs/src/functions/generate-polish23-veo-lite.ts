@@ -262,7 +262,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
             const analysis = meta?.['analysis'] ?? null;
             if (analysis && typeof analysis === 'object') {
               return {
-                source: 'prior_job_analysis' as const,
+                source: 'prior_analysis' as const,
                 text: JSON.stringify(analysis, null, 2),
                 jobId: p.id as string | null,
               };
@@ -280,15 +280,28 @@ export const generatePolish23VeoLite = inngest.createFunction(
           jobId: null as string | null,
         };
 
+    // Polish-23 Commit 3.0.16: explicit final-source tag matches the
+    // operator's spec exactly:
+    //   'ugc_original_script' | 'prior_analysis'
+    //   | 'legacy_transcription' | 'linda_fallback'
+    // Ties the source-lookup enum to a definitive downstream tag
+    // that names which branch actually fed Claude.
     let sourceContext: string;
+    let finalSourceTag:
+      | 'ugc_original_script'
+      | 'prior_analysis'
+      | 'legacy_transcription'
+      | 'linda_fallback';
     if (sourceLookup.source === 'ugc_original_script' && sourceLookup.text) {
       sourceContext = sourceLookup.text;
+      finalSourceTag = 'ugc_original_script';
       console.log(
         `[polish-23-worker] source context: concepts.ugc_original_script ` +
           `(direct user paste, ${sourceContext.length} chars)`,
       );
-    } else if (sourceLookup.source === 'prior_job_analysis' && sourceLookup.text) {
+    } else if (sourceLookup.source === 'prior_analysis' && sourceLookup.text) {
       sourceContext = sourceLookup.text;
+      finalSourceTag = 'prior_analysis';
       console.log(
         `[polish-23-worker] source context: prior job ${sourceLookup.jobId} ` +
           `metadata.analysis (${sourceContext.length} chars)`,
@@ -297,46 +310,45 @@ export const generatePolish23VeoLite = inngest.createFunction(
       const legacyJobScript = extractSourceScript(job.metadata as Record<string, unknown> | null);
       if (legacyJobScript) {
         sourceContext = legacyJobScript;
+        finalSourceTag = 'legacy_transcription';
         console.log(
           `[polish-23-worker] source context: this-job.metadata.analysis.script_transcription ` +
             `(${legacyJobScript.length} chars)`,
         );
       } else {
         sourceContext = '(no source analysis available)';
+        finalSourceTag = 'linda_fallback';
         console.warn(
-          `[polish-23-worker] source context: MISSING — no ugc_original_script on concept ` +
-            `${conceptId ?? '(unknown)'}, no prior analyzed job, no legacy this-job analysis. ` +
-            `Claude will produce a generic Linda-anchored ad.`,
+          `[polish-23-worker] source context: linda_fallback — no ugc_original_script on ` +
+            `concept ${conceptId ?? '(unknown)'}, no prior analyzed job, no legacy this-job ` +
+            `analysis. Claude will produce a generic Linda-anchored ad.`,
         );
       }
     }
     const sourceScript = sourceContext;
 
-    // Polish-23 Commit 3.0.15: durable source-context-lookup
-    // forensics for Bug 1 investigation (Julia → Linda regression).
+    // Polish-23 Commit 3.0.16: metadata.polish23_source_context —
+    // durable evidence of which branch fed Claude. Field name matches
+    // operator's spec (was polish23_source_context_lookup in 3.0.15).
     // Query with:
-    //   SELECT jsonb_pretty(metadata->'polish23_source_context_lookup')
+    //   SELECT jsonb_pretty(metadata->'polish23_source_context')
     //     FROM generation_jobs WHERE id = '<jobId>';
-    // If lookup.source is populated + text_chars matches operator's
-    // SQL count, the fetch is working and Bug 1 root cause is
-    // downstream (Claude prompt bias, not the source-lookup logic).
-    await step.run('persist-source-context-lookup', async () => {
+    await step.run('persist-source-context', async () => {
       const db = getDb();
       const meta = (job.metadata ?? {}) as Record<string, unknown>;
-      const textChars = sourceLookup.text?.length ?? 0;
-      const textForForensics = sourceLookup.text ?? '';
+      const textChars = sourceContext.length;
       await db
         .update(schema.generationJobs)
         .set({
           metadata: {
             ...meta,
-            polish23_source_context_lookup: {
+            polish23_source_context: {
               conceptId: conceptId ?? null,
-              source: sourceLookup.source,
+              source: finalSourceTag,
               priorJobId: sourceLookup.jobId,
               textChars,
-              textHead: textForForensics.slice(0, 200),
-              textTail: textForForensics.slice(-200),
+              textHead: sourceContext.slice(0, 200),
+              textTail: sourceContext.slice(-200),
               at: new Date().toISOString(),
             },
           },
@@ -761,6 +773,12 @@ export const generatePolish23VeoLite = inngest.createFunction(
       at: string;
       poll: Record<string, unknown>;
     }> = [];
+    // Polish-23 Commit 3.0.16: cheap forensics for clip-level retries.
+    // Persisted to metadata.polish23_veo_retry_counts on each
+    // persist-clip-i-progress step so an SQL query surfaces which
+    // clips needed retries (and how many) without diving into Vercel
+    // Runtime Logs. Map keyed by segmentIndex → total attempts used.
+    const veoRetryCounts = new Map<number, number>();
     for (let i = 0; i < adSpec.segments.length; i++) {
       const segment = adSpec.segments[i]!;
       const composed = composeVeoLiteSegmentPrompt(adSpec.character_lock, {
@@ -893,8 +911,23 @@ export const generatePolish23VeoLite = inngest.createFunction(
         clipUrl = await step.run(`veo-clip-${i}`, async () => {
           const keys = await loadDecryptedKeys(userId, ['kie_ai']);
           const prompt = truncated.prompt;
-          // Retry-once wrapper.
-          for (let attempt = 0; attempt < 2; attempt++) {
+          // Polish-23 Commit 3.0.16: 6 total attempts with exponential
+          // backoff [5, 10, 30, 60, 90]s between attempts (~3.25 min
+          // max recovery window). Veo credits are never spent on
+          // failed submits (kie.ai only charges on successful task
+          // creation), so retry cost is bandwidth + latency only.
+          const VEO_SUBMIT_MAX_ATTEMPTS = 6;
+          const VEO_SUBMIT_BACKOFF_SECONDS = [5, 10, 30, 60, 90];
+          for (let attempt = 0; attempt < VEO_SUBMIT_MAX_ATTEMPTS; attempt++) {
+            if (attempt > 0) {
+              const backoff = VEO_SUBMIT_BACKOFF_SECONDS[attempt - 1] ?? 90;
+              console.warn(
+                `[polish-23-worker Step C] veo-clip-${i} backoff ${backoff}s before ` +
+                  `submit-attempt=${attempt + 1}/${VEO_SUBMIT_MAX_ATTEMPTS}`,
+              );
+              await sleep(backoff * 1000);
+            }
+            veoRetryCounts.set(i, attempt + 1);
             const submit = await submitKieVeoLite({
               userId,
               apiKey: keys.kie_ai!,
@@ -949,15 +982,16 @@ export const generatePolish23VeoLite = inngest.createFunction(
                   `Veo Lite clip ${i} submit terminal failure: ${submit.errorMessage ?? 'unknown'}`,
                 );
               }
-              if (attempt === 0) {
+              if (attempt < VEO_SUBMIT_MAX_ATTEMPTS - 1) {
                 console.log(
-                  `[polish-23-worker] veo-clip-${i} submit attempt 1 failed (transient) ` +
+                  `[polish-23-worker] veo-clip-${i} submit attempt ${attempt + 1} failed (transient) ` +
                     `(${submit.errorMessage ?? 'unknown'}); retrying.`,
                 );
                 continue;
               }
               throw new Error(
-                `Veo Lite clip ${i} submit failed after retry: ${submit.errorMessage ?? 'unknown'}`,
+                `Veo Lite clip ${i} submit failed after ${VEO_SUBMIT_MAX_ATTEMPTS} attempts: ` +
+                  `${submit.errorMessage ?? 'unknown'}`,
               );
             }
             const taskId = submit.taskId;
@@ -1059,15 +1093,16 @@ export const generatePolish23VeoLite = inngest.createFunction(
               }
             }
             if (outputUrl) return outputUrl;
-            if (attempt === 0) {
+            if (attempt < VEO_SUBMIT_MAX_ATTEMPTS - 1) {
               console.log(
-                `[polish-23-worker] veo-clip-${i} poll attempt 1 ended without output ` +
+                `[polish-23-worker] veo-clip-${i} poll attempt ${attempt + 1} ended without output ` +
                   `(failed=${failed} msg=${failMsg || 'timeout'}); retrying submit.`,
               );
               continue;
             }
             throw new Error(
-              `Veo Lite clip ${i} didn't complete after retry: ${failMsg || 'poll timeout'}`,
+              `Veo Lite clip ${i} didn't complete after ${VEO_SUBMIT_MAX_ATTEMPTS} attempts: ` +
+                `${failMsg || 'poll timeout'}`,
             );
           }
           throw new Error(`Veo Lite clip ${i} unreachable`);
@@ -1114,6 +1149,9 @@ export const generatePolish23VeoLite = inngest.createFunction(
               polish23_clip_urls: clipUrls,
               polish23_composed_prompts: composedPromptsSnapshot,
               polish23_veo_submit_bodies: veoSubmitBodiesSnapshot,
+              polish23_veo_retry_counts: Array.from(veoRetryCounts.entries()).map(
+                ([segmentIndex, attempts]) => ({ segmentIndex, attempts }),
+              ),
               polish23_progress: {
                 step: `veo-clip-${i}`,
                 pct: computePolish23SegmentProgress(i, POLISH23_SEGMENT_COUNT),
