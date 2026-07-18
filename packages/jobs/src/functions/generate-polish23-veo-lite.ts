@@ -61,9 +61,9 @@ import {
   POLISH23_CLIP_SECONDS,
   POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT,
   assertAllSegmentsValid,
+  coalesceAdSpecWithFallback,
   composePolish23AdSpecUserPrompt,
   diagnosePolish23AdSpecParseFailure,
-  fallbackPolish23AdSpec,
   type AdSpec,
   type SegmentSpec,
 } from '../lib/polish23-claude-adspec-prompt';
@@ -172,17 +172,33 @@ export const generatePolish23VeoLite = inngest.createFunction(
     const sourceScript = extractSourceScript(job.metadata as Record<string, unknown> | null);
 
     // -------- Step A: Claude ad-spec --------
-    const adSpec = await step.run('claude-ad-spec', async () => {
+    // Polish-23 Commit 3.0.2: Step A now returns an enriched shape
+    // so the persist step can write durable forensics (raw Claude
+    // text excerpt + parse diagnostic + segment fallback tracking)
+    // to job.metadata. BCH's stack is new territory; production
+    // forensics beat re-running the pipeline to reproduce.
+    const stepAResult = await step.run('claude-ad-spec', async () => {
       let keys;
       try {
         keys = await loadDecryptedKeys(userId, ['claude']);
       } catch (err) {
         if (err instanceof MissingProviderKeyError) {
           console.warn(
-            '[polish-23-worker Step A] Claude key missing — falling back to Linda anchor + stock ad. ' +
-              'Full fallback fires: character_lock + segments come from fallbackPolish23AdSpec() as a paired object.',
+            '[polish-23-worker Step A] Claude key missing — wholesale fallback to Linda anchor + stock ad.',
           );
-          return fallbackPolish23AdSpec();
+          const coalesced = coalesceAdSpecWithFallback(null);
+          return {
+            adSpec: coalesced.adSpec,
+            metadataExtras: {
+              polish23_claude_raw_text: null,
+              polish23_parse_diagnostic: {
+                reason: 'claude-key-missing',
+                detail: (err as Error).message.slice(0, 400),
+              },
+              polish23_segments_fallback_used: coalesced.segmentFallbackIndices,
+              polish23_wholesale_fallback: coalesced.wholesaleFallback,
+            },
+          };
         }
         throw err;
       }
@@ -194,51 +210,92 @@ export const generatePolish23VeoLite = inngest.createFunction(
         maxTokens: 4096,
         generationJobId: jobId,
       });
-      // Polish-23 Commit 3.0.1: loud-log the FULL raw Claude response
-      // (first 4000 chars) BEFORE the parse attempt so any future
-      // parse failure surfaces the actual response text in Inngest
-      // logs. Cost of this log line: ~4KB per job — negligible.
+      const rawText = r.text ?? '';
+      const rawTextExcerpt = rawText.slice(0, 4000);
+      // Loud-log the FULL raw Claude response (first 4000 chars)
+      // BEFORE the parse attempt so any parse failure surfaces the
+      // actual response text in Inngest logs immediately.
       console.log(
-        `[polish-23-worker Step A] Claude raw response ok=${r.ok} chars=${
-          (r.text ?? '').length
-        }: ${(r.text ?? '').slice(0, 4000)}`,
+        `[polish-23-worker Step A] Claude raw response ok=${r.ok} chars=${rawText.length}: ` +
+          `${rawTextExcerpt}`,
       );
+
       if (!r.ok) {
         console.warn(
           `[polish-23-worker Step A] Claude ad-spec call failed (${r.errorMessage}) — ` +
-            'falling back to Linda anchor + stock ad. Full fallback fires: character_lock + segments come paired.',
+            'wholesale fallback to Linda + stock ad. Full fallback fires: character_lock + segments come paired.',
         );
-        return fallbackPolish23AdSpec();
+        const coalesced = coalesceAdSpecWithFallback(null);
+        return {
+          adSpec: coalesced.adSpec,
+          metadataExtras: {
+            polish23_claude_raw_text: rawTextExcerpt,
+            polish23_parse_diagnostic: {
+              reason: 'claude-call-failed',
+              detail: (r.errorMessage ?? '').slice(0, 400),
+            },
+            polish23_segments_fallback_used: coalesced.segmentFallbackIndices,
+            polish23_wholesale_fallback: coalesced.wholesaleFallback,
+          },
+        };
       }
-      // Diagnostic parse — same steps as parsePolish23AdSpec but names WHY it failed.
-      const diag = diagnosePolish23AdSpecParseFailure(r.text);
+
+      // Diagnostic parse — names WHY it failed if it does.
+      const diag = diagnosePolish23AdSpecParseFailure(rawText);
+      const parseDiagnostic = diag.ok
+        ? { reason: 'success' as const, detail: null as string | null }
+        : { reason: diag.reason, detail: diag.detail ?? null };
+      const parsed = diag.ok ? diag.data : null;
+
       if (!diag.ok) {
         console.warn(
           `[polish-23-worker Step A] Claude ad-spec parse failed: reason=${diag.reason} ` +
-            `detail=${diag.detail ?? '(none)'}. Falling back to Linda anchor + stock ad. ` +
-            'Full fallback fires: character_lock + segments come paired from fallbackPolish23AdSpec().',
+            `detail=${diag.detail ?? '(none)'}. Wholesale fallback fires — character_lock + segments come paired.`,
         );
-        return fallbackPolish23AdSpec();
+      } else {
+        console.log(
+          `[polish-23-worker Step A] Claude ad-spec parsed: character=${diag.data.character_lock.name} ` +
+            `age=${diag.data.character_lock.age} segments=${diag.data.segments.length}`,
+        );
       }
-      console.log(
-        `[polish-23-worker Step A] Claude ad-spec parsed: character=${diag.data.character_lock.name} ` +
-          `age=${diag.data.character_lock.age} segments=${diag.data.segments.length}`,
-      );
-      return diag.data;
-    });
 
-    // Polish-23 Commit 3.0.1: pre-Step-C invariant guard. Any drift
-    // between Step A's return and Step C's read (Inngest cache
-    // mismatch, in-memory mutation, schema loosening in a future
-    // commit) fails HERE with a named segment index instead of at
-    // Veo submit with an opaque "Please enter prompt". First live
-    // test at Commit 3 surfaced this exact class of failure — the
-    // guard closes the loop.
+      // Safety-net coalesce runs regardless. In the healthy parse
+      // path it's a no-op (identity return). In the failure path it
+      // wholesale-fills. In the theoretical partial-drift path it
+      // per-index backfills and tracks the offending indices.
+      const coalesced = coalesceAdSpecWithFallback(parsed);
+      if (coalesced.segmentFallbackIndices.length > 0) {
+        console.warn(
+          `[polish-23-worker Step A] Safety-net per-segment fallback fired for indices: ` +
+            `[${coalesced.segmentFallbackIndices.join(', ')}]. Parser SHOULD have caught this — ` +
+            'investigate a schema loosening or in-memory mutation.',
+        );
+      }
+
+      return {
+        adSpec: coalesced.adSpec,
+        metadataExtras: {
+          polish23_claude_raw_text: rawTextExcerpt,
+          polish23_parse_diagnostic: parseDiagnostic,
+          polish23_segments_fallback_used: coalesced.segmentFallbackIndices,
+          polish23_wholesale_fallback: coalesced.wholesaleFallback,
+        },
+      };
+    });
+    const adSpec = stepAResult.adSpec;
+    const metadataExtras = stepAResult.metadataExtras;
+
+    // Polish-23 Commit 3.0.1: paranoid triple-check pre-Step-C. The
+    // coalescer above already backfills any invalid segment from
+    // the fallback, so this should be dead code in every healthy
+    // path. Kept as a definitive fail-fast if the fallback itself
+    // is somehow corrupt (impossible per test suite).
     try {
       assertAllSegmentsValid(adSpec.segments);
       if (adSpec.character_lock == null || typeof adSpec.character_lock.name !== 'string') {
         throw new Error(
-          '[polish-23-worker] AdSpec.character_lock is missing or malformed. Refusing to proceed.',
+          '[polish-23-worker] AdSpec.character_lock is missing or malformed after coalesce. ' +
+            'This should be unreachable — investigate a corrupt fallbackPolish23AdSpec.',
         );
       }
     } catch (err) {
@@ -259,6 +316,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
             ...meta,
             character_lock: adSpec.character_lock,
             polish23_segments: adSpec.segments,
+            ...metadataExtras,
             polish23_progress: {
               step: 'claude-ad-spec',
               pct: computePolish23Progress('claude-ad-spec'),
@@ -352,6 +410,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
             ...meta,
             character_lock: adSpec.character_lock,
             polish23_segments: adSpec.segments,
+            ...metadataExtras,
             higgsfield_soul_ref_url: soulRefUrl,
             polish23_progress: {
               step: 'higgsfield-soul',
@@ -545,6 +604,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
             ...meta,
             character_lock: adSpec.character_lock,
             polish23_segments: adSpec.segments,
+            ...metadataExtras,
             higgsfield_soul_ref_url: soulRefUrl,
             polish23_clip_urls: clipUrls,
             polish23_composite_url: uploadedUrl,

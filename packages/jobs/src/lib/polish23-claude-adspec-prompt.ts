@@ -221,12 +221,80 @@ export function diagnosePolish23AdSpecParseFailure(
 }
 
 /**
+ * Polish-23 Commit 3.0.2: per-segment validity check. A segment
+ * is valid when it's a non-null object with non-empty dialogue AND
+ * non-empty sceneDirection strings. Exported so the safety-net
+ * coalescer + the pre-Step-C assertion share one definition.
+ */
+export function isValidSegment(seg: SegmentSpec | undefined | null): seg is SegmentSpec {
+  if (seg == null) return false;
+  if (typeof seg.dialogue !== 'string' || seg.dialogue.trim().length === 0) return false;
+  if (typeof seg.sceneDirection !== 'string' || seg.sceneDirection.trim().length === 0)
+    return false;
+  return true;
+}
+
+/**
+ * Polish-23 Commit 3.0.2: safety-net coalescer. Belt-and-suspenders
+ * on the critical path where empty prompts → kie.ai 400s.
+ *
+ * Contract:
+ *   - parsed == null → wholesale fallback (all 8 stock segments).
+ *     `wholesaleFallback: true`, `segmentFallbackIndices: []`
+ *   - parsed != null with all segments valid → identity return,
+ *     `segmentFallbackIndices: []`, `wholesaleFallback: false`
+ *   - parsed != null with SOME segments invalid → per-index
+ *     backfill from the fallback, index of each replaced slot
+ *     recorded in `segmentFallbackIndices`
+ *
+ * Since the parser (Zod) already enforces every segment's
+ * dialogue.min(1) + sceneDirection.min(1), the per-index backfill
+ * path is dead code today — but the operator's Commit 3.0.1
+ * first-live report suggested a state that should have been
+ * unreachable did surface anyway. This coalescer is future-proof
+ * defense: any later schema loosening, in-memory mutation, or
+ * Inngest-cache drift lands here instead of at Veo submit.
+ */
+export interface CoalescedAdSpec {
+  adSpec: AdSpec;
+  segmentFallbackIndices: number[];
+  wholesaleFallback: boolean;
+}
+
+export function coalesceAdSpecWithFallback(
+  parsed: AdSpec | null,
+  fallback: AdSpec = fallbackPolish23AdSpec(),
+): CoalescedAdSpec {
+  if (parsed == null) {
+    return { adSpec: fallback, segmentFallbackIndices: [], wholesaleFallback: true };
+  }
+  const segmentFallbackIndices: number[] = [];
+  const segments: SegmentSpec[] = [];
+  for (let i = 0; i < POLISH23_SEGMENT_COUNT; i++) {
+    const candidate = parsed.segments?.[i];
+    if (isValidSegment(candidate)) {
+      segments.push(candidate);
+    } else {
+      const fallbackSeg = fallback.segments[i]!;
+      segments.push(fallbackSeg);
+      segmentFallbackIndices.push(i);
+    }
+  }
+  return {
+    adSpec: { character_lock: parsed.character_lock, segments },
+    segmentFallbackIndices,
+    wholesaleFallback: false,
+  };
+}
+
+/**
  * Polish-23 Commit 3.0.1: runtime invariant guard used pre-Step-C.
- * A parseable-but-drifted AdSpec (e.g. the schema loosens in a
- * future release, or an in-memory mutation slips through) would
- * fail loudly at Veo-submit time with "Please enter prompt". This
- * assertion catches the drift BEFORE Veo credits are spent and
- * names the exact segment index that's malformed.
+ * Post-Commit 3.0.2 the coalescer already backfills invalid
+ * segments from the fallback, so this assertion should be dead
+ * code in every healthy path. Kept as paranoid triple-check —
+ * catches only "the fallback itself is corrupt" (which the test
+ * suite pins as impossible) and gives a definitive diagnostic if
+ * a future refactor breaks the contract.
  */
 export function assertAllSegmentsValid(segments: SegmentSpec[]): void {
   if (!Array.isArray(segments)) {

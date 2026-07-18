@@ -24,9 +24,11 @@ import {
   POLISH23_CLIP_SECONDS,
   POLISH23_SEGMENT_COUNT,
   assertAllSegmentsValid,
+  coalesceAdSpecWithFallback,
   composePolish23AdSpecUserPrompt,
   diagnosePolish23AdSpecParseFailure,
   fallbackPolish23AdSpec,
+  isValidSegment,
   parsePolish23AdSpec,
 } from '../src/lib/polish23-claude-adspec-prompt';
 import {
@@ -316,7 +318,114 @@ describe('Polish-23 Commit 3.0.1: assertAllSegmentsValid — pre-Step-C invarian
   });
 });
 
-describe('Polish-23 Commit 3.0.1: fallback pairs character_lock + segments (regression pin)', () => {
+describe('Polish-23 Commit 3.0.2: isValidSegment — segment validity primitive', () => {
+  it('accepts a fully-formed segment', () => {
+    expect(isValidSegment({ dialogue: 'hi there friend', sceneDirection: 'Linda waves' })).toBe(
+      true,
+    );
+  });
+
+  it('rejects null / undefined', () => {
+    expect(isValidSegment(null)).toBe(false);
+    expect(isValidSegment(undefined)).toBe(false);
+  });
+
+  it('rejects empty / whitespace-only dialogue', () => {
+    expect(isValidSegment({ dialogue: '', sceneDirection: 'x' })).toBe(false);
+    expect(isValidSegment({ dialogue: '   ', sceneDirection: 'x' })).toBe(false);
+  });
+
+  it('rejects empty / whitespace-only sceneDirection', () => {
+    expect(isValidSegment({ dialogue: 'x', sceneDirection: '' })).toBe(false);
+    expect(isValidSegment({ dialogue: 'x', sceneDirection: '   ' })).toBe(false);
+  });
+
+  it('rejects non-string fields (drift signal)', () => {
+    expect(isValidSegment({ dialogue: 42 as unknown as string, sceneDirection: 'x' })).toBe(false);
+  });
+});
+
+describe('Polish-23 Commit 3.0.2: coalesceAdSpecWithFallback — safety-net contract', () => {
+  it('parsed=null → wholesale fallback, no per-segment tracking', () => {
+    const r = coalesceAdSpecWithFallback(null);
+    expect(r.wholesaleFallback).toBe(true);
+    expect(r.segmentFallbackIndices).toEqual([]);
+    expect(r.adSpec.character_lock.name).toBe('Linda');
+    expect(r.adSpec.segments).toHaveLength(8);
+  });
+
+  it('parsed=valid → identity return, no fallback tracking', () => {
+    const parsed = fallbackPolish23AdSpec();
+    // Change character name so we can prove the parsed shape wins.
+    const custom = { ...parsed, character_lock: { ...parsed.character_lock, name: 'Marcos' } };
+    const r = coalesceAdSpecWithFallback(custom);
+    expect(r.wholesaleFallback).toBe(false);
+    expect(r.segmentFallbackIndices).toEqual([]);
+    expect(r.adSpec.character_lock.name).toBe('Marcos');
+    // Segments preserved verbatim.
+    expect(r.adSpec.segments).toEqual(custom.segments);
+  });
+
+  it('parsed with SOME invalid segments → per-index backfill from fallback, indices tracked', () => {
+    const parsed = fallbackPolish23AdSpec();
+    const fallback = fallbackPolish23AdSpec();
+    // Corrupt segments 2 and 5.
+    const corrupted = {
+      ...parsed,
+      segments: parsed.segments.map((s, i) =>
+        i === 2 ? { ...s, dialogue: '' } : i === 5 ? { ...s, sceneDirection: '   ' } : s,
+      ),
+    };
+    const r = coalesceAdSpecWithFallback(corrupted, fallback);
+    expect(r.wholesaleFallback).toBe(false);
+    expect(r.segmentFallbackIndices).toEqual([2, 5]);
+    // Slots 2 and 5 now match the fallback verbatim.
+    expect(r.adSpec.segments[2]).toEqual(fallback.segments[2]);
+    expect(r.adSpec.segments[5]).toEqual(fallback.segments[5]);
+    // Other slots preserved from parsed input.
+    expect(r.adSpec.segments[0]).toEqual(parsed.segments[0]);
+    expect(r.adSpec.segments[7]).toEqual(parsed.segments[7]);
+  });
+
+  it('parsed with undefined segment slot → per-index backfill (defensive against sparse arrays)', () => {
+    const parsed = fallbackPolish23AdSpec();
+    const sparse = { ...parsed, segments: [...parsed.segments] };
+    (sparse.segments as unknown as (unknown | undefined)[])[4] = undefined;
+    const r = coalesceAdSpecWithFallback(sparse as never);
+    expect(r.segmentFallbackIndices).toEqual([4]);
+    expect(r.adSpec.segments[4]).toEqual(fallbackPolish23AdSpec().segments[4]);
+  });
+
+  it('character_lock always comes from parsed input when present (never overwritten by fallback)', () => {
+    const parsed = fallbackPolish23AdSpec();
+    const custom = {
+      ...parsed,
+      character_lock: { ...parsed.character_lock, name: 'Julia', age: 32 },
+    };
+    // Even with all segments needing fallback, character_lock stays parsed.
+    const allBad = {
+      ...custom,
+      segments: custom.segments.map((s) => ({ ...s, dialogue: '' })),
+    };
+    const r = coalesceAdSpecWithFallback(allBad);
+    expect(r.adSpec.character_lock.name).toBe('Julia');
+    expect(r.adSpec.character_lock.age).toBe(32);
+    expect(r.segmentFallbackIndices).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it('output segments are always length 8 exactly (post-coalesce invariant)', () => {
+    for (const parsed of [
+      null,
+      fallbackPolish23AdSpec(),
+      { ...fallbackPolish23AdSpec(), segments: [] as never },
+    ]) {
+      const r = coalesceAdSpecWithFallback(parsed);
+      expect(r.adSpec.segments).toHaveLength(8);
+    }
+  });
+});
+
+describe('Polish-23 Commit 3.0.2: fallback pairs character_lock + segments (regression pin — was 3.0.1)', () => {
   it('fallbackPolish23AdSpec always returns BOTH fields — worker cannot land segments=undefined', () => {
     // Commit 3.0.1 diagnosis note: the operator's first-live report
     // suggested character_lock was set but segments was undefined.
