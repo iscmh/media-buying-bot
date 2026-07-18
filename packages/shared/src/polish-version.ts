@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.21';
+export const POLISH_VERSION = '23.0.22';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.21';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.14 — seed URL health check uses GET (picsum rejects HEAD)';
+  'Polish-23 Commit 3.0.15 — kie.ai 5xx as transient + source-lookup forensics';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

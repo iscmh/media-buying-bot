@@ -526,6 +526,51 @@ describe('Polish-23 Commit 3.0.6: classifyKieVeoErrorKind — terminal vs transi
       'terminal',
     );
   });
+
+  it('body-code 5xx → transient (Commit 3.0.15: kie.ai upstream hiccup, not schema drift)', () => {
+    // Regression pin for the operator's Julia-4-clips run: clip 4
+    // poll returned {code:500, msg:"Internal Server Error"} and
+    // the pre-3.0.15 classifier tagged it terminal — fired
+    // NonRetriableError on a genuinely transient kie.ai hiccup.
+    expect(classifyKieVeoErrorKind(undefined, 500, 'Internal Server Error')).toBe('transient');
+    expect(classifyKieVeoErrorKind(undefined, 502, 'Bad Gateway')).toBe('transient');
+    expect(classifyKieVeoErrorKind(undefined, 503, 'Service Unavailable')).toBe('transient');
+    expect(classifyKieVeoErrorKind(undefined, 504, 'Gateway Timeout')).toBe('transient');
+  });
+});
+
+describe('Polish-23 Commit 3.0.15: poll missing data envelope → transient (not terminal)', () => {
+  it("code:500 wrapper without data envelope → ok:false + errorKind='transient'", async () => {
+    const body = { code: 500, msg: 'Internal Server Error' };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response) as typeof globalThis.fetch;
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('transient');
+      expect(r.errorMessage).toMatch(/upstream error/i);
+    }
+  });
+
+  it('code:200 wrapper with null data envelope → transient (retry-able)', async () => {
+    const body = { code: 200, msg: 'success', data: null };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response) as typeof globalThis.fetch;
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errorKind).toBe('transient');
+      expect(r.errorMessage).toMatch(/missing data envelope/i);
+    }
+  });
 });
 
 describe('Polish-23 Commit 3.0.8: rawErrorBody attached on every failure path', () => {

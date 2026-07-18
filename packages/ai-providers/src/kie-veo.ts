@@ -476,11 +476,16 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
   }
   const data = result.data.data;
   if (!data) {
+    // Polish-23 Commit 3.0.15: missing data envelope is treated as
+    // TRANSIENT — kie.ai's Julia-4-clips run showed responses like
+    // {code:500, msg:"Internal Server Error"} where the wrapper is
+    // present but the data envelope is absent. Retrying the same
+    // taskId on the next poll tick usually recovers.
     return {
       ok: false,
       latencyMs: result.latencyMs,
-      errorMessage: 'kie.ai Veo record-info missing data envelope',
-      errorKind: 'terminal',
+      errorMessage: 'kie.ai Veo record-info missing data envelope (transient — will retry)',
+      errorKind: 'transient',
       rawErrorBody: result.data,
       rawResponseBody: result.data,
     };
@@ -627,6 +632,12 @@ export function classifyKieVeoErrorKind(
     return 'terminal';
   }
   if (kieCode === 429) return 'transient';
+  // Polish-23 Commit 3.0.15: body-code 5xx is a kie.ai upstream
+  // hiccup (their poll returned {code:500, msg:"Internal Server
+  // Error"} in the operator's Julia-4-clips run, clip 4). Treat
+  // as transient so the poll loop re-attempts on the next tick
+  // rather than firing NonRetriableError and burning the clip.
+  if (typeof kieCode === 'number' && kieCode >= 500) return 'transient';
   if (kieCode === 400 || kieCode === 401 || kieCode === 402 || kieCode === 404 || kieCode === 422) {
     return 'terminal';
   }

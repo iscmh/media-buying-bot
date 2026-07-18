@@ -312,6 +312,38 @@ export const generatePolish23VeoLite = inngest.createFunction(
     }
     const sourceScript = sourceContext;
 
+    // Polish-23 Commit 3.0.15: durable source-context-lookup
+    // forensics for Bug 1 investigation (Julia → Linda regression).
+    // Query with:
+    //   SELECT jsonb_pretty(metadata->'polish23_source_context_lookup')
+    //     FROM generation_jobs WHERE id = '<jobId>';
+    // If lookup.source is populated + text_chars matches operator's
+    // SQL count, the fetch is working and Bug 1 root cause is
+    // downstream (Claude prompt bias, not the source-lookup logic).
+    await step.run('persist-source-context-lookup', async () => {
+      const db = getDb();
+      const meta = (job.metadata ?? {}) as Record<string, unknown>;
+      const textChars = sourceLookup.text?.length ?? 0;
+      const textForForensics = sourceLookup.text ?? '';
+      await db
+        .update(schema.generationJobs)
+        .set({
+          metadata: {
+            ...meta,
+            polish23_source_context_lookup: {
+              conceptId: conceptId ?? null,
+              source: sourceLookup.source,
+              priorJobId: sourceLookup.jobId,
+              textChars,
+              textHead: textForForensics.slice(0, 200),
+              textTail: textForForensics.slice(-200),
+              at: new Date().toISOString(),
+            },
+          },
+        })
+        .where(eq(schema.generationJobs.id, jobId));
+    });
+
     // -------- Step A: Claude ad-spec --------
     // Polish-23 Commit 3.0.2: Step A now returns an enriched shape
     // so the persist step can write durable forensics (raw Claude
@@ -930,8 +962,8 @@ export const generatePolish23VeoLite = inngest.createFunction(
             }
             const taskId = submit.taskId;
             let outputUrl: string | undefined;
-            let failed = false;
-            let failMsg = '';
+            const failed = false;
+            const failMsg = '';
             for (let pollAttempt = 0; pollAttempt < VEO_POLL_MAX_ATTEMPTS; pollAttempt++) {
               await sleep(VEO_POLL_INTERVAL_SECONDS * 1000);
               const poll = await pollKieVeoLite({
@@ -992,17 +1024,24 @@ export const generatePolish23VeoLite = inngest.createFunction(
                 );
               }
               if (!poll.ok) {
-                // Poll transport failure — terminal shortcut when
-                // the client says so, otherwise let the outer retry
-                // -once fall through to a fresh submit.
+                // Polish-23 Commit 3.0.15: transient poll errors
+                // (kie.ai 5xx, missing data envelope, etc.) now
+                // `continue` inside the poll loop rather than
+                // `break`ing out to the retry-submit wrapper. A
+                // one-tick transient error shouldn't burn a fresh
+                // submit; the same taskId polled 10s later
+                // typically recovers. Terminal errors still
+                // short-circuit with NonRetriableError.
                 if (poll.errorKind === 'terminal') {
                   throw new NonRetriableError(
                     `Veo Lite clip ${i} poll terminal failure: ${poll.errorMessage ?? 'unknown'}`,
                   );
                 }
-                failed = true;
-                failMsg = poll.errorMessage ?? 'poll failed';
-                break;
+                console.warn(
+                  `[polish-23-worker Step C] veo-clip-${i} poll-${pollAttempt} ` +
+                    `transient error (${poll.errorMessage ?? 'unknown'}); continuing poll loop.`,
+                );
+                continue;
               }
               if (poll.state === 'fail') {
                 // Polish-23 Commit 3.0.6: kie.ai state='fail' is a
