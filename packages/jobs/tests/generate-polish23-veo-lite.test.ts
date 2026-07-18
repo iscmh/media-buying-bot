@@ -32,9 +32,11 @@ import {
   parsePolish23AdSpec,
 } from '../src/lib/polish23-claude-adspec-prompt';
 import {
+  POLISH23_PROMPT_MAX_CHARS,
   computePolish23Progress,
   computePolish23SegmentProgress,
   extractSourceScript,
+  softTruncatePromptForVeo,
 } from '../src/functions/generate-polish23-veo-lite';
 import { checkDialogueWordCount } from '@mbb/ai-providers';
 import { FALLBACK_CHARACTER_LOCK } from '@mbb/shared';
@@ -422,6 +424,47 @@ describe('Polish-23 Commit 3.0.2: coalesceAdSpecWithFallback — safety-net cont
       const r = coalesceAdSpecWithFallback(parsed);
       expect(r.adSpec.segments).toHaveLength(8);
     }
+  });
+});
+
+describe('Polish-23 Commit 3.0.8: softTruncatePromptForVeo — length ceiling + graceful marker', () => {
+  it('constant anchor: POLISH23_PROMPT_MAX_CHARS = 3000', () => {
+    expect(POLISH23_PROMPT_MAX_CHARS).toBe(3000);
+  });
+
+  it('passes short prompts through untouched (truncated=false, originalChars matches)', () => {
+    const r = softTruncatePromptForVeo('hello world');
+    expect(r.truncated).toBe(false);
+    expect(r.prompt).toBe('hello world');
+    expect(r.originalChars).toBe(11);
+  });
+
+  it('respects the boundary — a prompt exactly at maxChars is NOT truncated', () => {
+    const s = 'a'.repeat(3000);
+    const r = softTruncatePromptForVeo(s);
+    expect(r.truncated).toBe(false);
+    expect(r.prompt.length).toBe(3000);
+  });
+
+  it('truncates over-length prompts with a visible marker, preserving as much prefix as possible', () => {
+    const s = 'X'.repeat(5000);
+    const r = softTruncatePromptForVeo(s);
+    expect(r.truncated).toBe(true);
+    expect(r.originalChars).toBe(5000);
+    // Total (prefix + marker) never exceeds maxChars.
+    expect(r.prompt.length).toBeLessThanOrEqual(POLISH23_PROMPT_MAX_CHARS);
+    // Marker is visible + names the original length.
+    expect(r.prompt).toMatch(/truncated at 3000 chars/);
+    expect(r.prompt).toMatch(/original was 5000/);
+    // Prefix preserved verbatim.
+    expect(r.prompt.startsWith('X'.repeat(100))).toBe(true);
+  });
+
+  it('respects an explicit maxChars override for future-proofing', () => {
+    const r = softTruncatePromptForVeo('a'.repeat(500), 100);
+    expect(r.truncated).toBe(true);
+    expect(r.prompt.length).toBeLessThanOrEqual(100);
+    expect(r.originalChars).toBe(500);
   });
 });
 

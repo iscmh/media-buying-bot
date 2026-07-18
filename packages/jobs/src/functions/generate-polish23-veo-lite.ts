@@ -72,6 +72,35 @@ import {
 
 console.log(`[jobs.generate-polish23-veo-lite] cold start — POLISH_VERSION=${POLISH_VERSION}`);
 
+/**
+ * Polish-23 Commit 3.0.8: conservative prompt-length ceiling. Veo
+ * has an undocumented upstream cap; some clips overrun especially
+ * with a rich CHARACTER LOCK prefix + longer scene direction. We
+ * warn-and-truncate rather than break — a 3000-char prompt still
+ * carries the CHARACTER LOCK invariants and dialogue verbatim.
+ */
+export const POLISH23_PROMPT_MAX_CHARS = 3000;
+
+/**
+ * Polish-23 Commit 3.0.8: soft-truncate a composed prompt to the
+ * length ceiling with an explicit marker, so kie.ai / Veo can't
+ * silently reject an over-long submission. Returns the possibly-
+ * shortened prompt AND a flag so the worker's logs surface when
+ * the truncation fired.
+ */
+export function softTruncatePromptForVeo(
+  prompt: string,
+  maxChars: number = POLISH23_PROMPT_MAX_CHARS,
+): { prompt: string; truncated: boolean; originalChars: number } {
+  const originalChars = prompt.length;
+  if (originalChars <= maxChars) {
+    return { prompt, truncated: false, originalChars };
+  }
+  const marker = `\n[…truncated at ${maxChars} chars; original was ${originalChars}]`;
+  const room = Math.max(0, maxChars - marker.length);
+  return { prompt: prompt.slice(0, room) + marker, truncated: true, originalChars };
+}
+
 const SOUL_POLL_INTERVAL_SECONDS = 5;
 const SOUL_POLL_MAX_ATTEMPTS = 24; // ~2 min
 const VEO_POLL_INTERVAL_SECONDS = 10;
@@ -424,6 +453,57 @@ export const generatePolish23VeoLite = inngest.createFunction(
         .where(eq(schema.generationJobs.id, jobId));
     });
 
+    // Polish-23 Commit 3.0.8: soul-ref URL health check. Before we
+    // spend Veo credits on 8 clips that all reference this PNG, do
+    // a cheap HEAD to confirm kie.ai (or Replicate concat, or any
+    // downstream) can fetch it. Non-2xx → NonRetriableError with
+    // the URL + status code baked into the message; status also
+    // persisted to metadata.polish23_higgsfield_reference_url_status
+    // for durable inspection via the operator's SQL query.
+    await step.run('soul-ref-health-check', async () => {
+      let statusCode: number | null = null;
+      let networkError: string | null = null;
+      try {
+        const head = await fetch(soulRefUrl, { method: 'HEAD' });
+        statusCode = head.status;
+      } catch (err) {
+        networkError = err instanceof Error ? err.message : String(err);
+      }
+      const db = getDb();
+      const meta = (job.metadata ?? {}) as Record<string, unknown>;
+      await db
+        .update(schema.generationJobs)
+        .set({
+          metadata: {
+            ...meta,
+            character_lock: adSpec.character_lock,
+            polish23_segments: adSpec.segments,
+            ...metadataExtras,
+            higgsfield_soul_ref_url: soulRefUrl,
+            polish23_higgsfield_reference_url_status:
+              statusCode !== null ? String(statusCode) : `network-error: ${networkError}`,
+            polish23_progress: {
+              step: 'soul-ref-health-check',
+              pct: computePolish23Progress('higgsfield-soul'),
+              at: new Date().toISOString(),
+            },
+          },
+        })
+        .where(eq(schema.generationJobs.id, jobId));
+      if (networkError !== null) {
+        throw new NonRetriableError(
+          `Higgsfield Soul reference URL fetch failed (${soulRefUrl}): ${networkError}. ` +
+            `Downstream kie.ai + Replicate will fail identically — aborting before Veo credits burn.`,
+        );
+      }
+      if (statusCode === null || statusCode < 200 || statusCode >= 300) {
+        throw new NonRetriableError(
+          `Higgsfield Soul reference URL is not reachable (${soulRefUrl}, HTTP ${statusCode}). ` +
+            `Downstream kie.ai + Replicate will fail identically — aborting before Veo credits burn.`,
+        );
+      }
+    });
+
     // -------- Step C: Per-clip Veo Lite loop --------
     const clipUrls: string[] = [];
     // Polish-23 Commit 3.0.3: durable forensics — every composed
@@ -457,17 +537,32 @@ export const generatePolish23VeoLite = inngest.createFunction(
         sceneDirection: segment.sceneDirection,
         emotionalBeat: segment.emotionalBeat,
       });
+      // Polish-23 Commit 3.0.8: prompt-length instrumentation +
+      // soft-truncate. A 3000-char ceiling keeps the CHARACTER
+      // LOCK prefix + dialogue intact; anything longer risks
+      // silent kie.ai/Veo rejection with no useful error message.
+      const truncated = softTruncatePromptForVeo(composed.prompt);
+      if (truncated.truncated) {
+        console.warn(
+          `[polish-23-worker Step C] veo-clip-${i} PROMPT TRUNCATED: ` +
+            `original=${truncated.originalChars} chars, sent=${truncated.prompt.length} chars. ` +
+            `Investigate composer output growth if this fires often.`,
+        );
+      }
       const composedPromptRecord = {
         segmentIndex: i,
         wordCount: composed.wordCountCheck.wordCount,
-        promptChars: composed.prompt.length,
-        prompt: composed.prompt.slice(0, 3000),
+        promptChars: truncated.prompt.length,
+        originalChars: truncated.originalChars,
+        truncated: truncated.truncated,
+        prompt: truncated.prompt.slice(0, 3000),
       };
       composedPrompts.push(composedPromptRecord);
       console.log(
         `[polish-23-worker Step C] veo-clip-${i} composed prompt ` +
-          `chars=${composed.prompt.length} words=${composed.wordCountCheck.wordCount}: ` +
-          `${composed.prompt.slice(0, 3000)}`,
+          `chars=${truncated.prompt.length} (original=${truncated.originalChars}) ` +
+          `truncated=${truncated.truncated} ` +
+          `words=${composed.wordCountCheck.wordCount}: ${truncated.prompt.slice(0, 3000)}`,
       );
       if (composed.prompt.trim().length === 0) {
         console.error(
@@ -492,7 +587,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
       const capturedBody = buildKieVeoRequestBody({
         userId,
         apiKey: '',
-        prompt: composed.prompt,
+        prompt: truncated.prompt,
         aspectRatio: '9:16',
         imageUrls: [soulRefUrl],
         durationSeconds: POLISH23_CLIP_SECONDS,
@@ -541,7 +636,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
       try {
         clipUrl = await step.run(`veo-clip-${i}`, async () => {
           const keys = await loadDecryptedKeys(userId, ['kie_ai']);
-          const prompt = composed.prompt;
+          const prompt = truncated.prompt;
           // Retry-once wrapper.
           for (let attempt = 0; attempt < 2; attempt++) {
             const submit = await submitKieVeoLite({
@@ -554,6 +649,37 @@ export const generatePolish23VeoLite = inngest.createFunction(
               generationJobId: jobId,
             });
             if (!submit.ok || !submit.taskId) {
+              // Polish-23 Commit 3.0.8: persist kie.ai's full raw
+              // error response to job.metadata BEFORE throwing so
+              // the operator's SQL query surfaces the structured
+              // rejection detail (validator field name, code, etc.)
+              // without waiting on Inngest logs. Idempotent write —
+              // safe to re-execute on step retry.
+              try {
+                const db = getDb();
+                const meta = (job.metadata ?? {}) as Record<string, unknown>;
+                await db
+                  .update(schema.generationJobs)
+                  .set({
+                    metadata: {
+                      ...meta,
+                      polish23_veo_error_response: {
+                        segmentIndex: i,
+                        attempt,
+                        errorMessage: submit.errorMessage,
+                        errorKind: submit.errorKind,
+                        rawErrorBody: submit.rawErrorBody,
+                        at: new Date().toISOString(),
+                      },
+                    },
+                  })
+                  .where(eq(schema.generationJobs.id, jobId));
+              } catch (persistErr) {
+                console.error(
+                  `[polish-23-worker Step C] veo-clip-${i} kie-error persist failed: ` +
+                    `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+                );
+              }
               // Polish-23 Commit 3.0.6: terminal errors (400 / auth /
               // balance / shape drift / "Please enter prompt")
               // skip the retry-once entirely AND throw

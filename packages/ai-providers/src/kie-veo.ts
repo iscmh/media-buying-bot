@@ -178,6 +178,13 @@ export interface KieVeoSubmitResult {
    *   - 'transient': 429 / 5xx / transport / body-code 429
    */
   errorKind?: 'terminal' | 'transient';
+  /**
+   * Polish-23 Commit 3.0.8: full unwrapped response body kie.ai
+   * sent back on the failure path. Callers persist this to
+   * job.metadata.polish23_veo_error_response for durable diagnostic
+   * inspection. Undefined on the happy path.
+   */
+  rawErrorBody?: unknown;
 }
 
 interface KieVeoSubmitResponse {
@@ -288,6 +295,7 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
       latencyMs: result.latencyMs,
       errorMessage: translateKieVeoErrorStatus(result.status, result.errorMessage),
       errorKind: classifyKieVeoErrorKind(result.status, undefined, result.errorMessage),
+      rawErrorBody: result.rawBody,
     };
   }
   const code = result.data.code;
@@ -303,6 +311,7 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
       latencyMs: result.latencyMs,
       errorMessage: translateKieVeoErrorStatus(code, result.data.msg),
       errorKind: classifyKieVeoErrorKind(undefined, code, result.data.msg),
+      rawErrorBody: result.data,
     };
   }
   const taskId = result.data.data?.taskId ?? result.data.data?.task_id;
@@ -315,6 +324,7 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
       latencyMs: result.latencyMs,
       errorMessage: 'kie.ai Veo submit response missing taskId',
       errorKind: 'terminal',
+      rawErrorBody: result.data,
     };
   }
   return { ok: true, taskId, latencyMs: result.latencyMs };
@@ -345,6 +355,8 @@ export interface KieVeoPollResult {
   errorMessage?: string;
   /** Polish-23 Commit 3.0.6: same terminal/transient contract as KieVeoSubmitResult. */
   errorKind?: 'terminal' | 'transient';
+  /** Polish-23 Commit 3.0.8: full raw poll response on failure paths. */
+  rawErrorBody?: unknown;
 }
 
 interface KieVeoPollResponse {
@@ -383,6 +395,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       latencyMs: result.latencyMs,
       errorMessage: translateKieVeoErrorStatus(result.status, result.errorMessage),
       errorKind: classifyKieVeoErrorKind(result.status, undefined, result.errorMessage),
+      rawErrorBody: result.rawBody,
     };
   }
   const code = result.data.code;
@@ -392,6 +405,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       latencyMs: result.latencyMs,
       errorMessage: translateKieVeoErrorStatus(code, result.data.msg),
       errorKind: classifyKieVeoErrorKind(undefined, code, result.data.msg),
+      rawErrorBody: result.data,
     };
   }
   const data = result.data.data;
@@ -402,6 +416,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       latencyMs: result.latencyMs,
       errorMessage: 'kie.ai Veo record-info missing state field',
       errorKind: 'terminal',
+      rawErrorBody: result.data,
     };
   }
   if (state === 'fail') {
@@ -417,6 +432,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       failMsg: data.failMsg ?? undefined,
       latencyMs: result.latencyMs,
       errorKind: 'terminal',
+      rawErrorBody: result.data,
     };
   }
   if (state === 'success') {

@@ -454,6 +454,81 @@ describe('Polish-23 Commit 3.0.6: classifyKieVeoErrorKind — terminal vs transi
   });
 });
 
+describe('Polish-23 Commit 3.0.8: rawErrorBody attached on every failure path', () => {
+  it('submit HTTP-level failure surfaces raw response body', async () => {
+    const body = { code: 400, msg: 'Please enter prompt', data: { field: 'prompt' } };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 400,
+      ok: false,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response) as typeof globalThis.fetch;
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.rawErrorBody).toBeDefined();
+      // rawBody surfaces the parsed JSON kie.ai returned — pin the
+      // .data.field so the operator's SQL can drill into the
+      // validator complaint directly.
+      expect(r.rawErrorBody).toMatchObject({
+        code: 400,
+        msg: 'Please enter prompt',
+        data: { field: 'prompt' },
+      });
+    }
+  });
+
+  it('submit body-code failure surfaces the wrapped {code, msg, data} response', async () => {
+    const body = { code: 402, msg: 'balance too low' };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response) as typeof globalThis.fetch;
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.rawErrorBody).toMatchObject({ code: 402, msg: 'balance too low' });
+    }
+  });
+
+  it('poll HTTP-level failure surfaces raw body', async () => {
+    const body = { error: 'bad taskId' };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 400,
+      ok: false,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response) as typeof globalThis.fetch;
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.rawErrorBody).toBeDefined();
+    }
+  });
+
+  it("poll state='fail' surfaces the data payload with failCode + failMsg", async () => {
+    const body = {
+      code: 200,
+      data: { state: 'fail', failCode: 'CONTENT_POLICY', failMsg: 'nsfw guardrail' },
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response) as typeof globalThis.fetch;
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('fail');
+    expect(r.rawErrorBody).toMatchObject({
+      code: 200,
+      data: { state: 'fail', failCode: 'CONTENT_POLICY' },
+    });
+  });
+});
+
 describe('Polish-23 Commit 3.0.6: submit/poll results carry errorKind on the failure path', () => {
   it("submit HTTP 400 attaches errorKind='terminal'", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
