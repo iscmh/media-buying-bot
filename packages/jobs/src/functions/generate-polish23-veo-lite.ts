@@ -35,6 +35,7 @@
  *   - Every segment's Veo call uses the identical URL + prefix
  *   - Composite includes 8 clips in submitted order
  */
+import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { NonRetriableError } from 'inngest';
 import {
@@ -660,20 +661,43 @@ export const generatePolish23VeoLite = inngest.createFunction(
             `Investigate composer output growth if this fires often.`,
         );
       }
+      // Polish-23 Commit 3.0.12: SHA-256 + head/tail computed above
+      // and also persisted here so an SQL query on the job row
+      // returns them without needing Vercel Runtime Log access.
       const composedPromptRecord = {
         segmentIndex: i,
         wordCount: composed.wordCountCheck.wordCount,
         promptChars: truncated.prompt.length,
         originalChars: truncated.originalChars,
         truncated: truncated.truncated,
+        promptSha256: createHash('sha256').update(truncated.prompt).digest('hex'),
+        promptHead: truncated.prompt.slice(0, 100),
+        promptTail: truncated.prompt.slice(-100),
         prompt: truncated.prompt.slice(0, 3000),
       };
       composedPrompts.push(composedPromptRecord);
+      // Polish-23 Commit 3.0.12: repeatability + head/tail
+      // instrumentation. SHA-256 lets the operator confirm two
+      // runs produced identical prompts (or diff them if not).
+      // Head/tail 100 chars surface CHARACTER LOCK prefix +
+      // anti-AI directive tail without the middle content flooding
+      // Vercel Runtime Logs.
+      const promptHash = createHash('sha256').update(truncated.prompt).digest('hex');
+      const promptHead = truncated.prompt.slice(0, 100);
+      const promptTail = truncated.prompt.slice(-100);
       console.log(
         `[polish-23-worker Step C] veo-clip-${i} composed prompt ` +
           `chars=${truncated.prompt.length} (original=${truncated.originalChars}) ` +
           `truncated=${truncated.truncated} ` +
-          `words=${composed.wordCountCheck.wordCount}: ${truncated.prompt.slice(0, 3000)}`,
+          `words=${composed.wordCountCheck.wordCount} ` +
+          `sha256=${promptHash} ` +
+          `head=${JSON.stringify(promptHead)} tail=${JSON.stringify(promptTail)}`,
+      );
+      // Full prompt on a separate line so grep + copy-paste from
+      // Vercel Runtime Logs stays workable.
+      console.log(
+        `[polish-23-worker Step C] veo-clip-${i} composed prompt (full): ` +
+          `${truncated.prompt.slice(0, 3000)}`,
       );
       if (composed.prompt.trim().length === 0) {
         console.error(
