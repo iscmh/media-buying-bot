@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.13';
+export const POLISH_VERSION = '23.0.14';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.13';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.6 — NonRetriableError on terminal + zombie cleanup script';
+  'Polish-23 Commit 3.0.7 — flat kie.ai Veo body + veo3_fast model correction';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

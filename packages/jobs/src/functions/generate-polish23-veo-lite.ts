@@ -446,7 +446,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
     // failing row shows the exact shape kie.ai received.
     const veoSubmitBodies: Array<{
       segmentIndex: number;
-      body: { model: string; input: Record<string, unknown> };
+      body: Record<string, unknown>;
     }> = [];
     for (let i = 0; i < adSpec.segments.length; i++) {
       const segment = adSpec.segments[i]!;

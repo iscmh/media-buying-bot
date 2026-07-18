@@ -90,7 +90,10 @@ describe('Polish-23 Commit 2: submitKieVeoLite — endpoint + auth + body shape'
     expect(headers['content-type']).toBe('application/json');
   });
 
-  it('body carries model=veo3_lite + prompt + aspectRatio + duration + imageUrls', async () => {
+  it('body is FLAT (no `input` wrapper) — model=veo3_fast + prompt + aspect_ratio + imageUrls at top level', async () => {
+    // Polish-23 Commit 3.0.7: kie.ai's /veo/generate endpoint takes
+    // fields at the top level, NOT under an input wrapper. Doc URL:
+    // https://docs.kie.ai/veo3-api/generate-veo-3-video
     const calls = captureFetch({
       status: 200,
       body: { code: 200, data: { taskId: 'task-1' } },
@@ -102,21 +105,75 @@ describe('Polish-23 Commit 2: submitKieVeoLite — endpoint + auth + body shape'
       imageUrls: ['https://cdn/x.png'],
     });
     const body = JSON.parse(calls[0]!.init!.body as string);
-    expect(body.model).toBe('veo3_lite');
-    expect(body.input.prompt).toBe('p');
-    expect(body.input.aspectRatio).toBe('9:16');
-    expect(body.input.duration).toBe(8);
-    expect(body.input.imageUrls).toEqual(['https://cdn/x.png']);
+    // Regression pin: NEVER regenerate the input:{…} wrapper — that
+    // was the exact wire-shape bug from the first-live test.
+    expect(body).not.toHaveProperty('input');
+    expect(body.model).toBe('veo3_fast');
+    expect(body.prompt).toBe('p');
+    expect(body.aspect_ratio).toBe('9:16');
+    expect(body.imageUrls).toEqual(['https://cdn/x.png']);
+    // NO duration field — Veo 3.1 clips are fixed 8s server-side.
+    expect(body).not.toHaveProperty('duration');
+    // NO camelCase aspectRatio.
+    expect(body).not.toHaveProperty('aspectRatio');
   });
 
-  it('omits imageUrls when caller passes none (text-only Veo clip is legal)', async () => {
+  it("body carries generationType='REFERENCE_2_VIDEO' when imageUrls present (image-to-video path)", async () => {
     const calls = captureFetch({
       status: 200,
-      body: { code: 200, data: { taskId: 'task-1' } },
+      body: { code: 200, data: { taskId: 't' } },
+    });
+    await submitKieVeoLite({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      imageUrls: ['https://cdn/x.png'],
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.generationType).toBe('REFERENCE_2_VIDEO');
+  });
+
+  it("body carries generationType='TEXT_2_VIDEO' when no imageUrls (text-only path)", async () => {
+    const calls = captureFetch({
+      status: 200,
+      body: { code: 200, data: { taskId: 't' } },
     });
     await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
     const body = JSON.parse(calls[0]!.init!.body as string);
-    expect(body.input).not.toHaveProperty('imageUrls');
+    expect(body.generationType).toBe('TEXT_2_VIDEO');
+    expect(body).not.toHaveProperty('imageUrls');
+  });
+
+  it('body carries stable enableFallback=false + enableTranslation=true defaults', async () => {
+    const calls = captureFetch({ status: 200, body: { code: 200, data: { taskId: 't' } } });
+    await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body.enableFallback).toBe(false);
+    expect(body.enableTranslation).toBe(true);
+  });
+
+  it('matches the documented curl example shape verbatim (kie.ai docs regression pin)', async () => {
+    // The kie.ai docs curl example body — this test pins the
+    // superset shape so any future refactor that drifts from the
+    // documented example fails loudly. Example URL:
+    // https://docs.kie.ai/veo3-api/generate-veo-3-video
+    const calls = captureFetch({ status: 200, body: { code: 200, data: { taskId: 't' } } });
+    await submitKieVeoLite({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'A dog playing in a park',
+      imageUrls: ['http://example.com/image1.jpg'],
+    });
+    const body = JSON.parse(calls[0]!.init!.body as string);
+    expect(body).toEqual({
+      prompt: 'A dog playing in a park',
+      imageUrls: ['http://example.com/image1.jpg'],
+      model: 'veo3_fast',
+      aspect_ratio: '9:16',
+      enableFallback: false,
+      enableTranslation: true,
+      generationType: 'REFERENCE_2_VIDEO',
+    });
   });
 
   it('accepts task_id alias in the response (kie.ai has drifted the field name)', async () => {
@@ -467,42 +524,50 @@ describe('Polish-23 Commit 3.0.4: buildKieVeoRequestBody — pure body builder f
     expect(wireBody).toEqual(eager);
   });
 
-  it('carries model=veo3_lite + input.prompt + input.aspectRatio + input.duration + input.imageUrls', () => {
+  it('carries flat top-level fields: model=veo3_fast + prompt + aspect_ratio + imageUrls (no `input` wrapper)', () => {
     const b = buildKieVeoRequestBody({
       userId: 'u',
       apiKey: 'k',
       prompt: 'test prompt',
       imageUrls: ['https://cdn/x.png'],
     });
-    expect(b.model).toBe('veo3_lite');
-    expect(b.input.prompt).toBe('test prompt');
-    expect(b.input.aspectRatio).toBe('9:16');
-    expect(b.input.duration).toBe(8);
-    expect(b.input.imageUrls).toEqual(['https://cdn/x.png']);
+    expect(b).not.toHaveProperty('input');
+    expect(b['model']).toBe('veo3_fast');
+    expect(b['prompt']).toBe('test prompt');
+    expect(b['aspect_ratio']).toBe('9:16');
+    expect(b['imageUrls']).toEqual(['https://cdn/x.png']);
+    expect(b['generationType']).toBe('REFERENCE_2_VIDEO');
+    // NO duration field (Veo clips are fixed 8s server-side).
+    expect(b).not.toHaveProperty('duration');
+    // NO camelCase aspectRatio.
+    expect(b).not.toHaveProperty('aspectRatio');
   });
 
-  it('omits imageUrls when none provided (text-only Veo clip)', () => {
+  it('omits imageUrls when none provided (text-only Veo clip) + generationType=TEXT_2_VIDEO', () => {
     const b = buildKieVeoRequestBody({ userId: 'u', apiKey: 'k', prompt: 'p' });
-    expect(b.input).not.toHaveProperty('imageUrls');
+    expect(b).not.toHaveProperty('imageUrls');
+    expect(b['generationType']).toBe('TEXT_2_VIDEO');
   });
 
-  it('respects caller-provided aspectRatio + durationSeconds overrides', () => {
+  it('respects caller-provided aspectRatio override (converted to snake_case aspect_ratio wire field)', () => {
     const b = buildKieVeoRequestBody({
       userId: 'u',
       apiKey: 'k',
       prompt: 'p',
       aspectRatio: '16:9',
-      durationSeconds: 12,
     });
-    expect(b.input.aspectRatio).toBe('16:9');
-    expect(b.input.duration).toBe(12);
+    expect(b['aspect_ratio']).toBe('16:9');
   });
 });
 
 describe('Polish-23 Commit 2: model + cost constants (BCH anchors)', () => {
-  it('default model string is veo3_lite (BCH-verified)', () => {
-    expect(VEO_LITE_DEFAULT_MODEL_ID).toBe('veo3_lite');
-    expect(getVeoLiteModelId()).toBe('veo3_lite');
+  it("default model string is veo3_fast (kie.ai's documented Fast tier — Commit 3.0.7 corrected the BCH-conflated `veo3_lite` string)", () => {
+    // Docs: https://docs.kie.ai/veo3-api/generate-veo-3-video
+    // Only `veo3` (Quality) and `veo3_fast` (Fast) are documented.
+    // `veo3_lite` was a Commit 2 assumption that didn't match the
+    // API surface. BCH's $0.175/clip cost matches the Fast tier.
+    expect(VEO_LITE_DEFAULT_MODEL_ID).toBe('veo3_fast');
+    expect(getVeoLiteModelId()).toBe('veo3_fast');
   });
 
   it('default cost is $0.175 per 8s clip (35 credits × $0.005)', () => {

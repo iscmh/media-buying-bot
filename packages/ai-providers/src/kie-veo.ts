@@ -45,7 +45,19 @@ const kieVeoPollUrl = (taskId: string) =>
 const SUBMIT_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_MS = 15_000;
 
-export const VEO_LITE_DEFAULT_MODEL_ID = 'veo3_lite';
+/**
+ * Polish-23 Commit 3.0.7: kie.ai's documented model values on the
+ * /veo/generate endpoint are `veo3` (Quality tier) and `veo3_fast`
+ * (Fast tier). The `veo3_lite` string from the operator's Commit 2
+ * spec did NOT match kie.ai's API — BCH's verified $0.175/clip
+ * pricing corresponds to the FAST tier, which kie.ai calls
+ * `veo3_fast`. Docs:
+ *   https://docs.kie.ai/veo3-api/generate-veo-3-video
+ *   https://docs.kie.ai/veo3-api/quickstart
+ * Env override VEO_LITE_MODEL_ID_OVERRIDE kept for post-launch
+ * flexibility (e.g. flipping to `veo3` for premium runs).
+ */
+export const VEO_LITE_DEFAULT_MODEL_ID = 'veo3_fast';
 
 export function getVeoLiteModelId(): string {
   return process.env['VEO_LITE_MODEL_ID_OVERRIDE']?.trim() || VEO_LITE_DEFAULT_MODEL_ID;
@@ -175,34 +187,49 @@ interface KieVeoSubmitResponse {
 }
 
 /**
- * Polish-23 Commit 3.0.4: pure body-builder extracted so the worker
- * can capture the exact wire body it's about to send BEFORE calling
- * submitKieVeoLite — persist it to job.metadata for durable forensic
- * inspection. Zero drift risk: the same builder is used by
- * submitKieVeoLiteOnce so what the worker persists is what kie.ai
- * receives.
+ * Polish-23 Commit 3.0.7: FLAT request body — kie.ai's Veo endpoint
+ * takes fields at the top level, NOT under an `input` wrapper.
+ * Commit 2 extrapolated `{model, input: {...}}` from the generic
+ * `/jobs/createTask` pattern (which IS correct for Kling/Seedance),
+ * but the dedicated `/veo/generate` product surface uses a flat
+ * body per the documented curl example:
  *
- * Kept as { model, input: {...} } because that's what /jobs/createTask
- * expects and what my Commit 2 extrapolation assumed for /veo/generate.
- * If kie.ai's dedicated /veo/generate endpoint actually expects a
- * FLAT body, the persisted forensic + submit-failure response log
- * will show the mismatch definitively.
+ *   {
+ *     "prompt": "…",
+ *     "imageUrls": ["…"],           // optional; when present →
+ *                                   // generationType=REFERENCE_2_VIDEO
+ *     "model": "veo3_fast",
+ *     "aspect_ratio": "9:16",       // snake_case per docs
+ *     "enableFallback": false,
+ *     "enableTranslation": true,
+ *     "generationType": "REFERENCE_2_VIDEO" | "TEXT_2_VIDEO"
+ *   }
+ *
+ * NO `duration` field — Veo 3.1 clips are fixed 8s server-side.
+ * NO `aspectRatio` camelCase.
+ *
+ * Docs: https://docs.kie.ai/veo3-api/generate-veo-3-video
+ *
+ * The return type is intentionally the wire shape (Record<string,
+ * unknown>) so worker-side forensics persist EXACTLY what kie.ai
+ * receives, and JSON.stringify(body) sends the same bytes.
  */
-export function buildKieVeoRequestBody(input: KieVeoSubmitInput): {
-  model: string;
-  input: Record<string, unknown>;
-} {
+export function buildKieVeoRequestBody(input: KieVeoSubmitInput): Record<string, unknown> {
   const modelParam = getVeoLiteModelId();
-  const durationSeconds = input.durationSeconds ?? KIE_VEO_LITE_DEFAULT_CLIP_SECONDS;
-  const inputBody: Record<string, unknown> = {
+  const body: Record<string, unknown> = {
     prompt: input.prompt,
-    aspectRatio: input.aspectRatio ?? '9:16',
-    duration: durationSeconds,
+    model: modelParam,
+    aspect_ratio: input.aspectRatio ?? '9:16',
+    enableFallback: false,
+    enableTranslation: true,
   };
   if (input.imageUrls && input.imageUrls.length > 0) {
-    inputBody['imageUrls'] = input.imageUrls;
+    body['imageUrls'] = input.imageUrls;
+    body['generationType'] = 'REFERENCE_2_VIDEO';
+  } else {
+    body['generationType'] = 'TEXT_2_VIDEO';
   }
-  return { model: modelParam, input: inputBody };
+  return body;
 }
 
 export async function submitKieVeoLite(input: KieVeoSubmitInput): Promise<KieVeoSubmitResult> {
@@ -211,9 +238,12 @@ export async function submitKieVeoLite(input: KieVeoSubmitInput): Promise<KieVeo
 
 async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSubmitResult> {
   const modelParam = getVeoLiteModelId();
-  const durationSeconds = input.durationSeconds ?? KIE_VEO_LITE_DEFAULT_CLIP_SECONDS;
   const body = buildKieVeoRequestBody(input);
-  logFirstIfFirstCall('submit', modelParam, body);
+  // Polish-23 Commit 3.0.7: logFirstIfFirstCall's second param is
+  // the { model, input: {…} } shape; keep the log shape stable by
+  // wrapping the flat body under a synthetic 'input' key for the
+  // diagnostic bundle only. The wire body is still flat.
+  logFirstIfFirstCall('submit', modelParam, { model: modelParam, input: body });
 
   const result = await callProvider<KieVeoSubmitResponse>({
     userId: input.userId,
@@ -229,8 +259,10 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
     requestBodyForLog: {
       model: modelParam,
       prompt_chars: input.prompt.length,
-      duration_seconds: durationSeconds,
-      aspect_ratio: body.input['aspectRatio'],
+      // Polish-23 Commit 3.0.7: aspect_ratio is now a top-level flat
+      // field on the wire body; log matches.
+      aspect_ratio: body['aspect_ratio'],
+      generation_type: body['generationType'],
       image_count: input.imageUrls?.length ?? 0,
     },
     generationJobId: input.generationJobId,
