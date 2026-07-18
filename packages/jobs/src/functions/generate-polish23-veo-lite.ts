@@ -199,8 +199,78 @@ export const generatePolish23VeoLite = inngest.createFunction(
         .where(eq(schema.generationJobs.id, jobId));
     });
 
-    // -------- Source concept text --------
-    const sourceScript = extractSourceScript(job.metadata as Record<string, unknown> | null);
+    // -------- Source concept context --------
+    // Polish-23 Commit 3.0.9: schema correction — the `concepts`
+    // table has NO metadata column. Polish-21's analyze-concept
+    // writes the Gemini vision analysis to
+    // generation_jobs.metadata.analysis on the JOB row that ran it.
+    // For a fresh polish23 job (which doesn't run analyze-concept
+    // itself), we look up the most recent PRIOR completed job for
+    // the same concept and reuse its analysis. If none exists, we
+    // fall back to a "(no source)" placeholder and Claude produces
+    // a Linda-anchored generic ad — the operator can either run
+    // analyze-concept manually first or accept the generic output.
+    const conceptId = job.conceptIds?.[0];
+    const priorConceptAnalysis = conceptId
+      ? await step.run('load-prior-concept-analysis', async () => {
+          const db = getDb();
+          // Grab up to 5 recent completed jobs for this concept
+          // and pick the first whose metadata.analysis is populated.
+          const priors = await db.query.generationJobs.findMany({
+            where: eq(schema.generationJobs.status, 'completed'),
+            columns: { id: true, metadata: true, completedAt: true, conceptIds: true },
+            orderBy: (t, { desc }) => [desc(t.completedAt)],
+            limit: 25,
+          });
+          for (const p of priors) {
+            const ids = (p.conceptIds ?? []) as string[];
+            if (!ids.includes(conceptId)) continue;
+            const meta = (p.metadata ?? null) as Record<string, unknown> | null;
+            const analysis = meta?.['analysis'] ?? null;
+            if (analysis && typeof analysis === 'object') {
+              console.log(
+                `[polish-23-worker] load-prior-concept-analysis: reusing analysis from ` +
+                  `prior job ${p.id} (completed=${p.completedAt?.toISOString?.() ?? 'unknown'}) ` +
+                  `keys=${Object.keys(analysis as object)
+                    .slice(0, 10)
+                    .join(',')}`,
+              );
+              return analysis;
+            }
+          }
+          console.warn(
+            `[polish-23-worker] load-prior-concept-analysis: NO prior job with analysis found ` +
+              `for concept ${conceptId} across the last 25 completed jobs. ` +
+              `Run analyze-concept on this concept before Polish-23 to produce real content.`,
+          );
+          return null;
+        })
+      : null;
+
+    let sourceContext: string;
+    if (priorConceptAnalysis) {
+      sourceContext = JSON.stringify(priorConceptAnalysis, null, 2);
+      console.log(
+        `[polish-23-worker] source context: prior-job analysis (${sourceContext.length} chars)`,
+      );
+    } else {
+      const legacyJobScript = extractSourceScript(job.metadata as Record<string, unknown> | null);
+      if (legacyJobScript) {
+        sourceContext = legacyJobScript;
+        console.log(
+          `[polish-23-worker] source context: this-job.metadata.analysis.script_transcription ` +
+            `(${legacyJobScript.length} chars)`,
+        );
+      } else {
+        sourceContext = '(no source analysis available)';
+        console.warn(
+          `[polish-23-worker] source context: MISSING — Claude will produce a generic ` +
+            `Linda-anchored ad. To get real concept-adapted content, run analyze-concept ` +
+            `on concept ${conceptId ?? '(unknown)'} first.`,
+        );
+      }
+    }
+    const sourceScript = sourceContext;
 
     // -------- Step A: Claude ad-spec --------
     // Polish-23 Commit 3.0.2: Step A now returns an enriched shape
@@ -528,6 +598,22 @@ export const generatePolish23VeoLite = inngest.createFunction(
       segmentIndex: number;
       body: Record<string, unknown>;
     }> = [];
+    // Polish-23 Commit 3.0.9: durable per-poll response persistence.
+    // Every kie.ai poll body (success + failure) writes to
+    // metadata.polish23_veo_poll_responses BEFORE any state-parsing
+    // or throw — mirrors the persist-clip-forensics pattern from
+    // Commit 3.0.5. This unblocks decoding kie.ai's actual poll
+    // shape when our client's state-parsing is wrong (as with the
+    // Commit 3.0.9 "missing state field" diagnosis: kie's docs say
+    // successFlag, our code reads state, wire body will tell us
+    // which one really landed).
+    const veoPollResponses: Array<{
+      segmentIndex: number;
+      submitAttempt: number;
+      pollAttempt: number;
+      at: string;
+      poll: Record<string, unknown>;
+    }> = [];
     for (let i = 0; i < adSpec.segments.length; i++) {
       const segment = adSpec.segments[i]!;
       const composed = composeVeoLiteSegmentPrompt(adSpec.character_lock, {
@@ -716,6 +802,57 @@ export const generatePolish23VeoLite = inngest.createFunction(
                 taskId,
                 generationJobId: jobId,
               });
+              // Polish-23 Commit 3.0.9: persist-before-throw for
+              // poll responses. Push raw response into the outer-
+              // closure array + write to metadata BEFORE ANY state-
+              // parsing or throw fires. Idempotent: overwrites the
+              // full accumulated array on each iteration.
+              veoPollResponses.push({
+                segmentIndex: i,
+                submitAttempt: attempt,
+                pollAttempt,
+                at: new Date().toISOString(),
+                poll: {
+                  ok: poll.ok,
+                  state: poll.state ?? null,
+                  outputUrl: poll.outputUrl ?? null,
+                  failCode: poll.failCode ?? null,
+                  failMsg: poll.failMsg ?? null,
+                  errorMessage: poll.errorMessage ?? null,
+                  errorKind: poll.errorKind ?? null,
+                  costTimeMs: poll.costTimeMs ?? null,
+                  latencyMs: poll.latencyMs,
+                  rawResponseBody: poll.rawResponseBody ?? null,
+                },
+              });
+              // Loud-log for Vercel Runtime Logs — the operator's
+              // stderr-fallback pattern.
+              console.error(
+                `[polish-23-worker Step C] veo-clip-${i} poll-${pollAttempt} ` +
+                  `submit-attempt=${attempt} ok=${poll.ok} state=${poll.state ?? 'null'} ` +
+                  `errorMessage=${poll.errorMessage ?? 'null'} ` +
+                  `rawBody=${JSON.stringify(poll.rawResponseBody ?? poll.rawErrorBody ?? null).slice(0, 2000)}`,
+              );
+              // Best-effort metadata write. Failure doesn't stop the
+              // pipeline — the outer catch surfaces the real error.
+              try {
+                const db = getDb();
+                const meta = (job.metadata ?? {}) as Record<string, unknown>;
+                await db
+                  .update(schema.generationJobs)
+                  .set({
+                    metadata: {
+                      ...meta,
+                      polish23_veo_poll_responses: veoPollResponses,
+                    },
+                  })
+                  .where(eq(schema.generationJobs.id, jobId));
+              } catch (persistErr) {
+                console.error(
+                  `[polish-23-worker Step C] veo-clip-${i} poll-response persist failed: ` +
+                    `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+                );
+              }
               if (!poll.ok) {
                 // Poll transport failure — terminal shortcut when
                 // the client says so, otherwise let the outer retry

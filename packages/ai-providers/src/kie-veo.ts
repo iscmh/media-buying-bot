@@ -357,6 +357,15 @@ export interface KieVeoPollResult {
   errorKind?: 'terminal' | 'transient';
   /** Polish-23 Commit 3.0.8: full raw poll response on failure paths. */
   rawErrorBody?: unknown;
+  /**
+   * Polish-23 Commit 3.0.9: raw kie.ai response body on EVERY poll
+   * path (success + failure). Set from callProvider's result.data
+   * on both branches so the worker can persist verbatim to
+   * metadata.polish23_veo_poll_responses BEFORE any state-parsing
+   * or throw. This is the observability field that unblocks
+   * decoding kie.ai's actual poll shape (see Commit 3.0.9 spec).
+   */
+  rawResponseBody?: unknown;
 }
 
 interface KieVeoPollResponse {
@@ -396,6 +405,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       errorMessage: translateKieVeoErrorStatus(result.status, result.errorMessage),
       errorKind: classifyKieVeoErrorKind(result.status, undefined, result.errorMessage),
       rawErrorBody: result.rawBody,
+      rawResponseBody: result.rawBody,
     };
   }
   const code = result.data.code;
@@ -406,6 +416,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       errorMessage: translateKieVeoErrorStatus(code, result.data.msg),
       errorKind: classifyKieVeoErrorKind(undefined, code, result.data.msg),
       rawErrorBody: result.data,
+      rawResponseBody: result.data,
     };
   }
   const data = result.data.data;
@@ -417,6 +428,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       errorMessage: 'kie.ai Veo record-info missing state field',
       errorKind: 'terminal',
       rawErrorBody: result.data,
+      rawResponseBody: result.data,
     };
   }
   if (state === 'fail') {
@@ -433,6 +445,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       latencyMs: result.latencyMs,
       errorKind: 'terminal',
       rawErrorBody: result.data,
+      rawResponseBody: result.data,
     };
   }
   if (state === 'success') {
@@ -447,6 +460,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
         state,
         latencyMs: result.latencyMs,
         errorMessage: 'kie.ai Veo reported success but no output URL in response',
+        rawResponseBody: result.data,
       };
     }
     return {
@@ -455,9 +469,10 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       outputUrl,
       costTimeMs: data.costTime ?? undefined,
       latencyMs: result.latencyMs,
+      rawResponseBody: result.data,
     };
   }
-  return { ok: true, state, latencyMs: result.latencyMs };
+  return { ok: true, state, latencyMs: result.latencyMs, rawResponseBody: result.data };
 }
 
 /**
