@@ -463,14 +463,11 @@ export const generatePolish23VeoLite = inngest.createFunction(
         prompt: composed.prompt.slice(0, 3000),
       };
       composedPrompts.push(composedPromptRecord);
-      // Loud-log the composer output BEFORE any submit fires so
-      // the log line survives even if the step throws later.
       console.log(
         `[polish-23-worker Step C] veo-clip-${i} composed prompt ` +
           `chars=${composed.prompt.length} words=${composed.wordCountCheck.wordCount}: ` +
           `${composed.prompt.slice(0, 3000)}`,
       );
-      // Belt-and-suspenders assertion: never submit an empty prompt.
       if (composed.prompt.trim().length === 0) {
         console.error(
           `[polish-23-worker Step C] veo-clip-${i} COMPOSER PRODUCED EMPTY PROMPT — this should be impossible. ` +
@@ -484,89 +481,146 @@ export const generatePolish23VeoLite = inngest.createFunction(
         );
         return { jobId, mode, generated: 0 };
       }
-      const clipUrl = await step.run(`veo-clip-${i}`, async () => {
-        const keys = await loadDecryptedKeys(userId, ['kie_ai']);
-        const prompt = composed.prompt;
-        // Polish-23 Commit 3.0.4: capture the exact wire body BEFORE
-        // submit so the forensic survives even if submit throws.
-        const capturedBody = buildKieVeoRequestBody({
-          userId,
-          apiKey: keys.kie_ai!,
-          prompt,
-          aspectRatio: '9:16',
-          imageUrls: [soulRefUrl],
-          durationSeconds: POLISH23_CLIP_SECONDS,
-          generationJobId: jobId,
-        });
-        veoSubmitBodies.push({ segmentIndex: i, body: capturedBody });
-        console.log(
-          `[polish-23-worker Step C] veo-clip-${i} submit body: ` +
-            `${JSON.stringify(capturedBody).slice(0, 500)}`,
-        );
-        // Retry-once wrapper.
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const submit = await submitKieVeoLite({
-            userId,
-            apiKey: keys.kie_ai!,
-            prompt,
-            aspectRatio: '9:16',
-            imageUrls: [soulRefUrl],
-            durationSeconds: POLISH23_CLIP_SECONDS,
-            generationJobId: jobId,
-          });
-          if (!submit.ok || !submit.taskId) {
+
+      // Polish-23 Commit 3.0.5: build + push the wire body OUTSIDE
+      // the veo-clip step so the outer-closure array is populated
+      // deterministically BEFORE the risky submit step runs. Prior
+      // to this, capturedBody was pushed inside step.run — when the
+      // step threw, the in-memory push survived but the persist
+      // step that would have written it downstream never ran.
+      const capturedBody = buildKieVeoRequestBody({
+        userId,
+        apiKey: '',
+        prompt: composed.prompt,
+        aspectRatio: '9:16',
+        imageUrls: [soulRefUrl],
+        durationSeconds: POLISH23_CLIP_SECONDS,
+        generationJobId: jobId,
+      });
+      veoSubmitBodies.push({ segmentIndex: i, body: capturedBody });
+      console.error(
+        `[polish-23-worker Step C] veo-clip-${i} submit body (stderr fallback): ` +
+          `${JSON.stringify(capturedBody).slice(0, 500)}`,
+      );
+
+      // Polish-23 Commit 3.0.5: persist forensics BEFORE the risky
+      // submit. If veo-clip-i throws, the DB write already committed
+      // — the operator's SQL query returns the actual prompt +
+      // wire body regardless of downstream failure. Own step.run so
+      // Inngest caches it and retries don't re-write on function-
+      // level retry.
+      const composedPromptsSoFar = composedPrompts.slice();
+      const veoSubmitBodiesSoFar = veoSubmitBodies.slice();
+      await step.run(`persist-clip-${i}-forensics`, async () => {
+        const db = getDb();
+        const meta = (job.metadata ?? {}) as Record<string, unknown>;
+        await db
+          .update(schema.generationJobs)
+          .set({
+            metadata: {
+              ...meta,
+              character_lock: adSpec.character_lock,
+              polish23_segments: adSpec.segments,
+              ...metadataExtras,
+              higgsfield_soul_ref_url: soulRefUrl,
+              polish23_clip_urls: clipUrls,
+              polish23_composed_prompts: composedPromptsSoFar,
+              polish23_veo_submit_bodies: veoSubmitBodiesSoFar,
+              polish23_progress: {
+                step: `veo-clip-${i}-forensics`,
+                pct: computePolish23SegmentProgress(i, POLISH23_SEGMENT_COUNT),
+                at: new Date().toISOString(),
+              },
+            },
+          })
+          .where(eq(schema.generationJobs.id, jobId));
+      });
+
+      let clipUrl: string;
+      try {
+        clipUrl = await step.run(`veo-clip-${i}`, async () => {
+          const keys = await loadDecryptedKeys(userId, ['kie_ai']);
+          const prompt = composed.prompt;
+          // Retry-once wrapper.
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const submit = await submitKieVeoLite({
+              userId,
+              apiKey: keys.kie_ai!,
+              prompt,
+              aspectRatio: '9:16',
+              imageUrls: [soulRefUrl],
+              durationSeconds: POLISH23_CLIP_SECONDS,
+              generationJobId: jobId,
+            });
+            if (!submit.ok || !submit.taskId) {
+              if (attempt === 0) {
+                console.log(
+                  `[polish-23-worker] veo-clip-${i} submit attempt 1 failed ` +
+                    `(${submit.errorMessage ?? 'unknown'}); retrying.`,
+                );
+                continue;
+              }
+              throw new Error(
+                `Veo Lite clip ${i} submit failed after retry: ${submit.errorMessage ?? 'unknown'}`,
+              );
+            }
+            const taskId = submit.taskId;
+            let outputUrl: string | undefined;
+            let failed = false;
+            let failMsg = '';
+            for (let pollAttempt = 0; pollAttempt < VEO_POLL_MAX_ATTEMPTS; pollAttempt++) {
+              await sleep(VEO_POLL_INTERVAL_SECONDS * 1000);
+              const poll = await pollKieVeoLite({
+                userId,
+                apiKey: keys.kie_ai!,
+                taskId,
+                generationJobId: jobId,
+              });
+              if (!poll.ok) {
+                failed = true;
+                failMsg = poll.errorMessage ?? 'poll failed';
+                break;
+              }
+              if (poll.state === 'fail') {
+                failed = true;
+                failMsg = poll.failMsg ?? poll.failCode ?? 'kie.ai reported fail';
+                break;
+              }
+              if (poll.state === 'success' && poll.outputUrl) {
+                outputUrl = poll.outputUrl;
+                break;
+              }
+            }
+            if (outputUrl) return outputUrl;
             if (attempt === 0) {
               console.log(
-                `[polish-23-worker] veo-clip-${i} submit attempt 1 failed ` +
-                  `(${submit.errorMessage ?? 'unknown'}); retrying.`,
+                `[polish-23-worker] veo-clip-${i} poll attempt 1 ended without output ` +
+                  `(failed=${failed} msg=${failMsg || 'timeout'}); retrying submit.`,
               );
               continue;
             }
             throw new Error(
-              `Veo Lite clip ${i} submit failed after retry: ${submit.errorMessage ?? 'unknown'}`,
+              `Veo Lite clip ${i} didn't complete after retry: ${failMsg || 'poll timeout'}`,
             );
           }
-          const taskId = submit.taskId;
-          let outputUrl: string | undefined;
-          let failed = false;
-          let failMsg = '';
-          for (let pollAttempt = 0; pollAttempt < VEO_POLL_MAX_ATTEMPTS; pollAttempt++) {
-            await sleep(VEO_POLL_INTERVAL_SECONDS * 1000);
-            const poll = await pollKieVeoLite({
-              userId,
-              apiKey: keys.kie_ai!,
-              taskId,
-              generationJobId: jobId,
-            });
-            if (!poll.ok) {
-              failed = true;
-              failMsg = poll.errorMessage ?? 'poll failed';
-              break;
-            }
-            if (poll.state === 'fail') {
-              failed = true;
-              failMsg = poll.failMsg ?? poll.failCode ?? 'kie.ai reported fail';
-              break;
-            }
-            if (poll.state === 'success' && poll.outputUrl) {
-              outputUrl = poll.outputUrl;
-              break;
-            }
-          }
-          if (outputUrl) return outputUrl;
-          if (attempt === 0) {
-            console.log(
-              `[polish-23-worker] veo-clip-${i} poll attempt 1 ended without output ` +
-                `(failed=${failed} msg=${failMsg || 'timeout'}); retrying submit.`,
-            );
-            continue;
-          }
-          throw new Error(
-            `Veo Lite clip ${i} didn't complete after retry: ${failMsg || 'poll timeout'}`,
-          );
-        }
-        throw new Error(`Veo Lite clip ${i} unreachable`);
-      });
+          throw new Error(`Veo Lite clip ${i} unreachable`);
+        });
+      } catch (err) {
+        // Polish-23 Commit 3.0.5: catch the veo-clip step failure so
+        // the job status ends as 'failed' (not stuck at 'processing')
+        // AND the forensics we already persisted stay durable. The
+        // persist-clip-i-forensics step above ALREADY wrote
+        // composedPrompts + veoSubmitBodies through i to metadata,
+        // so the operator's SQL query returns real data.
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(
+          `[polish-23-worker Step C] veo-clip-${i} FAILED after all retries: ${msg}. ` +
+            `Forensics through segment ${i} are persisted in metadata. ` +
+            `Ending job as failed (was previously stuck at status='processing').`,
+        );
+        await markJobFailed(jobId, userId, msg, 0);
+        return { jobId, mode, generated: 0 };
+      }
       clipUrls.push(clipUrl);
 
       // Best-effort progress patch after each clip.
