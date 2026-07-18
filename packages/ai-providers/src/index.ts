@@ -279,6 +279,7 @@ export { composeHiggsfieldSoulReferencePrompt } from './higgsfield-soul-prompt';
 export {
   submitKieVeoLite,
   pollKieVeoLite,
+  buildKieVeoRequestBody,
   extractVeoOutputUrl,
   translateKieVeoErrorStatus,
   detectKieVeoRateLimit,

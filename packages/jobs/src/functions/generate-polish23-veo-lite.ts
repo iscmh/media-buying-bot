@@ -37,6 +37,7 @@
  */
 import { eq } from 'drizzle-orm';
 import {
+  buildKieVeoRequestBody,
   callClaude,
   checkReplicateConcat,
   composeHiggsfieldSoulReferencePrompt,
@@ -437,6 +438,15 @@ export const generatePolish23VeoLite = inngest.createFunction(
       promptChars: number;
       prompt: string;
     }> = [];
+    // Polish-23 Commit 3.0.4: capture the EXACT wire body sent to
+    // kie.ai per clip (via buildKieVeoRequestBody, same builder
+    // submitKieVeoLite uses internally — zero drift risk). Persisted
+    // to metadata.polish23_veo_submit_bodies so a SQL query on the
+    // failing row shows the exact shape kie.ai received.
+    const veoSubmitBodies: Array<{
+      segmentIndex: number;
+      body: { model: string; input: Record<string, unknown> };
+    }> = [];
     for (let i = 0; i < adSpec.segments.length; i++) {
       const segment = adSpec.segments[i]!;
       const composed = composeVeoLiteSegmentPrompt(adSpec.character_lock, {
@@ -477,6 +487,22 @@ export const generatePolish23VeoLite = inngest.createFunction(
       const clipUrl = await step.run(`veo-clip-${i}`, async () => {
         const keys = await loadDecryptedKeys(userId, ['kie_ai']);
         const prompt = composed.prompt;
+        // Polish-23 Commit 3.0.4: capture the exact wire body BEFORE
+        // submit so the forensic survives even if submit throws.
+        const capturedBody = buildKieVeoRequestBody({
+          userId,
+          apiKey: keys.kie_ai!,
+          prompt,
+          aspectRatio: '9:16',
+          imageUrls: [soulRefUrl],
+          durationSeconds: POLISH23_CLIP_SECONDS,
+          generationJobId: jobId,
+        });
+        veoSubmitBodies.push({ segmentIndex: i, body: capturedBody });
+        console.log(
+          `[polish-23-worker Step C] veo-clip-${i} submit body: ` +
+            `${JSON.stringify(capturedBody).slice(0, 500)}`,
+        );
         // Retry-once wrapper.
         for (let attempt = 0; attempt < 2; attempt++) {
           const submit = await submitKieVeoLite({
@@ -551,6 +577,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
       // metadataExtras between higgsfield-soul persist and the
       // final insert-generated-creative persist).
       const composedPromptsSnapshot = composedPrompts.slice();
+      const veoSubmitBodiesSnapshot = veoSubmitBodies.slice();
       await step.run(`persist-clip-${i}-progress`, async () => {
         const db = getDb();
         const meta = (job.metadata ?? {}) as Record<string, unknown>;
@@ -565,6 +592,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
               higgsfield_soul_ref_url: soulRefUrl,
               polish23_clip_urls: clipUrls,
               polish23_composed_prompts: composedPromptsSnapshot,
+              polish23_veo_submit_bodies: veoSubmitBodiesSnapshot,
               polish23_progress: {
                 step: `veo-clip-${i}`,
                 pct: computePolish23SegmentProgress(i, POLISH23_SEGMENT_COUNT),
@@ -659,6 +687,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
             higgsfield_soul_ref_url: soulRefUrl,
             polish23_clip_urls: clipUrls,
             polish23_composed_prompts: composedPrompts,
+            polish23_veo_submit_bodies: veoSubmitBodies,
             polish23_composite_url: uploadedUrl,
             polish23_progress: {
               step: 'complete',

@@ -162,14 +162,26 @@ interface KieVeoSubmitResponse {
   data?: { taskId?: string; task_id?: string };
 }
 
-export async function submitKieVeoLite(input: KieVeoSubmitInput): Promise<KieVeoSubmitResult> {
-  return retryKieVeoSubmit(() => submitKieVeoLiteOnce(input));
-}
-
-async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSubmitResult> {
+/**
+ * Polish-23 Commit 3.0.4: pure body-builder extracted so the worker
+ * can capture the exact wire body it's about to send BEFORE calling
+ * submitKieVeoLite — persist it to job.metadata for durable forensic
+ * inspection. Zero drift risk: the same builder is used by
+ * submitKieVeoLiteOnce so what the worker persists is what kie.ai
+ * receives.
+ *
+ * Kept as { model, input: {...} } because that's what /jobs/createTask
+ * expects and what my Commit 2 extrapolation assumed for /veo/generate.
+ * If kie.ai's dedicated /veo/generate endpoint actually expects a
+ * FLAT body, the persisted forensic + submit-failure response log
+ * will show the mismatch definitively.
+ */
+export function buildKieVeoRequestBody(input: KieVeoSubmitInput): {
+  model: string;
+  input: Record<string, unknown>;
+} {
   const modelParam = getVeoLiteModelId();
   const durationSeconds = input.durationSeconds ?? KIE_VEO_LITE_DEFAULT_CLIP_SECONDS;
-
   const inputBody: Record<string, unknown> = {
     prompt: input.prompt,
     aspectRatio: input.aspectRatio ?? '9:16',
@@ -178,8 +190,17 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
   if (input.imageUrls && input.imageUrls.length > 0) {
     inputBody['imageUrls'] = input.imageUrls;
   }
+  return { model: modelParam, input: inputBody };
+}
 
-  const body = { model: modelParam, input: inputBody };
+export async function submitKieVeoLite(input: KieVeoSubmitInput): Promise<KieVeoSubmitResult> {
+  return retryKieVeoSubmit(() => submitKieVeoLiteOnce(input));
+}
+
+async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSubmitResult> {
+  const modelParam = getVeoLiteModelId();
+  const durationSeconds = input.durationSeconds ?? KIE_VEO_LITE_DEFAULT_CLIP_SECONDS;
+  const body = buildKieVeoRequestBody(input);
   logFirstIfFirstCall('submit', modelParam, body);
 
   const result = await callProvider<KieVeoSubmitResponse>({
@@ -197,7 +218,7 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
       model: modelParam,
       prompt_chars: input.prompt.length,
       duration_seconds: durationSeconds,
-      aspect_ratio: inputBody['aspectRatio'],
+      aspect_ratio: body.input['aspectRatio'],
       image_count: input.imageUrls?.length ?? 0,
     },
     generationJobId: input.generationJobId,

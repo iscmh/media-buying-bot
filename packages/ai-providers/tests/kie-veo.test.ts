@@ -22,6 +22,7 @@ import {
   __resetKieVeoFirstCallLogForTests,
   __restoreKieVeoSleepImplForTests,
   __setKieVeoSleepImplForTests,
+  buildKieVeoRequestBody,
   computeKieVeoRateLimitBackoffMs,
   detectKieVeoRateLimit,
   estimateKieVeoLiteClipCostUsd,
@@ -334,6 +335,60 @@ describe('Polish-23 Commit 2: rate-limit primitives (Polish-19.4.3 pattern)', ()
     const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
     expect(r.ok).toBe(false);
     expect(attempt).toBe(1);
+  });
+});
+
+describe('Polish-23 Commit 3.0.4: buildKieVeoRequestBody — pure body builder for worker-side forensics', () => {
+  it('produces the SAME shape submit sends to kie.ai (zero-drift capture)', async () => {
+    // Round-trip pin: build the body eagerly, then submit → assert
+    // fetch received exactly the eagerly-built body.
+    const eager = buildKieVeoRequestBody({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'CHARACTER LOCK — Linda selfie',
+      imageUrls: ['https://cdn/x.png'],
+      durationSeconds: 8,
+    });
+    const calls = captureFetch({ status: 200, body: { code: 200, data: { taskId: 't' } } });
+    await submitKieVeoLite({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'CHARACTER LOCK — Linda selfie',
+      imageUrls: ['https://cdn/x.png'],
+    });
+    const wireBody = JSON.parse(calls[0]!.init!.body as string);
+    expect(wireBody).toEqual(eager);
+  });
+
+  it('carries model=veo3_lite + input.prompt + input.aspectRatio + input.duration + input.imageUrls', () => {
+    const b = buildKieVeoRequestBody({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'test prompt',
+      imageUrls: ['https://cdn/x.png'],
+    });
+    expect(b.model).toBe('veo3_lite');
+    expect(b.input.prompt).toBe('test prompt');
+    expect(b.input.aspectRatio).toBe('9:16');
+    expect(b.input.duration).toBe(8);
+    expect(b.input.imageUrls).toEqual(['https://cdn/x.png']);
+  });
+
+  it('omits imageUrls when none provided (text-only Veo clip)', () => {
+    const b = buildKieVeoRequestBody({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(b.input).not.toHaveProperty('imageUrls');
+  });
+
+  it('respects caller-provided aspectRatio + durationSeconds overrides', () => {
+    const b = buildKieVeoRequestBody({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      aspectRatio: '16:9',
+      durationSeconds: 12,
+    });
+    expect(b.input.aspectRatio).toBe('16:9');
+    expect(b.input.duration).toBe(12);
   });
 });
 

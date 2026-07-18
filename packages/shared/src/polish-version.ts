@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.10';
+export const POLISH_VERSION = '23.0.11';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.10';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.3 — composed-prompt + kie.ai wire-body forensics';
+  'Polish-23 Commit 3.0.4 — persisted per-clip kie.ai submit-body forensics';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
