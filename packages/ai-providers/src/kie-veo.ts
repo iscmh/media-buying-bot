@@ -205,9 +205,18 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
   });
 
   if (!result.ok) {
-    console.log(
+    // Polish-23 Commit 3.0.3: on ANY submit failure (transport OR
+    // soft), loud-log the FULL request body we sent + the full
+    // response body we got back. If kie.ai's /veo/generate endpoint
+    // expects a different body shape than {model, input: {...}}
+    // (e.g. flat fields at the top level, matching some product-
+    // specific SDKs), this pair of logs makes the mismatch visible
+    // in Inngest without a redeploy.
+    console.error(
       `[kie-veo] submit transport failure: model=${modelParam} status=${result.status} ` +
-        `err=${result.errorMessage ?? 'unknown'}`,
+        `err=${result.errorMessage ?? 'unknown'} ` +
+        `\n[kie-veo] request body sent: ${JSON.stringify(body).slice(0, 2000)}` +
+        `\n[kie-veo] response body: ${JSON.stringify(result.rawBody).slice(0, 2000)}`,
     );
     return {
       ok: false,
@@ -217,9 +226,11 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
   }
   const code = result.data.code;
   if (code !== undefined && code !== 200) {
-    console.log(
+    console.error(
       `[kie-veo] submit soft failure: model=${modelParam} code=${code} ` +
-        `msg=${result.data.msg ?? 'unknown'} body=${JSON.stringify(result.data).slice(0, 1500)}`,
+        `msg=${result.data.msg ?? 'unknown'} ` +
+        `\n[kie-veo] request body sent: ${JSON.stringify(body).slice(0, 2000)}` +
+        `\n[kie-veo] response body: ${JSON.stringify(result.data).slice(0, 2000)}`,
     );
     return {
       ok: false,

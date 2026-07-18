@@ -424,17 +424,59 @@ export const generatePolish23VeoLite = inngest.createFunction(
 
     // -------- Step C: Per-clip Veo Lite loop --------
     const clipUrls: string[] = [];
+    // Polish-23 Commit 3.0.3: durable forensics — every composed
+    // Veo prompt is captured here, then persisted to
+    // job.metadata.polish23_composed_prompts on each per-clip
+    // progress patch. A future "empty prompt reached kie.ai"
+    // report can be verified by reading the metadata row — no
+    // more guessing whether the composer or the wire layer was
+    // at fault.
+    const composedPrompts: Array<{
+      segmentIndex: number;
+      wordCount: number;
+      promptChars: number;
+      prompt: string;
+    }> = [];
     for (let i = 0; i < adSpec.segments.length; i++) {
       const segment = adSpec.segments[i]!;
+      const composed = composeVeoLiteSegmentPrompt(adSpec.character_lock, {
+        segmentIndex: i,
+        totalSegments: POLISH23_SEGMENT_COUNT,
+        dialogue: segment.dialogue,
+        sceneDirection: segment.sceneDirection,
+        emotionalBeat: segment.emotionalBeat,
+      });
+      const composedPromptRecord = {
+        segmentIndex: i,
+        wordCount: composed.wordCountCheck.wordCount,
+        promptChars: composed.prompt.length,
+        prompt: composed.prompt.slice(0, 3000),
+      };
+      composedPrompts.push(composedPromptRecord);
+      // Loud-log the composer output BEFORE any submit fires so
+      // the log line survives even if the step throws later.
+      console.log(
+        `[polish-23-worker Step C] veo-clip-${i} composed prompt ` +
+          `chars=${composed.prompt.length} words=${composed.wordCountCheck.wordCount}: ` +
+          `${composed.prompt.slice(0, 3000)}`,
+      );
+      // Belt-and-suspenders assertion: never submit an empty prompt.
+      if (composed.prompt.trim().length === 0) {
+        console.error(
+          `[polish-23-worker Step C] veo-clip-${i} COMPOSER PRODUCED EMPTY PROMPT — this should be impossible. ` +
+            `Aborting job before Veo credits are spent.`,
+        );
+        await markJobFailed(
+          jobId,
+          userId,
+          `composeVeoLiteSegmentPrompt returned empty for segment ${i} — investigate composer regression.`,
+          0,
+        );
+        return { jobId, mode, generated: 0 };
+      }
       const clipUrl = await step.run(`veo-clip-${i}`, async () => {
         const keys = await loadDecryptedKeys(userId, ['kie_ai']);
-        const { prompt } = composeVeoLiteSegmentPrompt(adSpec.character_lock, {
-          segmentIndex: i,
-          totalSegments: POLISH23_SEGMENT_COUNT,
-          dialogue: segment.dialogue,
-          sceneDirection: segment.sceneDirection,
-          emotionalBeat: segment.emotionalBeat,
-        });
+        const prompt = composed.prompt;
         // Retry-once wrapper.
         for (let attempt = 0; attempt < 2; attempt++) {
           const submit = await submitKieVeoLite({
@@ -502,6 +544,13 @@ export const generatePolish23VeoLite = inngest.createFunction(
       clipUrls.push(clipUrl);
 
       // Best-effort progress patch after each clip.
+      // Polish-23 Commit 3.0.3: also persist the durable
+      // composed-prompt forensics + Commit-3.0.2 metadataExtras
+      // (the earlier commit missed this persist site due to a
+      // different indentation level, so previous runs dropped
+      // metadataExtras between higgsfield-soul persist and the
+      // final insert-generated-creative persist).
+      const composedPromptsSnapshot = composedPrompts.slice();
       await step.run(`persist-clip-${i}-progress`, async () => {
         const db = getDb();
         const meta = (job.metadata ?? {}) as Record<string, unknown>;
@@ -512,8 +561,10 @@ export const generatePolish23VeoLite = inngest.createFunction(
               ...meta,
               character_lock: adSpec.character_lock,
               polish23_segments: adSpec.segments,
+              ...metadataExtras,
               higgsfield_soul_ref_url: soulRefUrl,
               polish23_clip_urls: clipUrls,
+              polish23_composed_prompts: composedPromptsSnapshot,
               polish23_progress: {
                 step: `veo-clip-${i}`,
                 pct: computePolish23SegmentProgress(i, POLISH23_SEGMENT_COUNT),
@@ -607,6 +658,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
             ...metadataExtras,
             higgsfield_soul_ref_url: soulRefUrl,
             polish23_clip_urls: clipUrls,
+            polish23_composed_prompts: composedPrompts,
             polish23_composite_url: uploadedUrl,
             polish23_progress: {
               step: 'complete',

@@ -169,3 +169,55 @@ describe('Polish-23 Commit 2: composeVeoLiteSegmentPrompt — full clip prompt',
     expect(() => composeVeoLiteSegmentPrompt(LINDA, { ...baseSpec, dialogue: D28 })).not.toThrow();
   });
 });
+
+describe('Polish-23 Commit 3.0.3: composer never emits an empty prompt (Step-C empty-prompt regression pin)', () => {
+  const LINDA_BASE: CharacterLock = FALLBACK_CHARACTER_LOCK;
+
+  it('every position across a full 8-clip batch produces a non-empty prompt >= 500 chars', () => {
+    // Anchors the Commit 3.0.3 first-live failure hypothesis:
+    // Step C0 reached kie.ai with an empty prompt. For that to be
+    // the composer's fault, this test would fail. Instead it pins
+    // the composer as blameless — the operator's next debug should
+    // look at wire-body shape (see kie-veo.ts Commit 3.0.3 error
+    // logs) rather than the composer.
+    for (let i = 0; i < 8; i++) {
+      const out = composeVeoLiteSegmentPrompt(LINDA_BASE, {
+        segmentIndex: i,
+        totalSegments: 8,
+        dialogue: D22,
+        sceneDirection: 'Linda leans in, waves at the camera.',
+        emotionalBeat: 'reassured',
+      });
+      expect(out.prompt.trim().length).toBeGreaterThan(500);
+      expect(out.prompt).toContain('CHARACTER LOCK');
+      expect(out.prompt).toContain(`SEGMENT ${i + 1}/8`);
+      expect(out.prompt).toContain(D22);
+    }
+  });
+
+  it('male character variant produces a non-empty prompt too (guards against gender-branch drift)', () => {
+    const male: CharacterLock = { ...LINDA_BASE, gender: 'male', name: 'Marcus' };
+    const out = composeVeoLiteSegmentPrompt(male, {
+      segmentIndex: 0,
+      totalSegments: 8,
+      dialogue: D22,
+      sceneDirection: 'Marcus points at the camera, grinning.',
+    });
+    expect(out.prompt.trim().length).toBeGreaterThan(500);
+    expect(out.prompt).toMatch(/He is speaking/);
+  });
+
+  it('when scene direction is a single character, prompt is STILL non-empty (composer resilient to short scene)', () => {
+    // Fuzz-style pin — a Claude that emitted a minimal but valid
+    // sceneDirection still produces a valid prompt because the
+    // CHARACTER LOCK prefix + camera anchor + anti-AI tail alone
+    // are already ~700+ chars.
+    const out = composeVeoLiteSegmentPrompt(LINDA_BASE, {
+      segmentIndex: 0,
+      totalSegments: 8,
+      dialogue: D22,
+      sceneDirection: 'x',
+    });
+    expect(out.prompt.trim().length).toBeGreaterThan(500);
+  });
+});
