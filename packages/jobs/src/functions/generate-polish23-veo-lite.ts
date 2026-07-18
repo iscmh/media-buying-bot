@@ -200,22 +200,40 @@ export const generatePolish23VeoLite = inngest.createFunction(
     });
 
     // -------- Source concept context --------
-    // Polish-23 Commit 3.0.9: schema correction — the `concepts`
-    // table has NO metadata column. Polish-21's analyze-concept
-    // writes the Gemini vision analysis to
-    // generation_jobs.metadata.analysis on the JOB row that ran it.
-    // For a fresh polish23 job (which doesn't run analyze-concept
-    // itself), we look up the most recent PRIOR completed job for
-    // the same concept and reuse its analysis. If none exists, we
-    // fall back to a "(no source)" placeholder and Claude produces
-    // a Linda-anchored generic ad — the operator can either run
-    // analyze-concept manually first or accept the generic output.
+    // Polish-23 Commit 3.0.10: source-priority chain, best → worst:
+    //   (1) concepts.ugc_original_script — direct user paste at
+    //       concept-upload time. No transcription loss. No prior
+    //       analyze-concept run needed. Grep of packages/jobs
+    //       confirmed no other worker reads this today; Polish-23
+    //       is the first to make it useful.
+    //   (2) most recent PRIOR completed job's metadata.analysis —
+    //       Gemini vision output from a Polish-21 run against the
+    //       same concept. Structured but transcribed.
+    //   (3) this-job's metadata.analysis.script_transcription —
+    //       same-job legacy path.
+    //   (4) "(no source)" placeholder → Linda-anchored generic ad.
+    //
+    // Single step.run so the DB reads for (1) + (2) share one
+    // Inngest cache boundary. Returns a discriminated shape so the
+    // caller can log which source won.
     const conceptId = job.conceptIds?.[0];
-    const priorConceptAnalysis = conceptId
-      ? await step.run('load-prior-concept-analysis', async () => {
+    const sourceLookup = conceptId
+      ? await step.run('load-concept-source-context', async () => {
           const db = getDb();
-          // Grab up to 5 recent completed jobs for this concept
-          // and pick the first whose metadata.analysis is populated.
+          // (1) concepts.ugc_original_script — direct read
+          const concept = await db.query.concepts.findFirst({
+            where: eq(schema.concepts.id, conceptId),
+            columns: { ugcOriginalScript: true, contentType: true },
+          });
+          const ugcScript = concept?.ugcOriginalScript ?? null;
+          if (ugcScript && ugcScript.trim().length > 0) {
+            return {
+              source: 'ugc_original_script' as const,
+              text: ugcScript,
+              jobId: null as string | null,
+            };
+          }
+          // (2) prior job's metadata.analysis — Gemini vision
           const priors = await db.query.generationJobs.findMany({
             where: eq(schema.generationJobs.status, 'completed'),
             columns: { id: true, metadata: true, completedAt: true, conceptIds: true },
@@ -228,30 +246,37 @@ export const generatePolish23VeoLite = inngest.createFunction(
             const meta = (p.metadata ?? null) as Record<string, unknown> | null;
             const analysis = meta?.['analysis'] ?? null;
             if (analysis && typeof analysis === 'object') {
-              console.log(
-                `[polish-23-worker] load-prior-concept-analysis: reusing analysis from ` +
-                  `prior job ${p.id} (completed=${p.completedAt?.toISOString?.() ?? 'unknown'}) ` +
-                  `keys=${Object.keys(analysis as object)
-                    .slice(0, 10)
-                    .join(',')}`,
-              );
-              return analysis;
+              return {
+                source: 'prior_job_analysis' as const,
+                text: JSON.stringify(analysis, null, 2),
+                jobId: p.id as string | null,
+              };
             }
           }
-          console.warn(
-            `[polish-23-worker] load-prior-concept-analysis: NO prior job with analysis found ` +
-              `for concept ${conceptId} across the last 25 completed jobs. ` +
-              `Run analyze-concept on this concept before Polish-23 to produce real content.`,
-          );
-          return null;
+          return {
+            source: 'none' as const,
+            text: null as string | null,
+            jobId: null as string | null,
+          };
         })
-      : null;
+      : {
+          source: 'none' as const,
+          text: null as string | null,
+          jobId: null as string | null,
+        };
 
     let sourceContext: string;
-    if (priorConceptAnalysis) {
-      sourceContext = JSON.stringify(priorConceptAnalysis, null, 2);
+    if (sourceLookup.source === 'ugc_original_script' && sourceLookup.text) {
+      sourceContext = sourceLookup.text;
       console.log(
-        `[polish-23-worker] source context: prior-job analysis (${sourceContext.length} chars)`,
+        `[polish-23-worker] source context: concepts.ugc_original_script ` +
+          `(direct user paste, ${sourceContext.length} chars)`,
+      );
+    } else if (sourceLookup.source === 'prior_job_analysis' && sourceLookup.text) {
+      sourceContext = sourceLookup.text;
+      console.log(
+        `[polish-23-worker] source context: prior job ${sourceLookup.jobId} ` +
+          `metadata.analysis (${sourceContext.length} chars)`,
       );
     } else {
       const legacyJobScript = extractSourceScript(job.metadata as Record<string, unknown> | null);
@@ -264,9 +289,9 @@ export const generatePolish23VeoLite = inngest.createFunction(
       } else {
         sourceContext = '(no source analysis available)';
         console.warn(
-          `[polish-23-worker] source context: MISSING — Claude will produce a generic ` +
-            `Linda-anchored ad. To get real concept-adapted content, run analyze-concept ` +
-            `on concept ${conceptId ?? '(unknown)'} first.`,
+          `[polish-23-worker] source context: MISSING — no ugc_original_script on concept ` +
+            `${conceptId ?? '(unknown)'}, no prior analyzed job, no legacy this-job analysis. ` +
+            `Claude will produce a generic Linda-anchored ad.`,
         );
       }
     }
