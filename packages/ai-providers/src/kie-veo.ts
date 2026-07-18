@@ -368,20 +368,75 @@ export interface KieVeoPollResult {
   rawResponseBody?: unknown;
 }
 
+/**
+ * Polish-23 Commit 3.0.11: real kie.ai /veo/record-info response
+ * shape verified against the operator's Commit-3.0.9 captured live
+ * body + the docs page:
+ *   https://docs.kie.ai/veo3-api/get-veo-3-video-details
+ *
+ * successFlag decoded (per docs):
+ *   0 = Generating  (in-progress; keep polling)
+ *   1 = Success     (extract data.response.resultUrls[0])
+ *   2 = Failed      (read data.errorCode + data.errorMessage)
+ *
+ * NOTE: my Commit 2 assumption of `data.state: 'waiting' | 'success'
+ * | 'fail'` was wrong — that shape belongs to the legacy
+ * `/jobs/recordInfo` endpoint (Kling/Seedance), not the dedicated
+ * `/veo/record-info` product surface. Corrected here.
+ */
 interface KieVeoPollResponse {
   code?: number;
   msg?: string;
   data?: {
     taskId?: string;
+    /** 0 = Generating, 1 = Success, 2 = Failed. */
+    successFlag?: number | null;
+    /** Nested response object populated when successFlag=1. */
+    response?: {
+      resultUrls?: string[] | null;
+      originUrls?: string[] | null;
+      resolution?: string | null;
+    } | null;
+    /** Populated on failure (successFlag=2 or errored mid-flight). */
+    errorCode?: string | number | null;
+    errorMessage?: string | null;
+    /** Unix ms; null until complete. */
+    completeTime?: number | null;
+    createTime?: number | null;
+    fallbackFlag?: boolean | null;
+    paramJson?: string | null;
+
+    // Legacy-shape belt-and-suspenders — Commit 2 read these; keep
+    // in the typedef so the shape-drift fallback in extractVeoOutputUrl
+    // still compiles + so a future kie.ai schema regression that
+    // reintroduces them lands on a valid TypeScript surface.
     state?: KieVeoState;
-    /** kie.ai Veo product surface returns URLs either as an array... */
     resultUrls?: string[] | null;
-    /** ...or nested inside a JSON-encoded string (kie-video.ts pattern). */
     resultJson?: string | null;
     failCode?: string | null;
     failMsg?: string | null;
     costTime?: number | null;
   };
+}
+
+/**
+ * Polish-23 Commit 3.0.11: map kie.ai's numeric successFlag onto
+ * our worker-facing KieVeoState union. Exported so future
+ * client-consumers can share the mapping.
+ *
+ *   0 → 'waiting'  (keep polling)
+ *   1 → 'success'  (terminal — extract outputUrl)
+ *   2 → 'fail'     (terminal — surface errorCode + errorMessage)
+ *
+ * Returns null when successFlag is missing / unrecognized so the
+ * poll caller can surface a shape-drift diagnostic instead of
+ * silently interpreting garbage.
+ */
+export function mapKieVeoSuccessFlag(successFlag: unknown): KieVeoState | null {
+  if (successFlag === 0) return 'waiting';
+  if (successFlag === 1) return 'success';
+  if (successFlag === 2) return 'fail';
+  return null;
 }
 
 export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPollResult> {
@@ -420,36 +475,73 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
     };
   }
   const data = result.data.data;
-  const state = data?.state;
-  if (!state) {
+  if (!data) {
     return {
       ok: false,
       latencyMs: result.latencyMs,
-      errorMessage: 'kie.ai Veo record-info missing state field',
+      errorMessage: 'kie.ai Veo record-info missing data envelope',
       errorKind: 'terminal',
       rawErrorBody: result.data,
       rawResponseBody: result.data,
     };
   }
+
+  // Polish-23 Commit 3.0.11: map successFlag → state per docs.
+  // Belt-and-suspenders: also accept the legacy `state` string field
+  // in case kie.ai regresses the schema back to the old shape.
+  const state: KieVeoState | null =
+    mapKieVeoSuccessFlag(data.successFlag) ??
+    (data.state === 'waiting' || data.state === 'success' || data.state === 'fail'
+      ? data.state
+      : null);
+
+  if (state === null) {
+    console.error(
+      `[kie-veo] poll response missing recognizable successFlag / state; ` +
+        `taskId=${input.taskId} body=${JSON.stringify(result.data).slice(0, 2000)}`,
+    );
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: 'kie.ai Veo record-info missing successFlag (and no legacy state field)',
+      errorKind: 'terminal',
+      rawErrorBody: result.data,
+      rawResponseBody: result.data,
+    };
+  }
+
   if (state === 'fail') {
-    // Polish-23 Commit 3.0.6: state='fail' is ALWAYS terminal —
-    // kie.ai has issued a definitive judgment on the task. A retry
-    // of the same taskId would poll the same failed state; a retry
-    // of the whole clip would burn credits on the same rejected
-    // input. Callers wrap this in NonRetriableError.
+    // Polish-23 Commit 3.0.11: kie.ai's Veo product returns
+    // `data.errorCode` + `data.errorMessage` (not failCode / failMsg).
+    // Fall back to the legacy names for defensive compatibility.
+    const failCode =
+      (typeof data.errorCode === 'string' || typeof data.errorCode === 'number'
+        ? String(data.errorCode)
+        : null) ??
+      data.failCode ??
+      undefined;
+    const failMsg = data.errorMessage ?? data.failMsg ?? undefined;
     return {
       ok: true,
       state,
-      failCode: data.failCode ?? undefined,
-      failMsg: data.failMsg ?? undefined,
+      failCode: failCode ?? undefined,
+      failMsg: failMsg ?? undefined,
       latencyMs: result.latencyMs,
       errorKind: 'terminal',
       rawErrorBody: result.data,
       rawResponseBody: result.data,
     };
   }
+
   if (state === 'success') {
-    const outputUrl = extractVeoOutputUrl(data.resultUrls, data.resultJson);
+    // Polish-23 Commit 3.0.11: the docs example nests the output
+    // URLs under `data.response.resultUrls`. extractVeoOutputUrl
+    // still accepts the legacy top-level `resultUrls` + JSON-encoded
+    // `resultJson` shapes for backward compatibility.
+    const outputUrl =
+      data.response?.resultUrls?.[0] && data.response.resultUrls[0].length > 0
+        ? data.response.resultUrls[0]
+        : extractVeoOutputUrl(data.resultUrls, data.resultJson);
     if (!outputUrl) {
       console.log(
         `[kie-veo] poll done but no outputUrl; taskId=${input.taskId} ` +
@@ -467,11 +559,18 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       ok: true,
       state,
       outputUrl,
-      costTimeMs: data.costTime ?? undefined,
+      // Polish-23 Commit 3.0.11: completeTime is a unix ms timestamp
+      // (NOT a duration). We surface `undefined` here rather than
+      // misleading the caller with an "elapsed ms" that's actually a
+      // wall-clock epoch. A future commit can add completeTimeUnixMs
+      // if downstream wants it.
+      costTimeMs: typeof data.costTime === 'number' ? data.costTime : undefined,
       latencyMs: result.latencyMs,
       rawResponseBody: result.data,
     };
   }
+
+  // state === 'waiting'
   return { ok: true, state, latencyMs: result.latencyMs, rawResponseBody: result.data };
 }
 

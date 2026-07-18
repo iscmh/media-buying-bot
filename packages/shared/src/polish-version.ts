@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.17';
+export const POLISH_VERSION = '23.0.18';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.17';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.10 — concepts.ugc_original_script as primary source';
+  'Polish-23 Commit 3.0.11 — real kie.ai poll shape (successFlag + data.response.resultUrls)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

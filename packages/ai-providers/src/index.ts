@@ -281,6 +281,7 @@ export {
   pollKieVeoLite,
   buildKieVeoRequestBody,
   extractVeoOutputUrl,
+  mapKieVeoSuccessFlag,
   translateKieVeoErrorStatus,
   classifyKieVeoErrorKind,
   detectKieVeoRateLimit,

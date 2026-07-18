@@ -26,6 +26,7 @@ import {
   classifyKieVeoErrorKind,
   computeKieVeoRateLimitBackoffMs,
   detectKieVeoRateLimit,
+  mapKieVeoSuccessFlag,
   estimateKieVeoLiteClipCostUsd,
   extractVeoOutputUrl,
   getKieVeoLiteUsdPerClip,
@@ -198,47 +199,106 @@ describe('Polish-23 Commit 2: submitKieVeoLite — endpoint + auth + body shape'
   });
 });
 
-describe('Polish-23 Commit 2: pollKieVeoLite — terminal states', () => {
-  it('waiting → ok:true, no outputUrl', async () => {
-    captureFetch({ status: 200, body: { code: 200, data: { state: 'waiting' } } });
+describe('Polish-23 Commit 3.0.11: pollKieVeoLite — real kie.ai shape (successFlag + data.response.resultUrls)', () => {
+  it("REAL LIVE CAPTURED shape from operator's job 5f31a1c4: successFlag=0 + response=null → state='waiting'", async () => {
+    // This body is the verbatim wire response the operator's
+    // Commit-3.0.9 forensics captured. It's the source of truth
+    // for what kie.ai actually returns during Veo generation.
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        msg: 'success',
+        data: {
+          taskId: 'veo3_lite_task_abc',
+          paramJson: '{"prompt":"…"}',
+          completeTime: null,
+          response: null,
+          successFlag: 0,
+          errorCode: null,
+          errorMessage: null,
+          createTime: 1752825253000,
+          fallbackFlag: false,
+        },
+      },
+    });
     const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
     expect(r.ok).toBe(true);
     expect(r.state).toBe('waiting');
     expect(r.outputUrl).toBeUndefined();
   });
 
-  it('success + resultUrls[] → outputUrl extracted', async () => {
+  it("successFlag=1 with data.response.resultUrls populated → state='success' + outputUrl extracted", async () => {
+    // The docs example shape (docs.kie.ai/veo3-api/get-veo-3-video-details).
     captureFetch({
       status: 200,
       body: {
         code: 200,
-        data: { state: 'success', resultUrls: ['https://cdn.kie/veo/clip.mp4'], costTime: 47000 },
-      },
-    });
-    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
-    expect(r.ok).toBe(true);
-    expect(r.state).toBe('success');
-    expect(r.outputUrl).toBe('https://cdn.kie/veo/clip.mp4');
-    expect(r.costTimeMs).toBe(47000);
-  });
-
-  it('success + JSON-encoded resultJson (legacy kie-video shape) → outputUrl extracted', async () => {
-    captureFetch({
-      status: 200,
-      body: {
-        code: 200,
+        msg: 'success',
         data: {
-          state: 'success',
-          resultJson: JSON.stringify({ resultUrls: ['https://cdn.kie/veo/legacy.mp4'] }),
+          taskId: 'veo3_lite_task_xyz',
+          completeTime: 1752825350000,
+          response: {
+            taskId: 'veo3_lite_task_xyz',
+            resultUrls: ['http://example.com/video1.mp4'],
+            originUrls: ['http://example.com/original.mp4'],
+            resolution: '1080p',
+          },
+          successFlag: 1,
+          errorCode: null,
+          errorMessage: '',
+          createTime: 1752825253000,
+          fallbackFlag: false,
         },
       },
     });
     const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
     expect(r.ok).toBe(true);
-    expect(r.outputUrl).toBe('https://cdn.kie/veo/legacy.mp4');
+    expect(r.state).toBe('success');
+    expect(r.outputUrl).toBe('http://example.com/video1.mp4');
   });
 
-  it('fail → ok:true (poll succeeded) but state=fail with failCode + failMsg', async () => {
+  it("successFlag=2 with errorCode + errorMessage → state='fail' + failCode + failMsg", async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          taskId: 'veo3_lite_task_bad',
+          successFlag: 2,
+          errorCode: 'CONTENT_POLICY',
+          errorMessage: 'prompt violated guardrails',
+          response: null,
+        },
+      },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('fail');
+    expect(r.failCode).toBe('CONTENT_POLICY');
+    expect(r.failMsg).toBe('prompt violated guardrails');
+    expect(r.errorKind).toBe('terminal');
+  });
+
+  it("successFlag=1 with NO response.resultUrls → state='success' but errorMessage set (drift signal)", async () => {
+    captureFetch({
+      status: 200,
+      body: { code: 200, data: { taskId: 't', successFlag: 1, response: {} } },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('success');
+    expect(r.errorMessage).toMatch(/no output URL/i);
+  });
+
+  it('missing successFlag AND missing legacy state → ok:false shape-drift diagnostic', async () => {
+    captureFetch({ status: 200, body: { code: 200, data: { taskId: 't' } } });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errorMessage).toMatch(/missing successFlag/i);
+  });
+
+  it("legacy state='fail' fallback still works (belt-and-suspenders for pre-3.0.11 shape regressions)", async () => {
     captureFetch({
       status: 200,
       body: {
@@ -253,27 +313,23 @@ describe('Polish-23 Commit 2: pollKieVeoLite — terminal states', () => {
     expect(r.failMsg).toBe('prompt too short');
   });
 
-  it('success with no output URLs → ok:true but errorMessage set (drift signal)', async () => {
+  it("legacy state='success' + top-level resultUrls fallback still works", async () => {
     captureFetch({
       status: 200,
-      body: { code: 200, data: { state: 'success' } },
+      body: {
+        code: 200,
+        data: { state: 'success', resultUrls: ['https://cdn.legacy/clip.mp4'] },
+      },
     });
     const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
     expect(r.ok).toBe(true);
-    expect(r.errorMessage).toMatch(/no output URL/i);
-  });
-
-  it('missing state → ok:false (shape drift)', async () => {
-    captureFetch({ status: 200, body: { code: 200, data: {} } });
-    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-1' });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.errorMessage).toMatch(/missing state/i);
+    expect(r.outputUrl).toBe('https://cdn.legacy/clip.mp4');
   });
 
   it('GET URL uses /veo/record-info?taskId=…', async () => {
     const calls = captureFetch({
       status: 200,
-      body: { code: 200, data: { state: 'waiting' } },
+      body: { code: 200, data: { successFlag: 0 } },
     });
     await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't with spaces' });
     expect(calls[0]!.url).toBe(
@@ -281,6 +337,24 @@ describe('Polish-23 Commit 2: pollKieVeoLite — terminal states', () => {
     );
     const headers = calls[0]!.init!.headers as Record<string, string>;
     expect(headers['Authorization']).toBe('Bearer k');
+  });
+});
+
+describe('Polish-23 Commit 3.0.11: mapKieVeoSuccessFlag — verified decode table (kie.ai docs)', () => {
+  it('0 → waiting (Generating; keep polling)', () => {
+    expect(mapKieVeoSuccessFlag(0)).toBe('waiting');
+  });
+  it('1 → success (Success; extract output URL)', () => {
+    expect(mapKieVeoSuccessFlag(1)).toBe('success');
+  });
+  it('2 → fail (Failed; surface errorCode + errorMessage)', () => {
+    expect(mapKieVeoSuccessFlag(2)).toBe('fail');
+  });
+  it('unknown / missing → null (caller surfaces shape-drift diagnostic)', () => {
+    expect(mapKieVeoSuccessFlag(3)).toBe(null);
+    expect(mapKieVeoSuccessFlag(null)).toBe(null);
+    expect(mapKieVeoSuccessFlag(undefined)).toBe(null);
+    expect(mapKieVeoSuccessFlag('1')).toBe(null); // strict numeric — no coercion
   });
 });
 
