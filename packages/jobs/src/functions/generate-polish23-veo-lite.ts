@@ -489,22 +489,30 @@ export const generatePolish23VeoLite = inngest.createFunction(
     // so the operator can flip the env var in 30 seconds instead
     // of chasing symptoms downstream.
     //
-    // Runs BEFORE any WaveSpeedAI credit is spent. HEAD-only so the
-    // check itself is free (no image download).
+    // Polish-23 Commit 3.0.14: uses GET instead of HEAD. picsum.photos
+    // (the operator's confirmed working seed host) returns 405 on
+    // HEAD but 200 on GET; real image CDNs commonly restrict HEAD.
+    // Trust GET as the ground-truth method Higgsfield Soul itself
+    // will use. Body stream is cancelled immediately after the
+    // status arrives, so the check remains cheap (~one TCP round-
+    // trip, no image download).
     await step.run('higgsfield-seed-url-health-check', async () => {
       let statusCode: number | null = null;
       let networkError: string | null = null;
       try {
-        const head = await fetch(HIGGSFIELD_SEED_IMAGE_URL, { method: 'HEAD' });
-        statusCode = head.status;
+        const res = await fetch(HIGGSFIELD_SEED_IMAGE_URL, { method: 'GET' });
+        statusCode = res.status;
+        // Abort the body stream — we only needed the status.
+        await res.body?.cancel();
       } catch (err) {
         networkError = err instanceof Error ? err.message : String(err);
       }
       const checkResult = {
         url: HIGGSFIELD_SEED_IMAGE_URL,
+        method: 'GET' as const,
         statusCode,
         networkError,
-        ok: networkError === null && statusCode !== null && statusCode >= 200 && statusCode < 300,
+        ok: networkError === null && statusCode !== null && statusCode >= 200 && statusCode < 400,
         at: new Date().toISOString(),
       };
       const db = getDb();
@@ -529,7 +537,11 @@ export const generatePolish23VeoLite = inngest.createFunction(
             `https://picsum.photos/1080/1920) on Vercel and redeploy.`,
         );
       }
-      if (statusCode === null || statusCode < 200 || statusCode >= 300) {
+      // Polish-23 Commit 3.0.14: accept 2xx AND 3xx (fetch follows
+      // redirects by default so 3xx is rare here, but a proxied
+      // seed CDN could legitimately return one before the client
+      // resolves the redirect).
+      if (statusCode === null || statusCode < 200 || statusCode >= 400) {
         throw new NonRetriableError(
           `Higgsfield seed URL unreachable: ${HIGGSFIELD_SEED_IMAGE_URL} returned ${statusCode}. ` +
             `Set POLISH23_HIGGSFIELD_SEED_IMAGE_URL to a valid image URL (e.g. ` +
