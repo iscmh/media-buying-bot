@@ -53,7 +53,7 @@ import {
   WAVESPEED_SOUL_USD_PER_RUN,
 } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
-import { POLISH_VERSION } from '@mbb/shared';
+import { POLISH_VERSION, parsePolish23VisionAdditions } from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
@@ -215,40 +215,59 @@ export const generatePolish23VeoLite = inngest.createFunction(
     });
 
     // -------- Source concept context --------
-    // Polish-23 Commit 3.0.10: source-priority chain, best → worst:
-    //   (1) concepts.ugc_original_script — direct user paste at
-    //       concept-upload time. No transcription loss. No prior
-    //       analyze-concept run needed. Grep of packages/jobs
-    //       confirmed no other worker reads this today; Polish-23
-    //       is the first to make it useful.
-    //   (2) most recent PRIOR completed job's metadata.analysis —
-    //       Gemini vision output from a Polish-21 run against the
-    //       same concept. Structured but transcribed.
-    //   (3) this-job's metadata.analysis.script_transcription —
-    //       same-job legacy path.
-    //   (4) "(no source)" placeholder → Linda-anchored generic ad.
+    // Polish-23 Commit 3.0.19: source-priority chain, best → worst:
+    //   (1) concepts.metadata.analysis.persona (+ setting_details +
+    //       emotional_arc + hook_structure + niche_category from
+    //       POLISH23_VISION_SYSTEM_PROMPT) — vision analysis run
+    //       against the source video. STRUCTURED persona class the
+    //       Claude ad-spec + Higgsfield Soul prompt use to mirror
+    //       source persona. HIGHEST — this is the correct signal.
+    //   (2) concepts.ugc_original_script — direct user paste at
+    //       concept-upload time. No transcription loss but no
+    //       persona info; Claude has to guess.
+    //   (3) most recent PRIOR completed job's metadata.analysis —
+    //       Polish-21 UGC_DECONSTRUCTOR output.
+    //   (4) this-job's metadata.analysis.script_transcription —
+    //       same-job legacy path (analyze-concept ran but no
+    //       persona schema).
+    //   (5) 'linda_fallback' → Linda-anchored generic ad.
     //
-    // Single step.run so the DB reads for (1) + (2) share one
-    // Inngest cache boundary. Returns a discriminated shape so the
-    // caller can log which source won.
+    // Single step.run so DB reads for (1)/(2)/(3) share one Inngest
+    // cache boundary. Returns a discriminated shape so the caller
+    // can log which source won.
     const conceptId = job.conceptIds?.[0];
     const sourceLookup = conceptId
       ? await step.run('load-concept-source-context', async () => {
           const db = getDb();
-          // (1) concepts.ugc_original_script — direct read
+          // (1) concepts.metadata.analysis with Polish-23 persona
           const concept = await db.query.concepts.findFirst({
             where: eq(schema.concepts.id, conceptId),
-            columns: { ugcOriginalScript: true, contentType: true },
+            columns: { ugcOriginalScript: true, contentType: true, metadata: true },
           });
+          const conceptMeta = (concept?.metadata as Record<string, unknown> | null) ?? null;
+          const conceptAnalysis = conceptMeta?.['analysis'] ?? null;
+          if (conceptAnalysis && typeof conceptAnalysis === 'object') {
+            const visionAdditions = parsePolish23VisionAdditions(conceptAnalysis);
+            if (visionAdditions) {
+              return {
+                source: 'vision_analysis_persona' as const,
+                text: JSON.stringify(conceptAnalysis, null, 2),
+                persona: visionAdditions.persona,
+                jobId: null as string | null,
+              };
+            }
+          }
+          // (2) concepts.ugc_original_script
           const ugcScript = concept?.ugcOriginalScript ?? null;
           if (ugcScript && ugcScript.trim().length > 0) {
             return {
               source: 'ugc_original_script' as const,
               text: ugcScript,
+              persona: null,
               jobId: null as string | null,
             };
           }
-          // (2) prior job's metadata.analysis — Gemini vision
+          // (3) prior job's metadata.analysis
           const priors = await db.query.generationJobs.findMany({
             where: eq(schema.generationJobs.status, 'completed'),
             columns: { id: true, metadata: true, completedAt: true, conceptIds: true },
@@ -264,6 +283,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
               return {
                 source: 'prior_analysis' as const,
                 text: JSON.stringify(analysis, null, 2),
+                persona: null,
                 jobId: p.id as string | null,
               };
             }
@@ -271,28 +291,39 @@ export const generatePolish23VeoLite = inngest.createFunction(
           return {
             source: 'none' as const,
             text: null as string | null,
+            persona: null,
             jobId: null as string | null,
           };
         })
       : {
           source: 'none' as const,
           text: null as string | null,
+          persona: null,
           jobId: null as string | null,
         };
 
-    // Polish-23 Commit 3.0.16: explicit final-source tag matches the
-    // operator's spec exactly:
-    //   'ugc_original_script' | 'prior_analysis'
-    //   | 'legacy_transcription' | 'linda_fallback'
-    // Ties the source-lookup enum to a definitive downstream tag
-    // that names which branch actually fed Claude.
+    // Polish-23 Commit 3.0.19: explicit final-source tag now
+    // includes 'vision_analysis_persona' as the highest-signal
+    // branch. Tag matches operator's spec:
+    //   'vision_analysis_persona' | 'ugc_original_script'
+    //   | 'prior_analysis' | 'legacy_transcription' | 'linda_fallback'
     let sourceContext: string;
     let finalSourceTag:
+      | 'vision_analysis_persona'
       | 'ugc_original_script'
       | 'prior_analysis'
       | 'legacy_transcription'
       | 'linda_fallback';
-    if (sourceLookup.source === 'ugc_original_script' && sourceLookup.text) {
+    if (sourceLookup.source === 'vision_analysis_persona' && sourceLookup.text) {
+      sourceContext = sourceLookup.text;
+      finalSourceTag = 'vision_analysis_persona';
+      console.log(
+        `[polish-23-worker] source context: concepts.metadata.analysis.persona ` +
+          `(POLISH23_VISION_SYSTEM_PROMPT output, ${sourceContext.length} chars, ` +
+          `persona.gender=${sourceLookup.persona?.gender}, ` +
+          `persona.age_range=${sourceLookup.persona?.age_range})`,
+      );
+    } else if (sourceLookup.source === 'ugc_original_script' && sourceLookup.text) {
       sourceContext = sourceLookup.text;
       finalSourceTag = 'ugc_original_script';
       console.log(
@@ -319,13 +350,33 @@ export const generatePolish23VeoLite = inngest.createFunction(
         sourceContext = '(no source analysis available)';
         finalSourceTag = 'linda_fallback';
         console.warn(
-          `[polish-23-worker] source context: linda_fallback — no ugc_original_script on ` +
-            `concept ${conceptId ?? '(unknown)'}, no prior analyzed job, no legacy this-job ` +
-            `analysis. Claude will produce a generic Linda-anchored ad.`,
+          `[polish-23-worker] source context: linda_fallback — no vision analysis or ` +
+            `ugc_original_script on concept ${conceptId ?? '(unknown)'}, no prior analyzed ` +
+            `job, no legacy this-job analysis. Claude will produce a generic Linda ad.`,
         );
       }
     }
-    const sourceScript = sourceContext;
+
+    // Polish-23 Commit 3.0.19: prepend a PERSONA MIRROR block to
+    // the source context when vision persona is available. Claude
+    // reads this ABOVE the analysis JSON so its character_lock
+    // generation locks to the source persona CLASS (not identity).
+    const sourceScript =
+      sourceLookup.source === 'vision_analysis_persona' && sourceLookup.persona
+        ? `PERSONA MIRROR (from source video vision analysis) — the character_lock you ` +
+          `generate MUST match this persona CLASS (not identity):\n` +
+          `- gender: ${sourceLookup.persona.gender}\n` +
+          `- age_range: ${sourceLookup.persona.age_range}\n` +
+          `- ethnicity: ${sourceLookup.persona.ethnicity}\n` +
+          `- look: ${sourceLookup.persona.look}\n` +
+          `- voice_tone: ${sourceLookup.persona.voice_tone}\n` +
+          `\n` +
+          `Generate a fictional character of the SAME gender + SAME age bracket + SAME ` +
+          `ethnicity + SAME look category as the source. Do NOT default to Linda (68yo ` +
+          `American female suburban grandmother) unless the source persona actually matches.\n` +
+          `\n` +
+          `Full source analysis follows:\n\n${sourceContext}`
+        : sourceContext;
 
     // Polish-23 Commit 3.0.16: metadata.polish23_source_context —
     // durable evidence of which branch fed Claude. Field name matches

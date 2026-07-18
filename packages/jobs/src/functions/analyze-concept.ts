@@ -1,7 +1,12 @@
 import { eq } from 'drizzle-orm';
 import { callGeminiVision } from '@mbb/ai-providers';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
-import { UGC_DECONSTRUCTOR_SYSTEM_PROMPT, describePipeline, pipelineFromString } from '@mbb/shared';
+import {
+  POLISH23_VISION_SYSTEM_PROMPT,
+  UGC_DECONSTRUCTOR_SYSTEM_PROMPT,
+  describePipeline,
+  pipelineFromString,
+} from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { downloadAsBase64 } from '../lib/storage';
@@ -175,10 +180,29 @@ export const analyzeConcept = inngest.createFunction(
         };
       }
 
+      // Polish-23 Commit 3.0.19: pick vision prompt based on the
+      // job's picked_pipeline. Polish-23 jobs get the extended
+      // schema with structured persona / setting / emotional_arc
+      // / hook / niche fields. Everything else keeps the operator-
+      // tuned Polish-21 UGC_DECONSTRUCTOR prompt untouched.
+      const jobPipelineRow = await db.query.generationJobs.findFirst({
+        where: eq(schema.generationJobs.id, jobId),
+        columns: { pickedPipeline: true },
+      });
+      const isPolish23 = jobPipelineRow?.pickedPipeline === 'polish23_higgsfield_veo_lite';
+      const visionSystemPrompt = isPolish23
+        ? POLISH23_VISION_SYSTEM_PROMPT
+        : UGC_DECONSTRUCTOR_SYSTEM_PROMPT;
+      console.log(
+        `[analyze-concept] job ${jobId} using ${
+          isPolish23 ? 'POLISH23_VISION_SYSTEM_PROMPT' : 'UGC_DECONSTRUCTOR_SYSTEM_PROMPT'
+        } (picked_pipeline=${jobPipelineRow?.pickedPipeline ?? 'null'})`,
+      );
+
       const vision = await callGeminiVision({
         userId,
         apiKey,
-        systemPrompt: UGC_DECONSTRUCTOR_SYSTEM_PROMPT,
+        systemPrompt: visionSystemPrompt,
         videoBase64: video.base64,
         videoMimeType: video.mimeType,
         generationJobId: jobId,
@@ -196,6 +220,7 @@ export const analyzeConcept = inngest.createFunction(
       return {
         ok: true as const,
         analysis: vision.json as Record<string, unknown>,
+        conceptId,
         costUsd: vision.costUsd,
         latencyMs: vision.latencyMs,
       };
@@ -265,6 +290,30 @@ export const analyzeConcept = inngest.createFunction(
           actualCostUsd: visionResult.costUsd.toFixed(4),
         })
         .where(eq(schema.generationJobs.id, jobId));
+
+      // Polish-23 Commit 3.0.19: ALSO persist the analysis to the
+      // concept row's new metadata.analysis jsonb slot so future
+      // Polish-23 jobs against the same concept reuse the vision
+      // output without re-running Gemini. Merges with any prior
+      // concept.metadata content so unrelated fields (uploaded via
+      // form etc.) survive.
+      if (visionResult.conceptId) {
+        const conceptRow = await db.query.concepts.findFirst({
+          where: eq(schema.concepts.id, visionResult.conceptId),
+          columns: { metadata: true },
+        });
+        const priorConceptMeta = (conceptRow?.metadata as Record<string, unknown> | null) ?? {};
+        await db
+          .update(schema.concepts)
+          .set({
+            metadata: {
+              ...priorConceptMeta,
+              analysis: innerAnalysis,
+              analyzed_at: new Date().toISOString(),
+            },
+          })
+          .where(eq(schema.concepts.id, visionResult.conceptId));
+      }
     });
 
     await step.run('audit-live', async () => {

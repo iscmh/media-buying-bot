@@ -1,4 +1,4 @@
-import { numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { jsonb, numeric, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { conceptContentTypeEnum, conceptStatusEnum } from './enums';
 import { users } from './users';
 
@@ -43,6 +43,32 @@ export const concepts = pgTable('concepts', {
 
   // UGC-only.
   ugcOriginalScript: text('ugc_original_script'),
+
+  /**
+   * Polish-23 Commit 3.0.19: per-concept metadata jsonb. Canonical
+   * resting place for Gemini Vision analysis (persona / setting /
+   * emotional arc / hook / niche) so N Polish-23 jobs against the
+   * same source concept can reuse ONE vision call instead of each
+   * re-running it or hunting through prior completed jobs.
+   *
+   * Shape (Polish-23):
+   *   { analysis: {
+   *       // Polish-21 legacy top-level fields still populated
+   *       // for backward compat with Sora + video-variant workers.
+   *       script_transcription, subject: {...}, ...,
+   *       // Polish-23 additions:
+   *       persona: { gender, age_range, ethnicity, look, voice_tone },
+   *       setting_details: { interior_or_exterior, room_or_place,
+   *                          lighting, key_props: [...] },
+   *       emotional_arc: { starting_emotion, ending_emotion,
+   *                        key_beats: [...] },
+   *       hook_structure: 'question' | 'statement' | 'story' | 'reveal',
+   *       niche_category: string,
+   *     },
+   *     analyzed_at: ISO-8601 string
+   *   }
+   */
+  metadata: jsonb('metadata').notNull().default({}),
 
   // Soft delete.
   deletedAt: timestamp('deleted_at', { withTimezone: true }),

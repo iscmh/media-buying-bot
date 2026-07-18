@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.24';
+export const POLISH_VERSION = '23.0.26';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.24';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.17 — BODY + SETTING invariants for cross-clip drift lock';
+  'Polish-23 Commit 3.0.19 — vision persona schema + concept.metadata + Polish-23 source-priority flip';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
