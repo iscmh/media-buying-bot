@@ -282,6 +282,7 @@ export {
   buildKieVeoRequestBody,
   extractVeoOutputUrl,
   translateKieVeoErrorStatus,
+  classifyKieVeoErrorKind,
   detectKieVeoRateLimit,
   computeKieVeoRateLimitBackoffMs,
   getKieVeoRateLimitMaxRetries,

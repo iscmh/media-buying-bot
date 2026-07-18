@@ -36,6 +36,7 @@
  *   - Composite includes 8 clips in submitted order
  */
 import { eq } from 'drizzle-orm';
+import { NonRetriableError } from 'inngest';
 import {
   buildKieVeoRequestBody,
   callClaude,
@@ -553,9 +554,22 @@ export const generatePolish23VeoLite = inngest.createFunction(
               generationJobId: jobId,
             });
             if (!submit.ok || !submit.taskId) {
+              // Polish-23 Commit 3.0.6: terminal errors (400 / auth /
+              // balance / shape drift / "Please enter prompt")
+              // skip the retry-once entirely AND throw
+              // NonRetriableError so Inngest doesn't retry the whole
+              // function either. Genuine transient errors (429/5xx)
+              // fall through the retry-once and — if still failing —
+              // throw a regular Error so Inngest's function-level
+              // retry takes one more shot.
+              if (submit.errorKind === 'terminal') {
+                throw new NonRetriableError(
+                  `Veo Lite clip ${i} submit terminal failure: ${submit.errorMessage ?? 'unknown'}`,
+                );
+              }
               if (attempt === 0) {
                 console.log(
-                  `[polish-23-worker] veo-clip-${i} submit attempt 1 failed ` +
+                  `[polish-23-worker] veo-clip-${i} submit attempt 1 failed (transient) ` +
                     `(${submit.errorMessage ?? 'unknown'}); retrying.`,
                 );
                 continue;
@@ -577,14 +591,27 @@ export const generatePolish23VeoLite = inngest.createFunction(
                 generationJobId: jobId,
               });
               if (!poll.ok) {
+                // Poll transport failure — terminal shortcut when
+                // the client says so, otherwise let the outer retry
+                // -once fall through to a fresh submit.
+                if (poll.errorKind === 'terminal') {
+                  throw new NonRetriableError(
+                    `Veo Lite clip ${i} poll terminal failure: ${poll.errorMessage ?? 'unknown'}`,
+                  );
+                }
                 failed = true;
                 failMsg = poll.errorMessage ?? 'poll failed';
                 break;
               }
               if (poll.state === 'fail') {
-                failed = true;
-                failMsg = poll.failMsg ?? poll.failCode ?? 'kie.ai reported fail';
-                break;
+                // Polish-23 Commit 3.0.6: kie.ai state='fail' is a
+                // definitive judgment — retrying the same clip with
+                // the same input burns credits for zero gain. Skip
+                // the retry-once + throw NonRetriableError.
+                throw new NonRetriableError(
+                  `Veo Lite clip ${i} kie.ai reported fail: ` +
+                    `${poll.failMsg ?? poll.failCode ?? 'no reason given'}`,
+                );
               }
               if (poll.state === 'success' && poll.outputUrl) {
                 outputUrl = poll.outputUrl;

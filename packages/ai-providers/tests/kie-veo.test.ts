@@ -23,6 +23,7 @@ import {
   __restoreKieVeoSleepImplForTests,
   __setKieVeoSleepImplForTests,
   buildKieVeoRequestBody,
+  classifyKieVeoErrorKind,
   computeKieVeoRateLimitBackoffMs,
   detectKieVeoRateLimit,
   estimateKieVeoLiteClipCostUsd,
@@ -335,6 +336,112 @@ describe('Polish-23 Commit 2: rate-limit primitives (Polish-19.4.3 pattern)', ()
     const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
     expect(r.ok).toBe(false);
     expect(attempt).toBe(1);
+  });
+});
+
+describe('Polish-23 Commit 3.0.6: classifyKieVeoErrorKind — terminal vs transient triage', () => {
+  it('HTTP 429 → transient', () => {
+    expect(classifyKieVeoErrorKind(429, undefined, undefined)).toBe('transient');
+  });
+
+  it('HTTP 5xx → transient', () => {
+    expect(classifyKieVeoErrorKind(500, undefined, undefined)).toBe('transient');
+    expect(classifyKieVeoErrorKind(503, undefined, undefined)).toBe('transient');
+  });
+
+  it('HTTP 400/401/402/404/422 → terminal', () => {
+    for (const s of [400, 401, 402, 404, 422]) {
+      expect(classifyKieVeoErrorKind(s, undefined, undefined)).toBe('terminal');
+    }
+  });
+
+  it('body-code 429 → transient', () => {
+    expect(classifyKieVeoErrorKind(undefined, 429, undefined)).toBe('transient');
+  });
+
+  it('body-code 400/401/402/404/422 → terminal', () => {
+    for (const c of [400, 401, 402, 404, 422]) {
+      expect(classifyKieVeoErrorKind(undefined, c, undefined)).toBe('terminal');
+    }
+  });
+
+  it("'Please enter prompt' substring → terminal (the exact failure surface from the first-live report)", () => {
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'Please enter prompt')).toBe('terminal');
+  });
+
+  it('rate-limit / upstream-error substrings → transient', () => {
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'rate limit hit')).toBe('transient');
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'kie.ai upstream error')).toBe(
+      'transient',
+    );
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'too many requests')).toBe('transient');
+  });
+
+  it('balance / auth / not-found / missing-shape substrings → terminal', () => {
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'Insufficient kie.ai balance')).toBe(
+      'terminal',
+    );
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'kie.ai authentication failed')).toBe(
+      'terminal',
+    );
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'resource not found')).toBe('terminal');
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'missing taskId')).toBe('terminal');
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'missing state field')).toBe('terminal');
+  });
+
+  it('unknown / unclassifiable → terminal (fail-fast default; safer than blind retries)', () => {
+    expect(classifyKieVeoErrorKind(undefined, undefined, undefined)).toBe('terminal');
+    expect(classifyKieVeoErrorKind(undefined, undefined, 'some novel error message')).toBe(
+      'terminal',
+    );
+  });
+});
+
+describe('Polish-23 Commit 3.0.6: submit/poll results carry errorKind on the failure path', () => {
+  it("submit HTTP 400 attaches errorKind='terminal'", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 400,
+      ok: false,
+      json: async () => ({ msg: 'Please enter prompt' }),
+      text: async () => JSON.stringify({ msg: 'Please enter prompt' }),
+    } as Response) as typeof globalThis.fetch;
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errorKind).toBe('terminal');
+  });
+
+  it("submit body-code 429 attaches errorKind='transient'", async () => {
+    globalThis.fetch = vi.fn().mockImplementation(async () => ({
+      status: 200,
+      ok: true,
+      json: async () => ({ code: 429, msg: 'rate limit' }),
+      text: async () => JSON.stringify({ code: 429, msg: 'rate limit' }),
+    })) as typeof globalThis.fetch;
+    // Trigger no-retry path by setting KIE_VEO_RATE_LIMIT_MAX_RETRIES=0
+    // via env — but that env leaks, so instead use the retry loop
+    // and check the LAST failing result's errorKind.
+    __setKieVeoSleepImplForTests(async () => {});
+    const r = await submitKieVeoLite({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errorKind).toBe('transient');
+    __restoreKieVeoSleepImplForTests();
+  });
+
+  it("poll state='fail' attaches errorKind='terminal'", async () => {
+    const body = {
+      code: 200,
+      data: { state: 'fail', failCode: 'BAD_INPUT', failMsg: 'bad prompt' },
+    };
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      status: 200,
+      ok: true,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response) as typeof globalThis.fetch;
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('fail');
+    expect(r.errorKind).toBe('terminal');
   });
 });
 

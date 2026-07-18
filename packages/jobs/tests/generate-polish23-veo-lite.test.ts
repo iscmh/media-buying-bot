@@ -425,6 +425,39 @@ describe('Polish-23 Commit 3.0.2: coalesceAdSpecWithFallback — safety-net cont
   });
 });
 
+describe('Polish-23 Commit 3.0.6: markJobCompleted never touches metadata (Step-E ordering pin)', () => {
+  it('inspects packages/jobs/src/lib/job-markers.ts source and confirms markJobCompleted only updates status / completedAt / generatedCreativeCount / actualCostUsd', async () => {
+    // Regression pin: the Polish-23 worker's Step E writes composed
+    // prompts, submit bodies, and composite URL to metadata; then
+    // calls markJobCompleted to flip status. This test proves the
+    // ordering is safe (metadata-write BEFORE markJobCompleted is
+    // NOT required, because markJobCompleted doesn't spread over
+    // metadata). If a future refactor makes markJobCompleted touch
+    // metadata, this pin fails loud so the Polish-23 worker gets
+    // updated to defensively order writes.
+    const fs = await import('node:fs/promises');
+    const src = await fs.readFile(new URL('../src/lib/job-markers.ts', import.meta.url), 'utf8');
+    // Extract the markJobCompleted function body.
+    const marker = 'export async function markJobCompleted(';
+    const start = src.indexOf(marker);
+    expect(start).toBeGreaterThan(-1);
+    // Walk to the matching closing brace at the outer function.
+    const funcEnd = src.indexOf('\n}\n', start);
+    expect(funcEnd).toBeGreaterThan(start);
+    const body = src.slice(start, funcEnd);
+    // Contract: NO reference to `metadata:` inside the .set() call.
+    // A false positive here is fine — we WANT this to fail if
+    // markJobCompleted grows a metadata write, so the worker can
+    // be updated accordingly.
+    expect(body).not.toMatch(/\bmetadata:/);
+    // Confirm the expected fields ARE touched.
+    expect(body).toMatch(/status:\s*'completed'/);
+    expect(body).toMatch(/completedAt:/);
+    expect(body).toMatch(/generatedCreativeCount:/);
+    expect(body).toMatch(/actualCostUsd:/);
+  });
+});
+
 describe('Polish-23 Commit 3.0.2: fallback pairs character_lock + segments (regression pin — was 3.0.1)', () => {
   it('fallbackPolish23AdSpec always returns BOTH fields — worker cannot land segments=undefined', () => {
     // Commit 3.0.1 diagnosis note: the operator's first-live report

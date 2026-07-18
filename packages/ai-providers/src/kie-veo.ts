@@ -154,6 +154,18 @@ export interface KieVeoSubmitResult {
   taskId?: string;
   latencyMs: number;
   errorMessage?: string;
+  /**
+   * Polish-23 Commit 3.0.6: transient vs terminal classification.
+   * Callers wrap terminal errors in Inngest's NonRetriableError
+   * so retries burn no additional kie.ai credits on validation /
+   * auth / balance / model-not-found failures. Undefined on the
+   * happy path (ok:true) and on retry-limbo shapes where the
+   * classification is genuinely unknown.
+   *   - 'terminal':  400 / 401 / 402 / 404 / 422 / body-code
+   *                  equivalents / any parse-shape drift
+   *   - 'transient': 429 / 5xx / transport / body-code 429
+   */
+  errorKind?: 'terminal' | 'transient';
 }
 
 interface KieVeoSubmitResponse {
@@ -243,6 +255,7 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
       ok: false,
       latencyMs: result.latencyMs,
       errorMessage: translateKieVeoErrorStatus(result.status, result.errorMessage),
+      errorKind: classifyKieVeoErrorKind(result.status, undefined, result.errorMessage),
     };
   }
   const code = result.data.code;
@@ -257,6 +270,7 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
       ok: false,
       latencyMs: result.latencyMs,
       errorMessage: translateKieVeoErrorStatus(code, result.data.msg),
+      errorKind: classifyKieVeoErrorKind(undefined, code, result.data.msg),
     };
   }
   const taskId = result.data.data?.taskId ?? result.data.data?.task_id;
@@ -268,6 +282,7 @@ async function submitKieVeoLiteOnce(input: KieVeoSubmitInput): Promise<KieVeoSub
       ok: false,
       latencyMs: result.latencyMs,
       errorMessage: 'kie.ai Veo submit response missing taskId',
+      errorKind: 'terminal',
     };
   }
   return { ok: true, taskId, latencyMs: result.latencyMs };
@@ -296,6 +311,8 @@ export interface KieVeoPollResult {
   costTimeMs?: number;
   latencyMs: number;
   errorMessage?: string;
+  /** Polish-23 Commit 3.0.6: same terminal/transient contract as KieVeoSubmitResult. */
+  errorKind?: 'terminal' | 'transient';
 }
 
 interface KieVeoPollResponse {
@@ -333,6 +350,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       ok: false,
       latencyMs: result.latencyMs,
       errorMessage: translateKieVeoErrorStatus(result.status, result.errorMessage),
+      errorKind: classifyKieVeoErrorKind(result.status, undefined, result.errorMessage),
     };
   }
   const code = result.data.code;
@@ -341,6 +359,7 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       ok: false,
       latencyMs: result.latencyMs,
       errorMessage: translateKieVeoErrorStatus(code, result.data.msg),
+      errorKind: classifyKieVeoErrorKind(undefined, code, result.data.msg),
     };
   }
   const data = result.data.data;
@@ -350,15 +369,22 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
       ok: false,
       latencyMs: result.latencyMs,
       errorMessage: 'kie.ai Veo record-info missing state field',
+      errorKind: 'terminal',
     };
   }
   if (state === 'fail') {
+    // Polish-23 Commit 3.0.6: state='fail' is ALWAYS terminal —
+    // kie.ai has issued a definitive judgment on the task. A retry
+    // of the same taskId would poll the same failed state; a retry
+    // of the whole clip would burn credits on the same rejected
+    // input. Callers wrap this in NonRetriableError.
     return {
       ok: true,
       state,
       failCode: data.failCode ?? undefined,
       failMsg: data.failMsg ?? undefined,
       latencyMs: result.latencyMs,
+      errorKind: 'terminal',
     };
   }
   if (state === 'success') {
@@ -418,6 +444,47 @@ export function extractVeoOutputUrl(
 // Error translation
 // -------------------------------------------------------------------
 
+/**
+ * Polish-23 Commit 3.0.6: classify a kie.ai submit/poll failure as
+ * transient (retry-worth) or terminal (validation / auth / balance /
+ * shape drift; retries burn credits for no gain). Callers wrap
+ * terminal errors in Inngest's NonRetriableError.
+ *
+ * HTTP status precedence: if the transport returned a status code,
+ * that wins. Falls back to kie.ai body-code / errorMessage substring
+ * matches.
+ */
+export function classifyKieVeoErrorKind(
+  status: number | undefined,
+  kieCode: number | undefined,
+  errorMessage: string | undefined,
+): 'terminal' | 'transient' {
+  if (status === 429) return 'transient';
+  if (typeof status === 'number' && status >= 500) return 'transient';
+  if (status === 400 || status === 401 || status === 402 || status === 404 || status === 422) {
+    return 'terminal';
+  }
+  if (kieCode === 429) return 'transient';
+  if (kieCode === 400 || kieCode === 401 || kieCode === 402 || kieCode === 404 || kieCode === 422) {
+    return 'terminal';
+  }
+  if (typeof errorMessage === 'string') {
+    const lower = errorMessage.toLowerCase();
+    if (lower.includes('rate limit') || lower.includes('too many requests')) return 'transient';
+    if (lower.includes('upstream error')) return 'transient';
+    if (lower.includes('please enter prompt') || lower.includes('validation')) return 'terminal';
+    if (lower.includes('insufficient') && lower.includes('balance')) return 'terminal';
+    if (lower.includes('authentication failed')) return 'terminal';
+    if (lower.includes('not found')) return 'terminal';
+    if (lower.includes('missing taskid')) return 'terminal';
+    if (lower.includes('missing state')) return 'terminal';
+  }
+  // Default: treat unknown as terminal — safer to fail fast than to
+  // retry a mystery error and burn credits blindly. Operator can
+  // rerun manually if it turns out to have been transient.
+  return 'terminal';
+}
+
 export function translateKieVeoErrorStatus(
   status: number | undefined,
   fallback: string | undefined,
@@ -473,6 +540,12 @@ async function retryKieVeoSubmit(
       `kie.ai Veo rate limit hit after ${maxRetries + 1} attempts over ~${totalWaitSec}s. ` +
       `Last error: ${lastMsg}. Consider raising KIE_VEO_RATE_LIMIT_MAX_RETRIES ` +
       `or reducing concurrent clips.`,
+    // Polish-23 Commit 3.0.6: retry-loop exhaustion IS transient by
+    // definition — every underlying attempt hit a rate-limit that
+    // detectKieVeoRateLimit classified as retry-worth. Callers can
+    // treat the whole result as transient (worker will still fail
+    // fast if the caller's own retry policy is exhausted).
+    errorKind: 'transient',
   };
 }
 

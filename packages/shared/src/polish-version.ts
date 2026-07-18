@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.12';
+export const POLISH_VERSION = '23.0.13';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.12';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.5 — persist-before-submit + Step-C failure markJobFailed';
+  'Polish-23 Commit 3.0.6 — NonRetriableError on terminal + zombie cleanup script';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
