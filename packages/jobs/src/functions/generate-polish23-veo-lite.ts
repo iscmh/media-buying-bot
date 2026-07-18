@@ -60,9 +60,10 @@ import {
   POLISH23_SEGMENT_COUNT,
   POLISH23_CLIP_SECONDS,
   POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT,
+  assertAllSegmentsValid,
   composePolish23AdSpecUserPrompt,
+  diagnosePolish23AdSpecParseFailure,
   fallbackPolish23AdSpec,
-  parsePolish23AdSpec,
   type AdSpec,
   type SegmentSpec,
 } from '../lib/polish23-claude-adspec-prompt';
@@ -177,7 +178,10 @@ export const generatePolish23VeoLite = inngest.createFunction(
         keys = await loadDecryptedKeys(userId, ['claude']);
       } catch (err) {
         if (err instanceof MissingProviderKeyError) {
-          console.log(`[polish-23-worker] Claude key missing; falling back to stock ad-spec.`);
+          console.warn(
+            '[polish-23-worker Step A] Claude key missing — falling back to Linda anchor + stock ad. ' +
+              'Full fallback fires: character_lock + segments come from fallbackPolish23AdSpec() as a paired object.',
+          );
           return fallbackPolish23AdSpec();
         }
         throw err;
@@ -190,24 +194,59 @@ export const generatePolish23VeoLite = inngest.createFunction(
         maxTokens: 4096,
         generationJobId: jobId,
       });
+      // Polish-23 Commit 3.0.1: loud-log the FULL raw Claude response
+      // (first 4000 chars) BEFORE the parse attempt so any future
+      // parse failure surfaces the actual response text in Inngest
+      // logs. Cost of this log line: ~4KB per job — negligible.
+      console.log(
+        `[polish-23-worker Step A] Claude raw response ok=${r.ok} chars=${
+          (r.text ?? '').length
+        }: ${(r.text ?? '').slice(0, 4000)}`,
+      );
       if (!r.ok) {
-        console.log(`[polish-23-worker] Claude ad-spec failed: ${r.errorMessage}; using fallback.`);
+        console.warn(
+          `[polish-23-worker Step A] Claude ad-spec call failed (${r.errorMessage}) — ` +
+            'falling back to Linda anchor + stock ad. Full fallback fires: character_lock + segments come paired.',
+        );
         return fallbackPolish23AdSpec();
       }
-      const parsed = parsePolish23AdSpec(r.text);
-      if (!parsed) {
-        console.log(
-          `[polish-23-worker] Claude ad-spec unparseable (first 400 chars: ` +
-            `${(r.text ?? '').slice(0, 400)}); using fallback.`,
+      // Diagnostic parse — same steps as parsePolish23AdSpec but names WHY it failed.
+      const diag = diagnosePolish23AdSpecParseFailure(r.text);
+      if (!diag.ok) {
+        console.warn(
+          `[polish-23-worker Step A] Claude ad-spec parse failed: reason=${diag.reason} ` +
+            `detail=${diag.detail ?? '(none)'}. Falling back to Linda anchor + stock ad. ` +
+            'Full fallback fires: character_lock + segments come paired from fallbackPolish23AdSpec().',
         );
         return fallbackPolish23AdSpec();
       }
       console.log(
-        `[polish-23-worker] Claude ad-spec parsed: character=${parsed.character_lock.name} ` +
-          `age=${parsed.character_lock.age} segments=${parsed.segments.length}`,
+        `[polish-23-worker Step A] Claude ad-spec parsed: character=${diag.data.character_lock.name} ` +
+          `age=${diag.data.character_lock.age} segments=${diag.data.segments.length}`,
       );
-      return parsed;
+      return diag.data;
     });
+
+    // Polish-23 Commit 3.0.1: pre-Step-C invariant guard. Any drift
+    // between Step A's return and Step C's read (Inngest cache
+    // mismatch, in-memory mutation, schema loosening in a future
+    // commit) fails HERE with a named segment index instead of at
+    // Veo submit with an opaque "Please enter prompt". First live
+    // test at Commit 3 surfaced this exact class of failure — the
+    // guard closes the loop.
+    try {
+      assertAllSegmentsValid(adSpec.segments);
+      if (adSpec.character_lock == null || typeof adSpec.character_lock.name !== 'string') {
+        throw new Error(
+          '[polish-23-worker] AdSpec.character_lock is missing or malformed. Refusing to proceed.',
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[polish-23-worker Step A → invariant guard] ${msg}`);
+      await markJobFailed(jobId, userId, msg, 0);
+      return { jobId, mode, generated: 0 };
+    }
 
     // Persist character_lock + segments to job.metadata + progress bump.
     await step.run('persist-ad-spec', async () => {

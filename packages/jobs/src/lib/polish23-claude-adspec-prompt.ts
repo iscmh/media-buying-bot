@@ -140,28 +140,128 @@ Emit the JSON object per the schema above.`;
  * returns null — the caller wholesale-falls-back to the Linda
  * anchor + a stock 8-segment scaffold so the pipeline can still
  * ship a first live variant while operator iterates on the prompt.
+ *
+ * Polish-23 Commit 3.0.1: to diagnose parse failures without a
+ * redeploy, callers should ALSO run diagnosePolish23AdSpecParseFailure
+ * with the same text and log the returned reason. That helper
+ * mirrors this function's steps and names the specific failure mode
+ * (empty / no-JSON-braces / json-parse-error / schema-mismatch)
+ * without changing this function's { AdSpec | null } signature — the
+ * existing callers + tests keep working.
  */
 export function parsePolish23AdSpec(claudeText: string | undefined | null): AdSpec | null {
-  if (!claudeText) return null;
+  const diag = diagnosePolish23AdSpecParseFailure(claudeText);
+  return diag.ok ? diag.data : null;
+}
 
-  // Strip markdown fences if present.
+/**
+ * Polish-23 Commit 3.0.1: diagnostic-quality parse. Same steps as
+ * parsePolish23AdSpec, but the return shape names WHY parsing failed.
+ * Step A's worker logs the reason so a future parse failure is
+ * traceable in Inngest without a redeploy.
+ *
+ * Failure modes:
+ *   - 'empty'              — claudeText was null / undefined / ''
+ *   - 'no-json-braces'     — no {...} substring found
+ *   - 'json-parse-error'   — the JSON.parse call threw (syntax error)
+ *   - 'schema-mismatch'    — JSON parsed but Zod rejected (missing
+ *                            fields, wrong segment count, out-of-range
+ *                            enum, etc.); `detail` carries the first
+ *                            few zod issues so the operator can see
+ *                            which schema field caused the reject
+ */
+export type DiagnosePolish23AdSpecResult =
+  | { ok: true; data: AdSpec }
+  | {
+      ok: false;
+      reason: 'empty' | 'no-json-braces' | 'json-parse-error' | 'schema-mismatch';
+      detail?: string;
+    };
+
+export function diagnosePolish23AdSpecParseFailure(
+  claudeText: string | undefined | null,
+): DiagnosePolish23AdSpecResult {
+  if (!claudeText) return { ok: false, reason: 'empty' };
+
   const fenceStripped = claudeText.replace(/^\s*```(?:json)?\s*/i, '').replace(/```\s*$/i, '');
 
-  // Grab the first {...} substring — Claude sometimes prefaces with
-  // "Here is the JSON:" no matter what the system prompt says.
   const firstBrace = fenceStripped.indexOf('{');
   const lastBrace = fenceStripped.lastIndexOf('}');
-  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    return { ok: false, reason: 'no-json-braces' };
+  }
   const jsonCandidate = fenceStripped.slice(firstBrace, lastBrace + 1);
 
   let raw: unknown;
   try {
     raw = JSON.parse(jsonCandidate);
-  } catch {
-    return null;
+  } catch (e) {
+    return {
+      ok: false,
+      reason: 'json-parse-error',
+      detail: (e as Error).message.slice(0, 400),
+    };
   }
   const parsed = AdSpecSchema.safeParse(raw);
-  return parsed.success ? parsed.data : null;
+  if (!parsed.success) {
+    // Surface the first 3 zod issues so operators see exactly which
+    // schema field mismatched (e.g. "segments must contain exactly 8
+    // element(s)"). Keeps log lines readable.
+    const issues = parsed.error.issues.slice(0, 3).map((i) => {
+      const path = i.path.join('.') || '(root)';
+      return `${path}: ${i.message}`;
+    });
+    return {
+      ok: false,
+      reason: 'schema-mismatch',
+      detail: issues.join(' | ').slice(0, 800),
+    };
+  }
+  return { ok: true, data: parsed.data };
+}
+
+/**
+ * Polish-23 Commit 3.0.1: runtime invariant guard used pre-Step-C.
+ * A parseable-but-drifted AdSpec (e.g. the schema loosens in a
+ * future release, or an in-memory mutation slips through) would
+ * fail loudly at Veo-submit time with "Please enter prompt". This
+ * assertion catches the drift BEFORE Veo credits are spent and
+ * names the exact segment index that's malformed.
+ */
+export function assertAllSegmentsValid(segments: SegmentSpec[]): void {
+  if (!Array.isArray(segments)) {
+    throw new Error(
+      `[polish-23-worker] AdSpec.segments is not an array (${typeof segments}). ` +
+        'Falling back to stock ad prevented; upstream drift.',
+    );
+  }
+  if (segments.length !== POLISH23_SEGMENT_COUNT) {
+    throw new Error(
+      `[polish-23-worker] AdSpec.segments length ${segments.length} !== ${POLISH23_SEGMENT_COUNT}. ` +
+        'Falling back to stock ad prevented; upstream drift.',
+    );
+  }
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg == null) {
+      throw new Error(
+        `[polish-23-worker] AdSpec.segments[${i}] is ${seg === null ? 'null' : 'undefined'}. ` +
+          'Refusing to submit Veo with an empty prompt.',
+      );
+    }
+    if (typeof seg.dialogue !== 'string' || seg.dialogue.trim().length === 0) {
+      throw new Error(
+        `[polish-23-worker] AdSpec.segments[${i}].dialogue is empty or non-string. ` +
+          'Refusing to submit Veo with an empty prompt.',
+      );
+    }
+    if (typeof seg.sceneDirection !== 'string' || seg.sceneDirection.trim().length === 0) {
+      throw new Error(
+        `[polish-23-worker] AdSpec.segments[${i}].sceneDirection is empty or non-string. ` +
+          'Refusing to submit Veo with an empty scene direction.',
+      );
+    }
+  }
 }
 
 /**

@@ -23,7 +23,9 @@ import {
   AdSpecSchema,
   POLISH23_CLIP_SECONDS,
   POLISH23_SEGMENT_COUNT,
+  assertAllSegmentsValid,
   composePolish23AdSpecUserPrompt,
+  diagnosePolish23AdSpecParseFailure,
   fallbackPolish23AdSpec,
   parsePolish23AdSpec,
 } from '../src/lib/polish23-claude-adspec-prompt';
@@ -202,6 +204,134 @@ describe('Polish-23 Commit 3: worker registration — the miss-once-caught tripw
     // Identity check by reference — avoids Inngest SDK's private
     // `id` getter shape drift across versions.
     expect(functions).toContain(generatePolish23VeoLite);
+  });
+});
+
+describe('Polish-23 Commit 3.0.1: diagnosePolish23AdSpecParseFailure — names WHY parsing failed', () => {
+  function validJson(): string {
+    return JSON.stringify(fallbackPolish23AdSpec());
+  }
+
+  it("empty / null / undefined → reason='empty'", () => {
+    for (const bad of ['', null, undefined]) {
+      const r = diagnosePolish23AdSpecParseFailure(bad);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe('empty');
+    }
+  });
+
+  it("prose with no braces → reason='no-json-braces'", () => {
+    const r = diagnosePolish23AdSpecParseFailure('I am not going to write JSON for you.');
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('no-json-braces');
+  });
+
+  it("malformed JSON inside braces → reason='json-parse-error' + detail carries the parser message", () => {
+    const r = diagnosePolish23AdSpecParseFailure('{ "character_lock": { ,,, invalid ,,, } }');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe('json-parse-error');
+      expect(r.detail).toBeDefined();
+      expect(r.detail!.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("Claude returns valid JSON but wrong segment count → reason='schema-mismatch' + detail names the field", () => {
+    const spec = fallbackPolish23AdSpec();
+    const bad = { ...spec, segments: spec.segments.slice(0, 6) };
+    const r = diagnosePolish23AdSpecParseFailure(JSON.stringify(bad));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe('schema-mismatch');
+      expect(r.detail).toMatch(/segments/i);
+    }
+  });
+
+  it("Claude returns valid JSON but character_lock missing fields → reason='schema-mismatch' + detail names the field", () => {
+    const spec = fallbackPolish23AdSpec();
+    const bad = { ...spec, character_lock: { name: 'X' } };
+    const r = diagnosePolish23AdSpecParseFailure(JSON.stringify(bad));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toBe('schema-mismatch');
+      expect(r.detail).toMatch(/character_lock/);
+    }
+  });
+
+  it('success → ok:true carries the parsed AdSpec (character_lock + segments both populated)', () => {
+    const r = diagnosePolish23AdSpecParseFailure(validJson());
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data.character_lock.name).toBeTruthy();
+      expect(r.data.segments).toHaveLength(POLISH23_SEGMENT_COUNT);
+    }
+  });
+
+  it('parsePolish23AdSpec remains a { AdSpec | null } shim over the diagnose helper (existing callers keep working)', () => {
+    // Regression pin — anyone importing parsePolish23AdSpec still
+    // gets the pre-Commit-3.0.1 signature.
+    expect(parsePolish23AdSpec(validJson())).not.toBeNull();
+    expect(parsePolish23AdSpec('nope')).toBeNull();
+  });
+});
+
+describe('Polish-23 Commit 3.0.1: assertAllSegmentsValid — pre-Step-C invariant guard', () => {
+  it('passes on a full 8-segment fallback ad-spec', () => {
+    expect(() => assertAllSegmentsValid(fallbackPolish23AdSpec().segments)).not.toThrow();
+  });
+
+  it('throws on non-array (drift signal — schema was loosened somewhere)', () => {
+    expect(() => assertAllSegmentsValid('not-an-array' as never)).toThrow(/not an array/);
+    expect(() => assertAllSegmentsValid(null as never)).toThrow(/not an array/);
+  });
+
+  it('throws on wrong length + names the actual length in the message', () => {
+    const short = fallbackPolish23AdSpec().segments.slice(0, 5);
+    expect(() => assertAllSegmentsValid(short)).toThrow(/length 5 !== 8/);
+  });
+
+  it('throws on undefined / null entry + names the offending index (would have caught the Commit 3 first-live failure)', () => {
+    const spec = fallbackPolish23AdSpec();
+    const badUndef = [...spec.segments];
+    badUndef[0] = undefined as never;
+    expect(() => assertAllSegmentsValid(badUndef)).toThrow(/segments\[0\] is undefined/);
+
+    const badNull = [...spec.segments];
+    badNull[3] = null as never;
+    expect(() => assertAllSegmentsValid(badNull)).toThrow(/segments\[3\] is null/);
+  });
+
+  it('throws on empty dialogue string + names the field', () => {
+    const spec = fallbackPolish23AdSpec();
+    const bad = [...spec.segments];
+    bad[2] = { ...bad[2]!, dialogue: '   ' };
+    expect(() => assertAllSegmentsValid(bad)).toThrow(/segments\[2\]\.dialogue is empty/);
+  });
+
+  it('throws on empty sceneDirection + names the field', () => {
+    const spec = fallbackPolish23AdSpec();
+    const bad = [...spec.segments];
+    bad[5] = { ...bad[5]!, sceneDirection: '' };
+    expect(() => assertAllSegmentsValid(bad)).toThrow(/segments\[5\]\.sceneDirection is empty/);
+  });
+});
+
+describe('Polish-23 Commit 3.0.1: fallback pairs character_lock + segments (regression pin)', () => {
+  it('fallbackPolish23AdSpec always returns BOTH fields — worker cannot land segments=undefined', () => {
+    // Commit 3.0.1 diagnosis note: the operator's first-live report
+    // suggested character_lock was set but segments was undefined.
+    // This pin proves the fallback shape can't produce that state —
+    // if the runtime observed it, the drift happened AFTER Step A
+    // return, which the assertAllSegmentsValid guard now catches.
+    const spec = fallbackPolish23AdSpec();
+    expect(spec.character_lock).toBeDefined();
+    expect(spec.character_lock.name).toBe('Linda');
+    expect(spec.segments).toBeDefined();
+    expect(spec.segments).toHaveLength(8);
+    for (const seg of spec.segments) {
+      expect(seg.dialogue.trim().length).toBeGreaterThan(0);
+      expect(seg.sceneDirection.trim().length).toBeGreaterThan(0);
+    }
   });
 });
 

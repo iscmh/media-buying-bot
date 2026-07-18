@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.7';
+export const POLISH_VERSION = '23.0.8';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.7';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.5 — form picker card + pipeline-route dispatch';
+  'Polish-23 Commit 3.0.1 — parse-failure diagnostics + segment invariant guard';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
