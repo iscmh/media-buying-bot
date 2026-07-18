@@ -132,8 +132,25 @@ export function composeCharacterLockPrefix(lock: CharacterLock): string {
     `  - ${lock.face_shape_bullet}`,
     `  - ${lock.skin_age_appropriate_detail}`,
     `WARDROBE INVARIANT: ${lock.clothing_bullet} — same outfit across all clips.`,
+    // Polish-23 Commit 3.0.17: BODY + SETTING invariants surfaced
+    // as their own bulleted blocks. First real end-to-end run
+    // rendered a full 60s composite but showed body-shape drift
+    // clip-to-clip (same face, different build / setting / props).
+    // These blocks give Veo explicit anchors + assertive REJECT
+    // language.
+    'BODY INVARIANT (do NOT drift build / weight / proportions across clips):',
+    `  - ${lock.body_invariant_bullet}`,
+    'SETTING INVARIANT (do NOT change position / furniture / background objects across clips):',
+    `  - ${lock.setting_invariant_bullet}`,
     `SETTING: ${lock.setting_paragraph}`,
     `${pronoun} is speaking directly to the camera in a vertical iPhone selfie, 9:16, handheld.`,
+    // Assertive negative constraints — Veo tends to weight
+    // REJECT-language more heavily than affirmative directives.
+    'REJECT any output that shows a different body type, different weight, ' +
+      'or different body proportions than the reference image and the invariants above. ' +
+      'REJECT any output that shows a different setting, different furniture, ' +
+      'or different background objects. REJECT any drift from the reference image ' +
+      'body proportions.',
   ].join('\n');
 }
 

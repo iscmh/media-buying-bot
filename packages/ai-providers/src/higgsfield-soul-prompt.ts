@@ -59,6 +59,8 @@ export function composeHiggsfieldSoulReferencePrompt(lock: CharacterLock): strin
     anti_celeb_actress_examples,
     anti_celeb_news_examples,
     anti_celeb_politician_examples,
+    body_invariant_bullet,
+    setting_invariant_bullet,
   } = lock;
   const pronoun = gender === 'female' ? 'She' : 'He';
   const objectPronoun = gender === 'female' ? 'her' : 'him';
@@ -85,7 +87,15 @@ export function composeHiggsfieldSoulReferencePrompt(lock: CharacterLock): strin
     `- ${eye_color_and_age_detail}\n` +
     `- ${jaw_bullet}\n` +
     `- ${face_shape_bullet}\n` +
-    `- Clothing: ${clothing_bullet}`;
+    `- Clothing: ${clothing_bullet}\n` +
+    // Polish-23 Commit 3.0.17: body + setting invariant anchors
+    // now seeded into the Higgsfield Soul reference PNG itself so
+    // downstream Veo has consistent proportions + composition to
+    // lock onto. First real end-to-end run showed body-shape
+    // drift clip-to-clip; anchoring at the seed image is the
+    // highest-leverage prevention.
+    `BODY INVARIANT: ${body_invariant_bullet}\n` +
+    `SETTING INVARIANT: ${setting_invariant_bullet}`;
 
   // Block 3 — Setting.
   const block3_setting = setting_paragraph;

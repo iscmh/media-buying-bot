@@ -32,6 +32,10 @@ const VALID: CharacterLock = {
   anti_celeb_actress_examples: ['Meryl Streep', 'Helen Mirren', 'Jane Fonda', 'Diane Keaton'],
   anti_celeb_news_examples: ['Barbara Walters', 'Diane Sawyer'],
   anti_celeb_politician_examples: ['Nancy Pelosi', 'Hillary Clinton'],
+  body_invariant_bullet:
+    'Medium build, average weight for a 42-year-old man, moderate shoulder width — SAME weight, SAME body proportions, SAME shoulder width across every clip.',
+  setting_invariant_bullet:
+    'Seated at a home-office desk with a black ceramic coffee mug in front of him, cool morning window light from off-camera left — SAME chair, SAME desk position, SAME mug placement across every clip.',
 };
 
 describe('Polish-23 Commit 1: CharacterLock type + schema shape', () => {
@@ -43,7 +47,9 @@ describe('Polish-23 Commit 1: CharacterLock type + schema shape', () => {
     const parsed = CharacterLockSchema.safeParse(VALID);
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-    // All 19 fields present.
+    // All 21 fields present (Polish-23 Commit 3.0.17: added
+    // body_invariant_bullet + setting_invariant_bullet to prevent
+    // cross-clip drift observed in first real end-to-end run).
     expect(Object.keys(parsed.data).sort()).toEqual(
       [
         'name',
@@ -65,6 +71,8 @@ describe('Polish-23 Commit 1: CharacterLock type + schema shape', () => {
         'anti_celeb_actress_examples',
         'anti_celeb_news_examples',
         'anti_celeb_politician_examples',
+        'body_invariant_bullet',
+        'setting_invariant_bullet',
       ].sort(),
     );
   });

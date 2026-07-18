@@ -103,6 +103,33 @@ export interface CharacterLock {
   anti_celeb_news_examples: string[];
   /** 4-6 political figures / spouses the face MUST NOT resemble. */
   anti_celeb_politician_examples: string[];
+  /**
+   * Polish-23 Commit 3.0.17: BODY INVARIANT.
+   * First real end-to-end run rendered a full 60s composite but
+   * showed body-shape drift across clips (same face, different
+   * build / weight / proportions clip-to-clip). Adding an explicit
+   * body-invariant bullet threaded into every clip's CHARACTER
+   * LOCK prefix + into the Higgsfield Soul reference prompt so
+   * Veo has a hard anchor to reject drift on.
+   *
+   * Format: leads with "- " like the other bullets. Example:
+   * "- Medium build, waist-up framing, same weight and body
+   *   proportions across every clip"
+   */
+  body_invariant_bullet: string;
+  /**
+   * Polish-23 Commit 3.0.17: SETTING INVARIANT.
+   * Same class of drift as body_invariant_bullet but for the
+   * environment / seating position / background props. Naming a
+   * specific position AND naming the specific props visible in
+   * the background gives Veo hard anchors on both.
+   *
+   * Example: "- Seated at her kitchen table with a ceramic
+   *   coffee mug in front of her, morning window light from
+   *   off-camera right, same position and background across
+   *   every clip"
+   */
+  setting_invariant_bullet: string;
 }
 
 /**
@@ -137,6 +164,10 @@ export const CharacterLockSchema: z.ZodType<CharacterLock> = z.object({
   anti_celeb_actress_examples: z.array(z.string().min(1)).min(4),
   anti_celeb_news_examples: z.array(z.string().min(1)).min(2),
   anti_celeb_politician_examples: z.array(z.string().min(1)).min(2),
+  // Polish-23 Commit 3.0.17: body + setting invariants for
+  // cross-clip drift lock.
+  body_invariant_bullet: z.string().min(1),
+  setting_invariant_bullet: z.string().min(1),
 });
 
 /**
@@ -195,6 +226,10 @@ export const FALLBACK_CHARACTER_LOCK: CharacterLock = {
     'Barbara Bush',
     'Michelle Obama',
   ],
+  body_invariant_bullet:
+    'Medium build, average weight for a 68-year-old woman, soft midsection and shoulders — SAME weight, SAME body proportions, SAME shoulder width across every clip. NO changes in build clip-to-clip.',
+  setting_invariant_bullet:
+    'Seated upright at her suburban kitchen table with a white ceramic coffee mug placed in front of her, morning window light from off-camera right — SAME chair, SAME table position, SAME mug placement, SAME window-light direction across every clip. NO shift in setting or furniture.',
 };
 
 /**

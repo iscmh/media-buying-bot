@@ -78,7 +78,9 @@ OUTPUT: ONE JSON object, no prose, no markdown fences, matching this schema:
     "skin_color_for_stubble": "none" | "black" | "brown" | "blonde" | "gray",
     "anti_celeb_actress_examples": string[],   // 8-12 famous names Claude MUST steer AWAY from
     "anti_celeb_news_examples": string[],      // 4-6 news-anchor names
-    "anti_celeb_politician_examples": string[] // 2-4 politician names
+    "anti_celeb_politician_examples": string[], // 2-4 politician names
+    "body_invariant_bullet": string,           // one sentence: build + weight + shoulder width. Leads with body type words: "Medium build, average weight for age…". Includes "SAME weight, SAME body proportions across every clip." NO changes clip-to-clip.
+    "setting_invariant_bullet": string         // one sentence: SPECIFIC seated position + SPECIFIC visible background objects + SPECIFIC light direction. Example: "Seated upright at kitchen table with a white ceramic coffee mug in front of her, morning window light from off-camera right — SAME chair, SAME table position, SAME mug placement across every clip."
   },
   "segments": [
     // EXACTLY 8 items.
@@ -99,6 +101,12 @@ CHARACTER RULES:
 - Physical features must be deliberately asymmetric and ordinary.
   Bullets lead with "- " so downstream composers can splice them
   verbatim into image-model prompts.
+- body_invariant_bullet and setting_invariant_bullet MUST include
+  the word "SAME" AT LEAST TWICE — they're the anchors that
+  prevent clip-to-clip drift (first end-to-end Polish-23 run
+  showed body-shape + setting drift). Repeat "SAME weight, SAME
+  proportions" and "SAME chair, SAME position" verbatim in these
+  fields. Downstream Veo weights REPETITION heavily.
 
 SEGMENT RULES:
 - EXACTLY 8 segments. Not 7, not 9.
