@@ -471,6 +471,36 @@ export function mapKieVeoSuccessFlag(
   return null;
 }
 
+/**
+ * Polish-23 Commit 3.0.22: kie.ai's Veo endpoint intermittently
+ * returns a poll body with a fail-looking successFlag AND an
+ * errorMessage that's textbook transient noise — "Internal Error,
+ * Please try again later" being the exemplar from job 02544a64.
+ * These are NOT terminal; the same taskId polled 20-45 seconds
+ * later usually recovers.
+ *
+ * Substrings are matched case-insensitively. Ordering matters only
+ * for docs, not correctness (any hit wins). Kept EXPORTED so the
+ * test suite can pin the exact list.
+ *
+ * errorCode presence still overrides — a real failure code beats
+ * any transient phrasing (see caller in pollKieVeoLite).
+ */
+export const KIE_VEO_TRANSIENT_ERROR_MESSAGE_PATTERNS: readonly string[] = [
+  'internal error',
+  'try again later',
+  'service temporarily unavailable',
+  'timeout',
+  'queue full',
+  'rate limit',
+];
+
+export function isKieVeoTransientErrorMessage(errorMessage: unknown): boolean {
+  if (typeof errorMessage !== 'string' || errorMessage.length === 0) return false;
+  const lower = errorMessage.toLowerCase();
+  return KIE_VEO_TRANSIENT_ERROR_MESSAGE_PATTERNS.some((p) => lower.includes(p));
+}
+
 export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPollResult> {
   const result = await callProvider<KieVeoPollResponse>({
     userId: input.userId,
@@ -528,11 +558,30 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
   // successFlag interpretation (see mapKieVeoSuccessFlag comment).
   // Belt-and-suspenders: also accept the legacy `state` string field
   // in case kie.ai regresses the schema back to the old shape.
-  const state: KieVeoState | null =
+  let state: KieVeoState | null =
     mapKieVeoSuccessFlag(data.successFlag, data.errorCode) ??
     (data.state === 'waiting' || data.state === 'success' || data.state === 'fail'
       ? data.state
       : null);
+
+  // Polish-23 Commit 3.0.22: transient errorMessage downgrade. If
+  // state resolves to 'fail' but errorCode is empty AND errorMessage
+  // matches a known kie.ai transient pattern ("Internal Error,
+  // Please try again later" being the exemplar), downgrade to
+  // 'waiting' so the poll loop keeps going instead of firing
+  // NonRetriableError. errorCode override STILL wins — if kie.ai
+  // gave us a real failure code, we respect it regardless of
+  // errorMessage phrasing.
+  const hasErrorCode =
+    (typeof data.errorCode === 'string' && data.errorCode.length > 0 && data.errorCode !== '0') ||
+    (typeof data.errorCode === 'number' && data.errorCode !== 0);
+  if (state === 'fail' && !hasErrorCode && isKieVeoTransientErrorMessage(data.errorMessage)) {
+    console.warn(
+      `[kie-veo] taskId=${input.taskId} state=fail DOWNGRADED to waiting: ` +
+        `errorMessage matches transient pattern (${JSON.stringify(data.errorMessage).slice(0, 200)})`,
+    );
+    state = 'waiting';
+  }
 
   // Polish-23 Commit 3.0.21: loud-log every poll's raw successFlag +
   // errorCode alongside the interpreted state. Grep-friendly single

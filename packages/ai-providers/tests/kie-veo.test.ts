@@ -26,6 +26,8 @@ import {
   classifyKieVeoErrorKind,
   computeKieVeoRateLimitBackoffMs,
   detectKieVeoRateLimit,
+  isKieVeoTransientErrorMessage,
+  KIE_VEO_TRANSIENT_ERROR_MESSAGE_PATTERNS,
   mapKieVeoSuccessFlag,
   estimateKieVeoLiteClipCostUsd,
   extractVeoOutputUrl,
@@ -384,6 +386,129 @@ describe('Polish-23 Commit 3.0.21: mapKieVeoSuccessFlag — verified live decode
     expect(mapKieVeoSuccessFlag(undefined)).toBe(null);
     expect(mapKieVeoSuccessFlag('1')).toBe(null); // strict numeric — no coercion
     expect(mapKieVeoSuccessFlag(-1)).toBe(null);
+  });
+});
+
+describe('Polish-23 Commit 3.0.22: isKieVeoTransientErrorMessage — pattern matcher', () => {
+  it('matches the operator-specified patterns case-insensitively', () => {
+    expect(isKieVeoTransientErrorMessage('Internal Error, Please try again later')).toBe(true);
+    expect(isKieVeoTransientErrorMessage('INTERNAL ERROR')).toBe(true);
+    expect(isKieVeoTransientErrorMessage('service temporarily unavailable')).toBe(true);
+    expect(isKieVeoTransientErrorMessage('Service Temporarily Unavailable')).toBe(true);
+    expect(isKieVeoTransientErrorMessage('Timeout waiting for GPU')).toBe(true);
+    expect(isKieVeoTransientErrorMessage('Queue full — retry shortly')).toBe(true);
+    expect(isKieVeoTransientErrorMessage('Rate limit hit')).toBe(true);
+    expect(isKieVeoTransientErrorMessage('Please try again later')).toBe(true);
+  });
+  it('exposes the exact pattern list so tests + operator SQL know the surface', () => {
+    // Regression pin: any addition/removal of a pattern must be
+    // deliberate — production interpretation of kie.ai flakiness
+    // hinges on this list.
+    expect(KIE_VEO_TRANSIENT_ERROR_MESSAGE_PATTERNS).toEqual([
+      'internal error',
+      'try again later',
+      'service temporarily unavailable',
+      'timeout',
+      'queue full',
+      'rate limit',
+    ]);
+  });
+  it('does NOT match genuine terminal errors', () => {
+    expect(isKieVeoTransientErrorMessage('Content policy violation')).toBe(false);
+    expect(isKieVeoTransientErrorMessage('Invalid prompt')).toBe(false);
+    expect(isKieVeoTransientErrorMessage('Insufficient balance')).toBe(false);
+    expect(isKieVeoTransientErrorMessage('Authentication failed')).toBe(false);
+    expect(isKieVeoTransientErrorMessage('')).toBe(false);
+    expect(isKieVeoTransientErrorMessage(null)).toBe(false);
+    expect(isKieVeoTransientErrorMessage(undefined)).toBe(false);
+    expect(isKieVeoTransientErrorMessage(42)).toBe(false);
+    expect(isKieVeoTransientErrorMessage({ msg: 'internal error' })).toBe(false);
+  });
+});
+
+describe('Polish-23 Commit 3.0.22: pollKieVeoLite — transient errorMessage DOWNGRADE integration', () => {
+  it("successFlag=2 + errorMessage='Internal Error, Please try again later' + errorCode=null → state='waiting' (DOWNGRADED)", async () => {
+    // This is the EXACT failure body from job 02544a64 (operator's
+    // production evidence). Under 3.0.21 this already returned
+    // 'waiting' via mapKieVeoSuccessFlag; under 3.0.22 it stays
+    // 'waiting' AND the downgrade path is a defense-in-depth
+    // even if successFlag drifts to a value the flag mapper
+    // treats as fail.
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          taskId: 'veo3_lite_task_02544a64',
+          successFlag: 2,
+          errorMessage: 'Internal Error, Please try again later',
+          errorCode: null,
+          response: null,
+        },
+      },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't-02544a64' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('waiting');
+  });
+  it("successFlag=4 + errorMessage='Service temporarily unavailable' + errorCode=null → state='waiting' (DOWNGRADED)", async () => {
+    // Belt-and-suspenders pin: even the successFlag≥4 fail branch
+    // gets the transient downgrade when errorMessage matches.
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          successFlag: 4,
+          errorMessage: 'Service temporarily unavailable',
+          errorCode: null,
+        },
+      },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('waiting');
+  });
+  it("successFlag=4 + errorMessage='Content policy violation' + errorCode=null → state='fail' (NOT downgraded)", async () => {
+    // Non-transient errorMessage — the fail stays terminal so the
+    // worker's clip-level auto-retry (Commit 3.0.22 Part 2) can
+    // decide whether to resubmit.
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          successFlag: 4,
+          errorMessage: 'Content policy violation',
+          errorCode: null,
+        },
+      },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('fail');
+    expect(r.errorKind).toBe('terminal');
+  });
+  it("errorCode='CONTENT_POLICY' + errorMessage='Internal Error' → state='fail' (errorCode OVERRIDES pattern)", async () => {
+    // Regression pin per operator spec: "errorCode always overrides
+    // (agent's existing pattern from 3.0.21)". A real errorCode
+    // beats any transient phrasing.
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: {
+          successFlag: 2,
+          errorMessage: 'Internal Error, Please try again later',
+          errorCode: 'CONTENT_POLICY',
+        },
+      },
+    });
+    const r = await pollKieVeoLite({ userId: 'u', apiKey: 'k', taskId: 't' });
+    expect(r.ok).toBe(true);
+    expect(r.state).toBe('fail');
+    expect(r.errorKind).toBe('terminal');
+    expect(r.failCode).toBe('CONTENT_POLICY');
   });
 });
 

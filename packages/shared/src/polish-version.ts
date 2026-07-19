@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.28';
+export const POLISH_VERSION = '23.0.29';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.28';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.21 — successFlag 0/2/3 all → waiting, errorCode override, 30-attempt cap';
+  'Polish-23 Commit 3.0.22 — transient errorMessage downgrade + clip-level auto-retry ×2 + polish23_clip_retries[]';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

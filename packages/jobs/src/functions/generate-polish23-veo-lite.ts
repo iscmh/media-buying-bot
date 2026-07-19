@@ -974,31 +974,46 @@ export const generatePolish23VeoLite = inngest.createFunction(
           .where(eq(schema.generationJobs.id, jobId));
       });
 
-      // Polish-23 Commit 3.0.20: submit is now its OWN step.run so
-      // the poll loop can live outside any single Vercel invocation.
-      // Each poll runs in its own invocation between step.sleep
-      // gates, so total wait per clip stretches to ~13 min without
-      // any single serverless handler exceeding the platform's 300s
-      // timeout.
-      let submitResult:
-        | { ok: true; taskId: string }
-        | { ok: false; terminal: boolean; message: string };
-      try {
-        submitResult = await step.run(`veo-clip-${i}-submit`, async () => {
-          const keys = await loadDecryptedKeys(userId, ['kie_ai']);
-          const submit = await submitKieVeoLite({
-            userId,
-            apiKey: keys.kie_ai!,
-            prompt: truncated.prompt,
-            aspectRatio: '9:16',
-            imageUrls: [soulRefUrl],
-            durationSeconds: POLISH23_CLIP_SECONDS,
-            generationJobId: jobId,
-          });
-          if (!submit.ok || !submit.taskId) {
-            // Persist kie.ai's raw error response BEFORE returning
-            // failure so SQL forensics beat log-diving. Idempotent —
-            // Inngest step caching guarantees single execution.
+      // Polish-23 Commit 3.0.22: outer clip-level auto-retry loop.
+      // On any TRUE terminal poll failure (state='fail' with a real
+      // errorCode, or a terminal errorKind poll error, or a poll
+      // timeout), automatically resubmit the clip as a fresh taskId
+      // — kie.ai sometimes gets a specific taskId stuck in a bad
+      // state that a resubmit clears.
+      //
+      // Cap: 2 auto-retries per clip (3 total attempts). Worst-case
+      // extra spend per clip = 2 × $0.175 = $0.35; per-generation
+      // worst case = 8 × 2 × $0.175 = $2.80 on top of nominal.
+      //
+      // Between attempts: 15s pause (via step.sleep) so kie.ai has
+      // a moment to settle.
+      //
+      // Note: SUBMIT-side terminal failures (auth / balance / invalid
+      // prompt) are NOT auto-retried — those never recover on the
+      // same input and would burn cycles for zero benefit. Only
+      // POLL-side terminals get the resubmit treatment, which is
+      // where kie.ai's flakiness actually surfaces.
+      const CLIP_MAX_RETRIES = 2;
+      const CLIP_RETRY_BACKOFF_SECONDS = 15;
+
+      let clipUrl: string | null = null;
+      let clipRetryChain: Array<{
+        segmentIndex: number;
+        retryCount: number;
+        lastTaskId: string;
+        lastErrorMessage: string | null;
+        firstFailureAt: string;
+        resolvedAt: string | null;
+      }> = [];
+      let firstFailureAt: string | null = null;
+      let lastFailureMessage = 'no failure recorded';
+
+      for (let attempt = 0; attempt <= CLIP_MAX_RETRIES; attempt++) {
+        // Persist retry-in-progress forensics + 15s settle pause
+        // BEFORE resubmitting (attempts > 0 only).
+        if (attempt > 0) {
+          const chainSnapshotBeforeRetry = clipRetryChain.slice();
+          await step.run(`veo-clip-${i}-retry-persist-r${attempt}`, async () => {
             try {
               const db = getDb();
               const row = await db.query.generationJobs.findFirst({
@@ -1006,186 +1021,340 @@ export const generatePolish23VeoLite = inngest.createFunction(
                 columns: { metadata: true },
               });
               const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+              const existing = Array.isArray(meta['polish23_clip_retries'])
+                ? (meta['polish23_clip_retries'] as unknown[]).filter(
+                    (e) =>
+                      !(
+                        e &&
+                        typeof e === 'object' &&
+                        (e as Record<string, unknown>)['segmentIndex'] === i
+                      ),
+                  )
+                : [];
               await db
                 .update(schema.generationJobs)
                 .set({
                   metadata: {
                     ...meta,
-                    polish23_veo_error_response: {
-                      segmentIndex: i,
-                      errorMessage: submit.errorMessage,
-                      errorKind: submit.errorKind,
-                      rawErrorBody: submit.rawErrorBody,
-                      at: new Date().toISOString(),
-                    },
+                    polish23_clip_retries: [...existing, ...chainSnapshotBeforeRetry],
                   },
                 })
                 .where(eq(schema.generationJobs.id, jobId));
             } catch (persistErr) {
               console.error(
-                `[polish-23-worker Step C] veo-clip-${i} kie-error persist failed: ` +
+                `[polish-23-worker Step C] veo-clip-${i} retry-persist r${attempt} failed: ` +
                   `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
               );
             }
-            return {
-              ok: false as const,
-              terminal: submit.errorKind === 'terminal',
-              message: submit.errorMessage ?? 'unknown',
-            };
-          }
-          return { ok: true as const, taskId: submit.taskId };
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(
-          `[polish-23-worker Step C] veo-clip-${i} submit step threw: ${msg}. ` +
-            `Ending job as failed.`,
-        );
-        await markJobFailed(jobId, userId, msg, 0);
-        return { jobId, mode, generated: 0 };
-      }
-      if (!submitResult.ok) {
-        const cls = submitResult.terminal ? 'terminal' : 'transient (no retry)';
-        const failMsg =
-          `Veo Lite clip ${i} submit ${cls}: ${submitResult.message}. ` +
-          `Function-level retry (retries: 1) may still fire for transient class.`;
-        console.error(`[polish-23-worker Step C] veo-clip-${i} submit failed: ${failMsg}`);
-        // Terminal → NonRetriable. Transient → regular Error so
-        // Inngest's function-level retry (retries: 1) takes one more
-        // whole-pipeline attempt.
-        if (submitResult.terminal) {
-          throw new NonRetriableError(failMsg);
-        }
-        throw new Error(failMsg);
-      }
-      const taskId = submitResult.taskId;
-
-      // -------- Sleep-poll loop --------
-      // Each poll body is its own step.run so it caches independently
-      // and runs in its own Vercel invocation. Between polls,
-      // step.sleep hands control back to Inngest, which re-invokes
-      // the function when the sleep expires. No single invocation
-      // exceeds the platform's serverless timeout even when total
-      // wait stretches to ~13 min.
-      let clipUrl: string | null = null;
-      let terminalFail: { code: string | null; msg: string | null } | null = null;
-      let terminalPollError: string | null = null;
-      for (let pollAttempt = 0; pollAttempt < VEO_POLL_MAX_ATTEMPTS; pollAttempt++) {
-        await step.sleep(
-          `veo-clip-${i}-wait-${pollAttempt}`,
-          `${computeVeoPollBackoffSeconds(pollAttempt)}s`,
-        );
-        const pollOutcome = await step.run(`veo-clip-${i}-poll-${pollAttempt}`, async () => {
-          const keys = await loadDecryptedKeys(userId, ['kie_ai']);
-          const poll = await pollKieVeoLite({
-            userId,
-            apiKey: keys.kie_ai!,
-            taskId,
-            generationJobId: jobId,
           });
-          const snapshot = {
-            ok: poll.ok,
-            state: poll.state ?? null,
-            outputUrl: poll.outputUrl ?? null,
-            failCode: poll.failCode ?? null,
-            failMsg: poll.failMsg ?? null,
-            errorMessage: poll.errorMessage ?? null,
-            errorKind: poll.errorKind ?? null,
-            costTimeMs: poll.costTimeMs ?? null,
-            latencyMs: poll.latencyMs,
-            rawResponseBody: poll.rawResponseBody ?? null,
-          };
-          // Loud-log stderr for Vercel Runtime Logs.
-          console.error(
-            `[polish-23-worker Step C] veo-clip-${i} poll-${pollAttempt} ` +
-              `ok=${snapshot.ok} state=${snapshot.state ?? 'null'} ` +
-              `errorMessage=${snapshot.errorMessage ?? 'null'} ` +
-              `rawBody=${JSON.stringify(snapshot.rawResponseBody ?? poll.rawErrorBody ?? null).slice(0, 2000)}`,
+          console.warn(
+            `[polish-23-worker Step C] veo-clip-${i} auto-retry r${attempt}/${CLIP_MAX_RETRIES}: ` +
+              `prior failure "${lastFailureMessage}". Sleeping ${CLIP_RETRY_BACKOFF_SECONDS}s ` +
+              `before fresh submit.`,
           );
-          // Persist poll response to metadata (append-safe). Reads
-          // current metadata + appends this poll + writes back. Each
-          // step.run body executes exactly once thanks to Inngest
-          // caching, so the append is idempotent.
-          try {
-            const db = getDb();
-            const row = await db.query.generationJobs.findFirst({
-              where: eq(schema.generationJobs.id, jobId),
-              columns: { metadata: true },
-            });
-            const meta = (row?.metadata ?? {}) as Record<string, unknown>;
-            const existing = Array.isArray(meta['polish23_veo_poll_responses'])
-              ? (meta['polish23_veo_poll_responses'] as unknown[])
-              : [];
-            await db
-              .update(schema.generationJobs)
-              .set({
-                metadata: {
-                  ...meta,
-                  polish23_veo_poll_responses: [
-                    ...existing,
-                    {
-                      segmentIndex: i,
-                      pollAttempt,
-                      at: new Date().toISOString(),
-                      poll: snapshot,
-                    },
-                  ],
-                },
-              })
-              .where(eq(schema.generationJobs.id, jobId));
-          } catch (persistErr) {
-            console.error(
-              `[polish-23-worker Step C] veo-clip-${i} poll-response persist failed: ` +
-                `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
-            );
-          }
-          return snapshot;
-        });
+          await step.sleep(
+            `veo-clip-${i}-retry-wait-r${attempt}`,
+            `${CLIP_RETRY_BACKOFF_SECONDS}s`,
+          );
+        }
 
-        if (!pollOutcome.ok) {
-          if (pollOutcome.errorKind === 'terminal') {
-            terminalPollError = pollOutcome.errorMessage ?? 'unknown';
+        // -------- Submit (per attempt) --------
+        let submitResult:
+          | { ok: true; taskId: string }
+          | { ok: false; terminal: boolean; message: string };
+        try {
+          submitResult = await step.run(`veo-clip-${i}-submit-r${attempt}`, async () => {
+            const keys = await loadDecryptedKeys(userId, ['kie_ai']);
+            const submit = await submitKieVeoLite({
+              userId,
+              apiKey: keys.kie_ai!,
+              prompt: truncated.prompt,
+              aspectRatio: '9:16',
+              imageUrls: [soulRefUrl],
+              durationSeconds: POLISH23_CLIP_SECONDS,
+              generationJobId: jobId,
+            });
+            if (!submit.ok || !submit.taskId) {
+              try {
+                const db = getDb();
+                const row = await db.query.generationJobs.findFirst({
+                  where: eq(schema.generationJobs.id, jobId),
+                  columns: { metadata: true },
+                });
+                const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+                await db
+                  .update(schema.generationJobs)
+                  .set({
+                    metadata: {
+                      ...meta,
+                      polish23_veo_error_response: {
+                        segmentIndex: i,
+                        attempt,
+                        errorMessage: submit.errorMessage,
+                        errorKind: submit.errorKind,
+                        rawErrorBody: submit.rawErrorBody,
+                        at: new Date().toISOString(),
+                      },
+                    },
+                  })
+                  .where(eq(schema.generationJobs.id, jobId));
+              } catch (persistErr) {
+                console.error(
+                  `[polish-23-worker Step C] veo-clip-${i} r${attempt} kie-error persist failed: ` +
+                    `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+                );
+              }
+              return {
+                ok: false as const,
+                terminal: submit.errorKind === 'terminal',
+                message: submit.errorMessage ?? 'unknown',
+              };
+            }
+            return { ok: true as const, taskId: submit.taskId };
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(
+            `[polish-23-worker Step C] veo-clip-${i} r${attempt} submit step threw: ${msg}. ` +
+              `Ending job as failed.`,
+          );
+          await markJobFailed(jobId, userId, msg, 0);
+          return { jobId, mode, generated: 0 };
+        }
+        if (!submitResult.ok) {
+          // Submit-side terminal failures are NOT auto-retried
+          // (auth / balance / invalid prompt won't recover on the
+          // same input). Transient submit failures throw regular
+          // Error so Inngest's function-level retry (retries: 1)
+          // takes one more whole-pipeline shot.
+          const cls = submitResult.terminal ? 'terminal' : 'transient';
+          const failMsg = `Veo Lite clip ${i} r${attempt} submit ${cls}: ${submitResult.message}`;
+          console.error(`[polish-23-worker Step C] ${failMsg}`);
+          if (submitResult.terminal) {
+            throw new NonRetriableError(failMsg);
+          }
+          throw new Error(failMsg);
+        }
+        const taskId = submitResult.taskId;
+
+        // -------- Sleep-poll loop (per attempt) --------
+        let terminalFail: { code: string | null; msg: string | null } | null = null;
+        let terminalPollError: string | null = null;
+        for (let pollAttempt = 0; pollAttempt < VEO_POLL_MAX_ATTEMPTS; pollAttempt++) {
+          await step.sleep(
+            `veo-clip-${i}-wait-r${attempt}-p${pollAttempt}`,
+            `${computeVeoPollBackoffSeconds(pollAttempt)}s`,
+          );
+          const pollOutcome = await step.run(
+            `veo-clip-${i}-poll-r${attempt}-p${pollAttempt}`,
+            async () => {
+              const keys = await loadDecryptedKeys(userId, ['kie_ai']);
+              const poll = await pollKieVeoLite({
+                userId,
+                apiKey: keys.kie_ai!,
+                taskId,
+                generationJobId: jobId,
+              });
+              const snapshot = {
+                ok: poll.ok,
+                state: poll.state ?? null,
+                outputUrl: poll.outputUrl ?? null,
+                failCode: poll.failCode ?? null,
+                failMsg: poll.failMsg ?? null,
+                errorMessage: poll.errorMessage ?? null,
+                errorKind: poll.errorKind ?? null,
+                costTimeMs: poll.costTimeMs ?? null,
+                latencyMs: poll.latencyMs,
+                rawResponseBody: poll.rawResponseBody ?? null,
+              };
+              console.error(
+                `[polish-23-worker Step C] veo-clip-${i} r${attempt} poll-${pollAttempt} ` +
+                  `ok=${snapshot.ok} state=${snapshot.state ?? 'null'} ` +
+                  `errorMessage=${snapshot.errorMessage ?? 'null'} ` +
+                  `rawBody=${JSON.stringify(snapshot.rawResponseBody ?? poll.rawErrorBody ?? null).slice(0, 2000)}`,
+              );
+              try {
+                const db = getDb();
+                const row = await db.query.generationJobs.findFirst({
+                  where: eq(schema.generationJobs.id, jobId),
+                  columns: { metadata: true },
+                });
+                const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+                const existing = Array.isArray(meta['polish23_veo_poll_responses'])
+                  ? (meta['polish23_veo_poll_responses'] as unknown[])
+                  : [];
+                await db
+                  .update(schema.generationJobs)
+                  .set({
+                    metadata: {
+                      ...meta,
+                      polish23_veo_poll_responses: [
+                        ...existing,
+                        {
+                          segmentIndex: i,
+                          attempt,
+                          pollAttempt,
+                          taskId,
+                          at: new Date().toISOString(),
+                          poll: snapshot,
+                        },
+                      ],
+                    },
+                  })
+                  .where(eq(schema.generationJobs.id, jobId));
+              } catch (persistErr) {
+                console.error(
+                  `[polish-23-worker Step C] veo-clip-${i} r${attempt} poll-persist failed: ` +
+                    `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+                );
+              }
+              return snapshot;
+            },
+          );
+
+          if (!pollOutcome.ok) {
+            if (pollOutcome.errorKind === 'terminal') {
+              terminalPollError = pollOutcome.errorMessage ?? 'unknown';
+              break;
+            }
+            console.warn(
+              `[polish-23-worker Step C] veo-clip-${i} r${attempt} poll-${pollAttempt} transient ` +
+                `(${pollOutcome.errorMessage ?? 'unknown'}); continuing.`,
+            );
+            continue;
+          }
+          if (pollOutcome.state === 'fail') {
+            terminalFail = {
+              code: pollOutcome.failCode,
+              msg: pollOutcome.failMsg,
+            };
             break;
           }
-          // Transient → keep polling (next sleep bracket).
-          console.warn(
-            `[polish-23-worker Step C] veo-clip-${i} poll-${pollAttempt} transient ` +
-              `(${pollOutcome.errorMessage ?? 'unknown'}); continuing.`,
-          );
-          continue;
+          if (pollOutcome.state === 'success' && pollOutcome.outputUrl) {
+            clipUrl = pollOutcome.outputUrl;
+            break;
+          }
         }
-        if (pollOutcome.state === 'fail') {
-          terminalFail = {
-            code: pollOutcome.failCode,
-            msg: pollOutcome.failMsg,
-          };
+
+        // -------- Outcome for this attempt --------
+        if (clipUrl !== null) {
+          // Success. If any prior attempts failed, mark the chain
+          // resolved and persist a final durable snapshot.
+          if (clipRetryChain.length > 0) {
+            const resolvedAt = new Date().toISOString();
+            clipRetryChain = clipRetryChain.map((e) => ({ ...e, resolvedAt }));
+            const resolvedSnapshot = clipRetryChain.slice();
+            await step.run(`veo-clip-${i}-resolve-persist`, async () => {
+              try {
+                const db = getDb();
+                const row = await db.query.generationJobs.findFirst({
+                  where: eq(schema.generationJobs.id, jobId),
+                  columns: { metadata: true },
+                });
+                const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+                const existing = Array.isArray(meta['polish23_clip_retries'])
+                  ? (meta['polish23_clip_retries'] as unknown[]).filter(
+                      (e) =>
+                        !(
+                          e &&
+                          typeof e === 'object' &&
+                          (e as Record<string, unknown>)['segmentIndex'] === i
+                        ),
+                    )
+                  : [];
+                await db
+                  .update(schema.generationJobs)
+                  .set({
+                    metadata: {
+                      ...meta,
+                      polish23_clip_retries: [...existing, ...resolvedSnapshot],
+                    },
+                  })
+                  .where(eq(schema.generationJobs.id, jobId));
+              } catch (persistErr) {
+                console.error(
+                  `[polish-23-worker Step C] veo-clip-${i} resolve-persist failed: ` +
+                    `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+                );
+              }
+            });
+            console.log(
+              `[polish-23-worker Step C] veo-clip-${i} recovered on attempt r${attempt} ` +
+                `after ${clipRetryChain.length} failure(s). resolvedAt=${resolvedAt}`,
+            );
+          }
           break;
         }
-        if (pollOutcome.state === 'success' && pollOutcome.outputUrl) {
-          clipUrl = pollOutcome.outputUrl;
-          break;
+
+        // Terminal failure on this attempt — record and decide.
+        const failMsg =
+          terminalPollError ??
+          terminalFail?.msg ??
+          terminalFail?.code ??
+          `poll timeout after ${VEO_POLL_MAX_ATTEMPTS} attempts (taskId=${taskId})`;
+        lastFailureMessage = failMsg;
+        if (firstFailureAt === null) firstFailureAt = new Date().toISOString();
+        clipRetryChain.push({
+          segmentIndex: i,
+          retryCount: attempt,
+          lastTaskId: taskId,
+          lastErrorMessage: failMsg,
+          firstFailureAt,
+          resolvedAt: null,
+        });
+
+        if (attempt === CLIP_MAX_RETRIES) {
+          // All attempts exhausted — final NonRetriable.
+          const finalChainSnapshot = clipRetryChain.slice();
+          await step.run(`veo-clip-${i}-final-fail-persist`, async () => {
+            try {
+              const db = getDb();
+              const row = await db.query.generationJobs.findFirst({
+                where: eq(schema.generationJobs.id, jobId),
+                columns: { metadata: true },
+              });
+              const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+              const existing = Array.isArray(meta['polish23_clip_retries'])
+                ? (meta['polish23_clip_retries'] as unknown[]).filter(
+                    (e) =>
+                      !(
+                        e &&
+                        typeof e === 'object' &&
+                        (e as Record<string, unknown>)['segmentIndex'] === i
+                      ),
+                  )
+                : [];
+              await db
+                .update(schema.generationJobs)
+                .set({
+                  metadata: {
+                    ...meta,
+                    polish23_clip_retries: [...existing, ...finalChainSnapshot],
+                  },
+                })
+                .where(eq(schema.generationJobs.id, jobId));
+            } catch (persistErr) {
+              console.error(
+                `[polish-23-worker Step C] veo-clip-${i} final-fail persist failed: ` +
+                  `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+              );
+            }
+          });
+          const finalMsg =
+            `Veo Lite clip ${i}: kie.ai failed ${CLIP_MAX_RETRIES + 1} times ` +
+            `(initial + ${CLIP_MAX_RETRIES} auto-retries). Last error: ${failMsg}`;
+          console.error(`[polish-23-worker Step C] ${finalMsg}`);
+          await markJobFailed(jobId, userId, finalMsg, 0);
+          throw new NonRetriableError(finalMsg);
         }
-        // Otherwise (waiting / queued) → next sleep bracket.
+        // else: loop back for next attempt (persist + sleep at top).
       }
 
-      if (terminalPollError !== null) {
-        const msg = `Veo Lite clip ${i} poll terminal failure: ${terminalPollError}`;
-        console.error(`[polish-23-worker Step C] ${msg}`);
-        await markJobFailed(jobId, userId, msg, 0);
-        throw new NonRetriableError(msg);
-      }
-      if (terminalFail !== null) {
-        const msg =
-          `Veo Lite clip ${i} kie.ai reported fail: ` +
-          `${terminalFail.msg ?? terminalFail.code ?? 'no reason given'}`;
-        console.error(`[polish-23-worker Step C] ${msg}`);
-        await markJobFailed(jobId, userId, msg, 0);
-        throw new NonRetriableError(msg);
-      }
       if (clipUrl === null) {
-        const msg =
-          `Veo Lite clip ${i} did not complete after ${VEO_POLL_MAX_ATTEMPTS} polls ` +
-          `(~20 min wait). taskId=${taskId}. Kie.ai likely stuck or overloaded.`;
+        // Unreachable — the retry loop either sets clipUrl or throws.
+        // Kept as a safety net so a control-flow regression can't
+        // silently push undefined into clipUrls.
+        const msg = `Veo Lite clip ${i}: unreachable state — retry loop exited without success or throw.`;
         console.error(`[polish-23-worker Step C] ${msg}`);
         await markJobFailed(jobId, userId, msg, 0);
         throw new NonRetriableError(msg);
