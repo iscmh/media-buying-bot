@@ -155,6 +155,21 @@ OUTPUT: ONE JSON object, no prose, no markdown fences, matching this schema:
   ]
 }
 
+PERSONA MIRROR PRIORITY (Polish-23 Commit 3.0.25):
+- If the user message starts with a "===== PERSONA MIRROR (HARD
+  CONSTRAINT) =====" block, that block is the AUTHORITATIVE source
+  of the character_lock's gender, age, ethnicity, look, and voice
+  tone. Read every "PER-FIELD REQUIREMENTS" bullet as a Zod-style
+  invariant — violate one and the downstream pipeline fails.
+- character_lock.gender in your output MUST equal the mirror's
+  gender field verbatim ("male" or "female"). No exceptions.
+- character_lock.age MUST fall inside the mirror's age_range.
+- character_lock.demographic_role, name, hair/eye/nose/etc. bullets
+  MUST reflect the mirror's persona — not the Linda default, not
+  any other default you've seen in previous responses.
+- If NO PERSONA MIRROR block is present, fall back to inferring
+  character demographics from the source concept transcript.
+
 CHARACTER RULES:
 - The character must look ANONYMOUS, not ATTRACTIVE. Intentional
   mediocrity is the goal. A believable neighbor, not a model.

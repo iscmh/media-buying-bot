@@ -70,9 +70,18 @@ export function composeHiggsfieldSoulReferencePrompt(lock: CharacterLock): strin
       : ` Real ${skin_color_for_stubble} stubble shadow on upper lip and jaw from one day of missed shaving.`;
 
   // Block 1 — Linda selfie lead.
+  // Polish-23 Commit 3.0.25: prefixed with "Hyper-realistic,
+  // unretouched," so Higgsfield Soul dials up photorealism +
+  // suppresses the airbrushed-selfie AI attractor. Followed by
+  // a REFERENCE ANCHOR line that tells the downstream Veo pipeline
+  // to treat this exact image as the character lock — same phrasing
+  // as the per-clip CHARACTER LOCK prefix so both prompts pull in
+  // the same direction.
   const block1_selfieLead =
     `Photorealistic vertical iPhone selfie of a fictional ${age}-year-old ${nationality} ${gender} named ${name}. ` +
-    `Generic ${demographic_role} appearance.`;
+    `Generic ${demographic_role} appearance. ` +
+    `Hyper-realistic and unretouched — every physical feature must render exactly as specified below. ` +
+    `This reference image will be the CHARACTER LOCK anchor for downstream Veo clips, so the video pipeline can match it verbatim.`;
 
   // Block 2 — PHYSICAL FEATURES (itemized bullets, deliberately
   // asymmetric). Bullets render sharper on image-to-image models
@@ -125,8 +134,15 @@ export function composeHiggsfieldSoulReferencePrompt(lock: CharacterLock): strin
     `The face should look like a RANDOM ${demographic_role}: 'the kind of face where you'd say I think I've seen ${objectPronoun} at the grocery store but you couldn't pick ${objectPronoun} out of a lineup.' Slightly asymmetric, ordinary features, no 'TV polish.'\n\n` +
     `Aim for ANONYMOUS, not ATTRACTIVE. The face should be intentionally unremarkable. If the face looks like a TV ${demographic_role} character, regenerate. The target is 'real human you'd walk past on the street and forget.'`;
 
-  // Block 6 — Camera anchor (Polish-21.0.5 phrasing preserved).
-  const block6_camera = `Shot on iPhone front camera, 9:16 vertical, natural daylight from ${setting_paragraph.split('.')[0]?.toLowerCase() ?? 'the scene setting'}, slightly shaky handheld feel.`;
+  // Block 6 — Camera + framing + lighting anchor.
+  // Polish-23 Commit 3.0.25: extended with explicit FRAMING and
+  // LIGHTING sub-anchors. Downstream Veo clips need a REPRODUCIBLE
+  // reference composition — same crop, same light direction, no
+  // harsh shadows — so per-clip drift doesn't compound.
+  const block6_camera =
+    `Shot on iPhone front camera, 9:16 vertical, natural daylight from ${setting_paragraph.split('.')[0]?.toLowerCase() ?? 'the scene setting'}, slightly shaky handheld feel. ` +
+    `FRAMING: shoulders + head + upper chest in frame, face centered, arms-length selfie distance — REPRODUCIBLE across every downstream clip. ` +
+    `LIGHTING: even soft daylight, no harsh shadows, no beauty ring light, no flash, no post-hoc color grading.`;
 
   // Block 7 — Anti-AI directive (verbatim Kling 3.0 guide anchor).
   const block7_antiAiDirective =

@@ -110,19 +110,41 @@ export function checkDialogueWordCount(dialogue: string): DialogueWordCountCheck
 
 /**
  * Compose the CHARACTER LOCK PREFIX. Every clip in a batch gets
- * the same prefix so Veo's per-clip generation can't drift the
- * character. Anchors 5 invariants: identity/age/gender/role,
- * physical features, setting, camera/framing, wardrobe.
+ * the SAME prefix so Veo's per-clip generation can't drift.
  *
- * Keep this format stable across clips — Veo's attention picks up
- * on repeated leading tokens as "the character is the same one."
+ * Polish-23 Commit 3.0.25 rewrite — operator's "each clip is
+ * different, this is useless" ship-blocker. kie.ai's Veo endpoint
+ * exposes no image-reference-strength / weight parameter (verified
+ * against buildKieVeoRequestBody wire body + docs), so prompt
+ * aggression is the ONLY lever. The rewrite matches BCH's approach:
+ * lead with an unambiguous MATCH REFERENCE IMAGE EXACTLY
+ * imperative, repeat physical invariants verbatim, follow with
+ * explicit REJECT/NEVER negative constraints Veo weights heavily,
+ * and lock wardrobe + setting to the reference image separately.
+ *
+ * Layout (STABLE across clips — Veo's attention rewards repetition):
+ *   1. MATCH REFERENCE IMAGE EXACTLY imperative + failure framing
+ *   2. IDENTITY line (age/nationality/gender/name/role)
+ *   3. PHYSICAL INVARIANTS bullet list (verbatim from lock)
+ *   4. BODY INVARIANT block (weight / proportions anchor)
+ *   5. SETTING INVARIANT + full setting paragraph
+ *   6. Explicit REJECT block (body/weight/age/features/setting)
+ *   7. WARDROBE lock (clothing_bullet + SAME/NEVER language)
+ *   8. SETTING lock (SAME/NEVER language)
+ *   9. Speaking-to-camera framing line (pronoun-specific)
  */
 export function composeCharacterLockPrefix(lock: CharacterLock): string {
   const pronoun = lock.gender === 'male' ? 'He' : 'She';
   return [
-    `CHARACTER LOCK — this ${lock.age}-year-old ${lock.nationality} ${lock.gender} named ${lock.name} ` +
-      `(${lock.demographic_role}) is the SAME PERSON across every clip in this batch. Do not drift.`,
-    'PHYSICAL INVARIANTS (verbatim, do not restyle):',
+    // Block 1 — aggressive MATCH REFERENCE opening.
+    'CHARACTER LOCK — MATCH REFERENCE IMAGE EXACTLY.',
+    'This character is the SAME PERSON as shown in the reference image AND the SAME PERSON across every clip in this batch. Any deviation from the reference image is a FAILURE.',
+    '',
+    // Block 2 — identity.
+    `IDENTITY: ${lock.age}-year-old ${lock.nationality} ${lock.gender} named ${lock.name} (${lock.demographic_role}).`,
+    '',
+    // Block 3 — physical invariants, verbatim.
+    'PHYSICAL INVARIANTS (verbatim per clip — do not restyle, do not soften):',
     `  - ${lock.hair_bullet}`,
     `  - ${lock.eye_asymmetry_bullet}`,
     `  - ${lock.nose_bullet}`,
@@ -131,26 +153,39 @@ export function composeCharacterLockPrefix(lock: CharacterLock): string {
     `  - ${lock.jaw_bullet}`,
     `  - ${lock.face_shape_bullet}`,
     `  - ${lock.skin_age_appropriate_detail}`,
-    `WARDROBE INVARIANT: ${lock.clothing_bullet} — same outfit across all clips.`,
-    // Polish-23 Commit 3.0.17: BODY + SETTING invariants surfaced
-    // as their own bulleted blocks. First real end-to-end run
-    // rendered a full 60s composite but showed body-shape drift
-    // clip-to-clip (same face, different build / setting / props).
-    // These blocks give Veo explicit anchors + assertive REJECT
-    // language.
+    '',
+    // Block 4 — body invariant (weight / proportions anchor).
     'BODY INVARIANT (do NOT drift build / weight / proportions across clips):',
     `  - ${lock.body_invariant_bullet}`,
+    '',
+    // Block 5 — setting invariant + full setting paragraph.
     'SETTING INVARIANT (do NOT change position / furniture / background objects across clips):',
     `  - ${lock.setting_invariant_bullet}`,
     `SETTING: ${lock.setting_paragraph}`,
+    '',
+    // Block 6 — explicit REJECT block per operator's spec. Veo
+    // weights REJECT-language more heavily than affirmative
+    // directives; separate lines so each REJECT gets its own
+    // attention weight rather than being averaged into a single
+    // long sentence.
+    'REJECT any change in body type.',
+    'REJECT any change in weight.',
+    'REJECT any change in age.',
+    'REJECT any change in facial features.',
+    'REJECT any change in setting.',
+    'REJECT any output that shows a different body type, different weight, or different body proportions than the reference image and the invariants above.',
+    '',
+    // Block 7 — WARDROBE lock. Keep the "WARDROBE INVARIANT" label
+    // (pinned by tests) but include the operator-specified SAME/NEVER
+    // language on its own line so Veo weights it separately.
+    `WARDROBE INVARIANT (LOCK): ${lock.clothing_bullet}`,
+    'SAME clothing as reference image. NEVER change wardrobe.',
+    '',
+    // Block 8 — SETTING lock (SAME/NEVER language).
+    'SETTING LOCK: SAME setting / room / background as reference image. NEVER change environment.',
+    '',
+    // Block 9 — framing / camera line.
     `${pronoun} is speaking directly to the camera in a vertical iPhone selfie, 9:16, handheld.`,
-    // Assertive negative constraints — Veo tends to weight
-    // REJECT-language more heavily than affirmative directives.
-    'REJECT any output that shows a different body type, different weight, ' +
-      'or different body proportions than the reference image and the invariants above. ' +
-      'REJECT any output that shows a different setting, different furniture, ' +
-      'or different background objects. REJECT any drift from the reference image ' +
-      'body proportions.',
   ].join('\n');
 }
 

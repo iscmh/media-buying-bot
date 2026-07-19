@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.31';
+export const POLISH_VERSION = '23.0.32';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.31';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.24 — Claude ad-spec request/response/parsed-CL/fallback-reason forensics (diagnostic only)';
+  'Polish-23 Commit 3.0.25 — MATCH REFERENCE IMAGE EXACTLY prefix + hyper-realistic Soul + PERSONA MIRROR hard-constraint';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

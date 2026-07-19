@@ -392,21 +392,43 @@ export const generatePolish23VeoLite = inngest.createFunction(
     // the source context when vision persona is available. Claude
     // reads this ABOVE the analysis JSON so its character_lock
     // generation locks to the source persona CLASS (not identity).
+    // Polish-23 Commit 3.0.25: PERSONA MIRROR block rewritten as
+    // a HARD CONSTRAINT with per-field requirements. Prior text
+    // said "MUST match this persona CLASS (not identity)" but
+    // Claude's ad-spec output was still landing on Linda when the
+    // source persona was male. New phrasing hits each character_lock
+    // field individually (gender, age, demographic_role, name)
+    // with imperative REJECT/DO-NOT language + explicit failure-
+    // mode framing so Claude can't attention-average it out.
     const sourceScript =
       sourceLookup.source === 'vision_analysis_persona' && sourceLookup.persona
-        ? `PERSONA MIRROR (from source video vision analysis) — the character_lock you ` +
-          `generate MUST match this persona CLASS (not identity):\n` +
-          `- gender: ${sourceLookup.persona.gender}\n` +
-          `- age_range: ${sourceLookup.persona.age_range}\n` +
-          `- ethnicity: ${sourceLookup.persona.ethnicity}\n` +
-          `- look: ${sourceLookup.persona.look}\n` +
-          `- voice_tone: ${sourceLookup.persona.voice_tone}\n` +
+        ? `===== PERSONA MIRROR (HARD CONSTRAINT) =====\n` +
+          `Source video vision analysis extracted this persona. The character_lock you ` +
+          `generate MUST match ALL of these fields verbatim:\n` +
+          `  gender: ${sourceLookup.persona.gender}\n` +
+          `  age_range: ${sourceLookup.persona.age_range}\n` +
+          `  ethnicity: ${sourceLookup.persona.ethnicity}\n` +
+          `  look: ${sourceLookup.persona.look}\n` +
+          `  voice_tone: ${sourceLookup.persona.voice_tone}\n` +
           `\n` +
-          `Generate a fictional character of the SAME gender + SAME age bracket + SAME ` +
-          `ethnicity + SAME look category as the source. Do NOT default to Linda (68yo ` +
-          `American female suburban grandmother) unless the source persona actually matches.\n` +
+          `PER-FIELD REQUIREMENTS (each is a HARD CONSTRAINT):\n` +
+          `  1. character_lock.gender MUST equal "${sourceLookup.persona.gender}". ` +
+          `DO NOT flip gender. A wrong gender is a total pipeline failure.\n` +
+          `  2. character_lock.age MUST fall inside the ${sourceLookup.persona.age_range} range.\n` +
+          `  3. character_lock.demographic_role MUST describe a ${sourceLookup.persona.gender} ` +
+          `${sourceLookup.persona.ethnicity} person in the ${sourceLookup.persona.age_range} bracket. ` +
+          `Not a "suburban grandmother" unless the source persona actually is one.\n` +
+          `  4. character_lock.name MUST be a common first name for a ${sourceLookup.persona.gender} ` +
+          `${sourceLookup.persona.ethnicity}. Do NOT reuse "Linda".\n` +
+          `  5. All anti_celeb_*_examples lists MUST reflect a ${sourceLookup.persona.gender} ` +
+          `${sourceLookup.persona.ethnicity} in the ${sourceLookup.persona.age_range} bracket ` +
+          `(not the Linda default).\n` +
           `\n` +
-          `Full source analysis follows:\n\n${sourceContext}`
+          `REJECT the default Linda anchor (68yo American female suburban grandmother) ` +
+          `unless the source persona is literally female + age_range 60-70 + white/other ` +
+          `Linda-shaped. Any Linda output on a non-Linda source persona is a HARD FAIL.\n` +
+          `\n` +
+          `===== SOURCE VIDEO VISION ANALYSIS (JSON) =====\n\n${sourceContext}`
         : sourceContext;
 
     // Polish-23 Commit 3.0.16: metadata.polish23_source_context —
