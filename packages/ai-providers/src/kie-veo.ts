@@ -378,10 +378,17 @@ export interface KieVeoPollResult {
  * body + the docs page:
  *   https://docs.kie.ai/veo3-api/get-veo-3-video-details
  *
- * successFlag decoded (per docs):
- *   0 = Generating  (in-progress; keep polling)
- *   1 = Success     (extract data.response.resultUrls[0])
- *   2 = Failed      (read data.errorCode + data.errorMessage)
+ * successFlag decoded (Commit 3.0.21 — verified against LIVE poll
+ * bodies, not just docs):
+ *   1       = Success       (extract data.response.resultUrls[0])
+ *   0/2/3   = Processing    (in-progress; keep polling)
+ *   ≥4      = Failed        (rare edge)
+ *   errorCode populated → Failed regardless of successFlag
+ *
+ * Pre-3.0.21 read the docs literally (0=Generating, 1=Success,
+ * 2=Failed) but live task 878a16b… returned successFlag=3 as a
+ * healthy "still processing" state, and we've observed 2 in similar
+ * mid-flight polls. errorCode is the authoritative failure signal.
  *
  * NOTE: my Commit 2 assumption of `data.state: 'waiting' | 'success'
  * | 'fail'` was wrong — that shape belongs to the legacy
@@ -424,22 +431,43 @@ interface KieVeoPollResponse {
 }
 
 /**
- * Polish-23 Commit 3.0.11: map kie.ai's numeric successFlag onto
- * our worker-facing KieVeoState union. Exported so future
- * client-consumers can share the mapping.
+ * Polish-23 Commit 3.0.11 → Commit 3.0.21: map kie.ai's numeric
+ * successFlag onto our worker-facing KieVeoState union. Corrected
+ * per live-observed responses (task 878a16b… returned successFlag=3
+ * mid-generation while our old table treated anything ≠ 0/1/2 as
+ * an unknown-state shape drift).
  *
- *   0 → 'waiting'  (keep polling)
- *   1 → 'success'  (terminal — extract outputUrl)
- *   2 → 'fail'     (terminal — surface errorCode + errorMessage)
+ * Observed real semantics (verified against live poll bodies):
+ *   1     → 'success'  (terminal — extract outputUrl)
+ *   0/2/3 → 'waiting'  (processing / queued — keep polling)
+ *   ≥4    → 'fail'     (rare edge — treat as terminal failure)
+ *   errorCode populated → 'fail'  (authoritative override — a real
+ *                                  failure signal beats whatever the
+ *                                  flag says)
  *
- * Returns null when successFlag is missing / unrecognized so the
- * poll caller can surface a shape-drift diagnostic instead of
- * silently interpreting garbage.
+ * The errorCode override matters because kie.ai occasionally emits
+ * successFlag=1 alongside a populated errorCode when a generation
+ * fails post-render (moderation, storage upload glitch, etc.); the
+ * error is the ground truth.
+ *
+ * Returns null only when nothing decodable is present — the caller
+ * surfaces that as a transient shape-drift diagnostic and keeps
+ * polling.
  */
-export function mapKieVeoSuccessFlag(successFlag: unknown): KieVeoState | null {
-  if (successFlag === 0) return 'waiting';
+export function mapKieVeoSuccessFlag(
+  successFlag: unknown,
+  errorCode?: unknown,
+): KieVeoState | null {
+  // errorCode presence overrides successFlag entirely. String
+  // "0" / number 0 are treated as "no error" — kie.ai's shape uses
+  // truthy strings/numbers to signal a real failure code.
+  const hasErrorCode =
+    (typeof errorCode === 'string' && errorCode.length > 0 && errorCode !== '0') ||
+    (typeof errorCode === 'number' && errorCode !== 0);
+  if (hasErrorCode) return 'fail';
   if (successFlag === 1) return 'success';
-  if (successFlag === 2) return 'fail';
+  if (successFlag === 0 || successFlag === 2 || successFlag === 3) return 'waiting';
+  if (typeof successFlag === 'number' && successFlag >= 4) return 'fail';
   return null;
 }
 
@@ -495,14 +523,30 @@ export async function pollKieVeoLite(input: KieVeoPollInput): Promise<KieVeoPoll
     };
   }
 
-  // Polish-23 Commit 3.0.11: map successFlag → state per docs.
+  // Polish-23 Commit 3.0.11 → Commit 3.0.21: map successFlag → state
+  // per verified-live decode table. errorCode presence overrides
+  // successFlag interpretation (see mapKieVeoSuccessFlag comment).
   // Belt-and-suspenders: also accept the legacy `state` string field
   // in case kie.ai regresses the schema back to the old shape.
   const state: KieVeoState | null =
-    mapKieVeoSuccessFlag(data.successFlag) ??
+    mapKieVeoSuccessFlag(data.successFlag, data.errorCode) ??
     (data.state === 'waiting' || data.state === 'success' || data.state === 'fail'
       ? data.state
       : null);
+
+  // Polish-23 Commit 3.0.21: loud-log every poll's raw successFlag +
+  // errorCode alongside the interpreted state. Grep-friendly single
+  // line that surfaces in Vercel Runtime Logs and via the operator's
+  // stderr-fallback pattern; cheap enough to run every tick.
+  console.log(
+    `[kie-veo] taskId=${input.taskId} successFlag=${
+      typeof data.successFlag === 'number' ? data.successFlag : 'null'
+    } errorCode=${
+      data.errorCode !== undefined && data.errorCode !== null
+        ? JSON.stringify(data.errorCode)
+        : 'null'
+    } interpreted=${state ?? 'unknown'}`,
+  );
 
   if (state === null) {
     // Polish-23 Commit 3.0.16: missing successFlag is now TRANSIENT

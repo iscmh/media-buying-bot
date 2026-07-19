@@ -340,21 +340,50 @@ describe('Polish-23 Commit 3.0.11: pollKieVeoLite — real kie.ai shape (success
   });
 });
 
-describe('Polish-23 Commit 3.0.11: mapKieVeoSuccessFlag — verified decode table (kie.ai docs)', () => {
-  it('0 → waiting (Generating; keep polling)', () => {
-    expect(mapKieVeoSuccessFlag(0)).toBe('waiting');
-  });
+describe('Polish-23 Commit 3.0.21: mapKieVeoSuccessFlag — verified live decode table', () => {
   it('1 → success (Success; extract output URL)', () => {
     expect(mapKieVeoSuccessFlag(1)).toBe('success');
   });
-  it('2 → fail (Failed; surface errorCode + errorMessage)', () => {
-    expect(mapKieVeoSuccessFlag(2)).toBe('fail');
+  it('0 → waiting (Processing / queued; keep polling)', () => {
+    expect(mapKieVeoSuccessFlag(0)).toBe('waiting');
   });
-  it('unknown / missing → null (caller surfaces shape-drift diagnostic)', () => {
-    expect(mapKieVeoSuccessFlag(3)).toBe(null);
+  it('2 → waiting (LIVE-observed mid-flight state, NOT terminal failure)', () => {
+    // Regression pin: pre-3.0.21 treated 2 as fail. Live evidence
+    // (task 878a16b…) showed 2/3 as healthy in-flight states.
+    expect(mapKieVeoSuccessFlag(2)).toBe('waiting');
+  });
+  it('3 → waiting (LIVE-observed on task 878a16b…, keep polling)', () => {
+    expect(mapKieVeoSuccessFlag(3)).toBe('waiting');
+  });
+  it('4/5 → fail (rare edge, treat as terminal)', () => {
+    expect(mapKieVeoSuccessFlag(4)).toBe('fail');
+    expect(mapKieVeoSuccessFlag(5)).toBe('fail');
+    expect(mapKieVeoSuccessFlag(99)).toBe('fail');
+  });
+  it('errorCode populated (string) → fail regardless of successFlag', () => {
+    expect(mapKieVeoSuccessFlag(0, 'IMAGE_INVALID')).toBe('fail');
+    expect(mapKieVeoSuccessFlag(1, 'MODERATION_BLOCK')).toBe('fail');
+    expect(mapKieVeoSuccessFlag(3, 'STORAGE_UPLOAD_FAIL')).toBe('fail');
+  });
+  it('errorCode populated (nonzero number) → fail regardless of successFlag', () => {
+    expect(mapKieVeoSuccessFlag(0, 400)).toBe('fail');
+    expect(mapKieVeoSuccessFlag(1, 500)).toBe('fail');
+  });
+  it('errorCode falsy (null / undefined / "0" / 0 / empty string) → does NOT override', () => {
+    // Regression pin: successFlag 1 with a zero-ish errorCode still
+    // means success. kie.ai occasionally emits errorCode:"0" or
+    // errorCode:0 as a placeholder — that's not a real failure.
+    expect(mapKieVeoSuccessFlag(1, null)).toBe('success');
+    expect(mapKieVeoSuccessFlag(1, undefined)).toBe('success');
+    expect(mapKieVeoSuccessFlag(1, '0')).toBe('success');
+    expect(mapKieVeoSuccessFlag(1, 0)).toBe('success');
+    expect(mapKieVeoSuccessFlag(1, '')).toBe('success');
+  });
+  it('unknown / missing successFlag → null (caller surfaces shape-drift diagnostic)', () => {
     expect(mapKieVeoSuccessFlag(null)).toBe(null);
     expect(mapKieVeoSuccessFlag(undefined)).toBe(null);
     expect(mapKieVeoSuccessFlag('1')).toBe(null); // strict numeric — no coercion
+    expect(mapKieVeoSuccessFlag(-1)).toBe(null);
   });
 });
 

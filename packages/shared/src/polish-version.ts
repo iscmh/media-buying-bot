@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.27';
+export const POLISH_VERSION = '23.0.28';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.27';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.20 — Inngest sleep-poll per-clip Veo loop (defeats Vercel 300s timeout)';
+  'Polish-23 Commit 3.0.21 — successFlag 0/2/3 all → waiting, errorCode override, 30-attempt cap';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

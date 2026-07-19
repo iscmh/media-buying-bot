@@ -104,21 +104,25 @@ export function softTruncatePromptForVeo(
 
 const SOUL_POLL_INTERVAL_SECONDS = 5;
 const SOUL_POLL_MAX_ATTEMPTS = 24; // ~2 min
-// Polish-23 Commit 3.0.20: Veo poll loop refactored to the Inngest
-// step.sleep + step.run per-attempt pattern so each poll runs as its
-// own Vercel invocation. No single invocation exceeds ~300s, but the
-// TOTAL wait per clip can stretch to ~13 min via exponential backoff
-// — enough to cover kie.ai's occasional 3-8 min tail without eating
-// the platform's serverless timeout.
+// Polish-23 Commit 3.0.20 → Commit 3.0.21: Veo poll loop uses the
+// Inngest step.sleep + step.run per-attempt pattern so each poll
+// runs as its own Vercel invocation. No single invocation exceeds
+// ~300s, but the TOTAL wait per clip stretches to ~20 min via
+// exponential backoff — enough to cover kie.ai's occasional slow
+// tail without eating the platform's serverless timeout.
+//
+// Commit 3.0.21 bumps the cap 20 → 30 attempts. Real kie.ai latency
+// variability warrants the extra headroom; the runs are cheap once
+// the successFlag=2/3 misread is fixed (see mapKieVeoSuccessFlag).
 //
 // Backoff schedule (in seconds):
 //   attempt 0 →  5s
 //   attempt 1 → 10s
 //   attempt 2 → 20s
 //   attempt 3 → 30s
-//   attempts 4-19 → 45s each
-// Total worst-case: 5 + 10 + 20 + 30 + 45×16 = 785s ≈ 13 min per clip.
-export const VEO_POLL_MAX_ATTEMPTS = 20;
+//   attempts 4-29 → 45s each
+// Total worst-case: 5 + 10 + 20 + 30 + 45×26 = 1235s ≈ 20.6 min per clip.
+export const VEO_POLL_MAX_ATTEMPTS = 30;
 export function computeVeoPollBackoffSeconds(attempt: number): number {
   switch (attempt) {
     case 0:
@@ -1181,7 +1185,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
       if (clipUrl === null) {
         const msg =
           `Veo Lite clip ${i} did not complete after ${VEO_POLL_MAX_ATTEMPTS} polls ` +
-          `(~13 min wait). taskId=${taskId}. Kie.ai likely stuck or overloaded.`;
+          `(~20 min wait). taskId=${taskId}. Kie.ai likely stuck or overloaded.`;
         console.error(`[polish-23-worker Step C] ${msg}`);
         await markJobFailed(jobId, userId, msg, 0);
         throw new NonRetriableError(msg);
