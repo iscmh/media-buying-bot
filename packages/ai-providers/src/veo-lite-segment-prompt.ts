@@ -163,26 +163,31 @@ export function composeCharacterLockPrefix(lock: CharacterLock): string {
     `  - ${lock.setting_invariant_bullet}`,
     `SETTING: ${lock.setting_paragraph}`,
     '',
-    // Block 6 — explicit REJECT block per operator's spec. Veo
-    // weights REJECT-language more heavily than affirmative
-    // directives; separate lines so each REJECT gets its own
-    // attention weight rather than being averaged into a single
-    // long sentence.
+    // Block 6 — explicit REJECT block per operator's spec.
+    // Polish-23 Commit 3.0.26: extended to 7 constraints (added
+    // wardrobe + lighting). Each REJECT sits on its own line so
+    // Veo's attention weights them independently rather than
+    // averaging into a single long sentence.
     'REJECT any change in body type.',
     'REJECT any change in weight.',
     'REJECT any change in age.',
     'REJECT any change in facial features.',
+    'REJECT any change in wardrobe.',
     'REJECT any change in setting.',
+    'REJECT any change in lighting.',
     'REJECT any output that shows a different body type, different weight, or different body proportions than the reference image and the invariants above.',
     '',
     // Block 7 — WARDROBE lock. Keep the "WARDROBE INVARIANT" label
     // (pinned by tests) but include the operator-specified SAME/NEVER
-    // language on its own line so Veo weights it separately.
+    // language + Reference: excerpt on their own lines so Veo weights
+    // each independently.
     `WARDROBE INVARIANT (LOCK): ${lock.clothing_bullet}`,
     'SAME clothing as reference image. NEVER change wardrobe.',
+    `Reference: ${lock.clothing_bullet}`,
     '',
-    // Block 8 — SETTING lock (SAME/NEVER language).
+    // Block 8 — SETTING lock (SAME/NEVER language + Reference: excerpt).
     'SETTING LOCK: SAME setting / room / background as reference image. NEVER change environment.',
+    `Reference: ${lock.setting_paragraph}`,
     '',
     // Block 9 — framing / camera line.
     `${pronoun} is speaking directly to the camera in a vertical iPhone selfie, 9:16, handheld.`,

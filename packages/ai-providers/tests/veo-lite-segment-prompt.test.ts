@@ -62,6 +62,61 @@ describe('Polish-23 Commit 2: countDialogueWords + checkDialogueWordCount (170wp
   });
 });
 
+describe('Polish-23 Commit 3.0.26: composeCharacterLockPrefix — aggressive MATCH-REFERENCE rewrite pins', () => {
+  it('leads with "MATCH REFERENCE IMAGE EXACTLY" imperative', () => {
+    const prefix = composeCharacterLockPrefix(LINDA);
+    expect(prefix).toContain('CHARACTER LOCK — MATCH REFERENCE IMAGE EXACTLY.');
+    expect(prefix).toContain('Any deviation from the reference image is a FAILURE.');
+  });
+
+  it('emits all 7 negative constraints on their own lines', () => {
+    const prefix = composeCharacterLockPrefix(LINDA);
+    // Order matters ONLY for reader scanning; independent lines
+    // mean Veo weights each REJECT separately.
+    expect(prefix).toContain('REJECT any change in body type.');
+    expect(prefix).toContain('REJECT any change in weight.');
+    expect(prefix).toContain('REJECT any change in age.');
+    expect(prefix).toContain('REJECT any change in facial features.');
+    expect(prefix).toContain('REJECT any change in wardrobe.');
+    expect(prefix).toContain('REJECT any change in setting.');
+    expect(prefix).toContain('REJECT any change in lighting.');
+  });
+
+  it('WARDROBE LOCK carries the clothing_bullet AND a "Reference:" excerpt', () => {
+    const prefix = composeCharacterLockPrefix(LINDA);
+    expect(prefix).toContain(`WARDROBE INVARIANT (LOCK): ${LINDA.clothing_bullet}`);
+    expect(prefix).toContain('SAME clothing as reference image. NEVER change wardrobe.');
+    expect(prefix).toContain(`Reference: ${LINDA.clothing_bullet}`);
+  });
+
+  it('SETTING LOCK carries the setting_paragraph AND a "Reference:" excerpt', () => {
+    const prefix = composeCharacterLockPrefix(LINDA);
+    expect(prefix).toContain(
+      'SETTING LOCK: SAME setting / room / background as reference image. NEVER change environment.',
+    );
+    expect(prefix).toContain(`Reference: ${LINDA.setting_paragraph}`);
+  });
+
+  it('prefix character count is > 800 (was ~400 in Polish-23 Commit 2 baseline)', () => {
+    // Regression pin: any silent softening of the aggressive
+    // rewrite that trims REJECT lines / Reference: excerpts /
+    // physical-invariant bullets would push the total below the
+    // 800-char floor. Fail loud if that happens.
+    const prefix = composeCharacterLockPrefix(LINDA);
+    expect(prefix.length).toBeGreaterThan(800);
+  });
+
+  it('male character variant still emits all 7 REJECTs + "He is speaking directly to the camera"', () => {
+    const male: CharacterLock = { ...LINDA, gender: 'male', name: 'David', age: 62 };
+    const prefix = composeCharacterLockPrefix(male);
+    expect(prefix).toContain('REJECT any change in body type.');
+    expect(prefix).toContain('REJECT any change in wardrobe.');
+    expect(prefix).toContain('REJECT any change in lighting.');
+    expect(prefix).toMatch(/He is speaking directly to the camera/);
+    expect(prefix).toMatch(/62-year-old American male named David/);
+  });
+});
+
 describe('Polish-23 Commit 2: composeCharacterLockPrefix — invariants', () => {
   it("names age + nationality + gender + role + Linda's name", () => {
     const prefix = composeCharacterLockPrefix(LINDA);

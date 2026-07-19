@@ -21,6 +21,7 @@ import { REGISTERED_GENERATION_WORKER_EVENTS, functions } from '../src/functions
 import { generatePolish23VeoLite } from '../src/functions/generate-polish23-veo-lite';
 import {
   AdSpecSchema,
+  POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT,
   POLISH23_CLIP_SECONDS,
   POLISH23_NESTED_QUOTE_PATTERNS,
   POLISH23_SEGMENT_COUNT,
@@ -520,6 +521,40 @@ describe('Polish-23 Commit 3.0.2: fallback pairs character_lock + segments (regr
       expect(seg.dialogue.trim().length).toBeGreaterThan(0);
       expect(seg.sceneDirection.trim().length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('Polish-23 Commit 3.0.26: POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT — PERSONA MIRROR authority + Linda-as-template pins', () => {
+  it('names PERSONA MIRROR as the AUTHORITATIVE identity source', () => {
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('AUTHORITATIVE SOURCE');
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('PERSONA MIRROR PRIORITY');
+  });
+
+  it('names Linda as a STRUCTURAL TEMPLATE, not an identity source', () => {
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('LINDA ANCHOR ROLE');
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('STRUCTURAL TEMPLATE');
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain(
+      'Linda is a stylistic guide only, NOT an identity source.',
+    );
+  });
+
+  it('states verbatim gender-match constraint', () => {
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain(
+      'character_lock.gender in your output MUST equal the mirror',
+    );
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toMatch(
+      /If PERSONA MIRROR says gender=male, output character_lock\.gender/,
+    );
+  });
+
+  it('DIALOGUE RULES section from Commit 3.0.23 still present (no regression from prior pins)', () => {
+    // Explicit belt-and-suspenders: the PERSONA MIRROR PRIORITY
+    // block was inserted BEFORE the CHARACTER RULES / SEGMENT RULES /
+    // DIALOGUE RULES sections. Confirm none of those were dropped.
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('CHARACTER RULES:');
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('SEGMENT RULES:');
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('DIALOGUE RULES');
+    expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('NEVER quote another person');
   });
 });
 

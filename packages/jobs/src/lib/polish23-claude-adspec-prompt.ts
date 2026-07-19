@@ -155,18 +155,31 @@ OUTPUT: ONE JSON object, no prose, no markdown fences, matching this schema:
   ]
 }
 
-PERSONA MIRROR PRIORITY (Polish-23 Commit 3.0.25):
-- If the user message starts with a "===== PERSONA MIRROR (HARD
-  CONSTRAINT) =====" block, that block is the AUTHORITATIVE source
-  of the character_lock's gender, age, ethnicity, look, and voice
-  tone. Read every "PER-FIELD REQUIREMENTS" bullet as a Zod-style
-  invariant — violate one and the downstream pipeline fails.
+PERSONA MIRROR PRIORITY (Polish-23 Commit 3.0.25-26 — AUTHORITATIVE):
+- If the user message contains a "===== PERSONA MIRROR (HARD
+  CONSTRAINT) =====" block, that block is the AUTHORITATIVE SOURCE
+  of the character_lock's identity. Read every "PER-FIELD
+  REQUIREMENTS" bullet as a Zod-style invariant — violate one and
+  the downstream pipeline fails.
 - character_lock.gender in your output MUST equal the mirror's
   gender field verbatim ("male" or "female"). No exceptions.
 - character_lock.age MUST fall inside the mirror's age_range.
 - character_lock.demographic_role, name, hair/eye/nose/etc. bullets
   MUST reflect the mirror's persona — not the Linda default, not
-  any other default you've seen in previous responses.
+  any other default from previous responses.
+- LINDA ANCHOR ROLE: the Linda-shaped bullet examples elsewhere in
+  this system prompt (68yo American female suburban grandmother,
+  "Shoulder-length salt-and-pepper hair", "Faded navy cotton
+  crewneck", etc.) are a STRUCTURAL TEMPLATE — they show the
+  SHAPE + LEVEL OF DETAIL each bullet must have. They are NOT the
+  identity to copy. The character's actual identity — gender, age,
+  ethnicity, name, look — comes from the PERSONA MIRROR block.
+  Linda is a stylistic guide only, NOT an identity source.
+- If PERSONA MIRROR says gender=male, output character_lock.gender
+  = "male". If it says age_range=60s, output character_lock.age
+  should be a 60-69 integer. If it says ethnicity=white, the hair
+  / skin / demographic_role bullets should describe a white male
+  in his 60s — not a suburban grandmother.
 - If NO PERSONA MIRROR block is present, fall back to inferring
   character demographics from the source concept transcript.
 
