@@ -439,24 +439,47 @@ export const generatePolish23VeoLite = inngest.createFunction(
     });
 
     // -------- Step A: Claude ad-spec --------
-    // Polish-23 Commit 3.0.2: Step A now returns an enriched shape
-    // so the persist step can write durable forensics (raw Claude
-    // text excerpt + parse diagnostic + segment fallback tracking)
-    // to job.metadata. BCH's stack is new territory; production
+    // Polish-23 Commit 3.0.2: Step A returns an enriched shape so
+    // the persist step can write durable forensics (raw Claude text
+    // excerpt + parse diagnostic + segment fallback tracking) to
+    // job.metadata. BCH's stack is new territory; production
     // forensics beat re-running the pipeline to reproduce.
+    //
+    // Polish-23 Commit 3.0.24: dedicated forensic fields for the
+    // "Linda fallback fired despite vision persona extracted"
+    // investigation. Every fallback path now writes:
+    //   - polish23_claude_adspec_request (userMessage LEFT 4000)
+    //   - polish23_claude_adspec_raw_response (rawText LEFT 4000)
+    //   - polish23_claude_parsed_character_lock (parsed CL or null)
+    //   - polish23_character_lock_fallback_reason (why fallback
+    //     fired; null on the healthy parse path)
+    // + loud-log of all four for Vercel Runtime Logs.
+    const claudeUserMessage = composePolish23AdSpecUserPrompt(sourceScript || '(no source script)');
+    const claudeUserMessageExcerpt = claudeUserMessage.slice(0, 4000);
+    console.log(
+      `[polish-23-worker Step A] Claude userMessage (LEFT 4000, ` +
+        `total_chars=${claudeUserMessage.length}): ${claudeUserMessageExcerpt}`,
+    );
     const stepAResult = await step.run('claude-ad-spec', async () => {
       let keys;
       try {
         keys = await loadDecryptedKeys(userId, ['claude']);
       } catch (err) {
         if (err instanceof MissingProviderKeyError) {
+          const fallbackReason = `claude-key-missing: ${(err as Error).message.slice(0, 400)}`;
           console.warn(
-            '[polish-23-worker Step A] Claude key missing — wholesale fallback to Linda anchor + stock ad.',
+            `[polish-23-worker Step A] Claude key missing — wholesale fallback to Linda. ` +
+              `polish23_character_lock_fallback_reason=${JSON.stringify(fallbackReason)} ` +
+              `polish23_claude_parsed_character_lock=null`,
           );
           const coalesced = coalesceAdSpecWithFallback(null);
           return {
             adSpec: coalesced.adSpec,
             metadataExtras: {
+              polish23_claude_adspec_request: claudeUserMessageExcerpt,
+              polish23_claude_adspec_raw_response: null,
+              polish23_claude_parsed_character_lock: null,
+              polish23_character_lock_fallback_reason: fallbackReason,
               polish23_claude_raw_text: null,
               polish23_parse_diagnostic: {
                 reason: 'claude-key-missing',
@@ -473,7 +496,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
         userId,
         apiKey: keys.claude!,
         systemPrompt: POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT,
-        userMessage: composePolish23AdSpecUserPrompt(sourceScript || '(no source script)'),
+        userMessage: claudeUserMessage,
         maxTokens: 4096,
         generationJobId: jobId,
       });
@@ -488,14 +511,21 @@ export const generatePolish23VeoLite = inngest.createFunction(
       );
 
       if (!r.ok) {
+        const fallbackReason = `claude-call-failed: ${(r.errorMessage ?? '').slice(0, 400)}`;
         console.warn(
           `[polish-23-worker Step A] Claude ad-spec call failed (${r.errorMessage}) — ` +
-            'wholesale fallback to Linda + stock ad. Full fallback fires: character_lock + segments come paired.',
+            'wholesale fallback to Linda + stock ad. ' +
+            `polish23_character_lock_fallback_reason=${JSON.stringify(fallbackReason)} ` +
+            `polish23_claude_parsed_character_lock=null`,
         );
         const coalesced = coalesceAdSpecWithFallback(null);
         return {
           adSpec: coalesced.adSpec,
           metadataExtras: {
+            polish23_claude_adspec_request: claudeUserMessageExcerpt,
+            polish23_claude_adspec_raw_response: rawTextExcerpt,
+            polish23_claude_parsed_character_lock: null,
+            polish23_character_lock_fallback_reason: fallbackReason,
             polish23_claude_raw_text: rawTextExcerpt,
             polish23_parse_diagnostic: {
               reason: 'claude-call-failed',
@@ -513,16 +543,26 @@ export const generatePolish23VeoLite = inngest.createFunction(
         ? { reason: 'success' as const, detail: null as string | null }
         : { reason: diag.reason, detail: diag.detail ?? null };
       const parsed = diag.ok ? diag.data : null;
+      const parsedCharacterLock = diag.ok ? diag.data.character_lock : null;
 
       if (!diag.ok) {
+        const fallbackReason = `parse-failed: reason=${diag.reason} detail=${diag.detail ?? '(none)'}`;
         console.warn(
           `[polish-23-worker Step A] Claude ad-spec parse failed: reason=${diag.reason} ` +
-            `detail=${diag.detail ?? '(none)'}. Wholesale fallback fires — character_lock + segments come paired.`,
+            `detail=${diag.detail ?? '(none)'}. Wholesale fallback fires. ` +
+            `polish23_character_lock_fallback_reason=${JSON.stringify(fallbackReason)} ` +
+            `polish23_claude_parsed_character_lock=null`,
         );
       } else {
         console.log(
-          `[polish-23-worker Step A] Claude ad-spec parsed: character=${diag.data.character_lock.name} ` +
-            `age=${diag.data.character_lock.age} segments=${diag.data.segments.length}`,
+          `[polish-23-worker Step A] Claude ad-spec parsed OK. ` +
+            `polish23_claude_parsed_character_lock={` +
+            `name=${diag.data.character_lock.name},` +
+            `age=${diag.data.character_lock.age},` +
+            `gender=${diag.data.character_lock.gender},` +
+            `demographic_role=${JSON.stringify(diag.data.character_lock.demographic_role)}} ` +
+            `segments=${diag.data.segments.length} ` +
+            `polish23_character_lock_fallback_reason=null`,
         );
       }
 
@@ -531,6 +571,12 @@ export const generatePolish23VeoLite = inngest.createFunction(
       // wholesale-fills. In the theoretical partial-drift path it
       // per-index backfills and tracks the offending indices.
       const coalesced = coalesceAdSpecWithFallback(parsed);
+      let coalesceFallbackReason: string | null = null;
+      if (coalesced.wholesaleFallback) {
+        coalesceFallbackReason = `wholesale-fallback: parsed=null (see polish23_parse_diagnostic for the underlying reason)`;
+      } else if (coalesced.segmentFallbackIndices.length > 0) {
+        coalesceFallbackReason = `per-segment-fallback: indices=[${coalesced.segmentFallbackIndices.join(', ')}]`;
+      }
       if (coalesced.segmentFallbackIndices.length > 0) {
         console.warn(
           `[polish-23-worker Step A] Safety-net per-segment fallback fired for indices: ` +
@@ -539,9 +585,20 @@ export const generatePolish23VeoLite = inngest.createFunction(
         );
       }
 
+      // Compose final polish23_character_lock_fallback_reason from
+      // whichever branch fired (parse failure OR coalesce fallback).
+      // Null on the true happy path (parse ok, no coalescer fill).
+      const finalFallbackReason: string | null = !diag.ok
+        ? `parse-failed: reason=${diag.reason} detail=${diag.detail ?? '(none)'}`
+        : coalesceFallbackReason;
+
       return {
         adSpec: coalesced.adSpec,
         metadataExtras: {
+          polish23_claude_adspec_request: claudeUserMessageExcerpt,
+          polish23_claude_adspec_raw_response: rawTextExcerpt,
+          polish23_claude_parsed_character_lock: parsedCharacterLock,
+          polish23_character_lock_fallback_reason: finalFallbackReason,
           polish23_claude_raw_text: rawTextExcerpt,
           polish23_parse_diagnostic: parseDiagnostic,
           polish23_segments_fallback_used: coalesced.segmentFallbackIndices,
