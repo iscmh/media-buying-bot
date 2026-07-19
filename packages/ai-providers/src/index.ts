@@ -307,8 +307,12 @@ export {
 export {
   composeVeoLiteSegmentPrompt,
   composeCharacterLockPrefix,
+  composeReferenceImageCaption,
   countDialogueWords,
   checkDialogueWordCount,
+  POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS,
+  POLISH23_VEO_SEED_MAX,
+  POLISH23_VEO_SEED_MIN,
   VEO_LITE_WPM,
   VEO_LITE_CLIP_SECONDS,
   VEO_LITE_MIN_DIALOGUE_WORDS,

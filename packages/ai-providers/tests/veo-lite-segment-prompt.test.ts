@@ -62,58 +62,122 @@ describe('Polish-23 Commit 2: countDialogueWords + checkDialogueWordCount (170wp
   });
 });
 
-describe('Polish-23 Commit 3.0.26: composeCharacterLockPrefix — aggressive MATCH-REFERENCE rewrite pins', () => {
-  it('leads with "MATCH REFERENCE IMAGE EXACTLY" imperative', () => {
+describe('Polish-23 Commit 3.0.27: composeCharacterLockPrefix — structured sheet + first-person anchor + Negative keywords', () => {
+  // Prior 3.0.25/3.0.26 pins for "MATCH REFERENCE IMAGE EXACTLY"
+  // + 7-REJECT command block are INTENTIONALLY REMOVED here. Google's
+  // Veo 3.1 prompting guide states negative prompting should be
+  // "declarative, not instructive — the model responds poorly to
+  // commands like 'don't' or 'no'." The command-form REJECT block
+  // was net-negative. Replaced by a bare Negative: keyword list.
+
+  it('carries the REFERENCE IMAGE literal caption line', () => {
     const prefix = composeCharacterLockPrefix(LINDA);
-    expect(prefix).toContain('CHARACTER LOCK — MATCH REFERENCE IMAGE EXACTLY.');
-    expect(prefix).toContain('Any deviation from the reference image is a FAILURE.');
+    expect(prefix).toContain('REFERENCE IMAGE:');
+    expect(prefix).toMatch(/depicts a 68-year-old American female named Linda/);
+    expect(prefix).toContain('suburban grandmother');
   });
 
-  it('emits all 7 negative constraints on their own lines', () => {
+  it('carries the structured CHARACTER SHEET with fixed field labels', () => {
     const prefix = composeCharacterLockPrefix(LINDA);
-    // Order matters ONLY for reader scanning; independent lines
-    // mean Veo weights each REJECT separately.
-    expect(prefix).toContain('REJECT any change in body type.');
-    expect(prefix).toContain('REJECT any change in weight.');
-    expect(prefix).toContain('REJECT any change in age.');
-    expect(prefix).toContain('REJECT any change in facial features.');
-    expect(prefix).toContain('REJECT any change in wardrobe.');
-    expect(prefix).toContain('REJECT any change in setting.');
-    expect(prefix).toContain('REJECT any change in lighting.');
+    expect(prefix).toContain('CHARACTER SHEET (identical across all 8 clips):');
+    expect(prefix).toContain('NAME: Linda');
+    expect(prefix).toContain('GENDER: female');
+    expect(prefix).toContain('AGE: 68');
+    expect(prefix).toContain('ETHNICITY: American');
+    expect(prefix).toContain('DEMOGRAPHIC: suburban grandmother');
+    expect(prefix).toContain('FACE:');
+    expect(prefix).toContain('BODY:');
+    expect(prefix).toContain('HAIR:');
+    expect(prefix).toContain('SKIN:');
+    expect(prefix).toContain('WARDROBE:');
+    expect(prefix).toContain('SETTING:');
+    expect(prefix).toContain('LIGHTING:');
+    expect(prefix).toContain('CAMERA:');
   });
 
-  it('WARDROBE LOCK carries the clothing_bullet AND a "Reference:" excerpt', () => {
+  it('carries the first-person IDENTITY ANCHOR line', () => {
+    // Polish-23 Commit 3.0.27: kept tight per Google's Veo 3.1
+    // guide "weights first ~150 words heaviest" — wardrobe + setting
+    // details already appear in the CHARACTER SHEET's WARDROBE: /
+    // SETTING: fields above. The IDENTITY ANCHOR is just the
+    // first-person same-person reinforcement.
     const prefix = composeCharacterLockPrefix(LINDA);
-    expect(prefix).toContain(`WARDROBE INVARIANT (LOCK): ${LINDA.clothing_bullet}`);
-    expect(prefix).toContain('SAME clothing as reference image. NEVER change wardrobe.');
-    expect(prefix).toContain(`Reference: ${LINDA.clothing_bullet}`);
-  });
-
-  it('SETTING LOCK carries the setting_paragraph AND a "Reference:" excerpt', () => {
-    const prefix = composeCharacterLockPrefix(LINDA);
-    expect(prefix).toContain(
-      'SETTING LOCK: SAME setting / room / background as reference image. NEVER change environment.',
+    expect(prefix).toMatch(
+      /IDENTITY ANCHOR: I am Linda, the SAME PERSON shown in the reference image/,
     );
-    expect(prefix).toContain(`Reference: ${LINDA.setting_paragraph}`);
   });
 
-  it('prefix character count is > 800 (was ~400 in Polish-23 Commit 2 baseline)', () => {
-    // Regression pin: any silent softening of the aggressive
-    // rewrite that trims REJECT lines / Reference: excerpts /
-    // physical-invariant bullets would push the total below the
-    // 800-char floor. Fail loud if that happens.
+  it('carries the bare Negative keyword list (NO command-form REJECT lines)', () => {
+    const prefix = composeCharacterLockPrefix(LINDA);
+    expect(prefix).toContain('Negative:');
+    expect(prefix).toContain('different person');
+    expect(prefix).toContain('weight change');
+    expect(prefix).toContain('wardrobe change');
+    expect(prefix).toContain('lighting change');
+    expect(prefix).toContain('plastic skin');
+    // Anti-AI-artifact guards absorbed into the Negative list (used
+    // to live on a separate "ABSOLUTELY NO …" line in Commit 2).
+    expect(prefix).toContain('phones in frame');
+    expect(prefix).toContain('watermark');
+    expect(prefix).toContain('on-screen text');
+    // Command-form REJECTs must NOT appear (violates Google's
+    // Veo 3.1 declarative-not-instructive rule).
+    expect(prefix).not.toContain('REJECT any change in');
+    expect(prefix).not.toContain('MATCH REFERENCE IMAGE EXACTLY');
+  });
+
+  it('prefix character count is bounded: > 800 (structured sheet is substantive) AND < 2500 (attention headroom)', () => {
     const prefix = composeCharacterLockPrefix(LINDA);
     expect(prefix.length).toBeGreaterThan(800);
+    expect(prefix.length).toBeLessThan(2500);
   });
 
-  it('male character variant still emits all 7 REJECTs + "He is speaking directly to the camera"', () => {
+  it('male character variant emits structured sheet with GENDER: male + first-person "I am <name>"', () => {
     const male: CharacterLock = { ...LINDA, gender: 'male', name: 'David', age: 62 };
     const prefix = composeCharacterLockPrefix(male);
-    expect(prefix).toContain('REJECT any change in body type.');
-    expect(prefix).toContain('REJECT any change in wardrobe.');
-    expect(prefix).toContain('REJECT any change in lighting.');
+    expect(prefix).toContain('GENDER: male');
+    expect(prefix).toContain('NAME: David');
+    expect(prefix).toContain('AGE: 62');
+    expect(prefix).toMatch(/IDENTITY ANCHOR: I am David/);
     expect(prefix).toMatch(/He is speaking directly to the camera/);
-    expect(prefix).toMatch(/62-year-old American male named David/);
+  });
+});
+
+describe('Polish-23 Commit 3.0.27: composeReferenceImageCaption — literal 1-sentence caption', () => {
+  it('names age + nationality + gender + demographic_role + wardrobe + setting', async () => {
+    const { composeReferenceImageCaption } = await import('../src/veo-lite-segment-prompt');
+    const caption = composeReferenceImageCaption(LINDA);
+    expect(caption).toMatch(/^The reference image \(shown in imageUrls\) depicts a /);
+    expect(caption).toMatch(/68-year-old American female named Linda/);
+    expect(caption).toContain('suburban grandmother');
+  });
+  it('caption length stays short (1-2 sentences, < 400 chars) so Veo weights it early', async () => {
+    const { composeReferenceImageCaption } = await import('../src/veo-lite-segment-prompt');
+    const caption = composeReferenceImageCaption(LINDA);
+    expect(caption.length).toBeLessThan(400);
+  });
+});
+
+describe('Polish-23 Commit 3.0.27: POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS + seed range constants', () => {
+  it('exports the exact seed range documented by kie.ai (10000-99999)', async () => {
+    const { POLISH23_VEO_SEED_MIN, POLISH23_VEO_SEED_MAX } =
+      await import('../src/veo-lite-segment-prompt');
+    expect(POLISH23_VEO_SEED_MIN).toBe(10000);
+    expect(POLISH23_VEO_SEED_MAX).toBe(99999);
+  });
+  it('Negative keyword list is a bare comma-separated string (NO imperative verbs)', async () => {
+    const { POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS } =
+      await import('../src/veo-lite-segment-prompt');
+    // Must contain the character-consistency keywords.
+    expect(POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS).toContain('different person');
+    expect(POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS).toContain('weight change');
+    expect(POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS).toContain('setting change');
+    // Must contain the anti-AI-artifact keywords (absorbed from
+    // the old "ABSOLUTELY NO …" tail).
+    expect(POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS).toContain('phones in frame');
+    expect(POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS).toContain('watermark');
+    // Must NOT contain command-form verbs (Google's declarative rule).
+    expect(POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS).not.toMatch(/\b(don't|do not|REJECT|NEVER)\b/);
   });
 });
 
@@ -126,23 +190,29 @@ describe('Polish-23 Commit 2: composeCharacterLockPrefix — invariants', () => 
     expect(prefix).toMatch(/SAME PERSON across every clip/);
   });
 
-  it('threads all 8 physical-invariant bullets (hair / eye asymmetry / nose / mouth / eye color / jaw / face / skin age)', () => {
+  it('threads the structured-sheet bullets (face_shape / eye_color / body / hair / skin)', () => {
+    // Polish-23 Commit 3.0.27: Google's Veo 3.1 guide recommends
+    // text + image conditioning fuse against ONE reference — so
+    // the per-clip Veo prompt keeps a summary bullet set, and the
+    // fine-grained face bullets (eye_asymmetry / nose / mouth /
+    // jaw) are provided by the Higgsfield Soul reference image
+    // itself (via imageUrls[]) rather than duplicated in text.
+    // Duplicating everything blows past the 150-word attention
+    // sweet spot and dilutes the character-lock signal.
     const prefix = composeCharacterLockPrefix(LINDA);
-    expect(prefix).toContain(LINDA.hair_bullet);
-    expect(prefix).toContain(LINDA.eye_asymmetry_bullet);
-    expect(prefix).toContain(LINDA.nose_bullet);
-    expect(prefix).toContain(LINDA.mouth_bullet);
-    expect(prefix).toContain(LINDA.eye_color_and_age_detail);
-    expect(prefix).toContain(LINDA.jaw_bullet);
     expect(prefix).toContain(LINDA.face_shape_bullet);
+    expect(prefix).toContain(LINDA.eye_color_and_age_detail);
+    expect(prefix).toContain(LINDA.body_invariant_bullet);
+    expect(prefix).toContain(LINDA.hair_bullet);
     expect(prefix).toContain(LINDA.skin_age_appropriate_detail);
   });
 
-  it('carries wardrobe + setting invariants', () => {
+  it('carries wardrobe + setting invariants (Commit 3.0.27: as structured-sheet WARDROBE: / SETTING: fields, not "WARDROBE INVARIANT" label)', () => {
     const prefix = composeCharacterLockPrefix(LINDA);
     expect(prefix).toContain(LINDA.clothing_bullet);
     expect(prefix).toContain(LINDA.setting_paragraph);
-    expect(prefix).toMatch(/WARDROBE INVARIANT/);
+    expect(prefix).toMatch(/^WARDROBE: /m);
+    expect(prefix).toMatch(/^SETTING: /m);
   });
 
   it('pronoun: female → She', () => {
@@ -204,10 +274,17 @@ describe('Polish-23 Commit 2: composeVeoLiteSegmentPrompt — full clip prompt',
     expect(out.prompt).toMatch(/slightly shaky handheld feel/);
   });
 
-  it('anti-AI directive tail: NO on-screen text + NO phones-in-frame (Polish-21.0.7 anchor)', () => {
+  it('anti-AI directive absorbed into the Negative: keyword list (Commit 3.0.27 — replaces "ABSOLUTELY NO …" tail)', () => {
+    // Polish-23 Commit 3.0.27: Google's Veo 3.1 prompting guide
+    // recommends bare keyword lists over command-form directives.
+    // The Commit 2 "ABSOLUTELY NO on-screen text …" tail is now
+    // folded into the Negative: keyword list inside the prefix.
     const out = composeVeoLiteSegmentPrompt(LINDA, baseSpec);
-    expect(out.prompt).toMatch(/ABSOLUTELY NO on-screen text/);
-    expect(out.prompt).toMatch(/ABSOLUTELY NO phones, cameras, screens/);
+    expect(out.prompt).toContain('Negative:');
+    expect(out.prompt).toContain('on-screen text');
+    expect(out.prompt).toContain('phones in frame');
+    expect(out.prompt).toContain('watermark');
+    expect(out.prompt).not.toContain('ABSOLUTELY NO');
   });
 
   it('wordCountCheck surfaces on the composed result (worker decides to run or reject)', () => {

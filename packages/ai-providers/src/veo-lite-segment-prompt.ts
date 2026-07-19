@@ -109,88 +109,149 @@ export function checkDialogueWordCount(dialogue: string): DialogueWordCountCheck
 }
 
 /**
+ * Polish-23 Commit 3.0.27: seed range for kie.ai's Veo endpoint.
+ * Documented 10000-99999 (5-digit integer). Same seed passed on
+ * every clip of a batch = the point of this field per kie.ai's
+ * docs: "Same seed generates similar video content."
+ *
+ * https://docs.kie.ai/veo3-api/generate-veo-3-video
+ */
+export const POLISH23_VEO_SEED_MIN = 10000;
+export const POLISH23_VEO_SEED_MAX = 99999;
+
+/**
+ * Polish-23 Commit 3.0.27: single Veo Negative prompt used on
+ * EVERY clip in a batch. Google's Veo prompting guide states that
+ * negative prompting is "declarative, not instructive — the model
+ * responds poorly to commands like 'don't' or 'no'. Instead, list
+ * unwanted concepts as keywords." This constant is a bare
+ * comma-separated keyword list, no imperative verbs.
+ *
+ * The list absorbs both the character-consistency guards (different
+ * person, weight change, age change, wardrobe change, lighting
+ * change, setting change, plastic skin, morph, extra limbs) AND the
+ * Polish-21.0.7 anti-AI-artifact guards (phones/cameras/screens in
+ * frame, on-screen text / captions / watermarks / social media UI /
+ * digital overlays), which prior commits carried in a separate
+ * "ABSOLUTELY NO …" line. Consolidating them into one Negative:
+ * keyword list matches Google's own recommended shape.
+ */
+export const POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS =
+  'different person, weight change, age change, wardrobe change, lighting change, ' +
+  'setting change, cartoon, animated, plastic skin, morph, extra limbs, watermark, ' +
+  'subtitles, text overlay, on-screen text, captions, social media UI, digital overlays, ' +
+  'phones in frame, cameras in frame, screens in frame, tablets, laptops';
+
+/**
+ * Polish-23 Commit 3.0.27: literal 1-2 sentence caption of what
+ * the Higgsfield Soul reference image (threaded via kie.ai's
+ * imageUrls[]) actually shows. Prepended to every clip prompt so
+ * Veo's text-and-image conditioning fuse against the same anchor.
+ *
+ * Also persisted to metadata.polish23_reference_image_caption for
+ * SQL forensics — the operator can verify what got threaded without
+ * grepping Vercel logs.
+ */
+export function composeReferenceImageCaption(lock: CharacterLock): string {
+  // Trim to first sentence for the setting excerpt so the caption
+  // stays punchy (Veo weights the first ~150 words heaviest per
+  // Google's guide).
+  const settingLead = lock.setting_paragraph.split('.')[0]?.trim() ?? lock.setting_paragraph;
+  return (
+    `The reference image (shown in imageUrls) depicts a ${lock.age}-year-old ` +
+    `${lock.nationality} ${lock.gender} named ${lock.name} (${lock.demographic_role}), ` +
+    `wearing ${lock.clothing_bullet.replace(/^-\s*/, '').replace(/^Clothing:\s*/i, '')}, ` +
+    `in ${settingLead.charAt(0).toLowerCase()}${settingLead.slice(1)}.`
+  );
+}
+
+/**
  * Compose the CHARACTER LOCK PREFIX. Every clip in a batch gets
- * the SAME prefix so Veo's per-clip generation can't drift.
+ * the SAME prefix — Veo's positional-attention mechanism rewards
+ * verbatim repetition of the character block across clips per
+ * community consensus (skywork.ai, sider.ai, tenten.co JSON prompt
+ * guides 2025-2026) + Google Cloud's Veo 3.1 prompting guide.
  *
- * Polish-23 Commit 3.0.25 rewrite — operator's "each clip is
- * different, this is useless" ship-blocker. kie.ai's Veo endpoint
- * exposes no image-reference-strength / weight parameter (verified
- * against buildKieVeoRequestBody wire body + docs), so prompt
- * aggression is the ONLY lever. The rewrite matches BCH's approach:
- * lead with an unambiguous MATCH REFERENCE IMAGE EXACTLY
- * imperative, repeat physical invariants verbatim, follow with
- * explicit REJECT/NEVER negative constraints Veo weights heavily,
- * and lock wardrobe + setting to the reference image separately.
+ * Polish-23 Commit 3.0.27 rewrite — replaces the 3.0.25/3.0.26
+ * "MATCH REFERENCE IMAGE EXACTLY" + 7-REJECT prose prefix based on
+ * research findings:
  *
- * Layout (STABLE across clips — Veo's attention rewards repetition):
- *   1. MATCH REFERENCE IMAGE EXACTLY imperative + failure framing
- *   2. IDENTITY line (age/nationality/gender/name/role)
- *   3. PHYSICAL INVARIANTS bullet list (verbatim from lock)
- *   4. BODY INVARIANT block (weight / proportions anchor)
- *   5. SETTING INVARIANT + full setting paragraph
- *   6. Explicit REJECT block (body/weight/age/features/setting)
- *   7. WARDROBE lock (clothing_bullet + SAME/NEVER language)
- *   8. SETTING lock (SAME/NEVER language)
- *   9. Speaking-to-camera framing line (pronoun-specific)
+ *   - Google's Veo 3.1 prompting guide explicitly says negative
+ *     prompting should be "declarative, not instructive" —
+ *     command-form "REJECT any change in X" underperforms bare
+ *     keyword lists. The old 7-REJECT block was net-negative.
+ *   - Structured character sheets with fielded labels (subject /
+ *     face / hair / body / wardrobe / setting / lighting / camera)
+ *     beat prose across every convergent 2025-2026 guide.
+ *   - Reference image literal-caption prepend is a Google-guide
+ *     pattern that fuses text + image conditioning against the
+ *     same anchor.
+ *   - First-person identity anchoring — operator's explicit spec
+ *     addition — reinforces the "same person" lock without the
+ *     shouting imperative.
+ *
+ * Layout (STABLE across clips):
+ *   1. Identity line (age / nationality / gender / name / role +
+ *      SAME PERSON across every clip anchor)
+ *   2. REFERENCE IMAGE: literal 1-sentence caption
+ *   3. CHARACTER SHEET (fielded, identical across all 8 clips)
+ *   4. IDENTITY ANCHOR (first-person "I am … the SAME PERSON …")
+ *   5. ACTION (third-person speaking-to-camera line)
+ *   6. Negative: bare comma-separated keyword list
  */
 export function composeCharacterLockPrefix(lock: CharacterLock): string {
   const pronoun = lock.gender === 'male' ? 'He' : 'She';
+  // Strip leading "- " from clothing_bullet for clean sheet + anchor
+  // embedding; retain the raw bullet text for the SHEET field.
+  const wardrobeText = lock.clothing_bullet.replace(/^-\s*/, '').replace(/^Clothing:\s*/i, '');
+  const settingLead = lock.setting_paragraph.split('.')[0]?.trim() ?? lock.setting_paragraph;
+
+  // Void unused locals — kept in scope in case a future revision
+  // wants to embed them; current tight layout below inlines the
+  // clothing/setting excerpts differently.
+  void wardrobeText;
+  void settingLead;
   return [
-    // Block 1 — aggressive MATCH REFERENCE opening.
-    'CHARACTER LOCK — MATCH REFERENCE IMAGE EXACTLY.',
-    'This character is the SAME PERSON as shown in the reference image AND the SAME PERSON across every clip in this batch. Any deviation from the reference image is a FAILURE.',
+    // Block 1 — identity line (keeps SAME PERSON language pinned by
+    // tests since Commit 2).
+    `CHARACTER LOCK — this ${lock.age}-year-old ${lock.nationality} ${lock.gender} named ${lock.name} ` +
+      `(${lock.demographic_role}) is the SAME PERSON across every clip in this batch.`,
     '',
-    // Block 2 — identity.
-    `IDENTITY: ${lock.age}-year-old ${lock.nationality} ${lock.gender} named ${lock.name} (${lock.demographic_role}).`,
+    // Block 2 — literal reference-image caption (fuses text + image
+    // conditioning against one description).
+    `REFERENCE IMAGE: ${composeReferenceImageCaption(lock)}`,
     '',
-    // Block 3 — physical invariants, verbatim.
-    'PHYSICAL INVARIANTS (verbatim per clip — do not restyle, do not soften):',
-    `  - ${lock.hair_bullet}`,
-    `  - ${lock.eye_asymmetry_bullet}`,
-    `  - ${lock.nose_bullet}`,
-    `  - ${lock.mouth_bullet}`,
-    `  - ${lock.eye_color_and_age_detail}`,
-    `  - ${lock.jaw_bullet}`,
-    `  - ${lock.face_shape_bullet}`,
-    `  - ${lock.skin_age_appropriate_detail}`,
-    '',
-    // Block 4 — body invariant (weight / proportions anchor).
-    'BODY INVARIANT (do NOT drift build / weight / proportions across clips):',
-    `  - ${lock.body_invariant_bullet}`,
-    '',
-    // Block 5 — setting invariant + full setting paragraph.
-    'SETTING INVARIANT (do NOT change position / furniture / background objects across clips):',
-    `  - ${lock.setting_invariant_bullet}`,
+    // Block 3 — structured CHARACTER SHEET. Field labels match the
+    // community-consensus 2025-2026 shape. Kept tight per Google's
+    // Veo 3.1 guide "weights the first ~150 words heaviest": FACE
+    // stays a 2-bullet summary rather than a 6-bullet dump; SETTING
+    // omits the setting_invariant_bullet (that content lives in the
+    // Higgsfield Soul reference image already).
+    'CHARACTER SHEET (identical across all 8 clips):',
+    `NAME: ${lock.name}`,
+    `GENDER: ${lock.gender}`,
+    `AGE: ${lock.age}`,
+    `ETHNICITY: ${lock.nationality}`,
+    `DEMOGRAPHIC: ${lock.demographic_role}`,
+    `FACE: ${lock.face_shape_bullet}. ${lock.eye_color_and_age_detail}.`,
+    `BODY: ${lock.body_invariant_bullet}`,
+    `HAIR: ${lock.hair_bullet}`,
+    `SKIN: ${lock.skin_age_appropriate_detail}`,
+    `WARDROBE: ${lock.clothing_bullet}`,
     `SETTING: ${lock.setting_paragraph}`,
+    'LIGHTING: even soft natural window light, no harsh shadows, no flash.',
+    'CAMERA: iPhone front camera, 9:16 vertical, arms-length selfie distance, slightly shaky handheld feel.',
     '',
-    // Block 6 — explicit REJECT block per operator's spec.
-    // Polish-23 Commit 3.0.26: extended to 7 constraints (added
-    // wardrobe + lighting). Each REJECT sits on its own line so
-    // Veo's attention weights them independently rather than
-    // averaging into a single long sentence.
-    'REJECT any change in body type.',
-    'REJECT any change in weight.',
-    'REJECT any change in age.',
-    'REJECT any change in facial features.',
-    'REJECT any change in wardrobe.',
-    'REJECT any change in setting.',
-    'REJECT any change in lighting.',
-    'REJECT any output that shows a different body type, different weight, or different body proportions than the reference image and the invariants above.',
+    // Block 4 — IDENTITY ANCHOR. First-person as operator's explicit
+    // spec — reinforces "same person" without command-form shouting.
+    `IDENTITY ANCHOR: I am ${lock.name}, the SAME PERSON shown in the reference image.`,
     '',
-    // Block 7 — WARDROBE lock. Keep the "WARDROBE INVARIANT" label
-    // (pinned by tests) but include the operator-specified SAME/NEVER
-    // language + Reference: excerpt on their own lines so Veo weights
-    // each independently.
-    `WARDROBE INVARIANT (LOCK): ${lock.clothing_bullet}`,
-    'SAME clothing as reference image. NEVER change wardrobe.',
-    `Reference: ${lock.clothing_bullet}`,
+    // Block 5 — ACTION line (third-person camera direction).
+    `ACTION: ${pronoun} is speaking directly to the camera in a vertical iPhone selfie, 9:16, handheld.`,
     '',
-    // Block 8 — SETTING lock (SAME/NEVER language + Reference: excerpt).
-    'SETTING LOCK: SAME setting / room / background as reference image. NEVER change environment.',
-    `Reference: ${lock.setting_paragraph}`,
-    '',
-    // Block 9 — framing / camera line.
-    `${pronoun} is speaking directly to the camera in a vertical iPhone selfie, 9:16, handheld.`,
+    // Block 6 — Negative keyword list (bare, no command verbs — per
+    // Google's own guide "declarative, not instructive").
+    `Negative: ${POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS}`,
   ].join('\n');
 }
 
@@ -213,6 +274,12 @@ export function composeVeoLiteSegmentPrompt(
   lock: CharacterLock,
   spec: VeoLiteSegmentSpec,
 ): ComposedVeoLiteSegmentPrompt {
+  // Polish-23 Commit 3.0.27: the CAMERA + anti-AI directive lines
+  // that used to sit here are now absorbed into the structured
+  // CHARACTER SHEET (CAMERA field) + the Negative keyword list
+  // inside composeCharacterLockPrefix. Nothing further to append —
+  // per-clip content is just segment header + dialogue + scene +
+  // optional emotional beat.
   const prefix = composeCharacterLockPrefix(lock);
   const wordCountCheck = checkDialogueWordCount(spec.dialogue);
   const emotionalLine = spec.emotionalBeat ? `Emotional beat: ${spec.emotionalBeat}.` : undefined;
@@ -224,11 +291,5 @@ export function composeVeoLiteSegmentPrompt(
     `SCENE: ${spec.sceneDirection.trim()}`,
   ];
   if (emotionalLine) parts.push(emotionalLine);
-  parts.push(
-    '',
-    'CAMERA: iPhone front camera, 9:16 vertical, slightly shaky handheld feel, natural indoor light.',
-    'ABSOLUTELY NO on-screen text, captions, floating text, social media UI, watermarks, or digital overlays. ' +
-      'ABSOLUTELY NO phones, cameras, screens, tablets, or laptops visible anywhere in the frame.',
-  );
   return { prompt: parts.join('\n'), wordCountCheck };
 }

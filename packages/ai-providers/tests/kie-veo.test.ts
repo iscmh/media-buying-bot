@@ -906,6 +906,46 @@ describe('Polish-23 Commit 3.0.4: buildKieVeoRequestBody — pure body builder f
     });
     expect(b['aspect_ratio']).toBe('16:9');
   });
+
+  it('Polish-23 Commit 3.0.27: threads seed as `seeds` field when provided', () => {
+    // Docs: https://docs.kie.ai/veo3-api/generate-veo-3-video
+    // Field name is plural `seeds` (kie.ai spec), range 10000-99999.
+    // Same seed on every clip in a batch → character consistency.
+    const b = buildKieVeoRequestBody({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      seed: 42731,
+    });
+    expect(b['seeds']).toBe(42731);
+  });
+
+  it('Polish-23 Commit 3.0.27: omits `seeds` when caller does not provide (kie.ai default random-seed behavior)', () => {
+    const b = buildKieVeoRequestBody({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(b).not.toHaveProperty('seeds');
+  });
+
+  it('Polish-23 Commit 3.0.27: threads negativePrompt when provided (speculative — Vertex AI field, kie.ai passthrough)', () => {
+    const b = buildKieVeoRequestBody({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      negativePrompt: 'different person, weight change, plastic skin',
+    });
+    expect(b['negativePrompt']).toBe('different person, weight change, plastic skin');
+  });
+
+  it('Polish-23 Commit 3.0.27: omits negativePrompt when unset or empty string', () => {
+    const bUnset = buildKieVeoRequestBody({ userId: 'u', apiKey: 'k', prompt: 'p' });
+    expect(bUnset).not.toHaveProperty('negativePrompt');
+    const bEmpty = buildKieVeoRequestBody({
+      userId: 'u',
+      apiKey: 'k',
+      prompt: 'p',
+      negativePrompt: '',
+    });
+    expect(bEmpty).not.toHaveProperty('negativePrompt');
+  });
 });
 
 describe('Polish-23 Commit 2: model + cost constants (BCH anchors)', () => {

@@ -157,6 +157,28 @@ export interface KieVeoSubmitInput {
   imageUrls?: string[];
   /** Per-clip duration seconds; kie.ai Veo Lite = 8s (fixed). */
   durationSeconds?: number;
+  /**
+   * Polish-23 Commit 3.0.27: seed for reproducibility. kie.ai's
+   * Veo endpoint documents `seeds` as an integer in the range
+   * 10000-99999 with the semantics "same seed generates similar
+   * video content" — use the SAME seed across all clips in a
+   * batch for character consistency. Undefined = kie.ai picks a
+   * random seed per submit.
+   * https://docs.kie.ai/veo3-api/generate-veo-3-video
+   */
+  seed?: number;
+  /**
+   * Polish-23 Commit 3.0.27: bare comma-separated keyword list of
+   * things to AVOID in the output. Google's Vertex AI Veo docs
+   * document `negativePrompt` explicitly; kie.ai's `/veo/generate`
+   * docs don't list it, but kie.ai is a Vertex passthrough for
+   * this endpoint and speculatively-sent unknown fields are
+   * ignored, not rejected. Cheap to send; matches Google's
+   * "declarative not instructive" recommended shape (bare keyword
+   * list, no "don't"/"no" imperatives).
+   * https://docs.cloud.google.com/vertex-ai/generative-ai/docs/video/use-reference-images-to-guide-video-generation
+   */
+  negativePrompt?: string;
   generationJobId?: string;
   generatedCreativeId?: string;
 }
@@ -235,6 +257,18 @@ export function buildKieVeoRequestBody(input: KieVeoSubmitInput): Record<string,
     body['generationType'] = 'REFERENCE_2_VIDEO';
   } else {
     body['generationType'] = 'TEXT_2_VIDEO';
+  }
+  // Polish-23 Commit 3.0.27: seed field name is `seeds` (plural)
+  // per kie.ai's documented shape. Only include when set — kie.ai's
+  // default random-seed behavior fires when the field is absent.
+  if (typeof input.seed === 'number') {
+    body['seeds'] = input.seed;
+  }
+  // Polish-23 Commit 3.0.27: speculative `negativePrompt` field.
+  // kie.ai's docs don't list it but their Vertex passthrough may
+  // forward. Field name mirrors Vertex AI's Veo API surface.
+  if (typeof input.negativePrompt === 'string' && input.negativePrompt.length > 0) {
+    body['negativePrompt'] = input.negativePrompt;
   }
   return body;
 }

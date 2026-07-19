@@ -43,8 +43,12 @@ import {
   callClaude,
   checkReplicateConcat,
   composeHiggsfieldSoulReferencePrompt,
+  composeReferenceImageCaption,
   composeVeoLiteSegmentPrompt,
   KIE_VEO_LITE_DEFAULT_USD_PER_CLIP,
+  POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS,
+  POLISH23_VEO_SEED_MAX,
+  POLISH23_VEO_SEED_MIN,
   pollKieVeoLite,
   pollWavespeedSoul,
   submitKieVeoLite,
@@ -843,6 +847,43 @@ export const generatePolish23VeoLite = inngest.createFunction(
         .where(eq(schema.generationJobs.id, jobId));
     });
 
+    // Polish-23 Commit 3.0.27: derive + persist the batch-scoped
+    // Veo seed ONCE, wrapped in step.run so Inngest caches it. On
+    // any function-level retry OR clip-level auto-retry (Commit
+    // 3.0.22), the cached seed is returned and the SAME value flows
+    // into every Veo submit — that's the point per kie.ai's docs.
+    //
+    // Range 10000-99999 per kie.ai's documented `seeds` field.
+    // Also persist the composed reference-image caption for SQL
+    // forensics + downstream reuse.
+    const polish23Seed = await step.run('generate-polish23-seed', async () => {
+      const seed =
+        POLISH23_VEO_SEED_MIN +
+        Math.floor(Math.random() * (POLISH23_VEO_SEED_MAX - POLISH23_VEO_SEED_MIN + 1));
+      const referenceCaption = composeReferenceImageCaption(adSpec.character_lock);
+      const db = getDb();
+      const row = await db.query.generationJobs.findFirst({
+        where: eq(schema.generationJobs.id, jobId),
+        columns: { metadata: true },
+      });
+      const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+      await db
+        .update(schema.generationJobs)
+        .set({
+          metadata: {
+            ...meta,
+            polish23_seed: seed,
+            polish23_reference_image_caption: referenceCaption,
+          },
+        })
+        .where(eq(schema.generationJobs.id, jobId));
+      console.log(
+        `[polish-23-worker] batch seed generated: polish23_seed=${seed} ` +
+          `polish23_reference_image_caption=${JSON.stringify(referenceCaption).slice(0, 400)}`,
+      );
+      return seed;
+    });
+
     // Polish-23 Commit 3.0.8: soul-ref URL health check. Before we
     // spend Veo credits on 8 clips that all reference this PNG, do
     // a cheap HEAD to confirm kie.ai (or Replicate concat, or any
@@ -1012,6 +1053,11 @@ export const generatePolish23VeoLite = inngest.createFunction(
         aspectRatio: '9:16',
         imageUrls: [soulRefUrl],
         durationSeconds: POLISH23_CLIP_SECONDS,
+        // Polish-23 Commit 3.0.27: batch-scoped seed + Negative
+        // keyword list. Same seed on every clip in the batch =
+        // kie.ai's documented consistency mechanism.
+        seed: polish23Seed,
+        negativePrompt: POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS,
         generationJobId: jobId,
       });
       veoSubmitBodies.push({ segmentIndex: i, body: capturedBody });
@@ -1151,6 +1197,14 @@ export const generatePolish23VeoLite = inngest.createFunction(
               aspectRatio: '9:16',
               imageUrls: [soulRefUrl],
               durationSeconds: POLISH23_CLIP_SECONDS,
+              // Polish-23 Commit 3.0.27: batch-scoped seed + Negative
+              // keyword list. Same seed on every clip = kie.ai's
+              // documented consistency mechanism; the auto-retry
+              // loop (Commit 3.0.22) also re-submits with the same
+              // seed since polish23Seed is captured from the
+              // outer-scope Inngest-cached step result.
+              seed: polish23Seed,
+              negativePrompt: POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS,
               generationJobId: jobId,
             });
             if (!submit.ok || !submit.taskId) {
