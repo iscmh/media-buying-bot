@@ -26,8 +26,70 @@ import { z } from 'zod';
 export const POLISH23_SEGMENT_COUNT = 8;
 export const POLISH23_CLIP_SECONDS = 8;
 
+/**
+ * Polish-23 Commit 3.0.23: Google Veo's TTS model rejects dialogue
+ * with nested quotes / mid-clip voice switches. First 6/8 run of
+ * job 03a…64 died on clip 6 dialogue:
+ *
+ *   "So I hit up my old buddy Frank who's been retired five years.
+ *    He said, 'David, just enjoy it. But my brain kept buzzing.'"
+ *
+ * Google Veo error: "The Google model was unable to generate audio
+ * for this request. Please try a different prompt."
+ *
+ * Root cause: the ' … ' bracketed third-party speech ("David, just
+ * enjoy it. But my brain kept buzzing.") forces Google's TTS to
+ * render a second voice mid-clip, which it can't do reliably.
+ *
+ * These regex patterns catch nested-quote shapes we've seen fail:
+ *   1. Straight double quotes         "..." (3+ chars)
+ *   2. Curly double quotes            "…" (3+ chars, U+201C U+201D)
+ *   3. Curly single quotes            '…' (5+ chars, U+2018 U+2019)
+ *   4. Attribution verb + straight    said, 'David, …'
+ *      single-quoted proper-noun-ish  told, 'Frank, …'
+ *      content (capital-letter start)
+ *
+ * The attribution+single-quote pattern deliberately requires a
+ * CAPITAL letter after the opening apostrophe so contraction
+ * sequences like "I said I'm fine and she said that's it" don't
+ * false-positive (both apostrophes come from contractions).
+ *
+ * Exported so tests can pin the exact list.
+ */
+export const POLISH23_NESTED_QUOTE_PATTERNS: readonly RegExp[] = [
+  /"[^"]{3,}"/,
+  /“[^“”]{3,}”/,
+  /‘[^‘’]{5,}’/,
+  // Attribution verb + optional recipient word ("me", "her", "us"…)
+  // + optional punctuation + whitespace + straight-single-quoted
+  // content that STARTS WITH A CAPITAL LETTER and is 5+ chars long.
+  // The capital-letter gate keeps contraction pairs like "I said I'm
+  // fine and she said that's all" from false-positiving (all
+  // apostrophes are followed by lowercase letters). The optional
+  // recipient word handles "He told me, 'Frank told me to enjoy it'"
+  // shape from the operator's clip-6 failure family.
+  //
+  // NO /i flag on purpose — JS regex case-insensitive mode folds
+  // [A-Z] to also match a-z, which would defeat the capital gate.
+  // Verbs stay lowercase because mid-sentence UGC dialogue always
+  // has attribution verbs in lowercase ("He said," never "He SAID,").
+  /\b(said|says|say|told|tells|asked|asks|replied|replies|shouted|whispered|yelled|answered|answers)\b\s*(?:\w+\s*)?[,:]?\s*'[A-Z][^']{5,}'/,
+];
+
+export function containsQuotedThirdPartySpeech(dialogue: unknown): boolean {
+  if (typeof dialogue !== 'string' || dialogue.length === 0) return false;
+  return POLISH23_NESTED_QUOTE_PATTERNS.some((p) => p.test(dialogue));
+}
+
 export const SegmentSpecSchema = z.object({
-  dialogue: z.string().min(1),
+  dialogue: z
+    .string()
+    .min(1)
+    .refine((d) => !containsQuotedThirdPartySpeech(d), {
+      message:
+        'dialogue contains quoted third-party speech (nested quotes / attribution+quote pattern). ' +
+        'Google Veo TTS rejects mid-clip voice switches. Rewrite as first-person paraphrase.',
+    }),
   sceneDirection: z.string().min(1),
   emotionalBeat: z.string().optional(),
 });
@@ -118,6 +180,29 @@ SEGMENT RULES:
 - sceneDirection MUST be about action/framing, NEVER re-describe
   the character's face/hair/clothing — those live in character_lock
   and are threaded automatically.
+
+DIALOGUE RULES (Polish-23 Commit 3.0.23 — Google Veo TTS constraint):
+- Every segment's dialogue is spoken in the character's OWN voice
+  ONLY. Single continuous first-person monologue per clip. No
+  character switches mid-segment.
+- NEVER quote another person's speech. NO nested quotes of any kind
+  — no straight double quotes, no curly quotes, no single-quoted
+  bracketed speech.
+- NEVER use dialogue attribution patterns that introduce a second
+  speaker. Avoid ALL of these shapes:
+    BAD: He said, "Just enjoy it."
+    BAD: She told me, "You'll be fine."
+    BAD: He said, 'David, just enjoy it. But my brain kept buzzing.'
+- If the character REFERS to another person's words, PARAPHRASE in
+  indirect / reported speech (no bracketed quoted content). Example:
+    GOOD: "Frank told me to just enjoy retirement, but my brain kept buzzing."
+    BAD:  "Frank said, 'David, just enjoy it. But my brain kept buzzing.'"
+- Rationale: Google Veo's TTS model rejects clips with nested-quote
+  dialogue — it can't switch voices mid-8s-clip reliably. A clip
+  that violates this rule fails with "The Google model was unable
+  to generate audio for this request." A downstream Zod validator
+  enforces this at parse time; violating dialogue causes wholesale
+  fallback to the Linda stock ad.
 
 CRITICAL:
 - Return the JSON object AND NOTHING ELSE. No leading "Here is",
@@ -239,6 +324,11 @@ export function isValidSegment(seg: SegmentSpec | undefined | null): seg is Segm
   if (typeof seg.dialogue !== 'string' || seg.dialogue.trim().length === 0) return false;
   if (typeof seg.sceneDirection !== 'string' || seg.sceneDirection.trim().length === 0)
     return false;
+  // Polish-23 Commit 3.0.23: nested-quote dialogue kills Google's
+  // Veo TTS. Belt-and-suspenders with the Zod refine — the schema
+  // already rejects, but coalescer paths that see a manually-
+  // constructed SegmentSpec would otherwise let it through.
+  if (containsQuotedThirdPartySpeech(seg.dialogue)) return false;
   return true;
 }
 
@@ -335,6 +425,15 @@ export function assertAllSegmentsValid(segments: SegmentSpec[]): void {
       throw new Error(
         `[polish-23-worker] AdSpec.segments[${i}].sceneDirection is empty or non-string. ` +
           'Refusing to submit Veo with an empty scene direction.',
+      );
+    }
+    // Polish-23 Commit 3.0.23: last-chance guard against nested-quote
+    // dialogue reaching Google Veo. Only reachable if the Zod refine
+    // AND the coalescer's isValidSegment both let it through.
+    if (containsQuotedThirdPartySpeech(seg.dialogue)) {
+      throw new Error(
+        `[polish-23-worker] AdSpec.segments[${i}].dialogue contains quoted third-party ` +
+          `speech — Google Veo TTS will reject. Refusing to submit.`,
       );
     }
   }

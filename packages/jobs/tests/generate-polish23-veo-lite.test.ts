@@ -22,10 +22,13 @@ import { generatePolish23VeoLite } from '../src/functions/generate-polish23-veo-
 import {
   AdSpecSchema,
   POLISH23_CLIP_SECONDS,
+  POLISH23_NESTED_QUOTE_PATTERNS,
   POLISH23_SEGMENT_COUNT,
+  SegmentSpecSchema,
   assertAllSegmentsValid,
   coalesceAdSpecWithFallback,
   composePolish23AdSpecUserPrompt,
+  containsQuotedThirdPartySpeech,
   diagnosePolish23AdSpecParseFailure,
   fallbackPolish23AdSpec,
   isValidSegment,
@@ -533,5 +536,136 @@ describe('Polish-23 Commit 3: character-lock lifecycle invariants (regression pi
     for (const seg of parsed.segments) {
       expect(seg).not.toHaveProperty('character_lock');
     }
+  });
+});
+
+describe('Polish-23 Commit 3.0.23: containsQuotedThirdPartySpeech — Google Veo TTS guard', () => {
+  it('matches the EXACT job 03a…64 clip 6 failure dialogue', () => {
+    const failing =
+      "So I hit up my old buddy Frank who's been retired five years. He said, " +
+      "'David, just enjoy it. But my brain kept buzzing.'";
+    expect(containsQuotedThirdPartySpeech(failing)).toBe(true);
+  });
+
+  it('matches straight double-quoted third-party speech', () => {
+    expect(containsQuotedThirdPartySpeech('He said, "just enjoy retirement".')).toBe(true);
+    expect(containsQuotedThirdPartySpeech('She told me "you\'ll be fine".')).toBe(true);
+  });
+
+  it('matches curly double-quoted third-party speech (U+201C U+201D)', () => {
+    expect(containsQuotedThirdPartySpeech('He said, “just enjoy retirement”.')).toBe(true);
+  });
+
+  it('matches curly single-quoted content (U+2018 U+2019, 5+ chars)', () => {
+    expect(containsQuotedThirdPartySpeech('She said ‘just enjoy it, David’ to me.')).toBe(true);
+  });
+
+  it('matches attribution + straight-single-quoted CAPITAL-start content', () => {
+    expect(
+      containsQuotedThirdPartySpeech("She said, 'David, take it easy for once in your life'"),
+    ).toBe(true);
+    expect(containsQuotedThirdPartySpeech("He told me, 'Frank told me to enjoy it'")).toBe(true);
+  });
+
+  it('does NOT false-positive on contraction pairs like "I said I\'m fine and she said that\'s it"', () => {
+    // Two contraction apostrophes 15+ chars apart used to false-positive.
+    // Attribution regex requires capital letter AFTER opening apostrophe.
+    expect(containsQuotedThirdPartySpeech("I said I'm fine and then she said that's all")).toBe(
+      false,
+    );
+  });
+
+  it('does NOT false-positive on inline contractions or possessives', () => {
+    expect(
+      containsQuotedThirdPartySpeech(
+        "I don't think it's worth it, but my daughter's opinion matters too.",
+      ),
+    ).toBe(false);
+    expect(
+      containsQuotedThirdPartySpeech(
+        "That's what I'd tell you if you were my age and I've been there.",
+      ),
+    ).toBe(false);
+    expect(
+      containsQuotedThirdPartySpeech(
+        "If you're my age and tired of feeling tired, go grab a bottle.",
+      ),
+    ).toBe(false);
+  });
+
+  it('returns false for non-strings, empty, null, undefined', () => {
+    expect(containsQuotedThirdPartySpeech('')).toBe(false);
+    expect(containsQuotedThirdPartySpeech(null)).toBe(false);
+    expect(containsQuotedThirdPartySpeech(undefined)).toBe(false);
+    expect(containsQuotedThirdPartySpeech(42)).toBe(false);
+    expect(containsQuotedThirdPartySpeech({ dialogue: 'He said, "hi"' })).toBe(false);
+  });
+
+  it('exports POLISH23_NESTED_QUOTE_PATTERNS as the exact 4-regex list (tripwire)', () => {
+    expect(POLISH23_NESTED_QUOTE_PATTERNS).toHaveLength(4);
+  });
+});
+
+describe('Polish-23 Commit 3.0.23: SegmentSpecSchema — Zod refine rejects nested-quote dialogue', () => {
+  it('rejects the EXACT job 03a…64 clip 6 failure dialogue at parse time', () => {
+    const bad = {
+      dialogue:
+        "So I hit up my old buddy Frank who's been retired five years. He said, " +
+        "'David, just enjoy it. But my brain kept buzzing.'",
+      sceneDirection: 'David leans back in his chair, contemplative.',
+    };
+    const parsed = SegmentSpecSchema.safeParse(bad);
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues[0]!.message).toMatch(/quoted third-party speech/i);
+    }
+  });
+
+  it('accepts paraphrased first-person indirect speech (the GOOD example)', () => {
+    const good = {
+      dialogue:
+        "So I hit up my old buddy Frank who's been retired five years. Frank told me " +
+        'to just enjoy retirement, but my brain kept buzzing anyway all day long here.',
+      sceneDirection: 'David leans back in his chair, contemplative.',
+    };
+    const parsed = SegmentSpecSchema.safeParse(good);
+    expect(parsed.success).toBe(true);
+  });
+});
+
+describe('Polish-23 Commit 3.0.23: fallbackPolish23AdSpec — every fallback dialogue survives the new guard', () => {
+  // Regression pin: if the fallback ever regresses to include a
+  // nested-quote pattern, EVERY Polish-23 job that hits the
+  // wholesale fallback path would fail Zod validation on the
+  // fallback itself — locking the pipeline out of even the "give
+  // up and ship Linda stock ad" recovery path.
+  const fallback = fallbackPolish23AdSpec();
+  for (const [i, seg] of fallback.segments.entries()) {
+    it(`fallback segment ${i} dialogue passes containsQuotedThirdPartySpeech(=false)`, () => {
+      expect(containsQuotedThirdPartySpeech(seg.dialogue)).toBe(false);
+    });
+    it(`fallback segment ${i} dialogue passes SegmentSpecSchema Zod refine`, () => {
+      expect(SegmentSpecSchema.safeParse(seg).success).toBe(true);
+    });
+  }
+});
+
+describe('Polish-23 Commit 3.0.23: isValidSegment + assertAllSegmentsValid — belt-and-suspenders', () => {
+  it('isValidSegment returns false when dialogue has nested quotes (bypasses schema path)', () => {
+    const bad = {
+      dialogue: "He said, 'David, just enjoy it. But my brain kept buzzing.'",
+      sceneDirection: 'David leans back.',
+    };
+    expect(isValidSegment(bad)).toBe(false);
+  });
+
+  it('assertAllSegmentsValid throws with a nested-quote diagnostic message', () => {
+    const spec = fallbackPolish23AdSpec();
+    const mutated = spec.segments.slice();
+    mutated[3] = {
+      dialogue: "He said, 'David, just enjoy it. But my brain kept buzzing.'",
+      sceneDirection: 'David leans back in his chair.',
+    };
+    expect(() => assertAllSegmentsValid(mutated)).toThrow(/quoted third-party speech/i);
   });
 });

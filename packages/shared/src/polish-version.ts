@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.29';
+export const POLISH_VERSION = '23.0.30';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.29';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.22 — transient errorMessage downgrade + clip-level auto-retry ×2 + polish23_clip_retries[]';
+  'Polish-23 Commit 3.0.23 — dialogue rules ban nested quotes + Zod refine + fallback pins (Google Veo TTS guard)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
