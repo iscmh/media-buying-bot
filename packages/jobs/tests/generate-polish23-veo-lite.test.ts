@@ -434,8 +434,8 @@ describe('Polish-23 Commit 3.0.2: coalesceAdSpecWithFallback — safety-net cont
 });
 
 describe('Polish-23 Commit 3.0.8: softTruncatePromptForVeo — length ceiling + graceful marker', () => {
-  it('constant anchor: POLISH23_PROMPT_MAX_CHARS = 3000', () => {
-    expect(POLISH23_PROMPT_MAX_CHARS).toBe(3000);
+  it('constant anchor: POLISH23_PROMPT_MAX_CHARS = 3500 (raised from 3000 in Commit 3.0.30 to fit SETTING INVARIANT block)', () => {
+    expect(POLISH23_PROMPT_MAX_CHARS).toBe(3500);
   });
 
   it('passes short prompts through untouched (truncated=false, originalChars matches)', () => {
@@ -446,10 +446,10 @@ describe('Polish-23 Commit 3.0.8: softTruncatePromptForVeo — length ceiling + 
   });
 
   it('respects the boundary — a prompt exactly at maxChars is NOT truncated', () => {
-    const s = 'a'.repeat(3000);
+    const s = 'a'.repeat(3500);
     const r = softTruncatePromptForVeo(s);
     expect(r.truncated).toBe(false);
-    expect(r.prompt.length).toBe(3000);
+    expect(r.prompt.length).toBe(3500);
   });
 
   it('truncates over-length prompts with a visible marker, preserving as much prefix as possible', () => {
@@ -460,7 +460,7 @@ describe('Polish-23 Commit 3.0.8: softTruncatePromptForVeo — length ceiling + 
     // Total (prefix + marker) never exceeds maxChars.
     expect(r.prompt.length).toBeLessThanOrEqual(POLISH23_PROMPT_MAX_CHARS);
     // Marker is visible + names the original length.
-    expect(r.prompt).toMatch(/truncated at 3000 chars/);
+    expect(r.prompt).toMatch(/truncated at 3500 chars/);
     expect(r.prompt).toMatch(/original was 5000/);
     // Prefix preserved verbatim.
     expect(r.prompt.startsWith('X'.repeat(100))).toBe(true);

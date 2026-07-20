@@ -85,7 +85,12 @@ console.log(`[jobs.generate-polish23-veo-lite] cold start — POLISH_VERSION=${P
  * warn-and-truncate rather than break — a 3000-char prompt still
  * carries the CHARACTER LOCK invariants and dialogue verbatim.
  */
-export const POLISH23_PROMPT_MAX_CHARS = 3000;
+// Polish-23 Commit 3.0.30: raised 3000 → 3500 to accommodate the
+// SETTING INVARIANT block (adds ~500 chars vs the 3.0.27 baseline
+// prefix). Google Veo's documented hard cap is ~1024 tokens
+// (roughly 4000-5000 chars), so 3500 still leaves headroom for
+// per-clip dialogue + scene direction (~300 chars typical).
+export const POLISH23_PROMPT_MAX_CHARS = 3500;
 
 /**
  * Polish-23 Commit 3.0.8: soft-truncate a composed prompt to the
@@ -289,6 +294,13 @@ export const generatePolish23VeoLite = inngest.createFunction(
                 source: 'vision_analysis_persona' as const,
                 text: JSON.stringify(conceptAnalysis, null, 2),
                 persona: visionAdditions.persona,
+                // Polish-23 Commit 3.0.30: also carry structured
+                // setting_details forward so the Higgsfield Soul
+                // reference prompt + Veo per-clip prompts get the
+                // room / props / lighting fields verbatim from
+                // vision analysis instead of relying on Claude to
+                // paraphrase them into setting_paragraph.
+                settingDetails: visionAdditions.setting_details,
                 jobId: null as string | null,
               };
             }
@@ -300,6 +312,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
               source: 'ugc_original_script' as const,
               text: ugcScript,
               persona: null,
+              settingDetails: null,
               jobId: null as string | null,
             };
           }
@@ -320,6 +333,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
                 source: 'prior_analysis' as const,
                 text: JSON.stringify(analysis, null, 2),
                 persona: null,
+                settingDetails: null,
                 jobId: p.id as string | null,
               };
             }
@@ -328,6 +342,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
             source: 'none' as const,
             text: null as string | null,
             persona: null,
+            settingDetails: null,
             jobId: null as string | null,
           };
         })
@@ -335,6 +350,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
           source: 'none' as const,
           text: null as string | null,
           persona: null,
+          settingDetails: null,
           jobId: null as string | null,
         };
 
@@ -827,7 +843,10 @@ export const generatePolish23VeoLite = inngest.createFunction(
         const submit = await submitWavespeedSoul({
           userId,
           apiKey: keys.wavespeed_ai!,
-          prompt: composeHiggsfieldSoulReferencePrompt(adSpec.character_lock),
+          prompt: composeHiggsfieldSoulReferencePrompt(
+            adSpec.character_lock,
+            sourceLookup.settingDetails ?? undefined,
+          ),
           image: HIGGSFIELD_SEED_IMAGE_URL,
           quality: 'high',
           generationJobId: jobId,
@@ -1142,6 +1161,11 @@ export const generatePolish23VeoLite = inngest.createFunction(
         dialogue: segment.dialogue,
         sceneDirection: segment.sceneDirection,
         emotionalBeat: segment.emotionalBeat,
+        // Polish-23 Commit 3.0.30: thread structured setting_details
+        // from the source-video vision analysis through to the
+        // SETTING INVARIANT block. Absent (non-persona flows) →
+        // block falls back to lock.setting_paragraph excerpts.
+        settingDetails: sourceLookup.settingDetails ?? undefined,
       });
       // Polish-23 Commit 3.0.8: prompt-length instrumentation +
       // soft-truncate. A 3000-char ceiling keeps the CHARACTER

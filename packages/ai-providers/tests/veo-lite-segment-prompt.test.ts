@@ -77,7 +77,7 @@ describe('Polish-23 Commit 3.0.27: composeCharacterLockPrefix — structured she
     expect(prefix).toContain('suburban grandmother');
   });
 
-  it('carries the structured CHARACTER SHEET with fixed field labels', () => {
+  it('carries the structured CHARACTER SHEET with fixed field labels (Commit 3.0.30: LIGHTING/CAMERA moved into SETTING INVARIANT block below)', () => {
     const prefix = composeCharacterLockPrefix(LINDA);
     expect(prefix).toContain('CHARACTER SHEET (identical across all 8 clips):');
     expect(prefix).toContain('NAME: Linda');
@@ -91,8 +91,8 @@ describe('Polish-23 Commit 3.0.27: composeCharacterLockPrefix — structured she
     expect(prefix).toContain('SKIN:');
     expect(prefix).toContain('WARDROBE:');
     expect(prefix).toContain('SETTING:');
-    expect(prefix).toContain('LIGHTING:');
-    expect(prefix).toContain('CAMERA:');
+    // LIGHTING + CAMERA now live in SETTING INVARIANT (Commit 3.0.30).
+    // Pins moved to the SETTING INVARIANT describe block below.
   });
 
   it('carries the first-person IDENTITY ANCHOR line', () => {
@@ -107,7 +107,7 @@ describe('Polish-23 Commit 3.0.27: composeCharacterLockPrefix — structured she
     );
   });
 
-  it('carries the bare Negative keyword list (NO command-form REJECT lines)', () => {
+  it('carries the bare Negative keyword list (Commit 3.0.30: character-level REJECTs still absent; setting REJECTs live in SETTING INVARIANT)', () => {
     const prefix = composeCharacterLockPrefix(LINDA);
     expect(prefix).toContain('Negative:');
     expect(prefix).toContain('different person');
@@ -120,16 +120,26 @@ describe('Polish-23 Commit 3.0.27: composeCharacterLockPrefix — structured she
     expect(prefix).toContain('phones in frame');
     expect(prefix).toContain('watermark');
     expect(prefix).toContain('on-screen text');
-    // Command-form REJECTs must NOT appear (violates Google's
-    // Veo 3.1 declarative-not-instructive rule).
-    expect(prefix).not.toContain('REJECT any change in');
+    // Character-level command-form REJECTs must NOT appear
+    // (Commit 3.0.27 removed per Google's declarative rule).
+    expect(prefix).not.toContain('REJECT any change in body type');
+    expect(prefix).not.toContain('REJECT any change in weight');
+    expect(prefix).not.toContain('REJECT any change in age');
+    expect(prefix).not.toContain('REJECT any change in facial features');
     expect(prefix).not.toContain('MATCH REFERENCE IMAGE EXACTLY');
+    // Setting-level REJECTs DO appear (Commit 3.0.30 walk-back —
+    // covered by the dedicated SETTING INVARIANT describe block).
   });
 
-  it('prefix character count is bounded: > 800 (structured sheet is substantive) AND < 2500 (attention headroom)', () => {
+  it('prefix character count is bounded: > 800 (structured sheet + SETTING INVARIANT are substantive) AND < 3500 (POLISH23_PROMPT_MAX_CHARS ceiling)', () => {
+    // Polish-23 Commit 3.0.30: SETTING INVARIANT block added ~500
+    // chars vs the 3.0.27 baseline. POLISH23_PROMPT_MAX_CHARS
+    // raised from 3000 → 3500 to keep the total prompt (prefix +
+    // segment header + dialogue + scene) under the truncation
+    // ceiling. Google Veo's hard cap is ~4000-5000 chars.
     const prefix = composeCharacterLockPrefix(LINDA);
     expect(prefix.length).toBeGreaterThan(800);
-    expect(prefix.length).toBeLessThan(2500);
+    expect(prefix.length).toBeLessThan(3500);
   });
 
   it('male character variant emits structured sheet with GENDER: male + first-person "I am <name>"', () => {
@@ -140,6 +150,87 @@ describe('Polish-23 Commit 3.0.27: composeCharacterLockPrefix — structured she
     expect(prefix).toContain('AGE: 62');
     expect(prefix).toMatch(/IDENTITY ANCHOR: I am David/);
     expect(prefix).toMatch(/He is speaking directly to the camera/);
+  });
+});
+
+describe('Polish-23 Commit 3.0.30: SETTING INVARIANT block + setting REJECTs + first-person setting anchor', () => {
+  const SETTING_DETAILS = {
+    interior_or_exterior: 'interior' as const,
+    room_or_place: 'living room with beige couch',
+    lighting: 'warm afternoon window light from camera-right',
+    key_props: ['beige couch', 'wooden coffee table', 'framed family photo on the wall'],
+  };
+
+  it('emits SETTING INVARIANT block with ROOM / PROPS / LIGHTING / FRAMING / CAMERA fields', () => {
+    const prefix = composeCharacterLockPrefix(LINDA, SETTING_DETAILS);
+    expect(prefix).toContain('SETTING INVARIANT (identical across all clips):');
+    expect(prefix).toContain('ROOM: living room with beige couch');
+    expect(prefix).toContain(
+      'PROPS: beige couch, wooden coffee table, framed family photo on the wall',
+    );
+    expect(prefix).toContain('LIGHTING: warm afternoon window light from camera-right');
+    expect(prefix).toContain(
+      'FRAMING: medium close-up, character seated, camera at eye level, same angle throughout.',
+    );
+    expect(prefix).toContain('CAMERA: iPhone front camera, 9:16 vertical');
+  });
+
+  it('emits all 4 setting-specific REJECT constraints on their own lines', () => {
+    const prefix = composeCharacterLockPrefix(LINDA, SETTING_DETAILS);
+    expect(prefix).toContain('REJECT any change in background/setting.');
+    expect(prefix).toContain('REJECT any change in camera angle or framing.');
+    expect(prefix).toContain('REJECT any change in prop positions.');
+    expect(prefix).toContain('REJECT any change in lighting direction or quality.');
+  });
+
+  it('emits the SAME/IDENTICAL summary line', () => {
+    const prefix = composeCharacterLockPrefix(LINDA, SETTING_DETAILS);
+    expect(prefix).toContain(
+      'The setting is IDENTICAL across all clips — same room, same angle, same lighting, same props in same positions.',
+    );
+  });
+
+  it('IDENTITY ANCHOR gets first-person setting clause per operator spec', () => {
+    const prefix = composeCharacterLockPrefix(LINDA, SETTING_DETAILS);
+    expect(prefix).toMatch(/I am in the SAME living room with beige couch as the reference image/);
+    expect(prefix).toMatch(/The camera is at the SAME angle/);
+    expect(prefix).toMatch(/The lighting and props are IDENTICAL/);
+  });
+
+  it('falls back to lock.setting_paragraph excerpts when settingDetails is undefined', () => {
+    // Non-persona flows (ugc_original_script, prior_analysis, none)
+    // still get a valid SETTING INVARIANT block — just derived from
+    // whatever Claude wrote into character_lock.setting_paragraph
+    // rather than the persona's structured fields.
+    const prefix = composeCharacterLockPrefix(LINDA); // no settingDetails
+    expect(prefix).toContain('SETTING INVARIANT (identical across all clips):');
+    // ROOM populated from setting_paragraph first-sentence excerpt.
+    const settingLead = LINDA.setting_paragraph.split('.')[0]!.trim();
+    expect(prefix).toContain(`ROOM: ${settingLead}`);
+    // PROPS defaults to placeholder.
+    expect(prefix).toContain('PROPS: (inferred from reference image)');
+    // 4 REJECTs still fire (defense in depth for setting drift).
+    expect(prefix).toContain('REJECT any change in background/setting.');
+  });
+
+  it('composeSettingInvariantBlock is exported for reuse + testing', async () => {
+    const { composeSettingInvariantBlock } = await import('../src/veo-lite-segment-prompt');
+    const block = composeSettingInvariantBlock(SETTING_DETAILS, LINDA);
+    expect(block).toContain('SETTING INVARIANT (identical across all clips):');
+    expect(block).toContain('ROOM: living room with beige couch');
+    expect(block).toContain('REJECT any change in background/setting.');
+  });
+
+  it('SEGMENT prompt threads settingDetails through composeVeoLiteSegmentPrompt.spec.settingDetails', () => {
+    const out = composeVeoLiteSegmentPrompt(LINDA, {
+      segmentIndex: 0,
+      totalSegments: 8,
+      dialogue: D22,
+      sceneDirection: 'Linda leans in slightly.',
+      settingDetails: SETTING_DETAILS,
+    });
+    expect(out.prompt).toContain('ROOM: living room with beige couch');
+    expect(out.prompt).toContain('REJECT any change in prop positions.');
   });
 });
 

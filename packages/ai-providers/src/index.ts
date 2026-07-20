@@ -310,6 +310,7 @@ export {
   composeVeoLiteSegmentPrompt,
   composeCharacterLockPrefix,
   composeReferenceImageCaption,
+  composeSettingInvariantBlock,
   countDialogueWords,
   checkDialogueWordCount,
   POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS,

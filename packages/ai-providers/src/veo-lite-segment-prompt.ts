@@ -19,7 +19,7 @@
  * it runs client-side in the estimator and server-side in the
  * worker without bundler complaints.
  */
-import type { CharacterLock } from '@mbb/shared';
+import type { CharacterLock, Polish23SettingDetails } from '@mbb/shared';
 
 export interface VeoLiteSegmentSpec {
   /** 0-indexed clip position in the batch (0…totalSegments-1). */
@@ -46,6 +46,15 @@ export interface VeoLiteSegmentSpec {
    * expression / pace / voice tone across the chain.
    */
   emotionalBeat?: string;
+  /**
+   * Polish-23 Commit 3.0.30: optional structured setting details
+   * from the source-video vision analysis. When provided, the
+   * SETTING INVARIANT block uses persona.setting_details fields
+   * (room_or_place, key_props, lighting) verbatim. Absent → the
+   * block falls back to lock.setting_paragraph excerpts + a
+   * placeholder props list.
+   */
+  settingDetails?: Polish23SettingDetails;
 }
 
 /** Speech-rate calibration constants. Exported for tests + docs. */
@@ -152,6 +161,65 @@ export const POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS =
  * SQL forensics — the operator can verify what got threaded without
  * grepping Vercel logs.
  */
+/**
+ * Polish-23 Commit 3.0.30: SETTING INVARIANT block composer.
+ * Character consistency landed in 3.0.28-3.0.29 (persona-mirror
+ * mode + WaveSpeedAI stability), but real-run evidence showed
+ * background/setting still drifted across clips — living room
+ * shifts between shots, framing changes, prop positions move.
+ *
+ * The SETTING field inside the CHARACTER SHEET wasn't enforced
+ * with the same aggression as the character identity. This helper
+ * emits a dedicated block right after the sheet with:
+ *   - ROOM: room_or_place (from persona setting_details, or a
+ *           first-sentence excerpt of lock.setting_paragraph when
+ *           the persona isn't available)
+ *   - PROPS: verbatim key_props list from persona (or a
+ *            "(inferred from reference image)" placeholder)
+ *   - LIGHTING: persona lighting (or the default even-daylight)
+ *   - FRAMING: fixed medium-close-up eye-level composition
+ *     (REPRODUCIBLE across clips — the operator's spec pin)
+ *   - BACKGROUND ELEMENTS: props positioned identically as
+ *     the reference image
+ *
+ * NOTE ON REJECT LANGUAGE: Commit 3.0.27 replaced command-form
+ * REJECTs with a bare Negative: keyword list based on Google's
+ * Veo 3.1 guide ("declarative, not instructive"). Real-run
+ * evidence in Commit 3.0.30 shows that IDENTITY-only Negative
+ * keywords weren't enough to hold the setting stable. This block
+ * intentionally walks back to command-form REJECTs for the
+ * setting-specific case + emits SAME/IDENTICAL language per the
+ * operator's spec. If drift persists we'll revisit; for now the
+ * operator's field evidence trumps Google's general guidance.
+ */
+export function composeSettingInvariantBlock(
+  settingDetails: Polish23SettingDetails | undefined,
+  lock: CharacterLock,
+): string {
+  const room =
+    settingDetails?.room_or_place ??
+    lock.setting_paragraph.split('.')[0]?.trim() ??
+    lock.setting_paragraph;
+  const propsList = settingDetails?.key_props?.length
+    ? settingDetails.key_props.join(', ')
+    : '(inferred from reference image)';
+  const lighting =
+    settingDetails?.lighting ?? 'even soft natural window light, no harsh shadows, no flash';
+  return [
+    'SETTING INVARIANT (identical across all clips):',
+    `ROOM: ${room}`,
+    `PROPS: ${propsList}`,
+    `LIGHTING: ${lighting}`,
+    'FRAMING: medium close-up, character seated, camera at eye level, same angle throughout.',
+    'CAMERA: iPhone front camera, 9:16 vertical, arms-length selfie distance, slightly shaky handheld feel.',
+    'The setting is IDENTICAL across all clips — same room, same angle, same lighting, same props in same positions.',
+    'REJECT any change in background/setting.',
+    'REJECT any change in camera angle or framing.',
+    'REJECT any change in prop positions.',
+    'REJECT any change in lighting direction or quality.',
+  ].join('\n');
+}
+
 export function composeReferenceImageCaption(lock: CharacterLock): string {
   // Trim to first sentence for the setting excerpt so the caption
   // stays punchy (Veo weights the first ~150 words heaviest per
@@ -199,18 +267,23 @@ export function composeReferenceImageCaption(lock: CharacterLock): string {
  *   5. ACTION (third-person speaking-to-camera line)
  *   6. Negative: bare comma-separated keyword list
  */
-export function composeCharacterLockPrefix(lock: CharacterLock): string {
+export function composeCharacterLockPrefix(
+  lock: CharacterLock,
+  settingDetails?: Polish23SettingDetails,
+): string {
   const pronoun = lock.gender === 'male' ? 'He' : 'She';
   // Strip leading "- " from clothing_bullet for clean sheet + anchor
   // embedding; retain the raw bullet text for the SHEET field.
   const wardrobeText = lock.clothing_bullet.replace(/^-\s*/, '').replace(/^Clothing:\s*/i, '');
-  const settingLead = lock.setting_paragraph.split('.')[0]?.trim() ?? lock.setting_paragraph;
+  const settingLead =
+    settingDetails?.room_or_place ??
+    lock.setting_paragraph.split('.')[0]?.trim() ??
+    lock.setting_paragraph;
 
   // Void unused locals — kept in scope in case a future revision
   // wants to embed them; current tight layout below inlines the
   // clothing/setting excerpts differently.
   void wardrobeText;
-  void settingLead;
   return [
     // Block 1 — identity line (keeps SAME PERSON language pinned by
     // tests since Commit 2).
@@ -239,18 +312,33 @@ export function composeCharacterLockPrefix(lock: CharacterLock): string {
     `SKIN: ${lock.skin_age_appropriate_detail}`,
     `WARDROBE: ${lock.clothing_bullet}`,
     `SETTING: ${lock.setting_paragraph}`,
-    'LIGHTING: even soft natural window light, no harsh shadows, no flash.',
-    'CAMERA: iPhone front camera, 9:16 vertical, arms-length selfie distance, slightly shaky handheld feel.',
     '',
-    // Block 4 — IDENTITY ANCHOR. First-person as operator's explicit
-    // spec — reinforces "same person" without command-form shouting.
-    `IDENTITY ANCHOR: I am ${lock.name}, the SAME PERSON shown in the reference image.`,
+    // Block 3.5 — SETTING INVARIANT (Polish-23 Commit 3.0.30 —
+    // real-run background/setting drift fix). Sits between the
+    // CHARACTER SHEET and the IDENTITY ANCHOR so Veo's positional
+    // attention treats it as parallel-priority to the character
+    // identity. Deliberately walks back the 3.0.27 declarative-only
+    // stance and uses command-form REJECTs for the setting-specific
+    // case — operator's field evidence trumps Google's general
+    // guidance on this axis.
+    composeSettingInvariantBlock(settingDetails, lock),
+    '',
+    // Block 4 — IDENTITY ANCHOR (first-person). Reinforces "same
+    // person" + "same setting" without the shouting imperative.
+    // Polish-23 Commit 3.0.30 adds the setting clause per operator
+    // spec: "I am in the SAME <room> as the reference image. The
+    // camera is at the SAME angle. The lighting and props are
+    // IDENTICAL."
+    `IDENTITY ANCHOR: I am ${lock.name}, the SAME PERSON shown in the reference image. ` +
+      `I am in the SAME ${settingLead} as the reference image. The camera is at the SAME ` +
+      `angle. The lighting and props are IDENTICAL.`,
     '',
     // Block 5 — ACTION line (third-person camera direction).
     `ACTION: ${pronoun} is speaking directly to the camera in a vertical iPhone selfie, 9:16, handheld.`,
     '',
     // Block 6 — Negative keyword list (bare, no command verbs — per
-    // Google's own guide "declarative, not instructive").
+    // Google's own guide "declarative, not instructive"). Setting-
+    // specific REJECTs live in the SETTING INVARIANT block above.
     `Negative: ${POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS}`,
   ].join('\n');
 }
@@ -280,7 +368,7 @@ export function composeVeoLiteSegmentPrompt(
   // inside composeCharacterLockPrefix. Nothing further to append —
   // per-clip content is just segment header + dialogue + scene +
   // optional emotional beat.
-  const prefix = composeCharacterLockPrefix(lock);
+  const prefix = composeCharacterLockPrefix(lock, spec.settingDetails);
   const wordCountCheck = checkDialogueWordCount(spec.dialogue);
   const emotionalLine = spec.emotionalBeat ? `Emotional beat: ${spec.emotionalBeat}.` : undefined;
   const parts: string[] = [

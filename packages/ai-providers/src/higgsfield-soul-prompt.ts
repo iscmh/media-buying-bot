@@ -1,4 +1,4 @@
-import type { CharacterLock } from '@mbb/shared';
+import type { CharacterLock, Polish23SettingDetails } from '@mbb/shared';
 
 /**
  * Polish-23 Commit 1: compose the Higgsfield Soul reference-image
@@ -38,7 +38,10 @@ import type { CharacterLock } from '@mbb/shared';
  * AI-CGI stock-photo aesthetic Polish-21.0.5 explicitly hardened
  * against.
  */
-export function composeHiggsfieldSoulReferencePrompt(lock: CharacterLock): string {
+export function composeHiggsfieldSoulReferencePrompt(
+  lock: CharacterLock,
+  settingDetails?: Polish23SettingDetails,
+): string {
   const {
     name,
     age,
@@ -107,7 +110,20 @@ export function composeHiggsfieldSoulReferencePrompt(lock: CharacterLock): strin
     `SETTING INVARIANT: ${setting_invariant_bullet}`;
 
   // Block 3 — Setting.
-  const block3_setting = setting_paragraph;
+  // Polish-23 Commit 3.0.30: when persona setting_details are
+  // available, layer in the exact room / props / lighting from
+  // the source-video vision analysis so the Higgsfield Soul
+  // reference PNG is composed against the SAME scene downstream
+  // Veo clips will match. Without this, Soul renders a plausible
+  // demographic-generic setting that doesn't necessarily match
+  // what the CHARACTER SHEET / SETTING INVARIANT specify.
+  const settingAnchorSentence = settingDetails
+    ? ` Setting anchor from source vision analysis: ${settingDetails.interior_or_exterior} ` +
+      `${settingDetails.room_or_place}, ${settingDetails.lighting}, key props: ` +
+      `${settingDetails.key_props.join(', ')}. This EXACT composition must be reproducible ` +
+      `across every downstream Veo clip.`
+    : '';
+  const block3_setting = `${setting_paragraph}${settingAnchorSentence}`;
 
   // Block 4 — SKIN REALISM MANDATE. Preserves the Polish-21.0.5
   // three ZERO anchors verbatim (ZERO airbrushing. ZERO beauty
