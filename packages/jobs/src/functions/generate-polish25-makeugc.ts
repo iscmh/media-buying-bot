@@ -259,7 +259,17 @@ export const generatePolish25Makeugc = inngest.createFunction(
       const rawText = (r.text ?? '').trim();
       // Persist BEFORE any throw — durable SQL forensics for
       // condenser failures (mirror Polish-23 Commit 3.0.5 pattern).
+      //
+      // Polish-25 Commit 4: also persist the FULL rawText to
+      // polish25_condensed_script itself (not just the excerpt on
+      // condenser_response) so operator can inspect the exact
+      // script that failed validation via one SQL column, not two.
+      // Step F re-writes this same field on the happy path; the
+      // pre-validation write is only observable when the job later
+      // fails at check-time.
       await patchMetadata(jobId, {
+        polish25_condensed_script: rawText,
+        polish25_condensed_script_chars: rawText.length,
         polish25_claude_condenser_response: {
           ok: r.ok,
           chars: rawText.length,

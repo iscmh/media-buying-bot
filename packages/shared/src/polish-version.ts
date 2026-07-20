@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '25.0.3';
+export const POLISH_VERSION = '25.0.4';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '25.0.3';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25 Commit 3 — persona-only source-context extraction (Polish-25 no longer requires full Polish-23 vision bundle)';
+  'Polish-25 Commit 4 — context-aware self-referential appearance validator + persist-before-validate';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

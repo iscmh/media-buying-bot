@@ -32,28 +32,59 @@ import { containsQuotedThirdPartySpeech } from './polish23-claude-adspec-prompt'
 export const POLISH25_CONDENSED_SCRIPT_MAX_CHARS = 1500;
 
 /**
- * Regex list — lifted from Polish-24 Commit 1's
- * HEYGEN_APPEARANCE_WORD_PATTERNS + tightened for the MakeUGC case
- * where appearance leakage is functionally identical (avatar is
- * pre-cast; describing its look at best wastes tokens, at worst
- * confuses TTS emphasis).
+ * Polish-25 Commit 4: CONTEXT-AWARE self-referential appearance
+ * detection. Rejects appearance words ONLY when they describe the
+ * SPEAKER THEMSELVES — not when they appear in natural dialogue
+ * about third parties (family, friends, other characters).
  *
- * Rejects gender / ethnicity / age / hair / wardrobe words. Bare
- * whole-word matches so contractions ("I've", "he's") don't trigger.
+ * Why: Commit 2's list was word-only ("male", "wearing", "60s") and
+ * false-positived on natural UGC scripts. Real evidence from job
+ * 6ccf05d7 — a grandfather-perspective script about his
+ * granddaughter ("She's seven. She doesn't know what things cost.
+ * My granddaughter asked me...") was rejected as [appearance-leak]
+ * even though nothing in it described the speaker's appearance.
+ *
+ * New rule: every pattern here requires a FIRST-PERSON marker
+ * ("I", "I'm", "I am", "my", "at my", "as a") tied to an appearance
+ * category (gender / ethnicity / age / hair / wardrobe). Third-
+ * person pronouns (he / she / they) and family words (daughter,
+ * granddaughter, friend) are FREE to appear anywhere.
+ *
+ * Trade-off: bare "60-year-old dude" (no first-person cue) no
+ * longer flags. That's the operator-approved compromise — the risk
+ * of Gemini emitting bare appearance strings describing the
+ * speaker is lower than the observed false-positive rate on real
+ * scripts. If a violation slips through, Claude has already
+ * followed the system-prompt HARD CONSTRAINTS (see below) telling
+ * it not to emit appearance descriptions in the first place.
  */
 export const POLISH25_APPEARANCE_WORD_PATTERNS: readonly RegExp[] = [
-  // Gender
-  /\b(male|female|man|woman|boy|girl|guy|gal|lady|dude|gentleman|gentlemen)\b/i,
-  // Age markers ("60s", "60-year-old", "aged 60")
-  /\b\d{1,2}(s|-year-old| year old| yr old|-yr-old| years old)\b/i,
+  // Self-declared gender: "I'm a man", "I am a woman", "as a lady", "as a bald guy"
+  /\bI\s*(?:'m|am)\s+(?:a\s+|an\s+)?(?:male|female|man|woman|guy|gal|lady|dude|gentleman|gentlemen|boy|girl)\b/i,
+  /\bas\s+(?:a|an)\s+(?:[^.,;!?\n]{0,25}?\s)?(?:male|female|man|woman|guy|gal|lady|dude|gentleman|boy|girl)\b/i,
+
+  // Self-declared age: "I'm 64", "I'm 64 years old", "I'm a 60-year-old",
+  // "I'm in my 60s", "in my 60s", "at my age", "aged 64", "I'm elderly"
+  /\bI\s*(?:'m|am)\s+(?:a\s+|an\s+)?\d{1,2}(?:\s+(?:year|years|yr|yrs)(?:\s+old)?)?\b/i,
+  /\bI\s*(?:'m|am)\s+(?:a\s+|an\s+)?\d{1,2}[- ]year[- ]old\b/i,
+  /\bI\s*(?:'m|am)\s+in\s+my\s+(?:early\s+|mid\s+|late\s+)?\d{1,2}s\b/i,
+  /\bin\s+my\s+(?:early\s+|mid\s+|late\s+)?\d{1,2}s\b/i,
+  /\bat\s+my\s+age\b/i,
   /\baged\s+\d{1,2}\b/i,
-  // Ethnicity
-  /\b(white|caucasian|black|african[- ]?american|hispanic|latino|latina|asian|east[- ]?asian|south[- ]?asian|chinese|japanese|korean|indian|middle[- ]?eastern|arab|jewish|mixed[- ]?race|biracial|multiracial)\b/i,
-  // Hair color / style
-  /\b(blonde|brunette|redhead|gray[- ]?hair|grey[- ]?hair|white[- ]?hair|black[- ]?hair|brown[- ]?hair|red[- ]?hair|bald|balding|receding|long[- ]?hair|short[- ]?hair|curly|salt[- ]?and[- ]?pepper)\b/i,
-  // Wardrobe leakage
-  /\bwearing\b/i,
-  /\b(shirt|blouse|sweater|hoodie|jacket|coat|dress|suit|tie|jeans|pants|skirt|scarf|hat|cap|glasses|sunglasses|jewelry|earrings|necklace)\b/i,
+  /\bI\s*(?:'m|am)\s+(?:a\s+|an\s+)?(?:elderly|senior|retired\s+guy|retired\s+man|retired\s+woman|old\s+man|old\s+woman|young\s+man|young\s+woman|middle[- ]?aged)\b/i,
+
+  // Self-declared ethnicity: "I'm white", "as a black woman", "I'm a hispanic guy"
+  /\bI\s*(?:'m|am)\s+(?:a\s+|an\s+)?(?:white|caucasian|black|african[- ]?american|hispanic|latino|latina|asian|east[- ]?asian|south[- ]?asian|chinese|japanese|korean|indian|middle[- ]?eastern|arab|jewish|mixed[- ]?race|biracial|multiracial)\b/i,
+  /\bas\s+(?:a|an)\s+(?:[^.,;!?\n]{0,20}?\s)?(?:white|caucasian|black|african[- ]?american|hispanic|latino|latina|asian|chinese|japanese|korean|indian|middle[- ]?eastern|arab|jewish|mixed[- ]?race|biracial|multiracial)(?:\s+(?:man|woman|male|female|guy|gal|lady|dude|gentleman|boy|girl))?\b/i,
+
+  // Self-hair: "I have gray hair", "my gray hair", "I'm bald"
+  /\b(?:I\s+have|I've\s+got|I've\s+had|I\s+got|my)\s+(?:[^.,;!?\n]{0,15}?\s)?(?:gray|grey|white|black|brown|blonde|blond|red|salt[- ]?and[- ]?pepper)[- ]?hair\b/i,
+  /\bI\s*(?:'m|am)\s+(?:bald|balding|receding)\b/i,
+
+  // Self-wardrobe: "I'm wearing", "dressed in", "my shirt"
+  /\bI\s*(?:'m|am)\s+(?:wearing|dressed\s+in|dressed\s+as)\b/i,
+  /\bwearing\s+my\s+(?:[^.,;!?\n]{0,15}?\s)?(?:shirt|blouse|sweater|hoodie|jacket|coat|dress|suit|tie|jeans|pants|skirt|scarf|hat|cap|glasses|sunglasses|jewelry|earrings|necklace)\b/i,
+  /\bmy\s+(?:favorite\s+|old\s+|new\s+|nice\s+|blue\s+|red\s+|green\s+|black\s+|white\s+|gray\s+|grey\s+|brown\s+)?(?:shirt|blouse|sweater|hoodie|jacket|coat|suit|tie|scarf)\b/i,
 ];
 
 export function containsPolish25AppearanceWords(text: unknown): boolean {
@@ -162,12 +193,26 @@ Zod validation at the worker layer and forces a re-condense):
      GOOD: My doctor told me everything was fine.
      GOOD: Frank told me to just enjoy retirement.
 
-4. No appearance descriptions: the pre-cast avatar handles gender /
-   ethnicity / age / hair / wardrobe VISUALLY. NEVER include:
+4. No SELF-APPEARANCE descriptions: the pre-cast avatar handles the
+   SPEAKER's gender / ethnicity / age / hair / wardrobe VISUALLY.
+   NEVER describe YOUR OWN appearance:
      BAD:  I'm a 60-year-old woman.
      BAD:  As a bald man, I know…
      BAD:  Wearing my favorite blue sweater…
-   Instead, focus on the ACTION and the EMOTIONAL BEATS.
+     BAD:  I have gray hair and I've seen it all.
+     BAD:  At my age, you learn…  (age self-reference)
+   THIRD-PERSON dialogue about OTHER people is FINE — the constraint
+   is on describing the speaker's own visual attributes, NOT on
+   telling stories about family, friends, or events. These are all
+   GOOD:
+     GOOD: My granddaughter asked me if we could go to Disney World.
+     GOOD: She's seven. She doesn't know what things cost.
+     GOOD: My doctor told me everything was fine.
+     GOOD: Frank said to just enjoy retirement.  (paraphrase, not quote)
+   Focus the speaker's OWN words on ACTION and EMOTIONAL BEATS, and
+   let third-person pronouns (he / she / they) and family words
+   (daughter, son, granddaughter, friend, wife, husband) flow
+   naturally when the story calls for them.
 
 5. Preserve the source HOOK: whatever hook_structure the source
    used (question / statement / story / reveal) — mirror it in the
