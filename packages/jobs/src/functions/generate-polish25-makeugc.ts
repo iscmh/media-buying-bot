@@ -64,11 +64,19 @@ import {
 
 console.log(`[jobs.generate-polish25-makeugc] cold start — POLISH_VERSION=${POLISH_VERSION}`);
 
-// Poll cadence: 10s interval × 60 attempts = 10 min max wait.
-// MakeUGC's typical 60s-video render is 30-90s per third-party
-// reviews; 10 min is 6-7× the median for safety on load spikes.
+// Poll cadence: 10s interval × 180 attempts = 30 min max wait.
+//
+// Polish-25 Commit 6: raised from 60→180 attempts after job 3634604b
+// (MakeUGC video cmrt9t0yo000713fkiqltdp2k) proved the marketing
+// "2-min processing" claim is aspirational — the same video was
+// still at ~50% completion 15+ min in. Real queue-depth latency
+// pushes routine renders to 20-30 min. The prior 10-min cap turned
+// otherwise-successful renders into false timeout-fails.
 const MAKEUGC_POLL_INTERVAL_SECONDS = 10;
-const MAKEUGC_POLL_MAX_ATTEMPTS = 60;
+export const MAKEUGC_POLL_MAX_ATTEMPTS = 180;
+// Log a heartbeat every Nth poll to Vercel Runtime Logs so a stuck
+// render is visible without waiting for the final timeout message.
+const MAKEUGC_POLL_HEARTBEAT_EVERY = 30;
 
 // Submit-side auto-retry on transient errors (mirror Polish-23
 // Commit 3.0.22 clip-level retry). Max 2 retries + 15s backoff between.
@@ -573,6 +581,14 @@ export const generatePolish25Makeugc = inngest.createFunction(
         break;
       }
       // Otherwise (processing / queued) — next sleep bracket.
+      // Polish-25 Commit 6: heartbeat every 30 polls (~5 min) so a
+      // slow-but-still-live render is visible in Vercel Runtime Logs
+      // without waiting for the ~30-min timeout message.
+      if ((pollAttempt + 1) % MAKEUGC_POLL_HEARTBEAT_EVERY === 0) {
+        console.log(
+          `[polish-25-worker] Still polling video ${videoId}, attempt ${pollAttempt + 1}/${MAKEUGC_POLL_MAX_ATTEMPTS}`,
+        );
+      }
     }
 
     if (terminalReason !== null) {
@@ -584,7 +600,8 @@ export const generatePolish25Makeugc = inngest.createFunction(
     if (videoUrl === null) {
       const msg =
         `Polish-25 poll timeout after ${MAKEUGC_POLL_MAX_ATTEMPTS} attempts ` +
-        `(~${(MAKEUGC_POLL_MAX_ATTEMPTS * MAKEUGC_POLL_INTERVAL_SECONDS) / 60} min). videoId=${videoId}.`;
+        `(~${(MAKEUGC_POLL_MAX_ATTEMPTS * MAKEUGC_POLL_INTERVAL_SECONDS) / 60} min). ` +
+        `videoId=${videoId}. MakeUGC likely stuck — real processing can exceed 30 min, retry may work.`;
       console.error(`[polish-25-worker] ${msg}`);
       await markJobFailed(jobId, userId, msg, 0);
       throw new NonRetriableError(msg);
