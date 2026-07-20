@@ -263,6 +263,8 @@ export {
   verifyWavespeedKey,
   normalizeWavespeedStatus,
   translateWavespeedErrorStatus,
+  isWavespeedTransientError,
+  WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS,
   estimateWavespeedSoulCostUsd,
   WAVESPEED_SOUL_USD_PER_RUN,
   WAVESPEED_SOUL_DEFAULT_QUALITY,

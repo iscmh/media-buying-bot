@@ -382,6 +382,40 @@ export async function verifyWavespeedKey(
 // Error translation
 // ---------------------------------------------------------------------
 
+/**
+ * Polish-23 Commit 3.0.29: WaveSpeedAI transient-error keyword list.
+ * Mirrors the kie.ai treatment from Commit 3.0.22 — case-insensitive
+ * substring match on errorMessage. If a WaveSpeedAI failure carries
+ * ANY of these substrings, the caller SHOULD auto-retry rather than
+ * fire NonRetriableError. Zombie job 9052426d 502'd on the initial
+ * Higgsfield Soul submit and Inngest kept the job stuck 'processing'
+ * while it scheduled its function-level retry; the fix is to catch
+ * those transients inside Step B and either succeed on retry or
+ * throw NonRetriable early.
+ *
+ * Kept EXPORTED so tests + operator SQL know the exact surface.
+ */
+export const WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS: readonly string[] = [
+  'upstream error',
+  'timeout',
+  // "temporar" covers both "temporary" and "temporarily" (as in
+  // "Service Temporarily Unavailable") in a single substring match.
+  'temporar',
+  '502',
+  '503',
+  '504',
+  'bad gateway',
+  'service unavailable',
+  'gateway timeout',
+  'try again',
+];
+
+export function isWavespeedTransientError(errorMessage: unknown): boolean {
+  if (typeof errorMessage !== 'string' || errorMessage.length === 0) return false;
+  const lower = errorMessage.toLowerCase();
+  return WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS.some((p) => lower.includes(p));
+}
+
 export function translateWavespeedErrorStatus(
   status: number | undefined,
   fallback: string | undefined,

@@ -45,6 +45,7 @@ import {
   composeHiggsfieldSoulReferencePrompt,
   composeReferenceImageCaption,
   composeVeoLiteSegmentPrompt,
+  isWavespeedTransientError,
   KIE_VEO_LITE_DEFAULT_USD_PER_CLIP,
   POLISH23_VEO_NEGATIVE_PROMPT_KEYWORDS,
   POLISH23_VEO_SEED_MAX,
@@ -787,20 +788,117 @@ export const generatePolish23VeoLite = inngest.createFunction(
     });
 
     // -------- Step B: Higgsfield Soul reference PNG --------
+    // Polish-23 Commit 3.0.29: auto-retry transient WaveSpeedAI
+    // failures (mirrors the kie.ai clip-level auto-retry from
+    // Commit 3.0.22). Zombie job 9052426d 502'd on the initial
+    // Higgsfield Soul submit — Inngest's function-level retry
+    // then kept the job stuck 'processing' during the retry
+    // pending window. Fix: catch transients inside Step B, retry
+    // up to 2 times with 15s sleep between attempts, and throw
+    // NonRetriableError + markJobFailed on exhaustion so the
+    // job status flips to 'failed' immediately (no zombie).
+    //
+    // TERMINAL failures (auth / balance / validation) short-circuit
+    // to NonRetriable on the first attempt — same input won't
+    // recover on retry, no point burning cycles.
+    const HIGGSFIELD_SUBMIT_MAX_RETRIES = 2;
+    const HIGGSFIELD_RETRY_BACKOFF_SECONDS = 15;
     const soulRefUrl = await step.run('higgsfield-soul', async () => {
       const keys = await loadDecryptedKeys(userId, ['wavespeed_ai']);
-      const submit = await submitWavespeedSoul({
-        userId,
-        apiKey: keys.wavespeed_ai!,
-        prompt: composeHiggsfieldSoulReferencePrompt(adSpec.character_lock),
-        image: HIGGSFIELD_SEED_IMAGE_URL,
-        quality: 'high',
-        generationJobId: jobId,
-      });
-      if (!submit.ok || !submit.predictionId) {
-        throw new Error(`WaveSpeedAI submit failed: ${submit.errorMessage ?? 'unknown'}`);
+      const higgsfieldRetryChain: Array<{
+        attempt: number;
+        errorMessage: string | null;
+        errorClass: 'transient' | 'terminal';
+        at: string;
+        resolvedAt: string | null;
+      }> = [];
+      let firstFailureAt: string | null = null;
+
+      // ---- Submit with auto-retry on transient errors ----
+      let predictionId: string | null = null;
+      for (let attempt = 0; attempt <= HIGGSFIELD_SUBMIT_MAX_RETRIES; attempt++) {
+        if (attempt > 0) {
+          console.warn(
+            `[polish-23-worker Step B] Higgsfield submit auto-retry r${attempt}/` +
+              `${HIGGSFIELD_SUBMIT_MAX_RETRIES}: sleeping ${HIGGSFIELD_RETRY_BACKOFF_SECONDS}s.`,
+          );
+          await sleep(HIGGSFIELD_RETRY_BACKOFF_SECONDS * 1000);
+        }
+        const submit = await submitWavespeedSoul({
+          userId,
+          apiKey: keys.wavespeed_ai!,
+          prompt: composeHiggsfieldSoulReferencePrompt(adSpec.character_lock),
+          image: HIGGSFIELD_SEED_IMAGE_URL,
+          quality: 'high',
+          generationJobId: jobId,
+        });
+        if (submit.ok && submit.predictionId) {
+          predictionId = submit.predictionId;
+          break;
+        }
+        const errorMessage = submit.errorMessage ?? 'unknown';
+        const transient = isWavespeedTransientError(errorMessage);
+        if (firstFailureAt === null) firstFailureAt = new Date().toISOString();
+        higgsfieldRetryChain.push({
+          attempt,
+          errorMessage,
+          errorClass: transient ? 'transient' : 'terminal',
+          at: new Date().toISOString(),
+          resolvedAt: null,
+        });
+        // Persist the retry chain SO FAR before the next decision
+        // so SQL forensics survive even if the sleep gets clipped.
+        try {
+          const db = getDb();
+          const row = await db.query.generationJobs.findFirst({
+            where: eq(schema.generationJobs.id, jobId),
+            columns: { metadata: true },
+          });
+          const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+          await db
+            .update(schema.generationJobs)
+            .set({
+              metadata: { ...meta, polish23_higgsfield_retries: higgsfieldRetryChain.slice() },
+            })
+            .where(eq(schema.generationJobs.id, jobId));
+        } catch (persistErr) {
+          console.error(
+            `[polish-23-worker Step B] retry-chain persist failed: ` +
+              `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+          );
+        }
+        // Terminal failures on ANY attempt → NonRetriable immediately.
+        if (!transient) {
+          const msg =
+            `WaveSpeedAI Higgsfield Soul submit terminal r${attempt}: ${errorMessage}. ` +
+            `Not a transient class — same input won't recover on retry.`;
+          console.error(`[polish-23-worker Step B] ${msg}`);
+          await markJobFailed(jobId, userId, msg, 0);
+          throw new NonRetriableError(msg);
+        }
+        // Transient + attempts exhausted → NonRetriable (prevents Inngest
+        // function-level retry from re-queuing and re-zombifying the job).
+        if (attempt === HIGGSFIELD_SUBMIT_MAX_RETRIES) {
+          const msg =
+            `WaveSpeedAI Higgsfield Soul submit failed ` +
+            `${HIGGSFIELD_SUBMIT_MAX_RETRIES + 1} times ` +
+            `(initial + ${HIGGSFIELD_SUBMIT_MAX_RETRIES} auto-retries). Last error: ${errorMessage}. ` +
+            `WaveSpeedAI unavailable — try again in a few minutes.`;
+          console.error(`[polish-23-worker Step B] ${msg}`);
+          await markJobFailed(jobId, userId, msg, 0);
+          throw new NonRetriableError(msg);
+        }
+        // else: loop back for next attempt
       }
-      const predictionId = submit.predictionId;
+      if (predictionId === null) {
+        // Unreachable — the loop either sets predictionId or throws.
+        const msg = 'WaveSpeedAI Higgsfield Soul submit loop exited without predictionId.';
+        console.error(`[polish-23-worker Step B] ${msg}`);
+        await markJobFailed(jobId, userId, msg, 0);
+        throw new NonRetriableError(msg);
+      }
+
+      // ---- Poll loop (transient poll errors continue, terminal throws) ----
       let outputUrl: string | undefined;
       for (let attempt = 0; attempt < SOUL_POLL_MAX_ATTEMPTS; attempt++) {
         await sleep(SOUL_POLL_INTERVAL_SECONDS * 1000);
@@ -811,12 +909,23 @@ export const generatePolish23VeoLite = inngest.createFunction(
           generationJobId: jobId,
         });
         if (!poll.ok) {
-          throw new Error(`WaveSpeedAI poll failed: ${poll.errorMessage ?? 'unknown'}`);
+          const pollError = poll.errorMessage ?? 'unknown';
+          if (isWavespeedTransientError(pollError)) {
+            console.warn(
+              `[polish-23-worker Step B] poll-${attempt} transient (${pollError}); continuing.`,
+            );
+            continue;
+          }
+          const msg = `WaveSpeedAI Higgsfield Soul poll terminal: ${pollError}`;
+          console.error(`[polish-23-worker Step B] ${msg}`);
+          await markJobFailed(jobId, userId, msg, 0);
+          throw new NonRetriableError(msg);
         }
         if (poll.status === 'failed' || poll.status === 'cancelled') {
-          throw new Error(
-            `WaveSpeedAI Higgsfield Soul terminal ${poll.status}: ${poll.errorMessage ?? '(no msg)'}`,
-          );
+          const msg = `WaveSpeedAI Higgsfield Soul terminal ${poll.status}: ${poll.errorMessage ?? '(no msg)'}`;
+          console.error(`[polish-23-worker Step B] ${msg}`);
+          await markJobFailed(jobId, userId, msg, 0);
+          throw new NonRetriableError(msg);
         }
         if (poll.status === 'completed') {
           outputUrl = poll.outputUrl;
@@ -824,15 +933,50 @@ export const generatePolish23VeoLite = inngest.createFunction(
         }
       }
       if (!outputUrl) {
-        throw new Error(
+        const msg =
           `WaveSpeedAI Higgsfield Soul didn't complete within ` +
-            `${SOUL_POLL_MAX_ATTEMPTS * SOUL_POLL_INTERVAL_SECONDS}s.`,
-        );
+          `${SOUL_POLL_MAX_ATTEMPTS * SOUL_POLL_INTERVAL_SECONDS}s. predictionId=${predictionId}.`;
+        console.error(`[polish-23-worker Step B] ${msg}`);
+        await markJobFailed(jobId, userId, msg, 0);
+        throw new NonRetriableError(msg);
       }
-      // Re-upload to Supabase for a stable URL kie.ai will fetch.
+
+      // ---- Mark retry chain resolved on success ----
+      if (higgsfieldRetryChain.length > 0) {
+        const resolvedAt = new Date().toISOString();
+        const resolved = higgsfieldRetryChain.map((e) => ({ ...e, resolvedAt }));
+        try {
+          const db = getDb();
+          const row = await db.query.generationJobs.findFirst({
+            where: eq(schema.generationJobs.id, jobId),
+            columns: { metadata: true },
+          });
+          const meta = (row?.metadata ?? {}) as Record<string, unknown>;
+          await db
+            .update(schema.generationJobs)
+            .set({
+              metadata: { ...meta, polish23_higgsfield_retries: resolved },
+            })
+            .where(eq(schema.generationJobs.id, jobId));
+          console.log(
+            `[polish-23-worker Step B] Higgsfield Soul recovered after ` +
+              `${higgsfieldRetryChain.length} transient failure(s). resolvedAt=${resolvedAt}`,
+          );
+        } catch (persistErr) {
+          console.error(
+            `[polish-23-worker Step B] resolve-persist failed: ` +
+              `${persistErr instanceof Error ? persistErr.message : String(persistErr)}`,
+          );
+        }
+      }
+
+      // ---- Re-upload to Supabase for a stable URL kie.ai will fetch ----
       const download = await fetch(outputUrl);
       if (!download.ok) {
-        throw new Error(`Failed to download Higgsfield Soul PNG: HTTP ${download.status}`);
+        const msg = `Failed to download Higgsfield Soul PNG: HTTP ${download.status}`;
+        console.error(`[polish-23-worker Step B] ${msg}`);
+        await markJobFailed(jobId, userId, msg, 0);
+        throw new NonRetriableError(msg);
       }
       const bytes = new Uint8Array(await download.arrayBuffer());
       const base64 = Buffer.from(bytes).toString('base64');

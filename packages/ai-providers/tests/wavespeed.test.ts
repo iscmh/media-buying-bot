@@ -18,6 +18,7 @@ vi.mock('@mbb/db', () => ({
 
 import {
   estimateWavespeedSoulCostUsd,
+  isWavespeedTransientError,
   normalizeWavespeedStatus,
   pollWavespeedSoul,
   submitWavespeedSoul,
@@ -25,6 +26,7 @@ import {
   verifyWavespeedKey,
   WAVESPEED_SOUL_DEFAULT_QUALITY,
   WAVESPEED_SOUL_USD_PER_RUN,
+  WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS,
 } from '../src/wavespeed';
 
 const realFetch = globalThis.fetch;
@@ -316,5 +318,69 @@ describe('Polish-23 Commit 1: cost constants', () => {
   it('estimateWavespeedSoulCostUsd returns the correct tier price', () => {
     expect(estimateWavespeedSoulCostUsd('medium')).toBe(0.09);
     expect(estimateWavespeedSoulCostUsd('high')).toBe(0.23);
+  });
+});
+
+describe('Polish-23 Commit 3.0.29: isWavespeedTransientError — auto-retry gate', () => {
+  it('exposes the exact keyword list as WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS', () => {
+    // Regression pin: any change to the pattern list must be
+    // deliberate — production auto-retry behavior hinges on it.
+    expect(WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS).toEqual([
+      'upstream error',
+      'timeout',
+      'temporar',
+      '502',
+      '503',
+      '504',
+      'bad gateway',
+      'service unavailable',
+      'gateway timeout',
+      'try again',
+    ]);
+  });
+
+  it('matches HTTP 502/503/504 upstream errors (exact zombie 9052426d failure class)', () => {
+    // translateWavespeedErrorStatus wraps 5xx as "WaveSpeedAI upstream
+    // error (HTTP 502…)" — both "upstream error" AND "502" hit the
+    // pattern list.
+    expect(isWavespeedTransientError('WaveSpeedAI upstream error (HTTP 502: Bad Gateway).')).toBe(
+      true,
+    );
+    expect(isWavespeedTransientError('WaveSpeedAI upstream error (HTTP 503).')).toBe(true);
+    expect(isWavespeedTransientError('WaveSpeedAI upstream error (HTTP 504).')).toBe(true);
+    expect(isWavespeedTransientError('502 Bad Gateway')).toBe(true);
+    expect(isWavespeedTransientError('503 Service Unavailable')).toBe(true);
+    expect(isWavespeedTransientError('504 Gateway Timeout')).toBe(true);
+  });
+
+  it('matches case-insensitive transient phrases', () => {
+    expect(isWavespeedTransientError('Request Timeout')).toBe(true);
+    expect(isWavespeedTransientError('TIMEOUT')).toBe(true);
+    expect(isWavespeedTransientError('Temporary outage')).toBe(true);
+    expect(isWavespeedTransientError('please try again later')).toBe(true);
+    expect(isWavespeedTransientError('Service Temporarily Unavailable')).toBe(true);
+  });
+
+  it('does NOT match terminal auth / balance / validation errors', () => {
+    expect(isWavespeedTransientError('WaveSpeedAI authentication failed.')).toBe(false);
+    expect(isWavespeedTransientError('Insufficient WaveSpeedAI credits.')).toBe(false);
+    expect(isWavespeedTransientError('WaveSpeedAI validation failed: bad prompt.')).toBe(false);
+    expect(isWavespeedTransientError('resource not found')).toBe(false);
+  });
+
+  it('returns false for non-string / null / undefined / empty', () => {
+    expect(isWavespeedTransientError('')).toBe(false);
+    expect(isWavespeedTransientError(null)).toBe(false);
+    expect(isWavespeedTransientError(undefined)).toBe(false);
+    expect(isWavespeedTransientError(42)).toBe(false);
+    expect(isWavespeedTransientError({ msg: '502 Bad Gateway' })).toBe(false);
+  });
+
+  it('translateWavespeedErrorStatus(502) → string that PASSES isWavespeedTransientError (integration pin)', () => {
+    // Production callers see the translated string, not the raw HTTP
+    // status. This pin closes the loop: the auto-retry gate correctly
+    // fires on what the caller actually receives.
+    const translated = translateWavespeedErrorStatus(502, 'Bad Gateway');
+    expect(isWavespeedTransientError(translated)).toBe(true);
   });
 });
