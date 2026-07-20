@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '25.0.2';
+export const POLISH_VERSION = '25.0.3';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '25.0.2';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25 Commit 2 — MakeUGC worker + form picker + Claude script condenser (end-to-end pipeline)';
+  'Polish-25 Commit 3 — persona-only source-context extraction (Polish-25 no longer requires full Polish-23 vision bundle)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

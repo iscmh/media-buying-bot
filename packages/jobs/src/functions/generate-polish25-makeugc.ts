@@ -52,7 +52,7 @@ import {
   type MakeugcPersona,
 } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
-import { POLISH_VERSION, parsePolish23VisionAdditions } from '@mbb/shared';
+import { POLISH_VERSION, Polish23PersonaSchema } from '@mbb/shared';
 import { inngest } from '../client';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
@@ -147,29 +147,63 @@ export const generatePolish25Makeugc = inngest.createFunction(
       });
       const conceptMeta = (concept?.metadata as Record<string, unknown> | null) ?? null;
       const conceptAnalysis = conceptMeta?.['analysis'] ?? null;
+      // Polish-25 Commit 3: persona-only extraction. Unlike Polish-23
+      // (which needs setting_details + emotional_arc + hook_structure
+      // + niche_category for Higgsfield Soul prompt construction),
+      // Polish-25 only needs `persona` for the MakeUGC avatar match.
+      // The condenser eats the raw JSON blob verbatim, so we do NOT
+      // require the full Polish23VisionAdditions bundle — a partial
+      // hydration (persona present, siblings missing/malformed) is
+      // fine here.
       if (conceptAnalysis && typeof conceptAnalysis === 'object') {
-        const visionAdditions = parsePolish23VisionAdditions(conceptAnalysis);
-        if (visionAdditions) {
+        const analysisObj = conceptAnalysis as Record<string, unknown>;
+        const fieldsPresent = {
+          persona: analysisObj['persona'] != null,
+          setting_details: analysisObj['setting_details'] != null,
+          emotional_arc: analysisObj['emotional_arc'] != null,
+          hook_structure: analysisObj['hook_structure'] != null,
+          niche_category: analysisObj['niche_category'] != null,
+        };
+        console.log(
+          `[polish-25-worker] source-context field presence for concept ${conceptId}: ` +
+            JSON.stringify(fieldsPresent),
+        );
+        const personaParse = Polish23PersonaSchema.safeParse(analysisObj['persona']);
+        if (personaParse.success) {
           return {
             source: 'vision_analysis_persona' as const,
             visionAnalysisJson: JSON.stringify(conceptAnalysis, null, 2),
-            persona: visionAdditions.persona,
-            settingDetails: visionAdditions.setting_details,
+            persona: personaParse.data,
+            fieldsPresent,
+            personaParseError: null,
           };
         }
+        return {
+          source: 'none' as const,
+          visionAnalysisJson: null,
+          persona: null,
+          fieldsPresent,
+          personaParseError: personaParse.error.issues
+            .map((i) => `${i.path.join('.')}: ${i.message}`)
+            .join('; '),
+        };
       }
       return {
         source: 'none' as const,
         visionAnalysisJson: null,
         persona: null,
-        settingDetails: null,
+        fieldsPresent: null,
+        personaParseError: 'concept.metadata.analysis is missing or not an object',
       };
     });
 
     if (sourceLookup.source !== 'vision_analysis_persona' || !sourceLookup.persona) {
       const msg =
         `Polish-25 requires concept ${conceptId} to have concepts.metadata.analysis.persona ` +
-        `populated (via the Polish-23 vision analysis pass). Run analyze-concept first.`;
+        `populated + parseable (gender enum + age_range + ethnicity enum + look + voice_tone). ` +
+        `Field presence: ${JSON.stringify(sourceLookup.fieldsPresent)}. ` +
+        `Persona parse error: ${sourceLookup.personaParseError ?? 'n/a'}. ` +
+        `Run analyze-concept first.`;
       console.error(`[polish-25-worker] ${msg}`);
       await markJobFailed(jobId, userId, msg, 0);
       throw new NonRetriableError(msg);
@@ -185,6 +219,12 @@ export const generatePolish25Makeugc = inngest.createFunction(
           personaAgeRange: sourceLookup.persona?.age_range,
           personaEthnicity: sourceLookup.persona?.ethnicity,
           textChars: sourceLookup.visionAnalysisJson?.length ?? 0,
+          // Polish-25 Commit 3: durable diagnostic for which
+          // Polish-23 vision-analysis sibling fields are present.
+          // Non-persona siblings are optional for Polish-25 but
+          // useful when debugging why analyze-concept output shape
+          // varies across concepts.
+          fieldsPresent: sourceLookup.fieldsPresent,
           at: nowIso(),
         },
         polish25_progress: { step: 'source-context', pct: 15, at: nowIso() },
