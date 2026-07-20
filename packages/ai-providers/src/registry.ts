@@ -4,6 +4,7 @@ import { CreatifyProvider } from './creatify';
 import { ElevenLabsProvider } from './elevenlabs';
 import { HedraProvider } from './hedra';
 import { HeyGenProvider } from './heygen';
+import { MakeugcProvider } from './makeugc';
 import { OpenAIProvider } from './openai-provider';
 import { ReplicateProvider } from './replicate';
 import { WavespeedProvider } from './wavespeed-provider';
@@ -29,6 +30,12 @@ const registry = new Map<AIProviderName, AIProvider>([
   // throws — Polish-23 generation dispatches through the worker,
   // not this legacy interface.
   ['wavespeed_ai', new WavespeedProvider()],
+  // Polish-25 Commit 1: MakeUGC pay-per-video UGC ad generator.
+  // verifyKey delegates to GET /video/avatars?gender=Male (cheap
+  // read, no credit deduction; 401/403 = invalid key).
+  // generateVariants throws — Polish-25 Commit 2 wires the worker
+  // directly on top of the client in makeugc-client.ts.
+  ['makeugc', new MakeugcProvider()],
 ]);
 
 export function getProvider(name: AIProviderName): AIProvider {

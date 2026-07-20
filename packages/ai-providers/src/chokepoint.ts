@@ -48,7 +48,11 @@ export type ProviderName =
   // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul
   // image-to-image endpoint. Reference-image seed for the
   // Polish-23 kie.ai Veo 3.1 Lite pipeline.
-  | 'wavespeed_ai';
+  | 'wavespeed_ai'
+  // Polish-25 Commit 1: MakeUGC pay-per-video UGC ad generator.
+  // Replaces the Polish-24 HeyGen pivot after avatar-quality
+  // rejection. Auth via X-Api-Key on app.makeugc.ai/api/platform.
+  | 'makeugc';
 
 export interface CallProviderInput {
   userId: string;

@@ -46,6 +46,14 @@ const ELEVENLABS_KEY_PATTERN = /^[A-Za-z0-9_.=-]{24,256}$/;
 // side regex is only there to catch obvious paste-errors, not to
 // mirror the vendor's internal format.
 const WAVESPEED_AI_KEY_PATTERN = /^wsk_.{20,150}$/;
+// Polish-25 Commit 1: MakeUGC API Starter keys. Observed format is
+// alphanumeric + underscores/hyphens/dots, typically 32-96 chars.
+// Deliberately permissive charset — MakeUGC hasn't published a
+// strict format spec; the real gate is the live API round-trip in
+// MakeugcProvider.verifyKey (401 detection). The client-side regex
+// is only there to catch obvious paste-errors (whitespace, empty
+// string, wrong length).
+const MAKEUGC_KEY_PATTERN = /^[A-Za-z0-9_.=-]{20,256}$/;
 export const AiProviderKeyInputSchema = z
   .object({
     provider: z.enum([
@@ -58,6 +66,8 @@ export const AiProviderKeyInputSchema = z
       'elevenlabs',
       // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul.
       'wavespeed_ai',
+      // Polish-25 Commit 1: MakeUGC pay-per-video UGC ad generator.
+      'makeugc',
     ]),
     apiKey: z.string().trim().min(1, 'Paste your API key.'),
   })
@@ -97,6 +107,10 @@ export const AiProviderKeyInputSchema = z
       case 'wavespeed_ai':
         pattern = WAVESPEED_AI_KEY_PATTERN;
         hint = 'WaveSpeedAI keys start with wsk_live_ (or wsk_test_) followed by 20+ chars.';
+        break;
+      case 'makeugc':
+        pattern = MAKEUGC_KEY_PATTERN;
+        hint = 'MakeUGC keys are 20+ chars from your API Starter dashboard at makeugc.com/api.';
         break;
     }
     if (!pattern.test(value.apiKey)) {
@@ -193,6 +207,14 @@ export const AI_PROVIDER_META: Record<
     apiDocsUrl: 'https://wavespeed.ai/docs/docs-api/higgsfield/higgsfield-soul-image-to-image',
     verificationMethod: 'api',
   },
+  makeugc: {
+    label: 'MakeUGC',
+    description:
+      'Pay-per-video UGC ad generator. $99/mo API Starter = 2,000 credits/mo = $0.0495/video (20-50x cheaper than HeyGen/Veo). Polish-25 pivot after Polish-24 HeyGen avatar-quality rejection.',
+    pricingUrl: 'https://makeugc.com/pricing',
+    apiDocsUrl: 'https://makeugc.com/api',
+    verificationMethod: 'api',
+  },
 };
 
 /**
@@ -222,6 +244,10 @@ export const CONNECTABLE_AI_PROVIDERS: AIProviderName[] = [
   // wavespeed_ai lands here). Polish-23 Commit 5 will drop
   // hedra + elevenlabs when the pipeline pivot completes.
   'wavespeed_ai',
+  // Polish-25 Commit 1: MakeUGC pay-per-video UGC ad generator.
+  // Positioned above heygen since it's the current primary UGC
+  // pipeline after the Polish-24 HeyGen avatar-quality rejection.
+  'makeugc',
   'heygen',
   'replicate',
   'openai',

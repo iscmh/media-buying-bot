@@ -35,6 +35,10 @@ export const aiProviderEnum = pgEnum('ai_provider', [
   // DB side. Reference-image seed for the new Polish-23 kie.ai
   // Veo 3.1 Lite pipeline.
   'wavespeed_ai',
+  // Polish-25 Commit 1: MakeUGC pay-per-video UGC ad generator.
+  // Migration 0036 adds the value on the DB side. Replaces the
+  // Polish-24 HeyGen pivot after avatar-quality rejection.
+  'makeugc',
 ]);
 
 // Polish-4: tier label per provider. nullable on the connection row —

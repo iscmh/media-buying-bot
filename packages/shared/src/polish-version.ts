@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '24.0.1';
+export const POLISH_VERSION = '25.0.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '24.0.1';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-24 Commit 1 — HeyGen pivot client: sanitizer + hard-filter matcher + tuple log + churn retry + cost estimator + cache';
+  'Polish-25 Commit 1 — MakeUGC pivot client: envelope parser + script-length Zod refine + hard-filter matcher + cache + BYOK';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

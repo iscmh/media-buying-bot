@@ -40,7 +40,9 @@ export async function logAiProviderApiCall(input: {
     // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK audit tag.
     | 'elevenlabs'
     // Polish-23 Commit 1: WaveSpeedAI Higgsfield Soul audit tag.
-    | 'wavespeed_ai';
+    | 'wavespeed_ai'
+    // Polish-25 Commit 1: MakeUGC pay-per-video UGC ad generator audit tag.
+    | 'makeugc';
   endpoint: string;
   method: string;
   requestBody?: Record<string, unknown>;

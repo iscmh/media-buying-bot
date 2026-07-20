@@ -36,7 +36,13 @@ export type AIProviderName =
   // Polish-23 kie.ai Veo 3.1 Lite pipeline. BYOK key lives in
   // ai_provider_connections under provider='wavespeed_ai'.
   // Migration 0034 adds the value on the DB side.
-  | 'wavespeed_ai';
+  | 'wavespeed_ai'
+  // Polish-25 Commit 1: MakeUGC (makeugc.com) — pay-per-video UGC
+  // ad generator, $99/mo API Starter tier = 2,000 credits/mo =
+  // $0.0495/video (20-50x cheaper than HeyGen/Veo). Replaces
+  // Polish-24 HeyGen pivot after avatar-quality rejection.
+  // Migration 0036 adds the value on the DB side.
+  | 'makeugc';
 
 export type CampaignObjective = 'CBO' | 'ABO';
 
