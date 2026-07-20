@@ -372,7 +372,13 @@ export const generatePolish25Makeugc = inngest.createFunction(
             hardFilters: matched.matchLog.hardFilters,
             scoredCandidates: matched.matchLog.scoredCandidates,
             winnerAvatarId: matched.matchLog.winnerAvatarId,
+            // Polish-25 Commit 5: winnerVoiceId is now the MakeUGC
+            // UUID (voice.id) — the value the submit endpoint accepts.
+            // We ALSO persist the TTS engine's internal identifier so
+            // future submit-endpoint drift is diagnosable in one SQL
+            // column pair without re-fetching the voice list.
             winnerVoiceId: matched.matchLog.winnerVoiceId,
+            winnerVoiceTtsEngineId: matched.voice.voiceId,
             winnerScore: matched.matchLog.winnerScore,
           },
           polish25_progress: { step: 'avatar-matched', pct: 45, at: nowIso() },
@@ -380,7 +386,10 @@ export const generatePolish25Makeugc = inngest.createFunction(
         return {
           avatarId: matched.avatar.id,
           avatarName: matched.avatar.name,
-          voiceId: matched.voice.voiceId,
+          // Polish-25 Commit 5: pass matched.voice.id (MakeUGC UUID)
+          // — NOT matched.voice.voiceId (TTS engine opaque string).
+          // Root cause of job 9a9522c9 "Voice not found" failure.
+          voiceId: matched.voice.id,
           voiceName: matched.voice.name,
         };
       } catch (err) {

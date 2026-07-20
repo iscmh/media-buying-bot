@@ -53,14 +53,29 @@ export interface MakeugcAvatar {
 }
 
 export interface MakeugcVoice {
-  /** Internal DB row id. Different from voiceId (below). */
+  /**
+   * MakeUGC's internal UUID reference. THIS is the value to send as
+   * `voice_id` in POST /video/generate.
+   *
+   * Polish-25 Commit 5: verified by real-world job 9a9522c9 —
+   * submit endpoint rejects the opaque TTS-engine string
+   * (voiceId below) with "Voice not found" and accepts the
+   * MakeUGC UUID (this `id` field). Prior to Commit 5, the
+   * matcher returned voiceId to submit — root cause of the bug.
+   */
   id: string;
   name: string;
   language?: string;
   gender?: string;
   templateUrl?: string;
   thumbnail?: string;
-  /** The value to send as voice_id in POST /video/generate. */
+  /**
+   * TTS engine's internal identifier (e.g. ElevenLabs voice
+   * reference like `21m00Tcm4TlvDq8ikWAM`, `dmeLYJsj2pZfEwysJhtw`).
+   * Kept for audit / debugging correlation only — NOT what the
+   * MakeUGC submit endpoint expects. See job 9a9522c9 for the
+   * Commit-5 bug proof.
+   */
   voiceId: string;
   accent?: string;
   country?: string;
@@ -312,16 +327,20 @@ export function normalizeMakeugcAvatar(raw: MakeugcAvatarRaw): MakeugcAvatar {
 
 export function normalizeMakeugcVoice(raw: MakeugcVoiceRaw): MakeugcVoice {
   return {
+    // Polish-25 Commit 5: `id` is MakeUGC's internal UUID — the value
+    // downstream code sends as voice_id to POST /video/generate.
+    // Verified against real-world submission (job 9a9522c9).
     id: String(raw.id ?? ''),
     name: String(raw.name ?? ''),
     language: typeof raw.language === 'string' ? raw.language : undefined,
     gender: typeof raw.gender === 'string' ? raw.gender : undefined,
     templateUrl: typeof raw.templateUrl === 'string' ? raw.templateUrl : undefined,
     thumbnail: typeof raw.thumbnail === 'string' ? raw.thumbnail : undefined,
-    // voiceId is the actual value sent as voice_id in POST /video/generate.
-    // The MakeUGC docs disambiguate: `id` = internal DB row, `voiceId` =
-    // ElevenLabs voice reference. Fall back to `id` if `voiceId` missing
-    // (older / custom avatars may only have id).
+    // TTS engine's internal identifier (ElevenLabs voice UUID etc).
+    // Preserved for audit + debugging correlation. NOT what the
+    // MakeUGC submit endpoint expects — see MakeugcVoice.id.
+    // Fall back to `id` when the raw payload omits it so old / custom
+    // avatar rows still have a non-empty string here.
     voiceId: String(raw.voiceId ?? raw.id ?? ''),
     accent: typeof raw.accent === 'string' ? raw.accent : undefined,
     country: typeof raw.country === 'string' ? raw.country : undefined,
@@ -752,12 +771,28 @@ export function selectMakeugcAvatarForPersona(
   }
   const winnerVoice = voicePool[0]!;
 
+  // Polish-25 Commit 5: loud-log BOTH voice identifiers at match
+  // time. Job 9a9522c9 root cause was matcher returning the TTS
+  // engine ID (voice.voiceId) instead of the MakeUGC UUID (voice.id).
+  // Logging both makes any future submit-endpoint drift or field-
+  // swap regression visible in one Vercel Runtime Logs line.
+  console.log(
+    `[makeugc-match] winner voice.id=${winnerVoice.id} voice.voiceId=${winnerVoice.voiceId} ` +
+      `(submit will receive voice.id) avatar.id=${winner.id} avatar.name=${JSON.stringify(winner.name)}`,
+  );
+
   const matchLog: MakeugcAvatarMatchLog = {
     candidatesConsidered: avatars.length,
     hardFilters,
     scoredCandidates: scoredCandidates.slice(0, 5),
     winnerAvatarId: winner.id,
-    winnerVoiceId: winnerVoice.voiceId,
+    // Polish-25 Commit 5: report the value that will be SENT to submit
+    // (voice.id, the MakeUGC UUID) — NOT voice.voiceId (TTS opaque
+    // string). Historical: this line was `winnerVoice.voiceId` in
+    // Commits 1-4 and caused every submit to fail with "Voice not
+    // found" once real ElevenLabs-style voiceIds appeared in the
+    // MakeUGC voice pool.
+    winnerVoiceId: winnerVoice.id,
     winnerScore,
   };
   return { avatar: winner, voice: winnerVoice, score: winnerScore, matchLog };

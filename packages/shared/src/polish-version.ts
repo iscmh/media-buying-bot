@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '25.0.4';
+export const POLISH_VERSION = '25.0.5';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '25.0.4';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25 Commit 4 — context-aware self-referential appearance validator + persist-before-validate';
+  'Polish-25 Commit 5 — matcher returns voice.id (MakeUGC UUID) instead of voice.voiceId (TTS opaque)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

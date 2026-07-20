@@ -37,6 +37,7 @@ import {
   MAKEUGC_USD_PER_CREDIT_STARTER,
   MAKEUGC_VOICE_CACHE_TTL_MS,
   MAKEUGC_VOICE_SCRIPT_MAX_CHARS,
+  normalizeMakeugcVoice,
   Polish25AvatarMatchMetadataSchema,
   Polish25CreditsUsedMetadataSchema,
   selectMakeugcAvatarForPersona,
@@ -149,9 +150,11 @@ describe('Polish-25 Commit 1: listMakeugcVoices — endpoint + envelope', () => 
     const r = await listMakeugcVoices({ userId: 'u', apiKey: 'k' });
     expect(r.ok).toBe(true);
     expect(r.voices).toHaveLength(1);
-    // MakeUGC returns BOTH id (DB row) and voiceId (the ElevenLabs
-    // voice reference to send in POST /video/generate). Client
-    // preserves both — voiceId is the one to use.
+    // MakeUGC returns BOTH `id` (its own UUID reference) and `voiceId`
+    // (the TTS engine's internal identifier — e.g. an ElevenLabs
+    // voice UUID). Client preserves both. Polish-25 Commit 5:
+    // downstream submit uses `id` (MakeUGC's UUID) — `voiceId` is
+    // retained for audit / debugging only.
     expect(r.voices[0]!.id).toBe('row_1');
     expect(r.voices[0]!.voiceId).toBe('21m00Tcm4TlvDq8ikWAM');
     expect(calls[0]!.url).toBe('https://app.makeugc.ai/api/platform/video/voices');
@@ -504,7 +507,90 @@ describe('Polish-25 Commit 1: selectMakeugcAvatarForPersona — hard filter + NO
     expect(match.matchLog.hardFilters).toContain('gender=male');
     expect(match.matchLog.scoredCandidates.length).toBeGreaterThan(0);
     expect(match.matchLog.winnerAvatarId).toBe(match.avatar.id);
-    expect(match.matchLog.winnerVoiceId).toBe(match.voice.voiceId);
+    // Polish-25 Commit 5: winnerVoiceId is the MakeUGC UUID (voice.id)
+    // — NOT voice.voiceId (TTS engine identifier). Root cause fix for
+    // job 9a9522c9 "Voice not found" submit failure.
+    expect(match.matchLog.winnerVoiceId).toBe(match.voice.id);
+    expect(match.matchLog.winnerVoiceId).not.toBe(match.voice.voiceId);
+  });
+});
+
+describe('Polish-25 Commit 5: matcher returns voice.id (MakeUGC UUID) — NOT voice.voiceId (TTS)', () => {
+  // Reproduces the exact shape from job 9a9522c9:
+  //   - voice.id       = MakeUGC UUID   (e.g. row_makeugc_uuid_1)
+  //   - voice.voiceId  = ElevenLabs opaque (e.g. dmeLYJsj2pZfEwysJhtw)
+  //   - submit endpoint accepts .id, rejects .voiceId with "Voice not found"
+  const mkAvatar = (id: string, gender: string): MakeugcAvatar => ({
+    id,
+    name: id,
+    gender,
+  });
+  const mkVoiceBothIds = (
+    makeugcUuid: string,
+    ttsOpaque: string,
+    gender: string,
+  ): MakeugcVoice => ({
+    id: makeugcUuid,
+    name: makeugcUuid,
+    gender,
+    language: 'English',
+    voiceId: ttsOpaque,
+  });
+
+  it('winnerVoiceId is voice.id (MakeUGC UUID)', () => {
+    const persona = { gender: 'male' as const, age_range: '60s' };
+    const avatars = [mkAvatar('avatar_uuid_1', 'Male')];
+    const voices = [mkVoiceBothIds('makeugc_uuid_v1', 'dmeLYJsj2pZfEwysJhtw', 'Male')];
+    const match = selectMakeugcAvatarForPersona(persona, avatars, voices);
+    expect(match.matchLog.winnerVoiceId).toBe('makeugc_uuid_v1');
+    expect(match.matchLog.winnerVoiceId).not.toBe('dmeLYJsj2pZfEwysJhtw');
+  });
+
+  it('preserves both voice.id + voice.voiceId in the returned MakeugcVoice for audit', () => {
+    const persona = { gender: 'female' as const, age_range: '30s' };
+    const avatars = [mkAvatar('avatar_uuid_2', 'Female')];
+    const voices = [mkVoiceBothIds('makeugc_uuid_v2', '21m00Tcm4TlvDq8ikWAM', 'Female')];
+    const match = selectMakeugcAvatarForPersona(persona, avatars, voices);
+    // Both fields intact on the raw voice object — Commit 5 keeps
+    // voice.voiceId reachable for SQL forensics without adding a
+    // second lookup roundtrip.
+    expect(match.voice.id).toBe('makeugc_uuid_v2');
+    expect(match.voice.voiceId).toBe('21m00Tcm4TlvDq8ikWAM');
+    // What downstream submit uses:
+    expect(match.matchLog.winnerVoiceId).toBe(match.voice.id);
+  });
+
+  it('re-parsed job 9a9522c9 shape: submit-facing id must be UUID-shaped, not opaque TTS string', () => {
+    // The literal voice.voiceId from the failing job.
+    const jobFailureTtsId = 'dmeLYJsj2pZfEwysJhtw';
+    const persona = { gender: 'male' as const, age_range: '60s' };
+    const avatars = [mkAvatar('avatar_makeugc_uuid', 'Male')];
+    const voices = [mkVoiceBothIds('voice_makeugc_uuid', jobFailureTtsId, 'Male')];
+    const match = selectMakeugcAvatarForPersona(persona, avatars, voices);
+    // Regression pin: winnerVoiceId MUST NOT be the ElevenLabs opaque
+    // string. If a future refactor swaps `.id` back to `.voiceId`
+    // (the Commit 1-4 bug), this test flips to red.
+    expect(match.matchLog.winnerVoiceId).not.toBe(jobFailureTtsId);
+    expect(match.matchLog.winnerVoiceId).toBe('voice_makeugc_uuid');
+  });
+
+  it('listMakeugcVoices raw parser preserves both id + voiceId fields separately', async () => {
+    // Duplicates the endpoint parser sanity check to nail down that
+    // Commit 5's fix depends on both fields surviving normalization.
+    const raw = {
+      id: 'row_1',
+      name: 'Male US News',
+      language: 'English',
+      gender: 'Male',
+      voiceId: 'dmeLYJsj2pZfEwysJhtw',
+      accent: 'American',
+      country: 'US',
+      isCustom: false,
+    };
+    const parsed = normalizeMakeugcVoice(raw);
+    expect(parsed.id).toBe('row_1');
+    expect(parsed.voiceId).toBe('dmeLYJsj2pZfEwysJhtw');
+    expect(parsed.id).not.toBe(parsed.voiceId);
   });
 });
 
