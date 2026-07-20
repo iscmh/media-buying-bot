@@ -100,7 +100,12 @@ export type PipelineType =
   // Veo 3.1 Lite 1080p × 8 clips per 60s composite. Reserved
   // here so the estimator + descriptor + form pickers stay in
   // lockstep before Commit 3 wires the worker.
-  | 'polish23_higgsfield_veo_lite';
+  | 'polish23_higgsfield_veo_lite'
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad. Single
+  // video output ($0.0495 per 60s @ API Starter tier — 20-50x
+  // cheaper than Polish-23/24). Character consistency guaranteed
+  // via pre-cast avatar library.
+  | 'polish25_makeugc';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -319,6 +324,29 @@ function estimateByPipeline(
       breakdown.push({
         item: `Replicate ffmpeg-concat (${variantCount} × $${PRICING.polish23ReplicateConcatUsd.toFixed(2)})`,
         cost: round4(variantCount * PRICING.polish23ReplicateConcatUsd),
+      });
+      break;
+    }
+    case 'polish25_makeugc': {
+      // Polish-25 pipeline: single MakeUGC video per variant at
+      // API Starter tier ($99/mo / 2000 credits = $0.0495/video).
+      // Plus a tiny Claude condenser call (~$0.02) that rewrites
+      // the source vision analysis into the ≤1500-char monologue.
+      //
+      //   Claude script condenser × variantCount   $0.02 × N
+      //   MakeUGC video × variantCount             $0.0495 × N
+      //
+      // 1 variant × 60s = ~$0.07 total. 20-50x cheaper than
+      // Polish-23 which spends ~$1.84 per 60s ad.
+      const CLAUDE_CONDENSER_USD = 0.02;
+      const MAKEUGC_STARTER_USD_PER_VIDEO = 99 / 2000; // $0.0495
+      breakdown.push({
+        item: `Claude script condenser (${variantCount} × $${CLAUDE_CONDENSER_USD.toFixed(2)})`,
+        cost: round4(variantCount * CLAUDE_CONDENSER_USD),
+      });
+      breakdown.push({
+        item: `MakeUGC pre-cast avatar video (${variantCount} × $${MAKEUGC_STARTER_USD_PER_VIDEO.toFixed(4)})`,
+        cost: round4(variantCount * MAKEUGC_STARTER_USD_PER_VIDEO),
       });
       break;
     }

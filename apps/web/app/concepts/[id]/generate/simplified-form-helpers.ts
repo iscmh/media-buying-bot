@@ -96,6 +96,18 @@ export const POLISH23_DESCRIPTION =
   'Best character consistency at ~$1.65 per 60s ad. Recommended default.';
 
 /**
+ * Polish-25 Commit 2: MakeUGC pre-cast avatar pipeline picker anchors.
+ * Character consistency guaranteed at platform level (same actor
+ * every clip). Single video output. Real ~$0.05 per 60s ad — 20-50x
+ * cheaper than Polish-23. Recommended primary going forward.
+ */
+export const POLISH25_PIPELINE_ID = 'polish25_makeugc' as const;
+export const POLISH25_DISPLAY_NAME = 'Polish-25 UGC (MakeUGC pre-cast avatar)';
+export const POLISH25_DESCRIPTION =
+  'Character consistency guaranteed via pre-cast avatar library. ' +
+  'Real $0.05 per 60s ad. Fastest, cheapest option — recommended primary.';
+
+/**
  * Polish-20.0.1: form state shape. Model picker is REQUIRED (per spec
  * user MUST pick), represented as `modelId | null`. Generate button
  * stays disabled until non-null. `providerId` defaults to the model's
@@ -117,6 +129,13 @@ export interface SimplifiedFormState {
   providerId: VideoProviderId | null;
   variantCount: number;
   polish23Selected?: boolean;
+  /**
+   * Polish-25 Commit 2: MakeUGC pre-cast avatar pipeline flag.
+   * Mirrors polish23Selected. When true, modelId is cleared and
+   * the form routes through the polish25_makeugc descriptor →
+   * generation/polish25-makeugc.requested worker event.
+   */
+  polish25Selected?: boolean;
 }
 
 /**
@@ -125,10 +144,11 @@ export interface SimplifiedFormState {
  * required from the form — the worker resolves it server-side.
  */
 export function canSubmitState(state: SimplifiedFormState): boolean {
-  // Polish-23 Commit 3.5: polish23Selected is an alternative "picked"
-  // signal that bypasses the modelId requirement. Either polish23 OR
-  // a modelId satisfies the gate — never both at once.
-  if (state.polish23Selected !== true && state.modelId == null) return false;
+  // Polish-23 / Polish-25: pipeline-selected flags are alternative
+  // "picked" signals that bypass the modelId requirement. Any one of
+  // {modelId, polish23Selected, polish25Selected} satisfies the gate.
+  const hasPickedPipeline = state.polish23Selected === true || state.polish25Selected === true;
+  if (!hasPickedPipeline && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
     return false;
   }
@@ -196,6 +216,14 @@ export function buildSubmissionFormData(input: {
   // because no metadata.model_id is set. Cleaner than adding
   // polish23 as a synthetic VideoModelId, which would tangle two
   // descriptor systems.
+  if (input.state.polish25Selected === true) {
+    // Polish-25 Commit 2: MakeUGC pre-cast avatar. Routes via the
+    // polish25_makeugc descriptor's workerEvent
+    // (generation/polish25-makeugc.requested). Same pattern as
+    // polish23Selected — set `pipeline` instead of modelId.
+    fd.set('pipeline', POLISH25_PIPELINE_ID);
+    return fd;
+  }
   if (input.state.polish23Selected === true) {
     fd.set('pipeline', POLISH23_PIPELINE_ID);
     return fd;
@@ -234,4 +262,24 @@ export function estimatePolish23CostPerVariantUsd(
   return {
     usd: SOUL + CLIP_COUNT * VEO_LITE_PER_CLIP + CLAUDE + NANO_BANANA_SEED + REPLICATE_CONCAT,
   };
+}
+
+/**
+ * Polish-25 Commit 2: cost preview for the MakeUGC pipeline card.
+ * Real anchor: 1 MakeUGC credit + tiny Claude condenser call.
+ *   Claude condenser  $0.02
+ *   MakeUGC video     $0.0495 ($99 / 2000 credits, Starter tier)
+ *   ----------------- ------
+ *   Total per variant $0.0695
+ *
+ * Duration doesn't scale the line — MakeUGC bills per video, not
+ * per second. Multi-variant scales linearly.
+ */
+export interface Polish25CostEstimate {
+  usd: number;
+}
+export function estimatePolish25CostPerVariantUsd(): Polish25CostEstimate {
+  const CLAUDE = 0.02;
+  const MAKEUGC = 99 / 2000;
+  return { usd: CLAUDE + MAKEUGC };
 }

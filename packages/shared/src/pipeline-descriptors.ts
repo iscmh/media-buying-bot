@@ -23,7 +23,7 @@ export interface PipelineDescriptor {
   /** label rendered in the form + job-review header */
   label: string;
   /** providerChoice column written on generation_jobs */
-  providerChoice: 'heygen' | 'openai' | 'gemini';
+  providerChoice: 'heygen' | 'openai' | 'gemini' | 'makeugc';
   /** format column written on generation_jobs */
   format: string;
   /**
@@ -39,7 +39,9 @@ export interface PipelineDescriptor {
     // kie.ai Veo 3.1 Lite + Higgsfield Soul worker. Named here so
     // the descriptor + estimator + form pickers type-check even
     // though the worker file doesn't land until Commit 3.
-    | 'generation/polish23-veo-lite.requested';
+    | 'generation/polish23-veo-lite.requested'
+    // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
+    | 'generation/polish25-makeugc.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -49,6 +51,8 @@ export interface PipelineDescriptor {
     | 'kie_ai'
     // Polish-23 Commit 1: WaveSpeedAI-hosted Higgsfield Soul.
     | 'wavespeed_ai'
+    // Polish-25 Commit 2: MakeUGC pre-cast avatar renderer.
+    | 'makeugc'
   >;
 }
 
@@ -90,6 +94,18 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     workerEvent: 'generation/polish23-veo-lite.requested',
     requiredProviders: ['claude', 'gemini', 'kie_ai', 'wavespeed_ai'],
   },
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad. Single
+  // video output at ~$0.05 per 60s (Starter tier). Character
+  // consistency guaranteed via pre-cast avatar library. Requires
+  // Claude for script condensing + MakeUGC for the video render.
+  polish25_makeugc: {
+    pipeline: 'polish25_makeugc',
+    label: 'UGC ad (MakeUGC pre-cast avatar — Polish-25)',
+    providerChoice: 'makeugc',
+    format: 'polish25_makeugc',
+    workerEvent: 'generation/polish25-makeugc.requested',
+    requiredProviders: ['claude', 'gemini', 'makeugc'],
+  },
 };
 
 export function describePipeline(pipeline: PipelineType): PipelineDescriptor {
@@ -128,4 +144,7 @@ export const ALL_PIPELINES: PipelineType[] = [
   // Polish-23 Commit 1: reserved; not surfaced in the form until
   // Commit 3 wires the worker.
   'polish23_higgsfield_veo_lite',
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad — primary
+  // pipeline going forward (single video output @ ~$0.05).
+  'polish25_makeugc',
 ];

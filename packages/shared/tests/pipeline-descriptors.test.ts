@@ -79,17 +79,17 @@ describe('Polish-20 Commit 4: defaultPipeline throws — no pipeline-level defau
 });
 
 describe('Polish-20 Commit 4 → Polish-23 Commit 1: ALL_PIPELINES coverage', () => {
-  it('covers the 3 legacy survivors + the Polish-23 reserved pipeline', () => {
-    // Polish-23 Commit 1 added polish23_higgsfield_veo_lite as a
-    // reserved descriptor. The form picker doesn't surface it yet
-    // (worker isn't registered until Commit 3), but ALL_PIPELINES
-    // must include it so descriptor lookups + cost estimator
-    // coverage tests stay in lockstep.
+  it('covers legacy survivors + Polish-23 + Polish-25 pipelines', () => {
+    // Polish-23 Commit 1 added polish23_higgsfield_veo_lite.
+    // Polish-25 Commit 2 added polish25_makeugc as the primary
+    // recommended pipeline (MakeUGC pre-cast avatar, ~$0.05 per
+    // 60s ad — 20-50x cheaper than Polish-23).
     const expected: PipelineType[] = [
       'heygen_avatar_talking_head',
       'sora_2_single_shot',
       'nano_banana_static_image',
       'polish23_higgsfield_veo_lite',
+      'polish25_makeugc',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
   });

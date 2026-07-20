@@ -21,6 +21,8 @@ import {
   LAUNCHER_VISIBLE_MODELS,
   POLISH23_DESCRIPTION,
   POLISH23_DISPLAY_NAME,
+  POLISH25_DESCRIPTION,
+  POLISH25_DISPLAY_NAME,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
@@ -29,6 +31,7 @@ import {
   canSubmitState,
   clampVariantCount,
   estimatePolish23CostPerVariantUsd,
+  estimatePolish25CostPerVariantUsd,
   formatModelCostHintPerVariant,
   getDefaultProviderForModel,
   getSoleLauncherModel,
@@ -98,6 +101,10 @@ export function SimplifiedGenerationForm({
   // the VideoModel descriptor system. Picking Polish-23 clears
   // modelId; picking any classic model clears polish23Selected.
   const [polish23Selected, setPolish23Selected] = React.useState(false);
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar picker. Mutually
+  // exclusive with polish23Selected + modelId — picking any one
+  // clears the other two.
+  const [polish25Selected, setPolish25Selected] = React.useState(false);
   const [variantCount, setVariantCount] = React.useState<number>(SIMPLIFIED_DEFAULT_VARIANTS);
 
   const [error, setError] = React.useState<string | null>(null);
@@ -114,6 +121,7 @@ export function SimplifiedGenerationForm({
     providerId,
     variantCount,
     polish23Selected,
+    polish25Selected,
   };
   const canSubmit = canSubmitState(state);
 
@@ -132,16 +140,22 @@ export function SimplifiedGenerationForm({
         estimateUsd: variantCount * estimatePolish23CostPerVariantUsd(detectedSourceSeconds).usd,
       }
     : null;
-  const estimate = polish23Estimate
-    ? polish23Estimate
-    : modelId
-      ? estimateGenerationCost({
-          conceptType: 'ugc',
-          variantCount,
-          videoModelId: modelId,
-          sourceDurationSeconds: previewSeconds,
-        })
-      : null;
+  // Polish-25 Commit 2: fixed per-variant cost, duration doesn't scale.
+  const polish25Estimate = polish25Selected
+    ? { estimateUsd: variantCount * estimatePolish25CostPerVariantUsd().usd }
+    : null;
+  const estimate = polish25Estimate
+    ? polish25Estimate
+    : polish23Estimate
+      ? polish23Estimate
+      : modelId
+        ? estimateGenerationCost({
+            conceptType: 'ugc',
+            variantCount,
+            videoModelId: modelId,
+            sourceDurationSeconds: previewSeconds,
+          })
+        : null;
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate != null && estimate.estimateUsd > remaining;
@@ -166,13 +180,29 @@ export function SimplifiedGenerationForm({
   if (!connectedProviders.replicate.connected) polish23MissingKeys.push('Replicate');
   const hasPolish23Keys = polish23MissingKeys.length === 0;
 
+  // Polish-25 Commit 2: MakeUGC gate. Needs Claude (script condenser)
+  // + Gemini (concept vision analysis via analyze-concept) + MakeUGC.
+  const polish25MissingKeys: string[] = [];
+  if (!connectedProviders.claude.connected) polish25MissingKeys.push('Claude');
+  if (!connectedProviders.gemini.connected) polish25MissingKeys.push('Gemini');
+  if (!connectedProviders.makeugc.connected) polish25MissingKeys.push('MakeUGC');
+  const hasPolish25Keys = polish25MissingKeys.length === 0;
+
   const legacyMissingKeys: string[] = [];
   if (!hasHedraKey) legacyMissingKeys.push('Hedra');
   if (!hasElevenLabsKey) legacyMissingKeys.push('ElevenLabs');
   const hasLegacyKeys = hasHedraKey && hasElevenLabsKey;
 
-  const hasProviderKey = polish23Selected ? hasPolish23Keys : hasLegacyKeys;
-  const missingKeys = polish23Selected ? polish23MissingKeys : legacyMissingKeys;
+  const hasProviderKey = polish25Selected
+    ? hasPolish25Keys
+    : polish23Selected
+      ? hasPolish23Keys
+      : hasLegacyKeys;
+  const missingKeys = polish25Selected
+    ? polish25MissingKeys
+    : polish23Selected
+      ? polish23MissingKeys
+      : legacyMissingKeys;
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -244,15 +274,32 @@ export function SimplifiedGenerationForm({
         )}
       </section>
 
-      {/* Polish-23 Commit 3.5: new "recommended" pipeline card
-          above the classic model picker. Selecting it clears the
-          classic modelId; picking a classic card clears it. */}
+      {/* Polish-25 Commit 2: MakeUGC pre-cast avatar card — primary
+          recommended pipeline going forward. Positioned FIRST.
+          Character consistency guaranteed at platform level, ~$0.05
+          per 60s ad (20-50x cheaper than Polish-23). Picking clears
+          Polish-23 + modelId. */}
+      <Polish25PickerCard
+        picked={polish25Selected}
+        disabled={isPending}
+        variantCount={variantCount}
+        onPick={() => {
+          setPolish25Selected(true);
+          setPolish23Selected(false);
+          setModelId(null);
+        }}
+      />
+
+      {/* Polish-23 Commit 3.5: pipeline card retained as a
+          parallel provider while Polish-25 validates in production
+          testing. Selecting it clears Polish-25 + modelId. */}
       <Polish23PickerCard
         picked={polish23Selected}
         disabled={isPending}
         variantCount={variantCount}
         onPick={() => {
           setPolish23Selected(true);
+          setPolish25Selected(false);
           setModelId(null);
         }}
       />
@@ -291,6 +338,7 @@ export function SimplifiedGenerationForm({
                 onPick={() => {
                   setModelId(model.id);
                   setPolish23Selected(false);
+                  setPolish25Selected(false);
                 }}
               />
             ))}
@@ -375,11 +423,13 @@ export function SimplifiedGenerationForm({
             reduce variants, or pick a cheaper model.
           </p>
         )}
-        {!hasProviderKey && (modelId != null || polish23Selected) && (
+        {!hasProviderKey && (modelId != null || polish23Selected || polish25Selected) && (
           <p className="mt-1 text-xs text-[color:var(--accent-negative)]">
             Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
             <Link
-              href={polish23Selected ? '/connections' : '/connections/ai-provider'}
+              href={
+                polish25Selected || polish23Selected ? '/connections' : '/connections/ai-provider'
+              }
               className="hover:text-fg underline underline-offset-4"
             >
               /connections
@@ -454,6 +504,53 @@ interface Polish23PickerCardProps {
   disabled: boolean;
   variantCount: number;
   onPick: () => void;
+}
+
+/**
+ * Polish-25 Commit 2: MakeUGC pre-cast avatar picker card. Same
+ * visual language as Polish23PickerCard but positioned FIRST in the
+ * form (primary recommended pipeline). Character consistency
+ * guaranteed at platform level (pre-cast avatar library) at
+ * ~$0.05 per 60s ad — 20-50x cheaper than Polish-23.
+ */
+function Polish25PickerCard({ picked, disabled, variantCount, onPick }: Polish23PickerCardProps) {
+  const perVariantUsd = estimatePolish25CostPerVariantUsd().usd;
+  const totalUsd = perVariantUsd * variantCount;
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      disabled={disabled}
+      aria-pressed={picked}
+      className={cn(
+        'group relative flex w-full flex-col gap-2 rounded-md border p-4 text-left transition-colors',
+        picked
+          ? 'border-fg bg-fg/5'
+          : 'border-[color:var(--accent-positive)]/50 bg-bg-surface hover:border-fg/50',
+        disabled && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <span
+        className={cn(
+          'absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+          'bg-[color:var(--accent-positive)]/15 text-[color:var(--accent-positive)]',
+        )}
+      >
+        Primary — Recommended
+      </span>
+      {picked && (
+        <CheckCircle2 className="text-fg absolute right-24 top-3 h-4 w-4" aria-hidden="true" />
+      )}
+      <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
+        Polish-25 pipeline
+      </div>
+      <div className="text-fg text-sm font-semibold">{POLISH25_DISPLAY_NAME}</div>
+      <div className="text-fg-muted text-xs leading-relaxed">{POLISH25_DESCRIPTION}</div>
+      <div className="text-fg-subtle mt-1 font-mono text-xs">
+        ~${perVariantUsd.toFixed(4)}/variant × {variantCount} = ${totalUsd.toFixed(4)}
+      </div>
+    </button>
+  );
 }
 
 function Polish23PickerCard({ picked, disabled, variantCount, onPick }: Polish23PickerCardProps) {

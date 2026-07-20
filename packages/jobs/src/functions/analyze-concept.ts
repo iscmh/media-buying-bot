@@ -189,14 +189,20 @@ export const analyzeConcept = inngest.createFunction(
         where: eq(schema.generationJobs.id, jobId),
         columns: { pickedPipeline: true },
       });
-      const isPolish23 = jobPipelineRow?.pickedPipeline === 'polish23_higgsfield_veo_lite';
-      const visionSystemPrompt = isPolish23
+      // Polish-25 Commit 2: Polish-25 (MakeUGC) ALSO needs the extended
+      // Polish-23 vision schema (persona + setting_details + emotional_arc
+      // + hook + niche) since the Polish-25 Claude condenser reads the
+      // same shape. Treat both pipelines as "needs Polish-23 vision".
+      const picked = jobPipelineRow?.pickedPipeline ?? null;
+      const usesPolish23Vision =
+        picked === 'polish23_higgsfield_veo_lite' || picked === 'polish25_makeugc';
+      const visionSystemPrompt = usesPolish23Vision
         ? POLISH23_VISION_SYSTEM_PROMPT
         : UGC_DECONSTRUCTOR_SYSTEM_PROMPT;
       console.log(
         `[analyze-concept] job ${jobId} using ${
-          isPolish23 ? 'POLISH23_VISION_SYSTEM_PROMPT' : 'UGC_DECONSTRUCTOR_SYSTEM_PROMPT'
-        } (picked_pipeline=${jobPipelineRow?.pickedPipeline ?? 'null'})`,
+          usesPolish23Vision ? 'POLISH23_VISION_SYSTEM_PROMPT' : 'UGC_DECONSTRUCTOR_SYSTEM_PROMPT'
+        } (picked_pipeline=${picked ?? 'null'})`,
       );
 
       const vision = await callGeminiVision({
@@ -379,6 +385,10 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   // the union here now keeps analyze-concept in lockstep before
   // Commit 3 lands the worker.
   | 'generation/polish23-veo-lite.requested'
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad. Descriptor
+  // lookup already returns this string; typing the union keeps
+  // analyze-concept in lockstep.
+  | 'generation/polish25-makeugc.requested'
 > {
   try {
     const db = getDb();

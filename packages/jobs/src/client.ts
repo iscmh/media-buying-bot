@@ -75,6 +75,14 @@ export type Events = {
   'generation/nano-banana.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-23 Commit 3: Higgsfield Soul + kie.ai Veo 3.1 Lite worker.
+  'generation/polish23-veo-lite.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
+  'generation/polish25-makeugc.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   'summary/daily.requested': {
     data: { userId: string; date: string };
   };

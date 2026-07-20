@@ -36,6 +36,9 @@ export interface DecryptedKeys {
   // Polish-23 Commit 3: WaveSpeedAI BYOK (Higgsfield Soul host).
   // Lives in ai_provider_connections under provider='wavespeed_ai'.
   wavespeed_ai?: string;
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar renderer BYOK.
+  // Lives in ai_provider_connections under provider='makeugc'.
+  makeugc?: string;
 }
 
 export type ProviderKey = keyof DecryptedKeys;

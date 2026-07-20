@@ -43,6 +43,10 @@ export interface ConnectedProviders {
   // covers operators who connected under the older card label.
   wavespeed_ai: { connected: boolean };
   replicate: { connected: boolean };
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad pipeline
+  // gate. Combined with claude (script condenser) + gemini (vision
+  // analysis) to enable the Polish-25 form card.
+  makeugc: { connected: boolean };
 }
 
 export interface AiProviderRow {
@@ -72,6 +76,7 @@ export function buildConnectedProviders(
     // 'kling' enum value. Either row satisfies the polish23
     // ffmpeg-concat gate.
     replicate: { connected: byAi.has('replicate') || byAi.has('kling') },
+    makeugc: { connected: byAi.has('makeugc') },
   };
 }
 
@@ -94,4 +99,6 @@ export const AI_PROVIDER_QUERY_LIST = [
   'wavespeed_ai',
   'replicate',
   'kling',
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar renderer BYOK.
+  'makeugc',
 ] as const;

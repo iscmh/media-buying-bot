@@ -5,6 +5,7 @@ import { generateVideoVariant } from './generate-video-variant';
 import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
 import { generatePolish23VeoLite } from './generate-polish23-veo-lite';
+import { generatePolish25Makeugc } from './generate-polish25-makeugc';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -49,6 +50,10 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // event is registered here now so the descriptor-coverage
   // tripwire and cost-estimator stay in lockstep.
   'generation/polish23-veo-lite.requested',
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad. Single video
+  // output ($0.0495 per 60s @ Starter tier). Replaces Polish-23/24
+  // as the primary pipeline going forward.
+  'generation/polish25-makeugc.requested',
 ] as const);
 
 export const functions = [
@@ -69,6 +74,8 @@ export const functions = [
   // completes the registration by adding the function to the
   // dispatch array.
   generatePolish23VeoLite,
+  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
+  generatePolish25Makeugc,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.
