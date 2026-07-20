@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.38';
+export const POLISH_VERSION = '24.0.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.38';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.31 — WaveSpeedAI "created" queue state + loud-log status + poll cap 24→60 attempts';
+  'Polish-24 Commit 1 — HeyGen pivot client: sanitizer + hard-filter matcher + tuple log + churn retry + cost estimator + cache';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

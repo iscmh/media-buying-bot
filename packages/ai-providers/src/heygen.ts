@@ -3,24 +3,29 @@ import type { AIProvider, GenerateInput, GeneratedCreative } from './types';
 
 /**
  * HeyGen.
- * API: https://docs.heygen.com (v2 used here for verifyKey)
+ * API: https://docs.heygen.com
  *
  * Integration date: 2025-05-01
+ * Polish-24 Commit 1 (2026-07-20): verifyKey swapped to
+ *   GET /v2/user/remaining_quota — cheaper + returns billing info
+ *   (remaining_quota credits ≈ $0.01/credit) that the connect UI can
+ *   surface. Older /v2/voices?limit=1 approach worked but wasted a
+ *   full voice-catalog fetch just to check auth. Auth header remains
+ *   `X-Api-Key` (per HeyGen docs — NOT `Authorization: Bearer`).
  *
- * verifyKey: real API call to GET /v2/voices?limit=1 with `X-API-KEY`
- *   header. Picked because it's a small, free GET — no credits deducted,
- *   200 if key is valid, 401/403 if not.
- *
- * generateVariants: stub. Phase 3.
+ * generateVariants: stub. Polish-24 Commit 2 will wire the Polish-24
+ *   Inngest worker on top of the client in heygen-client.ts; this
+ *   AIProvider adapter is retained for legacy compatibility with the
+ *   BYOK verify flow only.
  */
 export class HeyGenProvider implements AIProvider {
   readonly name = 'heygen' as const;
 
   async verifyKey(apiKey: string): Promise<VerifyKeyResult> {
     try {
-      const res = await fetch('https://api.heygen.com/v2/voices?limit=1', {
+      const res = await fetch('https://api.heygen.com/v2/user/remaining_quota', {
         method: 'GET',
-        headers: { 'X-API-KEY': apiKey, Accept: 'application/json' },
+        headers: { 'X-Api-Key': apiKey, Accept: 'application/json' },
         signal: AbortSignal.timeout(10_000),
       });
       if (res.ok) {
@@ -50,6 +55,9 @@ export class HeyGenProvider implements AIProvider {
   }
 
   async generateVariants(_input: GenerateInput): Promise<GeneratedCreative[]> {
-    throw new Error('HeyGenProvider.generateVariants not implemented (Phase 3)');
+    throw new Error(
+      'HeyGenProvider.generateVariants not implemented — Polish-24 uses the ' +
+        'submitHeygenPolish24VideoWithChurnRetry client directly from the worker.',
+    );
   }
 }
