@@ -113,7 +113,12 @@ export function softTruncatePromptForVeo(
 }
 
 const SOUL_POLL_INTERVAL_SECONDS = 5;
-const SOUL_POLL_MAX_ATTEMPTS = 24; // ~2 min
+// Polish-23 Commit 3.0.31: bumped 24 → 60 attempts (~5 min total).
+// Real production evidence: WaveSpeedAI sometimes leaves a job in
+// "created"/queued state for 30-60s before "processing" starts.
+// With the previous ceiling of 2 min, a 60s queue + 90s processing
+// would bust the cap and fail the job on a healthy trajectory.
+const SOUL_POLL_MAX_ATTEMPTS = 60; // ~5 min
 // Polish-23 Commit 3.0.20 → Commit 3.0.21: Veo poll loop uses the
 // Inngest step.sleep + step.run per-attempt pattern so each poll
 // runs as its own Vercel invocation. No single invocation exceeds

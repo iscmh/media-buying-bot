@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.37';
+export const POLISH_VERSION = '23.0.38';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.37';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.30 — SETTING INVARIANT block + setting REJECTs + first-person setting anchor + persona setting_details threading';
+  'Polish-23 Commit 3.0.31 — WaveSpeedAI "created" queue state + loud-log status + poll cap 24→60 attempts';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

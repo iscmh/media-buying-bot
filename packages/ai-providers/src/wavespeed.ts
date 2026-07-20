@@ -269,7 +269,19 @@ export async function pollWavespeedSoul(
   }
   const data = result.data.data ?? {};
   const status = normalizeWavespeedStatus(data.status);
+  // Polish-23 Commit 3.0.31: loud-log raw + interpreted status on
+  // EVERY poll so any future new WaveSpeedAI state surfaces on the
+  // FIRST failure rather than after N production runs. Grep-friendly
+  // single line for Vercel Runtime Logs.
+  console.log(
+    `[wavespeed] poll predictionId=${input.predictionId} ` +
+      `rawStatus=${JSON.stringify(data.status ?? null)} interpreted=${status ?? 'unknown'}`,
+  );
   if (!status) {
+    console.error(
+      `[wavespeed] UNKNOWN status ${JSON.stringify(data.status)} — add to normalizeWavespeedStatus. ` +
+        `predictionId=${input.predictionId} body=${JSON.stringify(result.data).slice(0, 800)}`,
+    );
     return {
       ok: false,
       latencyMs: result.latencyMs,
@@ -308,11 +320,28 @@ export async function pollWavespeedSoul(
  * Guards against future case-changes or aliases the platform might
  * introduce — an unrecognized value returns undefined so the caller
  * can surface it as a diagnostic rather than silently degrade.
+ *
+ * Polish-23 Commit 3.0.31: added "created" (+ "starting" /
+ * "initializing" / "in_queue" defensive variants) to the queued
+ * bucket. Real production failure: WaveSpeedAI returned status
+ * "created" on a fresh submit poll, our parser returned undefined,
+ * caller threw "missing status (got 'created')" as terminal, Step
+ * B failed the whole job on what was really a queue-not-started-yet
+ * state. Same class of bug as Commit 3.0.21's kie.ai successFlag=3.
  */
 export function normalizeWavespeedStatus(raw: unknown): WavespeedPredictionStatus | undefined {
   if (typeof raw !== 'string') return undefined;
   const lower = raw.toLowerCase();
-  if (lower === 'queued' || lower === 'pending') return 'queued';
+  if (
+    lower === 'queued' ||
+    lower === 'pending' ||
+    lower === 'created' ||
+    lower === 'starting' ||
+    lower === 'initializing' ||
+    lower === 'in_queue'
+  ) {
+    return 'queued';
+  }
   if (lower === 'processing' || lower === 'running' || lower === 'in_progress') return 'processing';
   if (lower === 'completed' || lower === 'complete' || lower === 'succeeded') return 'completed';
   if (lower === 'failed' || lower === 'error' || lower === 'failure') return 'failed';
@@ -408,6 +437,13 @@ export const WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS: readonly string[] = [
   'service unavailable',
   'gateway timeout',
   'try again',
+  // Polish-23 Commit 3.0.31: unknown-status responses are treated
+  // as transient so a future WaveSpeedAI queue state we haven't
+  // seen yet ("initialized", "warming_up", etc.) loops until it
+  // resolves rather than failing the whole job on first sight.
+  // The loud-log in pollWavespeedSoul still surfaces the raw
+  // status so the operator can add it to normalizeWavespeedStatus.
+  'missing status',
 ];
 
 export function isWavespeedTransientError(errorMessage: unknown): boolean {

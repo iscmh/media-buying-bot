@@ -256,6 +256,67 @@ describe('Polish-23 Commit 1: pollWavespeedSoul + normalizeWavespeedStatus', () 
   });
 });
 
+describe("Polish-23 Commit 3.0.31: normalizeWavespeedStatus — queue variants ('created', 'starting', …)", () => {
+  it("'created' → 'queued' (real production failure fixed here)", () => {
+    // Root cause of Commit 3.0.31: WaveSpeedAI returned status
+    // "created" on a fresh submit poll. Prior parser returned
+    // undefined → caller threw "missing status (got 'created')"
+    // as terminal → Step B failed the job. Fix: treat "created"
+    // as queued (keep polling).
+    expect(normalizeWavespeedStatus('created')).toBe('queued');
+    expect(normalizeWavespeedStatus('CREATED')).toBe('queued');
+    expect(normalizeWavespeedStatus('Created')).toBe('queued');
+  });
+  it("defensive queue variants ('starting' / 'initializing' / 'in_queue') also → 'queued'", () => {
+    expect(normalizeWavespeedStatus('starting')).toBe('queued');
+    expect(normalizeWavespeedStatus('initializing')).toBe('queued');
+    expect(normalizeWavespeedStatus('in_queue')).toBe('queued');
+  });
+  it('genuinely unknown status STILL returns undefined (parser is defensive, caller loops via transient patterns)', () => {
+    expect(normalizeWavespeedStatus('warming_up')).toBeUndefined();
+    expect(normalizeWavespeedStatus('unknown_state')).toBeUndefined();
+    expect(normalizeWavespeedStatus('')).toBeUndefined();
+  });
+});
+
+describe('Polish-23 Commit 3.0.31: WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS includes "missing status"', () => {
+  it('"missing status" is in the transient pattern list so unknown-status responses loop instead of failing', () => {
+    // Belt-and-suspenders on the parser: if a NEW queue state
+    // slips through normalizeWavespeedStatus (returns undefined),
+    // the caller's errorMessage will contain "missing status (got
+    // 'X')". That substring matches the transient pattern list,
+    // so Step B's poll loop CONTINUES instead of throwing. Loud-
+    // log in pollWavespeedSoul surfaces the new state so the
+    // operator adds it to normalizeWavespeedStatus.
+    expect(WAVESPEED_TRANSIENT_ERROR_MESSAGE_PATTERNS).toContain('missing status');
+    expect(
+      isWavespeedTransientError("WaveSpeedAI poll response missing status (got 'warming_up')."),
+    ).toBe(true);
+  });
+});
+
+describe('Polish-23 Commit 3.0.31: pollWavespeedSoul integration — "created" status', () => {
+  it("status='created' → ok:true + status='queued' (caller keeps polling)", async () => {
+    captureFetch({
+      status: 200,
+      body: {
+        code: 200,
+        data: { id: 'pred-created', status: 'created' },
+      },
+    });
+    const r = await pollWavespeedSoul({
+      userId: 'u',
+      apiKey: 'k',
+      predictionId: 'pred-created',
+    });
+    expect(r.ok).toBe(true);
+    expect(r.status).toBe('queued');
+    // No outputUrl, no errorMessage — caller sees "still pending".
+    expect(r.outputUrl).toBeUndefined();
+    expect(r.errorMessage).toBeUndefined();
+  });
+});
+
 describe('Polish-23 Commit 1: translateWavespeedErrorStatus branches', () => {
   it('401/403 → re-paste-key guidance', () => {
     expect(translateWavespeedErrorStatus(401, 'x')).toMatch(/authentication failed/i);
@@ -336,6 +397,9 @@ describe('Polish-23 Commit 3.0.29: isWavespeedTransientError — auto-retry gate
       'service unavailable',
       'gateway timeout',
       'try again',
+      // Polish-23 Commit 3.0.31 — "missing status" makes unknown
+      // WaveSpeedAI states loop instead of terminal-failing.
+      'missing status',
     ]);
   });
 
