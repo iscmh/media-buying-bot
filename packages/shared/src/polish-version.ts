@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '23.0.34';
+export const POLISH_VERSION = '23.0.35';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '23.0.34';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-23 Commit 3.0.27 — seed lock + structured character sheet + first-person anchor + Negative keyword list (research-driven rewrite)';
+  'Polish-23 Commit 3.0.28 — PERSONA-MIRROR MODE system prompt (strips Linda anchor when persona available)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

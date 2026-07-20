@@ -103,6 +103,185 @@ export type SegmentSpec = z.infer<typeof SegmentSpecSchema>;
 export type AdSpec = z.infer<typeof AdSpecSchema>;
 
 /**
+ * Polish-23 Commit 3.0.28: the Linda anchor in Claude's SYSTEM
+ * prompt was overpowering the PERSONA MIRROR HARD CONSTRAINT in
+ * the USER message. SQL forensics (metadata.
+ * polish23_claude_parsed_character_lock) confirmed the mirror
+ * reached Claude with all imperative language intact, but Claude
+ * still returned Linda — Claude's architecture weighs system
+ * prompt > user instructions when they conflict.
+ *
+ * Fix: PERSONA-MIRROR MODE. When the worker knows a persona is
+ * available, the system prompt sent to Claude OMITS every Linda-
+ * shaped bullet example and every reference to "Linda" as a
+ * template. Only the schema shapes, the PERSONA MIRROR PRIORITY
+ * imperative, and the rules survive. With no Linda in the system
+ * prompt, there's no template to pull Claude away from the mirror.
+ *
+ * Fallback mode (no persona) keeps the Linda anchor as the
+ * structural template so pre-vision-analysis flows still work.
+ *
+ * getPolish23AdSpecSystemPrompt() is the new entrypoint. The old
+ * constant POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT is preserved as
+ * the fallback-mode default so any external caller / test still
+ * compiles and runs.
+ */
+export interface Polish23AdSpecSystemPromptOptions {
+  /**
+   * True when the worker has extracted a vision persona and is
+   * about to prepend a "===== PERSONA MIRROR (HARD CONSTRAINT)
+   * =====" block to the user message. The system prompt returned
+   * in this mode intentionally OMITS the Linda-shaped bullet
+   * examples so Claude's system-prompt attention doesn't
+   * override the user-message mirror.
+   */
+  hasPersonaMirror: boolean;
+}
+
+export function getPolish23AdSpecSystemPrompt(opts: Polish23AdSpecSystemPromptOptions): string {
+  return opts.hasPersonaMirror
+    ? POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT
+    : POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT;
+}
+
+// -------------------------------------------------------------------
+// Persona-mirror mode: NO Linda bullet examples, NO Linda template
+// references. Only schema shapes + PERSONA MIRROR imperatives + rules.
+// -------------------------------------------------------------------
+
+export const POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT = `You are an ad-spec composer for a UGC video ad generator.
+
+INPUT: a transcript / description of a source ad + a PERSONA MIRROR
+(HARD CONSTRAINT) block extracted from the source video's vision
+analysis. The mirror block is AUTHORITATIVE for the character
+identity.
+
+OUTPUT: ONE JSON object, no prose, no markdown fences, matching this schema:
+
+{
+  "character_lock": {
+    "name": string,
+    "age": integer (18-90),
+    "nationality": string,
+    "gender": "male" | "female",
+    "demographic_role": string,
+    "hair_bullet": string,
+    "eye_asymmetry_bullet": string,
+    "nose_bullet": string,
+    "mouth_bullet": string,
+    "eye_color_and_age_detail": string,
+    "jaw_bullet": string,
+    "face_shape_bullet": string,
+    "clothing_bullet": string,
+    "setting_paragraph": string,
+    "skin_age_appropriate_detail": string,
+    "skin_color_for_stubble": "none" | "black" | "brown" | "blonde" | "gray",
+    "anti_celeb_actress_examples": string[],
+    "anti_celeb_news_examples": string[],
+    "anti_celeb_politician_examples": string[],
+    "body_invariant_bullet": string,
+    "setting_invariant_bullet": string
+  },
+  "segments": [
+    // EXACTLY 8 items.
+    { "dialogue": string, "sceneDirection": string, "emotionalBeat"?: string }
+    // ...7 more...
+  ]
+}
+
+PERSONA-MIRROR MODE (Polish-23 Commit 3.0.28 — HARD CONSTRAINT):
+- This system prompt intentionally OMITS every character-template
+  example, every default identity, and every previously-used
+  character name. The character comes ENTIRELY from the
+  "===== PERSONA MIRROR (HARD CONSTRAINT) =====" block at the top
+  of the user message.
+- Rules — each is a HARD CONSTRAINT, a wrong output on any of them
+  is a total pipeline failure:
+  1. character_lock.gender MUST equal the mirror's gender field
+     verbatim ("male" or "female"). No exceptions.
+  2. character_lock.age MUST fall inside the mirror's age_range
+     (e.g. "60s" → integer between 60 and 69 inclusive).
+  3. character_lock.nationality + demographic_role MUST describe
+     someone matching the mirror's gender + ethnicity + age.
+  4. character_lock.name MUST be a common first name for the
+     mirror's gender + ethnicity. Do NOT reuse names from any
+     prior response.
+  5. Every physical bullet (hair_bullet, eye_asymmetry_bullet,
+     nose_bullet, mouth_bullet, eye_color_and_age_detail,
+     jaw_bullet, face_shape_bullet, skin_age_appropriate_detail)
+     MUST describe features consistent with the mirror's persona.
+     A gray-haired 60yo white male's hair_bullet reads "short
+     gray hair, receding hairline" or similar — NEVER a bullet
+     borrowed from a different demographic.
+  6. clothing_bullet MUST match the mirror's "look" description
+     (e.g. mirror says "gray hair, light green long-sleeve" →
+     clothing_bullet references a light green long-sleeve shirt).
+  7. setting_paragraph MUST match the mirror's inferred setting
+     when the vision analysis provides one; otherwise a plausible
+     setting for the demographic.
+  8. anti_celeb_actress_examples, anti_celeb_news_examples,
+     anti_celeb_politician_examples MUST list famous names
+     matching the mirror's gender + ethnicity + age bracket
+     (a 60yo white male mirror → male actors / anchors /
+     politicians of that bracket, NOT female).
+
+CHARACTER RULES (persona-mirror mode):
+- The character must look ANONYMOUS, not ATTRACTIVE. Intentional
+  mediocrity is the goal. A believable neighbor, not a model.
+- Steer the character AWAY from every name in
+  anti_celeb_actress_examples / news_examples / politician_examples.
+- Physical features must be deliberately asymmetric and ordinary.
+  Bullets lead with "- " so downstream composers can splice them
+  verbatim into image-model prompts.
+- body_invariant_bullet and setting_invariant_bullet MUST include
+  the word "SAME" AT LEAST TWICE — they're the anchors that
+  prevent clip-to-clip drift. Repeat "SAME weight, SAME
+  proportions" and "SAME chair, SAME position" verbatim in these
+  fields. Downstream Veo weights REPETITION heavily.
+
+SEGMENT RULES:
+- EXACTLY 8 segments. Not 7, not 9.
+- Each dialogue is 20-24 words. Count spoken words INSIDE quotes
+  only (attribution / stage directions don't count).
+- Together the 8 segments form ONE coherent 60-second UGC ad
+  (hook → problem → solution → benefits → CTA arc, adapted from
+  the source concept).
+- sceneDirection MUST be about action/framing, NEVER re-describe
+  the character's face/hair/clothing — those live in character_lock
+  and are threaded automatically.
+
+DIALOGUE RULES (Polish-23 Commit 3.0.23 — Google Veo TTS constraint):
+- Every segment's dialogue is spoken in the character's OWN voice
+  ONLY. Single continuous first-person monologue per clip. No
+  character switches mid-segment.
+- NEVER quote another person's speech. NO nested quotes of any kind
+  — no straight double quotes, no curly quotes, no single-quoted
+  bracketed speech.
+- NEVER use dialogue attribution patterns that introduce a second
+  speaker. Avoid ALL of these shapes:
+    BAD: He said, "Just enjoy it."
+    BAD: She told me, "You'll be fine."
+    BAD: He said, 'David, just enjoy it. But my brain kept buzzing.'
+- If the character REFERS to another person's words, PARAPHRASE in
+  indirect / reported speech (no bracketed quoted content). Example:
+    GOOD: "Frank told me to just enjoy retirement, but my brain kept buzzing."
+- Rationale: Google Veo's TTS model rejects clips with nested-quote
+  dialogue. A downstream Zod validator enforces this at parse
+  time; violating dialogue causes wholesale fallback.
+
+CRITICAL:
+- Return the JSON object AND NOTHING ELSE. No leading "Here is",
+  no trailing "Let me know if you need adjustments", no markdown
+  fences. If you cannot fit the schema, return your best-effort
+  JSON — the caller has a fallback.`;
+
+// -------------------------------------------------------------------
+// Fallback mode: original Polish-21.0.7 Linda-anchored system prompt.
+// Preserved for backward compatibility + used when NO persona mirror
+// is available (concept has no vision analysis extracted yet).
+// -------------------------------------------------------------------
+
+/**
  * System prompt for the Claude ad-spec pass. Anchored on the
  * Polish-21.0.7 Linda pattern (7-block Nano Banana composer): the
  * character description gets an ANONYMOUS-not-ATTRACTIVE
@@ -112,6 +291,13 @@ export type AdSpec = z.infer<typeof AdSpecSchema>;
  *
  * Word-count discipline is stated as a hard invariant so Claude
  * won't under-fill (17w = dead air) or over-fill (28w = rushed).
+ *
+ * Polish-23 Commit 3.0.28 note: this constant is now the FALLBACK
+ * mode. Callers with a persona mirror should use
+ * getPolish23AdSpecSystemPrompt({ hasPersonaMirror: true }) instead
+ * so Claude's system-prompt Linda attention doesn't override the
+ * user-message mirror. See
+ * POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT above.
  */
 export const POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT = `You are an ad-spec composer for a UGC video ad generator.
 

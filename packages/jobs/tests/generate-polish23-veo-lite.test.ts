@@ -21,6 +21,7 @@ import { REGISTERED_GENERATION_WORKER_EVENTS, functions } from '../src/functions
 import { generatePolish23VeoLite } from '../src/functions/generate-polish23-veo-lite';
 import {
   AdSpecSchema,
+  POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT,
   POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT,
   POLISH23_CLIP_SECONDS,
   POLISH23_NESTED_QUOTE_PATTERNS,
@@ -32,6 +33,7 @@ import {
   containsQuotedThirdPartySpeech,
   diagnosePolish23AdSpecParseFailure,
   fallbackPolish23AdSpec,
+  getPolish23AdSpecSystemPrompt,
   isValidSegment,
   parsePolish23AdSpec,
 } from '../src/lib/polish23-claude-adspec-prompt';
@@ -555,6 +557,72 @@ describe('Polish-23 Commit 3.0.26: POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT — PERS
     expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('SEGMENT RULES:');
     expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('DIALOGUE RULES');
     expect(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT).toContain('NEVER quote another person');
+  });
+});
+
+describe('Polish-23 Commit 3.0.28: getPolish23AdSpecSystemPrompt — persona-mirror mode strips Linda anchor', () => {
+  it('hasPersonaMirror=true returns the persona-mirror system prompt (NO Linda examples)', () => {
+    const p = getPolish23AdSpecSystemPrompt({ hasPersonaMirror: true });
+    expect(p).toBe(POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT);
+  });
+
+  it('hasPersonaMirror=false returns the fallback (Linda-anchored) system prompt', () => {
+    const p = getPolish23AdSpecSystemPrompt({ hasPersonaMirror: false });
+    expect(p).toBe(POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT);
+  });
+
+  it('persona-mirror variant contains NO Linda-shaped bullet examples', () => {
+    // Real breakthrough from job forensics: Linda examples in the
+    // system prompt overpowered the user-message PERSONA MIRROR
+    // HARD CONSTRAINT because Claude weighs system > user on
+    // conflict. Persona-mirror variant MUST omit every Linda
+    // template reference.
+    const p = POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT;
+    expect(p).not.toContain('suburban grandmother');
+    expect(p).not.toContain('Shoulder-length salt-and-pepper hair');
+    expect(p).not.toContain('Faded navy cotton crewneck');
+    expect(p).not.toContain('Warm hazel eyes');
+    expect(p).not.toContain('Ordinary nose, slight bump');
+    expect(p).not.toContain('Sitting at her kitchen table');
+    // "Linda" as a name must NOT appear anywhere in the persona
+    // variant. The word "salt-and-pepper" doesn't either.
+    expect(p).not.toContain('Linda');
+    expect(p).not.toContain('salt-and-pepper');
+  });
+
+  it('persona-mirror variant names PERSONA-MIRROR MODE + HARD CONSTRAINT rules', () => {
+    const p = POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT;
+    expect(p).toContain('PERSONA-MIRROR MODE');
+    expect(p).toContain('HARD CONSTRAINT');
+    expect(p).toContain('character_lock.gender MUST equal the mirror');
+    expect(p).toContain('a wrong output on any of them');
+  });
+
+  it('persona-mirror variant keeps SEGMENT RULES / DIALOGUE RULES / CRITICAL sections intact', () => {
+    const p = POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT;
+    expect(p).toContain('SEGMENT RULES:');
+    expect(p).toContain('DIALOGUE RULES');
+    expect(p).toContain('CRITICAL:');
+    expect(p).toContain('NEVER quote another person');
+    expect(p).toContain('EXACTLY 8 segments');
+  });
+
+  it('persona-mirror variant is materially shorter than the Linda-anchored variant (Linda examples consume ~1000 chars)', () => {
+    // Regression pin: if a future edit accidentally re-adds Linda
+    // examples to the persona-mirror variant, the char count would
+    // climb back into fallback territory. Fail loud.
+    const persona = POLISH23_CLAUDE_ADSPEC_PERSONA_MIRROR_SYSTEM_PROMPT;
+    const fallback = POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT;
+    // Both are substantive (>3000 chars) — the delta is a signal.
+    expect(persona.length).toBeGreaterThan(2500);
+    expect(fallback.length).toBeGreaterThan(persona.length);
+  });
+
+  it('fallback variant still contains the Linda template (regression pin — no-persona flows still work)', () => {
+    const p = POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT;
+    expect(p).toContain('suburban grandmother');
+    expect(p).toContain('Shoulder-length salt-and-pepper hair');
+    expect(p).toContain('LINDA ANCHOR ROLE');
   });
 });
 

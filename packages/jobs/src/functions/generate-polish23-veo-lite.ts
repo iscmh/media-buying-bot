@@ -66,11 +66,11 @@ import {
   AdSpecSchema,
   POLISH23_SEGMENT_COUNT,
   POLISH23_CLIP_SECONDS,
-  POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT,
   assertAllSegmentsValid,
   coalesceAdSpecWithFallback,
   composePolish23AdSpecUserPrompt,
   diagnosePolish23AdSpecParseFailure,
+  getPolish23AdSpecSystemPrompt,
   type AdSpec,
   type SegmentSpec,
 } from '../lib/polish23-claude-adspec-prompt';
@@ -482,6 +482,23 @@ export const generatePolish23VeoLite = inngest.createFunction(
     // + loud-log of all four for Vercel Runtime Logs.
     const claudeUserMessage = composePolish23AdSpecUserPrompt(sourceScript || '(no source script)');
     const claudeUserMessageExcerpt = claudeUserMessage.slice(0, 4000);
+    // Polish-23 Commit 3.0.28: PERSONA-MIRROR MODE system prompt.
+    // SQL forensics (metadata.polish23_claude_parsed_character_lock)
+    // confirmed the mirror reached Claude with all HARD CONSTRAINT
+    // language intact — but Claude still returned Linda because the
+    // Linda-shaped bullet examples in the fallback system prompt
+    // dominated the user-message mirror. Fix: when a persona is
+    // available, hand Claude a system prompt that OMITS every Linda
+    // template — the character comes entirely from the user-message
+    // mirror block with no competing system-prompt anchor.
+    const hasPersonaMirror =
+      sourceLookup.source === 'vision_analysis_persona' && !!sourceLookup.persona;
+    const claudeSystemPrompt = getPolish23AdSpecSystemPrompt({ hasPersonaMirror });
+    console.log(
+      `[polish-23-worker Step A] Claude systemPrompt mode: ` +
+        `hasPersonaMirror=${hasPersonaMirror} ` +
+        `systemPrompt_chars=${claudeSystemPrompt.length}`,
+    );
     console.log(
       `[polish-23-worker Step A] Claude userMessage (LEFT 4000, ` +
         `total_chars=${claudeUserMessage.length}): ${claudeUserMessageExcerpt}`,
@@ -502,6 +519,9 @@ export const generatePolish23VeoLite = inngest.createFunction(
           return {
             adSpec: coalesced.adSpec,
             metadataExtras: {
+              polish23_claude_adspec_system_prompt_mode: hasPersonaMirror
+                ? 'persona-mirror'
+                : 'fallback-linda',
               polish23_claude_adspec_request: claudeUserMessageExcerpt,
               polish23_claude_adspec_raw_response: null,
               polish23_claude_parsed_character_lock: null,
@@ -521,7 +541,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
       const r = await callClaude({
         userId,
         apiKey: keys.claude!,
-        systemPrompt: POLISH23_CLAUDE_ADSPEC_SYSTEM_PROMPT,
+        systemPrompt: claudeSystemPrompt,
         userMessage: claudeUserMessage,
         maxTokens: 4096,
         generationJobId: jobId,
@@ -548,6 +568,9 @@ export const generatePolish23VeoLite = inngest.createFunction(
         return {
           adSpec: coalesced.adSpec,
           metadataExtras: {
+            polish23_claude_adspec_system_prompt_mode: hasPersonaMirror
+              ? 'persona-mirror'
+              : 'fallback-linda',
             polish23_claude_adspec_request: claudeUserMessageExcerpt,
             polish23_claude_adspec_raw_response: rawTextExcerpt,
             polish23_claude_parsed_character_lock: null,
