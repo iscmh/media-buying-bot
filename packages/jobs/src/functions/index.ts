@@ -6,7 +6,10 @@ import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
 import { generatePolish23VeoLite } from './generate-polish23-veo-lite';
 import { generatePolish25Makeugc } from './generate-polish25-makeugc';
-import { refreshMakeugcAvatarIndex } from './refresh-makeugc-avatar-index';
+import {
+  refreshMakeugcAvatarIndexCron,
+  refreshMakeugcAvatarIndexManual,
+} from './refresh-makeugc-avatar-index';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -77,11 +80,15 @@ export const functions = [
   generatePolish23VeoLite,
   // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
   generatePolish25Makeugc,
-  // Polish-25 Commit 7: nightly cron + on-demand event that
-  // refreshes the enriched MakeUGC avatar index. Sits alongside
-  // the generation worker — different trigger (cron), same
-  // package.
-  refreshMakeugcAvatarIndex,
+  // Polish-25 Commit 7: enriched MakeUGC avatar index refresh.
+  // Commit 8 SPLIT the original multi-trigger function into two
+  // single-trigger functions — matches the repo's existing pattern
+  // (poll-ad-performance, token-expiry-checker, daily-summary-
+  // generator all use single-trigger) and works around an Inngest
+  // manifest-sync issue where multi-trigger functions silently
+  // vanished from the production Functions tab.
+  refreshMakeugcAvatarIndexCron,
+  refreshMakeugcAvatarIndexManual,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

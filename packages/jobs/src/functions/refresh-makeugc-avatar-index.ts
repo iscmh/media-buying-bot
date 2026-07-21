@@ -1,36 +1,54 @@
 /**
- * Polish-25 Commit 7: nightly refresh of the enriched MakeUGC
- * avatar index.
+ * Polish-25 Commit 7 + 8: refresh of the enriched MakeUGC avatar
+ * index.
  *
- * Two triggers on the same function:
- *   1. Inngest cron '0 3 * * *' — nightly at 3am UTC.
- *   2. Event 'makeugc/avatar-index.refresh.requested' — manual /
- *      on-demand dispatch (from admin UI, ad-hoc scripts, or curl
- *      to /api/inngest).
+ * Polish-25 Commit 8 refactor: SPLIT what was one multi-trigger
+ * function into TWO single-trigger functions that delegate to a
+ * shared core (`refreshMakeugcAvatarIndexCore`).
  *
- * Steps (each its own step.run — Inngest retry boundary):
- *   A. resolve-refresh-user     — pick the userId whose Gemini +
- *                                  MakeUGC keys we use for this
- *                                  cycle. Cron uses env-configured
- *                                  MAKEUGC_REFRESH_USER_ID; manual
- *                                  event uses event.data.userId.
- *   B. fetch-avatar-list        — GET /video/avatars (no gender
+ *   refreshMakeugcAvatarIndexCron   — trigger: { cron: '0 3 * * *' }
+ *                                     userId from MAKEUGC_REFRESH_USER_ID
+ *                                     env, forceAll:false
+ *   refreshMakeugcAvatarIndexManual — trigger: { event:
+ *                                     'makeugc/avatar-index.refresh.requested' }
+ *                                     userId + forceAll from event.data
+ *
+ * Why the split: Commit 7 used the multi-trigger array form
+ *   [{ cron: '...' }, { event: '...' }]
+ * — SDK-supported per Inngest 3.54's sanitizeTriggers, but the
+ * production sync manifest silently dropped the function. Symptom:
+ * function not visible in the Inngest Functions tab even though
+ * every wiring checkpoint (functions[] array, event-payload map,
+ * /api/inngest serve) was correct.
+ *
+ * Split matches the existing repo convention — every other worker
+ * (pollAdPerformance / tokenExpiryChecker / dailySummaryGenerator /
+ * daily-summary-generator) uses a single trigger.
+ *
+ * Steps in the core (each its own step.run — Inngest retry
+ * boundary):
+ *   A. fetch-avatar-list        — GET /video/avatars (no gender
  *                                  filter → full library).
- *   C. diff-against-index       — split into new / stale (>7d) /
+ *   B. diff-against-index       — split into new / stale (>7d) /
  *                                  unchanged / disappeared subsets.
- *   D. mark-disappeared-deleted — set deleted_at on rows no longer
+ *   C. mark-disappeared-deleted — set deleted_at on rows no longer
  *                                  in the MakeUGC library.
- *   E. analyze-batch            — Gemini Vision on new + stale
+ *   D. analyze-batch            — Gemini Vision on new + stale
  *                                  thumbnails, concurrency-limited
  *                                  to 5 parallel.
- *   F. persist-batch            — upsert enriched descriptors.
- *   G. persist-summary          — log-level summary + counters.
+ *   E. persist-batch            — upsert enriched descriptors.
+ *   F. touch-fresh-rows         — bump lastRefreshedAt on unchanged rows.
+ *   G. return summary           — logged + returned as the function value.
+ *
+ * (Step A' — resolve-refresh-user — is now done at the wrapper layer
+ * so the core always gets a real userId. Cron resolves from env;
+ * manual resolves from event.data.)
  *
  * Cost budget: ~$0.001/thumbnail × ~500 avatars = ~$0.50 initial
  * build. Weekly stale refresh keeps ongoing spend near $0.50/week.
  */
 import { and, inArray, isNull, sql } from 'drizzle-orm';
-import { NonRetriableError } from 'inngest';
+import { NonRetriableError, type GetStepTools } from 'inngest';
 import {
   analyzeMakeugcAvatarThumbnail,
   listMakeugcAvatars,
@@ -65,8 +83,11 @@ interface RefreshEventData {
  *   2. env MAKEUGC_REFRESH_USER_ID (cron path — must be set at
  *      deploy time to a real user's UUID)
  *   3. throw NonRetriableError (no userId → no keys → nothing to do)
+ *
+ * Exported so tests can pin the precedence rules directly without
+ * spinning up an Inngest step context.
  */
-function resolveRefreshUserId(eventUserId: string | undefined): string {
+export function resolveRefreshUserId(eventUserId: string | undefined): string {
   if (eventUserId && typeof eventUserId === 'string' && eventUserId.trim().length > 0) {
     return eventUserId.trim();
   }
@@ -86,7 +107,7 @@ interface DiffBuckets {
   toSoftDelete: string[]; // present-in-index, absent-in-MakeUGC
 }
 
-function bucketize(
+export function bucketize(
   liveAvatars: readonly MakeugcAvatar[],
   indexRows: readonly {
     avatarId: string;
@@ -166,201 +187,220 @@ async function runWithConcurrency<T, R>(
   return out as Array<{ ok: true; result: R } | { ok: false; error: string }>;
 }
 
-export const refreshMakeugcAvatarIndex = inngest.createFunction(
-  {
-    id: 'refresh-makeugc-avatar-index',
-    name: 'Polish-25: refresh MakeUGC enriched avatar index',
-    // One function-level retry — internal step.run boundaries own
-    // finer-grained recovery. Vision analysis errors are captured
-    // per-avatar and never rethrown.
-    retries: 1,
-  },
-  // Dual trigger: nightly cron + on-demand event dispatch.
-  // Inngest v3.x supports the { triggers: [...] } array form.
-  [{ cron: '0 3 * * *' }, { event: 'makeugc/avatar-index.refresh.requested' }],
-  async ({ event, step }) => {
-    const data = (event?.data ?? {}) as RefreshEventData;
-    const forceAll = data.forceAll === true;
-    const startedAt = Date.now();
+type StepTools = GetStepTools<typeof inngest>;
 
-    // Step A: resolve who we borrow keys from.
-    const userId = await step.run('resolve-refresh-user', async () => {
-      return resolveRefreshUserId(data.userId);
-    });
+export interface RefreshCoreParams {
+  step: StepTools;
+  userId: string;
+  forceAll: boolean;
+  /** Wrapper-side wall-clock start so summary.durationMs covers
+   *  scheduling + resolve-user + core end-to-end. */
+  startedAt: number;
+  /** Trigger label — 'cron' or 'manual' — carried into the returned
+   *  summary + cold-start log for dashboard forensics. */
+  trigger: 'cron' | 'manual';
+}
 
-    // Step B: fetch live library.
-    const liveAvatars = await step.run('fetch-avatar-list', async () => {
-      let keys;
-      try {
-        keys = await loadDecryptedKeys(userId, ['makeugc']);
-      } catch (err) {
-        if (err instanceof MissingProviderKeyError) {
-          throw new NonRetriableError(
-            `refresh-makeugc-avatar-index: MakeUGC BYOK missing for refresh user ${userId}. ` +
-              err.message,
-          );
-        }
-        throw err;
-      }
-      const r = await listMakeugcAvatars({ userId, apiKey: keys.makeugc! });
-      if (!r.ok) {
+/**
+ * Polish-25 Commit 8: the shared body of both Inngest functions.
+ *
+ * Same params + same work regardless of trigger — the wrapper's
+ * only job is to resolve `userId` + `forceAll` and hand off here.
+ */
+export async function refreshMakeugcAvatarIndexCore(
+  params: RefreshCoreParams,
+): Promise<Record<string, unknown>> {
+  const { step, userId, forceAll, startedAt, trigger } = params;
+
+  // Step A: fetch live library.
+  const liveAvatars = await step.run('fetch-avatar-list', async () => {
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['makeugc']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) {
         throw new NonRetriableError(
-          `refresh-makeugc-avatar-index: listMakeugcAvatars failed — ` +
-            `${r.errorMessage ?? 'unknown'}`,
+          `refresh-makeugc-avatar-index: MakeUGC BYOK missing for refresh user ${userId}. ` +
+            err.message,
         );
       }
-      return r.avatars;
-    });
-
-    // Step C: diff against the existing index.
-    const diff = await step.run('diff-against-index', async () => {
-      const db = getDb();
-      const rows = await db.query.makeugcAvatarIndex.findMany({
-        columns: { avatarId: true, visionAnalyzedAt: true, deletedAt: true },
-      });
-      const buckets = bucketize(liveAvatars, rows, Date.now(), forceAll);
-      console.log(
-        `[refresh-makeugc-avatar-index] diff live=${liveAvatars.length} ` +
-          `existing=${rows.length} toAnalyze=${buckets.toAnalyze.length} ` +
-          `toTouchOnly=${buckets.toTouchOnly.length} ` +
-          `toSoftDelete=${buckets.toSoftDelete.length} forceAll=${forceAll}`,
-      );
-      return {
-        toAnalyzeIds: buckets.toAnalyze.map((a) => a.id),
-        toAnalyzeAvatars: buckets.toAnalyze,
-        toTouchOnlyIds: buckets.toTouchOnly.map((a) => a.id),
-        toSoftDeleteIds: buckets.toSoftDelete,
-        counts: {
-          live: liveAvatars.length,
-          existing: rows.length,
-          toAnalyze: buckets.toAnalyze.length,
-          toTouchOnly: buckets.toTouchOnly.length,
-          toSoftDelete: buckets.toSoftDelete.length,
-        },
-      };
-    });
-
-    // Step D: soft-delete rows that disappeared from MakeUGC.
-    if (diff.toSoftDeleteIds.length > 0) {
-      await step.run('mark-disappeared-deleted', async () => {
-        const db = getDb();
-        await db
-          .update(schema.makeugcAvatarIndex)
-          .set({ deletedAt: new Date() })
-          .where(inArray(schema.makeugcAvatarIndex.avatarId, diff.toSoftDeleteIds));
-      });
+      throw err;
     }
+    const r = await listMakeugcAvatars({ userId, apiKey: keys.makeugc! });
+    if (!r.ok) {
+      throw new NonRetriableError(
+        `refresh-makeugc-avatar-index: listMakeugcAvatars failed — ` +
+          `${r.errorMessage ?? 'unknown'}`,
+      );
+    }
+    return r.avatars;
+  });
 
-    // Step E: analyze thumbnails. Skip step.run for the outer loop
-    // because we want the concurrency runner + per-item failure
-    // isolation; each analyzed row lands in metadata as durable
-    // audit whether or not the row itself was reachable.
-    const analyzed = await step.run('analyze-batch', async () => {
-      if (diff.toAnalyzeAvatars.length === 0) {
-        return { attempted: 0, successful: 0, failed: 0, results: [] };
+  // Step B: diff against the existing index.
+  const diff = await step.run('diff-against-index', async () => {
+    const db = getDb();
+    const rows = await db.query.makeugcAvatarIndex.findMany({
+      columns: { avatarId: true, visionAnalyzedAt: true, deletedAt: true },
+    });
+    const buckets = bucketize(liveAvatars, rows, Date.now(), forceAll);
+    console.log(
+      `[refresh-makeugc-avatar-index:${trigger}] diff live=${liveAvatars.length} ` +
+        `existing=${rows.length} toAnalyze=${buckets.toAnalyze.length} ` +
+        `toTouchOnly=${buckets.toTouchOnly.length} ` +
+        `toSoftDelete=${buckets.toSoftDelete.length} forceAll=${forceAll}`,
+    );
+    return {
+      toAnalyzeIds: buckets.toAnalyze.map((a) => a.id),
+      toAnalyzeAvatars: buckets.toAnalyze,
+      toTouchOnlyIds: buckets.toTouchOnly.map((a) => a.id),
+      toSoftDeleteIds: buckets.toSoftDelete,
+      counts: {
+        live: liveAvatars.length,
+        existing: rows.length,
+        toAnalyze: buckets.toAnalyze.length,
+        toTouchOnly: buckets.toTouchOnly.length,
+        toSoftDelete: buckets.toSoftDelete.length,
+      },
+    };
+  });
+
+  // Step C: soft-delete rows that disappeared from MakeUGC.
+  if (diff.toSoftDeleteIds.length > 0) {
+    await step.run('mark-disappeared-deleted', async () => {
+      const db = getDb();
+      await db
+        .update(schema.makeugcAvatarIndex)
+        .set({ deletedAt: new Date() })
+        .where(inArray(schema.makeugcAvatarIndex.avatarId, diff.toSoftDeleteIds));
+    });
+  }
+
+  // Step D: analyze thumbnails.
+  const analyzed = await step.run('analyze-batch', async () => {
+    if (diff.toAnalyzeAvatars.length === 0) {
+      return { attempted: 0, successful: 0, failed: 0, results: [] };
+    }
+    let keys;
+    try {
+      keys = await loadDecryptedKeys(userId, ['gemini', 'makeugc']);
+    } catch (err) {
+      if (err instanceof MissingProviderKeyError) {
+        throw new NonRetriableError(
+          `refresh-makeugc-avatar-index: Gemini BYOK missing for refresh user ${userId}. ` +
+            `${err.message}. MakeUGC key OK but vision analysis needs Gemini.`,
+        );
       }
-      let keys;
-      try {
-        keys = await loadDecryptedKeys(userId, ['gemini', 'makeugc']);
-      } catch (err) {
-        if (err instanceof MissingProviderKeyError) {
-          throw new NonRetriableError(
-            `refresh-makeugc-avatar-index: Gemini BYOK missing for refresh user ${userId}. ` +
-              `${err.message}. MakeUGC key OK but vision analysis needs Gemini.`,
-          );
-        }
-        throw err;
-      }
-      type AnalyzedRow = {
-        avatarId: string;
-        avatarName: string;
-        thumbnailUrl: string;
-        makeugcGender: string;
-        analysis: ReturnType<typeof parseMakeugcAvatarVisionAnalysis>;
-        rawJson: unknown;
-        rawText: string | undefined;
-        costUsd: number;
-        errorMessage: string | undefined;
-      };
-      const outcomes = await runWithConcurrency(
-        diff.toAnalyzeAvatars,
-        VISION_CONCURRENCY,
-        async (avatar): Promise<AnalyzedRow> => {
-          if (!avatar.thumbnail || avatar.thumbnail.length === 0) {
-            return {
-              avatarId: avatar.id,
-              avatarName: avatar.name,
-              thumbnailUrl: '',
-              makeugcGender: avatar.gender ?? '',
-              analysis: null,
-              rawJson: undefined,
-              rawText: undefined,
-              costUsd: 0,
-              errorMessage: 'no thumbnail URL — skipped',
-            };
-          }
-          const r = await analyzeMakeugcAvatarThumbnail({
-            userId,
-            apiKey: keys.gemini!,
-            imageUrl: avatar.thumbnail,
-            systemPrompt: MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
-          });
-          const analysis = r.ok ? parseMakeugcAvatarVisionAnalysis(r.parsedJson) : null;
+      throw err;
+    }
+    type AnalyzedRow = {
+      avatarId: string;
+      avatarName: string;
+      thumbnailUrl: string;
+      makeugcGender: string;
+      analysis: ReturnType<typeof parseMakeugcAvatarVisionAnalysis>;
+      rawJson: unknown;
+      rawText: string | undefined;
+      costUsd: number;
+      errorMessage: string | undefined;
+    };
+    const outcomes = await runWithConcurrency(
+      diff.toAnalyzeAvatars,
+      VISION_CONCURRENCY,
+      async (avatar): Promise<AnalyzedRow> => {
+        if (!avatar.thumbnail || avatar.thumbnail.length === 0) {
           return {
             avatarId: avatar.id,
             avatarName: avatar.name,
-            thumbnailUrl: avatar.thumbnail,
+            thumbnailUrl: '',
             makeugcGender: avatar.gender ?? '',
-            analysis,
-            rawJson: r.parsedJson,
-            rawText: r.rawText,
-            costUsd: r.costUsd,
-            errorMessage: r.ok
-              ? analysis
-                ? undefined
-                : 'JSON did not match schema'
-              : r.errorMessage,
+            analysis: null,
+            rawJson: undefined,
+            rawText: undefined,
+            costUsd: 0,
+            errorMessage: 'no thumbnail URL — skipped',
           };
-        },
-      );
-      const results = outcomes.map((o) =>
-        o.ok
-          ? o.result
-          : ({
-              avatarId: '(unknown)',
-              avatarName: '',
-              thumbnailUrl: '',
-              makeugcGender: '',
-              analysis: null,
-              rawJson: undefined,
-              rawText: undefined,
-              costUsd: 0,
-              errorMessage: o.error,
-            } as AnalyzedRow),
-      );
-      const successful = results.filter((r) => r.analysis !== null).length;
-      const failed = results.length - successful;
-      const totalCostUsd = results.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
-      console.log(
-        `[refresh-makeugc-avatar-index] vision batch attempted=${results.length} ` +
-          `successful=${successful} failed=${failed} totalCostUsd=${totalCostUsd.toFixed(4)}`,
-      );
-      return { attempted: results.length, successful, failed, results };
-    });
+        }
+        const r = await analyzeMakeugcAvatarThumbnail({
+          userId,
+          apiKey: keys.gemini!,
+          imageUrl: avatar.thumbnail,
+          systemPrompt: MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
+        });
+        const analysis = r.ok ? parseMakeugcAvatarVisionAnalysis(r.parsedJson) : null;
+        return {
+          avatarId: avatar.id,
+          avatarName: avatar.name,
+          thumbnailUrl: avatar.thumbnail,
+          makeugcGender: avatar.gender ?? '',
+          analysis,
+          rawJson: r.parsedJson,
+          rawText: r.rawText,
+          costUsd: r.costUsd,
+          errorMessage: r.ok
+            ? analysis
+              ? undefined
+              : 'JSON did not match schema'
+            : r.errorMessage,
+        };
+      },
+    );
+    const results = outcomes.map((o) =>
+      o.ok
+        ? o.result
+        : ({
+            avatarId: '(unknown)',
+            avatarName: '',
+            thumbnailUrl: '',
+            makeugcGender: '',
+            analysis: null,
+            rawJson: undefined,
+            rawText: undefined,
+            costUsd: 0,
+            errorMessage: o.error,
+          } as AnalyzedRow),
+    );
+    const successful = results.filter((r) => r.analysis !== null).length;
+    const failed = results.length - successful;
+    const totalCostUsd = results.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
+    console.log(
+      `[refresh-makeugc-avatar-index:${trigger}] vision batch attempted=${results.length} ` +
+        `successful=${successful} failed=${failed} totalCostUsd=${totalCostUsd.toFixed(4)}`,
+    );
+    return { attempted: results.length, successful, failed, results };
+  });
 
-    // Step F: upsert every successful analysis. Skip rows whose
-    // analysis failed — they'll be retried on the next stale
-    // cycle (visionAnalyzedAt not bumped so >7d filter still hits).
-    const persistedCount = await step.run('persist-batch', async () => {
-      let count = 0;
-      const db = getDb();
-      const now = new Date();
-      for (const r of analyzed.results) {
-        if (r.analysis === null) continue;
-        await db
-          .insert(schema.makeugcAvatarIndex)
-          .values({
-            avatarId: r.avatarId,
+  // Step E: upsert every successful analysis. Skip rows whose
+  // analysis failed — they'll be retried on the next stale cycle
+  // (visionAnalyzedAt not bumped so >7d filter still hits).
+  const persistedCount = await step.run('persist-batch', async () => {
+    let count = 0;
+    const db = getDb();
+    const now = new Date();
+    for (const r of analyzed.results) {
+      if (r.analysis === null) continue;
+      await db
+        .insert(schema.makeugcAvatarIndex)
+        .values({
+          avatarId: r.avatarId,
+          avatarName: r.avatarName,
+          thumbnailUrl: r.thumbnailUrl,
+          makeugcGender: r.makeugcGender,
+          ageBucket: r.analysis.age_bucket,
+          ethnicity: r.analysis.ethnicity,
+          hairColor: r.analysis.hair_color,
+          hairStyle: r.analysis.hair_style,
+          facialHair: r.analysis.facial_hair,
+          wardrobeStyle: r.analysis.wardrobe_style,
+          wardrobeSummary: r.analysis.wardrobe_summary,
+          backgroundSetting: r.analysis.background_setting,
+          visionAnalysisRaw: r.rawJson as Record<string, unknown> | null,
+          visionAnalyzedAt: now,
+          lastRefreshedAt: now,
+          deletedAt: null,
+        })
+        .onConflictDoUpdate({
+          target: schema.makeugcAvatarIndex.avatarId,
+          set: {
             avatarName: r.avatarName,
             thumbnailUrl: r.thumbnailUrl,
             makeugcGender: r.makeugcGender,
@@ -376,72 +416,106 @@ export const refreshMakeugcAvatarIndex = inngest.createFunction(
             visionAnalyzedAt: now,
             lastRefreshedAt: now,
             deletedAt: null,
-          })
-          .onConflictDoUpdate({
-            target: schema.makeugcAvatarIndex.avatarId,
-            set: {
-              avatarName: r.avatarName,
-              thumbnailUrl: r.thumbnailUrl,
-              makeugcGender: r.makeugcGender,
-              ageBucket: r.analysis.age_bucket,
-              ethnicity: r.analysis.ethnicity,
-              hairColor: r.analysis.hair_color,
-              hairStyle: r.analysis.hair_style,
-              facialHair: r.analysis.facial_hair,
-              wardrobeStyle: r.analysis.wardrobe_style,
-              wardrobeSummary: r.analysis.wardrobe_summary,
-              backgroundSetting: r.analysis.background_setting,
-              visionAnalysisRaw: r.rawJson as Record<string, unknown> | null,
-              visionAnalyzedAt: now,
-              lastRefreshedAt: now,
-              deletedAt: null,
-            },
-          });
-        count++;
-      }
-      return count;
-    });
-
-    // Also touch last_refreshed_at on rows that were present +
-    // fresh (no re-analysis but still confirm current), so the
-    // stale-scan cursor stays accurate.
-    if (diff.toTouchOnlyIds.length > 0) {
-      await step.run('touch-fresh-rows', async () => {
-        const db = getDb();
-        await db
-          .update(schema.makeugcAvatarIndex)
-          .set({ lastRefreshedAt: new Date() })
-          .where(
-            and(
-              inArray(schema.makeugcAvatarIndex.avatarId, diff.toTouchOnlyIds),
-              isNull(schema.makeugcAvatarIndex.deletedAt),
-            ),
-          );
-      });
+          },
+        });
+      count++;
     }
+    return count;
+  });
 
-    // Step G: summary (log + return).
-    const totalCostUsd = analyzed.results.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
-    const summary = {
-      polishVersion: POLISH_VERSION,
-      durationMs: Date.now() - startedAt,
-      counts: diff.counts,
-      analyzeAttempted: analyzed.attempted,
-      analyzeSuccessful: analyzed.successful,
-      analyzeFailed: analyzed.failed,
-      persistedCount,
-      totalGeminiCostUsd: Number(totalCostUsd.toFixed(6)),
-      // Simple health signal for the next stale-scan cursor: if this
-      // is much larger than the population, something's mis-tuned.
-      // Kept as a hint, not enforced.
-      staleThresholdMs: STALE_MS,
+  // Step F: touch last_refreshed_at on rows that were present +
+  // fresh so the stale-scan cursor stays accurate.
+  if (diff.toTouchOnlyIds.length > 0) {
+    await step.run('touch-fresh-rows', async () => {
+      const db = getDb();
+      await db
+        .update(schema.makeugcAvatarIndex)
+        .set({ lastRefreshedAt: new Date() })
+        .where(
+          and(
+            inArray(schema.makeugcAvatarIndex.avatarId, diff.toTouchOnlyIds),
+            isNull(schema.makeugcAvatarIndex.deletedAt),
+          ),
+        );
+    });
+  }
+
+  // Step G: summary (log + return).
+  const totalCostUsd = analyzed.results.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
+  const summary = {
+    polishVersion: POLISH_VERSION,
+    trigger,
+    durationMs: Date.now() - startedAt,
+    counts: diff.counts,
+    analyzeAttempted: analyzed.attempted,
+    analyzeSuccessful: analyzed.successful,
+    analyzeFailed: analyzed.failed,
+    persistedCount,
+    totalGeminiCostUsd: Number(totalCostUsd.toFixed(6)),
+    staleThresholdMs: STALE_MS,
+    forceAll,
+    refreshUserId: userId,
+  };
+  console.log(
+    `[refresh-makeugc-avatar-index:${trigger}] cycle complete ${JSON.stringify(summary)}`,
+  );
+  // sql`` is imported so drizzle-orm's raw-sql tag is available if
+  // future ad-hoc queries land here; void it so noUnusedImports
+  // strict mode doesn't flag it.
+  void sql`select 1`;
+  return summary;
+}
+
+// ---------------------------------------------------------------
+// Polish-25 Commit 8: two SINGLE-trigger functions.
+// ---------------------------------------------------------------
+
+export const refreshMakeugcAvatarIndexCron = inngest.createFunction(
+  {
+    id: 'refresh-makeugc-avatar-index-cron',
+    name: 'Polish-25: refresh MakeUGC enriched avatar index (cron)',
+    // One function-level retry — internal step.run boundaries own
+    // finer-grained recovery. Vision analysis errors are captured
+    // per-avatar and never rethrown.
+    retries: 1,
+  },
+  { cron: '0 3 * * *' },
+  async ({ step }) => {
+    const startedAt = Date.now();
+    const userId = await step.run('resolve-refresh-user', async () => {
+      // Cron ignores any event.data — always uses env.
+      return resolveRefreshUserId(undefined);
+    });
+    return refreshMakeugcAvatarIndexCore({
+      step,
+      userId,
+      forceAll: false,
+      startedAt,
+      trigger: 'cron',
+    });
+  },
+);
+
+export const refreshMakeugcAvatarIndexManual = inngest.createFunction(
+  {
+    id: 'refresh-makeugc-avatar-index-manual',
+    name: 'Polish-25: refresh MakeUGC enriched avatar index (manual)',
+    retries: 1,
+  },
+  { event: 'makeugc/avatar-index.refresh.requested' },
+  async ({ event, step }) => {
+    const startedAt = Date.now();
+    const data = (event?.data ?? {}) as RefreshEventData;
+    const forceAll = data.forceAll === true;
+    const userId = await step.run('resolve-refresh-user', async () => {
+      return resolveRefreshUserId(data.userId);
+    });
+    return refreshMakeugcAvatarIndexCore({
+      step,
+      userId,
       forceAll,
-      refreshUserId: userId,
-    };
-    console.log(`[refresh-makeugc-avatar-index] cycle complete ${JSON.stringify(summary)}`);
-    // Cheap sanity check the returned type is what we expect. sql`` avoids an
-    // unused-import lint hit when the file compiles under strict mode.
-    void sql`select 1`;
-    return summary;
+      startedAt,
+      trigger: 'manual',
+    });
   },
 );
