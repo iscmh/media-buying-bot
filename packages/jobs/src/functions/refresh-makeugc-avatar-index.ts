@@ -1,29 +1,35 @@
 /**
- * Polish-25 Commit 7 + 8: refresh of the enriched MakeUGC avatar
- * index.
+ * Polish-25 Commit 7 + 8 + 9: refresh of the enriched MakeUGC
+ * avatar index.
  *
- * Polish-25 Commit 8 refactor: SPLIT what was one multi-trigger
- * function into TWO single-trigger functions that delegate to a
- * shared core (`refreshMakeugcAvatarIndexCore`).
+ * Polish-25 Commit 8 SPLIT what was one multi-trigger function
+ * into TWO single-trigger functions that delegate to a shared
+ * core (`refreshMakeugcAvatarIndexCore`).
  *
- *   refreshMakeugcAvatarIndexCron   — trigger: { cron: '0 3 * * *' }
- *                                     userId from MAKEUGC_REFRESH_USER_ID
- *                                     env, forceAll:false
- *   refreshMakeugcAvatarIndexManual — trigger: { event:
- *                                     'makeugc/avatar-index.refresh.requested' }
+ * Polish-25 Commit 9 STICKY-ID FIX: after Commit 8 shipped,
+ * Inngest cloud kept the Commit-7 manifest entry for
+ * `refresh-makeugc-avatar-index` (bare id) — every route to the
+ * split `-manual` id fired "No function ID found in request".
+ * PUT-based force-sync rejected our deployId formats ("Invalid
+ * deploy ID"), and Vercel redeploy didn't dislodge the stale
+ * manifest. Pragmatic unstick: the event-triggered function
+ * keeps the ORIGINAL bare id `refresh-makeugc-avatar-index` so
+ * the stale manifest routes correctly; the cron function keeps
+ * its distinct `-cron` id introduced by Commit 8.
+ *
+ *   refreshMakeugcAvatarIndexCron   — id: 'refresh-makeugc-avatar-index-cron'
+ *                                     trigger: { cron: '0 3 * * *' }
+ *                                     userId from MAKEUGC_REFRESH_USER_ID env
+ *                                     forceAll:false
+ *   refreshMakeugcAvatarIndexManual — id: 'refresh-makeugc-avatar-index'  ← bare
+ *                                     trigger: { event: 'makeugc/avatar-index
+ *                                                       .refresh.requested' }
  *                                     userId + forceAll from event.data
  *
- * Why the split: Commit 7 used the multi-trigger array form
- *   [{ cron: '...' }, { event: '...' }]
- * — SDK-supported per Inngest 3.54's sanitizeTriggers, but the
- * production sync manifest silently dropped the function. Symptom:
- * function not visible in the Inngest Functions tab even though
- * every wiring checkpoint (functions[] array, event-payload map,
- * /api/inngest serve) was correct.
- *
- * Split matches the existing repo convention — every other worker
- * (pollAdPerformance / tokenExpiryChecker / dailySummaryGenerator /
- * daily-summary-generator) uses a single trigger.
+ * The JS export name `refreshMakeugcAvatarIndexManual` is kept
+ * for functions/index.ts wiring stability — only the Inngest
+ * function id string changed. Both functions still delegate to
+ * the shared `refreshMakeugcAvatarIndexCore`.
  *
  * Steps in the core (each its own step.run — Inngest retry
  * boundary):
@@ -496,10 +502,21 @@ export const refreshMakeugcAvatarIndexCron = inngest.createFunction(
   },
 );
 
+// Polish-25 Commit 9: Inngest cloud's manifest was stuck on the
+// Commit-7 multi-trigger function id `refresh-makeugc-avatar-index`
+// even after Commit 8 shipped the -cron / -manual split. PUT-based
+// force-sync rejected our deployId formats ("Invalid deploy ID"),
+// and Vercel redeploy of the split didn't dislodge the stale entry.
+// Pragmatic unstick: keep the BARE-ID function alive (event
+// trigger) so the stale manifest routes correctly on the next
+// event fire, and let a fresh sync cycle catch up naturally. The
+// JavaScript export name stays `refreshMakeugcAvatarIndexManual`
+// so functions/index.ts wiring + tests keep working; only the
+// Inngest function `id` string changed from `-manual` → bare.
 export const refreshMakeugcAvatarIndexManual = inngest.createFunction(
   {
-    id: 'refresh-makeugc-avatar-index-manual',
-    name: 'Polish-25: refresh MakeUGC enriched avatar index (manual)',
+    id: 'refresh-makeugc-avatar-index',
+    name: 'Polish-25: refresh MakeUGC enriched avatar index',
     retries: 1,
   },
   { event: 'makeugc/avatar-index.refresh.requested' },

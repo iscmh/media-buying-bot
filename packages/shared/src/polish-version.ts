@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '25.0.8';
+export const POLISH_VERSION = '25.0.9';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '25.0.8';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25 Commit 8 — split refresh-makeugc-avatar-index into two single-trigger functions (Inngest manifest-sync workaround)';
+  'Polish-25 Commit 9 — restore bare refresh-makeugc-avatar-index id so stale Inngest manifest routes events correctly';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

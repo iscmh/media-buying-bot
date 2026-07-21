@@ -67,6 +67,29 @@ describe('Polish-25 Commit 8: refresh worker split into two single-trigger funct
       expect(manualId).toContain('refresh-makeugc-avatar-index');
     }
   });
+
+  it('Commit 9: manual function keeps the BARE id refresh-makeugc-avatar-index', () => {
+    // Rationale: Inngest cloud's manifest was stuck on the Commit-7
+    // bare id and rejected the Commit-8 `-manual` id with "No
+    // function ID found in request". Commit 9 restores the bare id
+    // for the event-triggered function so the stale manifest still
+    // routes correctly. Any future refactor that renames back to
+    // `-manual` MUST first confirm the manifest has synced past
+    // the bare id — this pin is the guardrail.
+    const idFn = refreshMakeugcAvatarIndexManual as unknown as { id?: () => string };
+    const manualId = typeof idFn.id === 'function' ? idFn.id() : undefined;
+    if (manualId !== undefined) {
+      expect(manualId).toBe('refresh-makeugc-avatar-index');
+    }
+  });
+
+  it('Commit 9: cron function keeps its -cron suffix (distinct from bare id)', () => {
+    const idFn = refreshMakeugcAvatarIndexCron as unknown as { id?: () => string };
+    const cronId = typeof idFn.id === 'function' ? idFn.id() : undefined;
+    if (cronId !== undefined) {
+      expect(cronId).toBe('refresh-makeugc-avatar-index-cron');
+    }
+  });
 });
 
 describe('Polish-25 Commit 8: resolveRefreshUserId precedence', () => {
