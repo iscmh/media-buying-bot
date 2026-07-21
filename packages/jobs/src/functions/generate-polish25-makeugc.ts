@@ -35,7 +35,7 @@
  *   - Transient auto-retry with recorded retry chain
  *     (metadata.polish25_makeugc_retries[])
  */
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { NonRetriableError } from 'inngest';
 import {
   callClaude,
@@ -48,7 +48,9 @@ import {
   MakeugcNoMatchingAvatarError,
   MakeugcScriptTooLongError,
   selectMakeugcAvatarForPersona,
+  selectMakeugcAvatarForPersonaFromIndex,
   submitMakeugcVideo,
+  type MakeugcEnrichedAvatar,
   type MakeugcPersona,
 } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
@@ -329,97 +331,204 @@ export const generatePolish25Makeugc = inngest.createFunction(
       voice_tone: sourceLookup.persona.voice_tone,
       language: 'English',
     };
-    const match = await step.run('makeugc-avatar-match', async () => {
-      let keys;
-      try {
-        keys = await loadDecryptedKeys(userId, ['makeugc']);
-      } catch (err) {
-        if (err instanceof MissingProviderKeyError) {
-          const msg = `Polish-25 requires MakeUGC BYOK key. ${err.message}`;
-          console.error(`[polish-25-worker] ${msg}`);
-          await markJobFailed(jobId, userId, msg, 0);
-          throw new NonRetriableError(msg);
+    interface MakeugcMatchStepReturn {
+      avatarId: string;
+      avatarName: string;
+      voiceId: string;
+      voiceName: string;
+    }
+    const match = await step.run(
+      'makeugc-avatar-match',
+      async (): Promise<MakeugcMatchStepReturn> => {
+        let keys;
+        try {
+          keys = await loadDecryptedKeys(userId, ['makeugc']);
+        } catch (err) {
+          if (err instanceof MissingProviderKeyError) {
+            const msg = `Polish-25 requires MakeUGC BYOK key. ${err.message}`;
+            console.error(`[polish-25-worker] ${msg}`);
+            await markJobFailed(jobId, userId, msg, 0);
+            throw new NonRetriableError(msg);
+          }
+          throw err;
         }
-        throw err;
-      }
-      const genderFilter = persona.gender === 'male' ? 'Male' : 'Female';
-      const avatarsResult = await listMakeugcAvatarsCached({
-        userId,
-        apiKey: keys.makeugc!,
-        gender: genderFilter,
-        generationJobId: jobId,
-      });
-      if (!avatarsResult.ok) {
-        const msg = `MakeUGC avatar list failed: ${avatarsResult.errorMessage ?? 'unknown'}`;
-        console.error(`[polish-25-worker] ${msg}`);
-        await markJobFailed(jobId, userId, msg, 0);
-        throw new NonRetriableError(msg);
-      }
-      const voicesResult = await listMakeugcVoicesCached({
-        userId,
-        apiKey: keys.makeugc!,
-        gender: genderFilter,
-        language: 'English',
-        generationJobId: jobId,
-      });
-      if (!voicesResult.ok) {
-        const msg = `MakeUGC voice list failed: ${voicesResult.errorMessage ?? 'unknown'}`;
-        console.error(`[polish-25-worker] ${msg}`);
-        await markJobFailed(jobId, userId, msg, 0);
-        throw new NonRetriableError(msg);
-      }
-      try {
-        const matched = selectMakeugcAvatarForPersona(
-          persona,
-          avatarsResult.avatars,
-          voicesResult.voices,
-        );
-        await patchMetadata(jobId, {
-          polish25_avatar_match: {
-            candidatesConsidered: matched.matchLog.candidatesConsidered,
-            hardFilters: matched.matchLog.hardFilters,
-            scoredCandidates: matched.matchLog.scoredCandidates,
-            winnerAvatarId: matched.matchLog.winnerAvatarId,
-            // Polish-25 Commit 5: winnerVoiceId is now the MakeUGC
-            // UUID (voice.id) — the value the submit endpoint accepts.
-            // We ALSO persist the TTS engine's internal identifier so
-            // future submit-endpoint drift is diagnosable in one SQL
-            // column pair without re-fetching the voice list.
-            winnerVoiceId: matched.matchLog.winnerVoiceId,
-            winnerVoiceTtsEngineId: matched.voice.voiceId,
-            winnerScore: matched.matchLog.winnerScore,
-          },
-          polish25_progress: { step: 'avatar-matched', pct: 45, at: nowIso() },
+        const genderFilter = persona.gender === 'male' ? 'Male' : 'Female';
+
+        // Voices always come from the live cached list — the enriched
+        // index only enriches AVATARS. The voice pool is per-user
+        // and small enough to not need pre-analysis.
+        const voicesResult = await listMakeugcVoicesCached({
+          userId,
+          apiKey: keys.makeugc!,
+          gender: genderFilter,
+          language: 'English',
+          generationJobId: jobId,
         });
-        return {
-          avatarId: matched.avatar.id,
-          avatarName: matched.avatar.name,
-          // Polish-25 Commit 5: pass matched.voice.id (MakeUGC UUID)
-          // — NOT matched.voice.voiceId (TTS engine opaque string).
-          // Root cause of job 9a9522c9 "Voice not found" failure.
-          voiceId: matched.voice.id,
-          voiceName: matched.voice.name,
-        };
-      } catch (err) {
-        if (err instanceof MakeugcNoMatchingAvatarError) {
-          const msg =
-            `Polish-25 avatar match failed: ${err.message}. ` +
-            `Add matching MakeUGC actors or lift persona filters.`;
+        if (!voicesResult.ok) {
+          const msg = `MakeUGC voice list failed: ${voicesResult.errorMessage ?? 'unknown'}`;
           console.error(`[polish-25-worker] ${msg}`);
-          await patchMetadata(jobId, {
-            polish25_avatar_match_failure: {
-              persona,
-              candidatesConsidered: err.candidatesConsidered,
-              hardFiltersApplied: err.hardFiltersApplied,
-              at: nowIso(),
-            },
-          });
           await markJobFailed(jobId, userId, msg, 0);
           throw new NonRetriableError(msg);
         }
-        throw err;
-      }
-    });
+
+        // Polish-25 Commit 7: try the enriched index first.
+        // - Query makeugc_avatar_index for undeleted rows in this gender.
+        // - If the index has ≥1 row → run selectMakeugcAvatarForPersonaFromIndex
+        //   (hard-filter gender + age±1, soft-score ethnicity/hair/facial-hair/wardrobe).
+        // - If empty → fall back to Commit 1's gender-only matcher over
+        //   listMakeugcAvatarsCached. Loud-log the fallback so operators
+        //   see when the nightly cron hasn't populated yet or when the
+        //   index was wiped.
+        const db = getDb();
+        const enrichedRows = await db.query.makeugcAvatarIndex.findMany({
+          where: and(
+            eq(schema.makeugcAvatarIndex.makeugcGender, genderFilter),
+            isNull(schema.makeugcAvatarIndex.deletedAt),
+          ),
+          columns: {
+            avatarId: true,
+            avatarName: true,
+            makeugcGender: true,
+            ageBucket: true,
+            ethnicity: true,
+            hairColor: true,
+            hairStyle: true,
+            facialHair: true,
+            wardrobeStyle: true,
+            wardrobeSummary: true,
+            backgroundSetting: true,
+          },
+        });
+
+        // ---------- Enriched-index path ----------
+        if (enrichedRows.length > 0) {
+          const enriched: MakeugcEnrichedAvatar[] = enrichedRows.map((r) => ({
+            avatarId: r.avatarId,
+            avatarName: r.avatarName,
+            makeugcGender: r.makeugcGender,
+            ageBucket: r.ageBucket,
+            ethnicity: r.ethnicity,
+            hairColor: r.hairColor,
+            hairStyle: r.hairStyle,
+            facialHair: r.facialHair,
+            wardrobeStyle: r.wardrobeStyle,
+            wardrobeSummary: r.wardrobeSummary,
+            backgroundSetting: r.backgroundSetting,
+          }));
+          try {
+            const matched = selectMakeugcAvatarForPersonaFromIndex(
+              persona,
+              enriched,
+              voicesResult.voices,
+            );
+            await patchMetadata(jobId, {
+              polish25_avatar_match: {
+                matchStrategy: matched.matchLog.matchStrategy,
+                candidatesConsidered: matched.matchLog.candidatesConsidered,
+                hardFilters: matched.matchLog.hardFilters,
+                scoredCandidates: matched.matchLog.scoredCandidates,
+                winnerAvatarId: matched.matchLog.winnerAvatarId,
+                winnerVoiceId: matched.matchLog.winnerVoiceId,
+                winnerVoiceTtsEngineId: matched.voice.voiceId,
+                winnerScore: matched.matchLog.winnerScore,
+                winnerAgeBucket: matched.avatar.ageBucket,
+                winnerEthnicity: matched.avatar.ethnicity,
+                winnerHairColor: matched.avatar.hairColor,
+              },
+              polish25_progress: { step: 'avatar-matched', pct: 45, at: nowIso() },
+            });
+            return {
+              avatarId: matched.avatar.avatarId,
+              avatarName: matched.avatar.avatarName,
+              voiceId: matched.voice.id,
+              voiceName: matched.voice.name,
+            };
+          } catch (err) {
+            if (err instanceof MakeugcNoMatchingAvatarError) {
+              const msg =
+                `Polish-25 enriched avatar match failed: ${err.message}. ` +
+                `Add matching MakeUGC actors or lift persona filters.`;
+              console.error(`[polish-25-worker] ${msg}`);
+              await patchMetadata(jobId, {
+                polish25_avatar_match_failure: {
+                  persona,
+                  candidatesConsidered: err.candidatesConsidered,
+                  hardFiltersApplied: err.hardFiltersApplied,
+                  matchStrategy: 'enriched-index',
+                  at: nowIso(),
+                },
+              });
+              await markJobFailed(jobId, userId, msg, 0);
+              throw new NonRetriableError(msg);
+            }
+            throw err;
+          }
+        }
+
+        // ---------- Empty-index fallback (Commit 1 behavior) ----------
+        console.warn(
+          `[polish-25-worker] enriched index empty; falling back to gender-only match. ` +
+            `Trigger 'makeugc/avatar-index.refresh.requested' to populate.`,
+        );
+        const avatarsResult = await listMakeugcAvatarsCached({
+          userId,
+          apiKey: keys.makeugc!,
+          gender: genderFilter,
+          generationJobId: jobId,
+        });
+        if (!avatarsResult.ok) {
+          const msg = `MakeUGC avatar list failed: ${avatarsResult.errorMessage ?? 'unknown'}`;
+          console.error(`[polish-25-worker] ${msg}`);
+          await markJobFailed(jobId, userId, msg, 0);
+          throw new NonRetriableError(msg);
+        }
+        try {
+          const matched = selectMakeugcAvatarForPersona(
+            persona,
+            avatarsResult.avatars,
+            voicesResult.voices,
+          );
+          await patchMetadata(jobId, {
+            polish25_avatar_match: {
+              matchStrategy: 'gender-only-fallback',
+              candidatesConsidered: matched.matchLog.candidatesConsidered,
+              hardFilters: matched.matchLog.hardFilters,
+              scoredCandidates: matched.matchLog.scoredCandidates,
+              winnerAvatarId: matched.matchLog.winnerAvatarId,
+              winnerVoiceId: matched.matchLog.winnerVoiceId,
+              winnerVoiceTtsEngineId: matched.voice.voiceId,
+              winnerScore: matched.matchLog.winnerScore,
+            },
+            polish25_progress: { step: 'avatar-matched', pct: 45, at: nowIso() },
+          });
+          return {
+            avatarId: matched.avatar.id,
+            avatarName: matched.avatar.name,
+            voiceId: matched.voice.id,
+            voiceName: matched.voice.name,
+          };
+        } catch (err) {
+          if (err instanceof MakeugcNoMatchingAvatarError) {
+            const msg =
+              `Polish-25 avatar match failed: ${err.message}. ` +
+              `Add matching MakeUGC actors or lift persona filters.`;
+            console.error(`[polish-25-worker] ${msg}`);
+            await patchMetadata(jobId, {
+              polish25_avatar_match_failure: {
+                persona,
+                candidatesConsidered: err.candidatesConsidered,
+                hardFiltersApplied: err.hardFiltersApplied,
+                matchStrategy: 'gender-only-fallback',
+                at: nowIso(),
+              },
+            });
+            await markJobFailed(jobId, userId, msg, 0);
+            throw new NonRetriableError(msg);
+          }
+          throw err;
+        }
+      },
+    );
 
     // -------- Step H: submit (auto-retry ×2 on transient) --------
     const retryChain: Array<{

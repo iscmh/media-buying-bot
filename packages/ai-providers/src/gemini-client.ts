@@ -1033,6 +1033,164 @@ export async function rateGeminiFaceSimilarity(
   };
 }
 
+/**
+ * Polish-25 Commit 7: analyze a MakeUGC avatar thumbnail image and
+ * return structured descriptor JSON (age bucket, ethnicity, hair,
+ * facial hair, wardrobe, background). Backs the enriched
+ * makeugc_avatar_index refresh worker.
+ *
+ * Same shape as rateGeminiFaceSimilarity: fetch the imageUrl,
+ * inline as base64, call gemini-2.5-flash with a text prompt that
+ * demands strict JSON output, return raw string + parsed JSON to
+ * the caller. Zod validation lives in
+ * packages/jobs/src/lib/makeugc-avatar-vision-prompt.ts so this
+ * layer stays generic — the caller owns schema semantics.
+ *
+ * Real cost: gemini-2.5-flash vision call on a single small
+ * thumbnail is ~$0.0005 - $0.002 per image. For a full 500-avatar
+ * MakeUGC library the one-time build is ~$0.25 - $1.
+ */
+export interface AnalyzeMakeugcAvatarThumbnailInput {
+  userId: string;
+  apiKey: string;
+  /** Public MakeUGC thumbnail URL — fetched, inlined as base64. */
+  imageUrl: string;
+  /** System prompt supplied by caller so operator-tuned wording
+   * stays out of this layer. */
+  systemPrompt: string;
+  generationJobId?: string;
+}
+
+export interface AnalyzeMakeugcAvatarThumbnailResult {
+  ok: boolean;
+  /** Raw Gemini text response — caller Zod-parses. Undefined when ok=false. */
+  rawText?: string;
+  /** Best-effort JSON.parse of rawText (with markdown-fence strip).
+   *  Undefined when the response wasn't JSON-shaped. */
+  parsedJson?: unknown;
+  costUsd: number;
+  latencyMs: number;
+  errorMessage?: string;
+}
+
+export async function analyzeMakeugcAvatarThumbnail(
+  input: AnalyzeMakeugcAvatarThumbnailInput,
+): Promise<AnalyzeMakeugcAvatarThumbnailResult> {
+  // Fetch + inline the thumbnail (mirror rateGeminiFaceSimilarity —
+  // Files API adds ~5s polling latency that we don't need for a
+  // <2 MB PNG).
+  let inlineData: { mimeType: string; data: string };
+  const fetchStart = Date.now();
+  try {
+    const response = await fetch(input.imageUrl);
+    if (!response.ok) {
+      return {
+        ok: false,
+        costUsd: 0,
+        latencyMs: Date.now() - fetchStart,
+        errorMessage: `Failed to fetch avatar thumbnail (HTTP ${response.status})`,
+      };
+    }
+    const mimeType = response.headers.get('content-type') ?? 'image/jpeg';
+    const arrayBuffer = await response.arrayBuffer();
+    inlineData = {
+      mimeType,
+      data: Buffer.from(arrayBuffer).toString('base64'),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      costUsd: 0,
+      latencyMs: Date.now() - fetchStart,
+      errorMessage: `Avatar thumbnail fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
+  const body = {
+    contents: [
+      {
+        role: 'user' as const,
+        parts: [
+          { inline_data: { mime_type: inlineData.mimeType, data: inlineData.data } },
+          { text: input.systemPrompt },
+        ],
+      },
+    ],
+    generationConfig: {
+      // Low temperature — descriptors, not creative writing.
+      temperature: 0.1,
+      // Ask Gemini to emit JSON directly. gemini-2.5-flash honors
+      // responseMimeType per REST v1beta docs.
+      responseMimeType: 'application/json',
+      maxOutputTokens: 1024,
+    },
+  };
+
+  const result = await callProvider<GeminiResponse>({
+    userId: input.userId,
+    provider: 'gemini',
+    url,
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': input.apiKey,
+      'content-type': 'application/json',
+    },
+    body,
+    timeoutMs: VISION_TIMEOUT_MS,
+    requestBodyForLog: {
+      model: VISION_MODEL,
+      purpose: 'makeugc_avatar_descriptor_vision',
+      image_mime: inlineData.mimeType,
+      image_base64_chars: inlineData.data.length,
+    },
+    generationJobId: input.generationJobId,
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      costUsd: 0,
+      latencyMs: result.latencyMs,
+      errorMessage: result.errorMessage,
+    };
+  }
+
+  const rawText = extractText(result.data) ?? undefined;
+  const usage = result.data.usageMetadata ?? {};
+  const costUsd = computeGeminiTextCost(usage);
+  if (!rawText || rawText.length === 0) {
+    return {
+      ok: false,
+      costUsd,
+      latencyMs: result.latencyMs,
+      errorMessage: 'Gemini returned an empty text response for avatar thumbnail analysis',
+    };
+  }
+  // Strip a potential markdown fence — responseMimeType:'application/json'
+  // should suppress it, but Gemini occasionally still emits ```json...```
+  // per REST-mode drift observed on gemini-2.5-flash.
+  const stripped = rawText
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+  let parsedJson: unknown = undefined;
+  try {
+    parsedJson = JSON.parse(stripped);
+  } catch {
+    // Leave undefined — caller decides whether the raw text is
+    // usable or the call must be retried.
+  }
+  return {
+    ok: true,
+    rawText,
+    parsedJson,
+    costUsd,
+    latencyMs: result.latencyMs,
+  };
+}
+
 /** Lightweight verify: 1-token text request. Returns 200 on valid key. */
 export async function verifyGeminiKey(
   apiKey: string,

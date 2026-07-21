@@ -83,6 +83,15 @@ export type Events = {
   'generation/polish25-makeugc.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-25 Commit 7: on-demand trigger for the enriched avatar
+  // index refresh. Nightly cron does the same work with empty
+  // event.data — the manual path here lets the operator force an
+  // immediate cycle without waiting for 3am UTC. `forceAll` re-
+  // analyzes every row (not just new + >7d stale), useful after a
+  // vision-prompt update.
+  'makeugc/avatar-index.refresh.requested': {
+    data: { userId?: string; forceAll?: boolean };
+  };
   'summary/daily.requested': {
     data: { userId: string; date: string };
   };

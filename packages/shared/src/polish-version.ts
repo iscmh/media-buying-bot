@@ -41,7 +41,7 @@
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
  */
-export const POLISH_VERSION = '25.0.6';
+export const POLISH_VERSION = '25.0.7';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +50,7 @@ export const POLISH_VERSION = '25.0.6';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25 Commit 6 — MakeUGC poll cap raised 60→180 attempts (10min→30min) + heartbeat log';
+  'Polish-25 Commit 7 — enriched Gemini-Vision avatar index + nightly refresh cron + age±1 enriched matcher';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

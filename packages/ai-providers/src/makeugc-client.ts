@@ -799,6 +799,286 @@ export function selectMakeugcAvatarForPersona(
 }
 
 // =========================================================================
+// Polish-25 Commit 7: enriched-index matcher
+// =========================================================================
+
+/**
+ * Enriched avatar row — the shape the polish25-makeugc worker
+ * hydrates from makeugc_avatar_index (populated by the nightly
+ * refresh worker). Fields mirror the SQL table + Gemini vision
+ * schema in packages/jobs/src/lib/makeugc-avatar-vision-prompt.ts.
+ *
+ * Deliberately loose typing on the descriptor strings — the
+ * matcher does string-equality comparisons (age_bucket exact +
+ * ethnicity exact) and case-insensitive substring checks (hair
+ * / facial hair / wardrobe fuzzy scoring). Callers Zod-validate
+ * upstream if they want stricter enum guarantees.
+ */
+export interface MakeugcEnrichedAvatar {
+  avatarId: string;
+  avatarName: string;
+  makeugcGender: string; // "Male" | "Female"
+  ageBucket: string; // "20s" | ... | "80s+"
+  ethnicity: string;
+  hairColor: string;
+  hairStyle: string | null;
+  facialHair: string | null;
+  wardrobeStyle: string | null;
+  wardrobeSummary: string | null;
+  backgroundSetting: string | null;
+}
+
+export interface MakeugcEnrichedMatchLog {
+  candidatesConsidered: number;
+  hardFilters: string[];
+  scoredCandidates: Array<{
+    avatarId: string;
+    score: number;
+    breakdown: {
+      ethnicity: number;
+      hair: number;
+      facialHair: number;
+      wardrobe: number;
+    };
+  }>;
+  winnerAvatarId: string;
+  winnerVoiceId: string;
+  winnerScore: number;
+  matchStrategy: 'enriched-index' | 'gender-only-fallback';
+}
+
+export interface MakeugcEnrichedMatchResult {
+  avatar: MakeugcEnrichedAvatar;
+  voice: MakeugcVoice;
+  score: number;
+  matchLog: MakeugcEnrichedMatchLog;
+}
+
+/** Persona-decade → age bucket. Persona.age_range can be free-form
+ *  ("60s", "mid-60s", "60-year-old", "senior") — extract the first
+ *  1-2 digit decade tag and map to the closed MakeUGC bucket set.
+ *  Returns null for genuinely unparseable ranges; caller decides
+ *  whether to apply an age hard-filter or skip it. */
+export function personaAgeRangeToBucket(rawAgeRange: string): string | null {
+  if (typeof rawAgeRange !== 'string' || rawAgeRange.trim().length === 0) return null;
+  const s = rawAgeRange.toLowerCase();
+  // 80+ collapses to a single bucket. Match "80", "80s", "82",
+  // "80-year-old", "aged 82", 90s, etc. — the leading `\b` requires a
+  // word boundary, so incidental substrings like "180" don't hit.
+  if (/\b(8|9)\d/.test(s)) return '80s+';
+  // 2-digit ages 20-79 (e.g. "62", "60", "38", "42-year-old"). We
+  // don't require a trailing \b because "60s" has no boundary between
+  // the digits and the 's'.
+  const twoDigit = s.match(/\b([2-7])\d/);
+  if (twoDigit && twoDigit[1]) return `${twoDigit[1]}0s`;
+  // Word forms.
+  if (/\btwenties?\b|\btwentysomething\b/.test(s)) return '20s';
+  if (/\bthirties?\b|\bthirtysomething\b/.test(s)) return '30s';
+  if (/\bforties?\b|\bfortysomething\b/.test(s)) return '40s';
+  if (/\bfiftie?s?\b|\bfifty\b|\bfiftysomething\b/.test(s)) return '50s';
+  if (/\bsixtie?s?\b|\bsixty\b|\bsixtysomething\b/.test(s)) return '60s';
+  if (/\bseventie?s?\b|\bseventy\b|\bseventysomething\b/.test(s)) return '70s';
+  if (/\beightie?s?\b|\beighty\b|\bninet(y|ies)\b|\belderly\b|\bsenior\b/.test(s)) return '80s+';
+  return null;
+}
+
+const AGE_BUCKET_ORDER = ['20s', '30s', '40s', '50s', '60s', '70s', '80s+'] as const;
+
+/** Returns buckets within ±1 slot of the target — the hard-filter
+ *  tolerance for the enriched matcher. e.g. target "60s" →
+ *  ["50s","60s","70s"]. */
+export function ageBucketNeighbors(target: string): string[] {
+  const idx = AGE_BUCKET_ORDER.indexOf(target as (typeof AGE_BUCKET_ORDER)[number]);
+  if (idx < 0) return [];
+  const out: string[] = [];
+  if (idx > 0) out.push(AGE_BUCKET_ORDER[idx - 1]!);
+  out.push(AGE_BUCKET_ORDER[idx]!);
+  if (idx < AGE_BUCKET_ORDER.length - 1) out.push(AGE_BUCKET_ORDER[idx + 1]!);
+  return out;
+}
+
+/**
+ * Score contributions per operator's spec:
+ *   - ethnicity exact match: +10
+ *   - hair fuzzy (persona.look substring on avatar.hairColor OR
+ *     avatar.hairStyle): +5
+ *   - facial hair fuzzy: +3
+ *   - wardrobe fuzzy (persona.look substring on avatar.wardrobeStyle
+ *     OR wardrobeSummary): +2
+ *
+ * Age is a HARD FILTER (±1 bucket) not a scored dimension — mismatched
+ * age never makes it into the candidate pool.
+ */
+export const MAKEUGC_ENRICHED_SCORE_WEIGHTS = {
+  ethnicityExact: 10,
+  hair: 5,
+  facialHair: 3,
+  wardrobe: 2,
+} as const;
+
+/** Bidirectional fuzzy: true when either side contains the other after
+ *  normalizing hyphens / underscores → spaces. Handles cases like
+ *  persona.look="clean-shaven" against avatar.facialHair="clean_shaven",
+ *  or persona.look="blue polo shirt" against wardrobeSummary="navy
+ *  blue polo shirt". */
+function bidiFuzzy(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b || typeof a !== 'string' || typeof b !== 'string') return false;
+  const norm = (s: string): string => s.toLowerCase().replace(/[-_]/g, ' ');
+  const aN = norm(a);
+  const bN = norm(b);
+  if (aN.length === 0 || bN.length === 0) return false;
+  return aN.includes(bN) || bN.includes(aN);
+}
+
+function scoreEnrichedAvatar(
+  avatar: MakeugcEnrichedAvatar,
+  persona: MakeugcPersona,
+  personaAgeBucket: string | null,
+): {
+  total: number;
+  breakdown: { ethnicity: number; hair: number; facialHair: number; wardrobe: number };
+} {
+  const w = MAKEUGC_ENRICHED_SCORE_WEIGHTS;
+
+  // Ethnicity exact (case-insensitive; persona.ethnicity may be
+  // absent — worth zero, not negative).
+  const ethnicity =
+    typeof persona.ethnicity === 'string' &&
+    persona.ethnicity.trim().length > 0 &&
+    avatar.ethnicity.toLowerCase() === persona.ethnicity.toLowerCase()
+      ? w.ethnicityExact
+      : 0;
+
+  // Hair fuzzy: hair_color OR hair_style either-way substring match
+  // against persona.look ("gray hair" in look → avatar.hairColor="gray"
+  // scores; also handles the reverse direction).
+  const look = typeof persona.look === 'string' ? persona.look : '';
+  const hair = bidiFuzzy(look, avatar.hairColor) || bidiFuzzy(look, avatar.hairStyle) ? w.hair : 0;
+
+  // Facial hair fuzzy: persona.look="clean-shaven" ↔ avatar.facialHair
+  // ="clean_shaven" — bidiFuzzy normalizes hyphens + underscores.
+  const facialHair = bidiFuzzy(look, avatar.facialHair) ? w.facialHair : 0;
+
+  // Wardrobe fuzzy: match against wardrobe_style enum OR the
+  // freeform wardrobe_summary — either direction.
+  const wardrobe =
+    bidiFuzzy(look, avatar.wardrobeStyle) || bidiFuzzy(look, avatar.wardrobeSummary)
+      ? w.wardrobe
+      : 0;
+
+  // Age bucket exact match beats age bucket ±1 (soft bonus so the
+  // exact hit outranks a same-score-otherwise ±1 candidate).
+  const ageBonus = personaAgeBucket && avatar.ageBucket === personaAgeBucket ? 1 : 0;
+
+  return {
+    total: ethnicity + hair + facialHair + wardrobe + ageBonus,
+    breakdown: { ethnicity, hair, facialHair, wardrobe },
+  };
+}
+
+/**
+ * Polish-25 Commit 7: enriched-index matcher.
+ *
+ * HARD FILTERS (throw MakeugcNoMatchingAvatarError on empty result):
+ *   1. makeugcGender exact match ("Male" ↔ persona.gender="male")
+ *   2. ageBucket ∈ neighbors(persona.age_range) (±1 bucket
+ *      tolerance). If persona.age_range can't be parsed to a
+ *      known bucket, the age filter is skipped and hardFilters
+ *      records "age=unparseable" for audit.
+ *   3. Voice pool has ≥1 candidate matching gender + language
+ *      (mirror Commit 1 voice discipline).
+ *
+ * SOFT SCORING: see MAKEUGC_ENRICHED_SCORE_WEIGHTS.
+ *
+ * `exclude` skips avatarIds (used by the worker for second-best
+ * retry after a submit-side non-transient failure — mirrors
+ * Commit 1 pattern).
+ *
+ * NO silent random fallback — throws when the candidate pool is
+ * empty after hard filters. The worker owns the empty-index
+ * fallback (drops to Commit 1's gender-only matcher).
+ */
+export function selectMakeugcAvatarForPersonaFromIndex(
+  persona: MakeugcPersona,
+  enrichedAvatars: readonly MakeugcEnrichedAvatar[],
+  voices: readonly MakeugcVoice[],
+  opts?: { exclude?: readonly string[]; language?: string },
+): MakeugcEnrichedMatchResult {
+  const exclude = new Set(opts?.exclude ?? []);
+  const language = opts?.language ?? persona.language ?? 'English';
+  const hardFilters: string[] = [];
+
+  // HARD FILTER 1: gender.
+  hardFilters.push(`gender=${persona.gender}`);
+  const genderPool = enrichedAvatars.filter(
+    (a) =>
+      typeof a.makeugcGender === 'string' &&
+      a.makeugcGender.toLowerCase() === persona.gender.toLowerCase() &&
+      !exclude.has(a.avatarId),
+  );
+  if (genderPool.length === 0) {
+    throw new MakeugcNoMatchingAvatarError(persona, enrichedAvatars.length, hardFilters);
+  }
+
+  // HARD FILTER 2: age bucket ±1 (if parseable).
+  const personaBucket = personaAgeRangeToBucket(persona.age_range);
+  let agePool: MakeugcEnrichedAvatar[];
+  if (personaBucket === null) {
+    hardFilters.push('age=unparseable(skipped)');
+    agePool = genderPool;
+  } else {
+    const neighbors = new Set(ageBucketNeighbors(personaBucket));
+    hardFilters.push(`age∈${JSON.stringify(Array.from(neighbors))}`);
+    agePool = genderPool.filter((a) => neighbors.has(a.ageBucket));
+    if (agePool.length === 0) {
+      throw new MakeugcNoMatchingAvatarError(persona, enrichedAvatars.length, hardFilters);
+    }
+  }
+
+  // Score every survivor.
+  const scored = agePool.map((a) => {
+    const { total, breakdown } = scoreEnrichedAvatar(a, persona, personaBucket);
+    return { avatarId: a.avatarId, score: total, breakdown };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  const winnerScored = scored[0]!;
+  const winnerAvatar = agePool.find((a) => a.avatarId === winnerScored.avatarId)!;
+
+  // HARD FILTER 3: voice pool (mirror Commit 1).
+  hardFilters.push(`voice.gender=${persona.gender}`);
+  hardFilters.push(`voice.language=${language}`);
+  const voicePool = voices.filter(
+    (v) =>
+      typeof v.gender === 'string' &&
+      v.gender.toLowerCase() === persona.gender.toLowerCase() &&
+      typeof v.language === 'string' &&
+      v.language.toLowerCase() === language.toLowerCase(),
+  );
+  if (voicePool.length === 0) {
+    throw new MakeugcNoMatchingAvatarError(persona, enrichedAvatars.length, hardFilters);
+  }
+  const winnerVoice = voicePool[0]!;
+
+  console.log(
+    `[makeugc-match:enriched] winner avatar.id=${winnerAvatar.avatarId} ` +
+      `age=${winnerAvatar.ageBucket} ethnicity=${winnerAvatar.ethnicity} ` +
+      `score=${winnerScored.score} breakdown=${JSON.stringify(winnerScored.breakdown)} ` +
+      `voice.id=${winnerVoice.id} voice.voiceId=${winnerVoice.voiceId}`,
+  );
+
+  const matchLog: MakeugcEnrichedMatchLog = {
+    candidatesConsidered: enrichedAvatars.length,
+    hardFilters,
+    scoredCandidates: scored.slice(0, 5),
+    winnerAvatarId: winnerAvatar.avatarId,
+    winnerVoiceId: winnerVoice.id,
+    winnerScore: winnerScored.score,
+    matchStrategy: 'enriched-index',
+  };
+  return { avatar: winnerAvatar, voice: winnerVoice, score: winnerScored.score, matchLog };
+}
+
+// =========================================================================
 // Daily-cached avatar / voice library (module-level Map, TTL by userId)
 // =========================================================================
 
