@@ -28,7 +28,7 @@ const FAREWELL_MESSAGE =
  *   3. Clear tg_chat_id, set status='revoked', null linked_at.
  *   4. Cascade-pause the user (matches Meta + AI provider disconnect).
  *   5. Audit log telegram_disconnected with farewell-DM result.
- *   6. Redirect to /onboarding/telegram so the page renders the link-code
+ *   6. Redirect to /settings/connections?tab=telegram so the page renders the link-code
  *      flow again on reconnect.
  *
  * The farewell DM is a courtesy; if it fails, the local cleanup still
@@ -43,7 +43,7 @@ export async function disconnectTelegramAction(): Promise<void> {
     columns: { id: true, tgChatId: true, status: true },
   });
   if (!conn) {
-    redirect('/onboarding/telegram');
+    redirect('/settings/connections?tab=telegram');
   }
 
   let farewellOk = false;
@@ -83,5 +83,5 @@ export async function disconnectTelegramAction(): Promise<void> {
   });
 
   revalidatePath('/connections/telegram');
-  redirect('/onboarding/telegram');
+  redirect('/settings/connections?tab=telegram');
 }

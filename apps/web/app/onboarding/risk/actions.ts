@@ -35,5 +35,8 @@ export async function acknowledgeRiskAction(formData: FormData) {
   });
 
   revalidatePath('/onboarding/risk');
-  redirect('/onboarding/meta');
+  // Polish-25.2 Commit 13: fixed 404. Chain is tos → risk → keys
+  // (per Commit 10a's ONBOARDING_STEPS trim); the pre-Commit-10a
+  // "→ meta" target no longer exists.
+  redirect('/onboarding/keys');
 }

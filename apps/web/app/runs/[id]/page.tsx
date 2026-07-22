@@ -282,6 +282,11 @@ export default async function JobReviewPage({ params }: Props) {
             format: v.format,
           }))}
           launchSnapshot={launchSnapshot}
+          // Polish-25.2 Commit 13: gate the Launch button on Meta
+          // being connected. Existing query already filters
+          // status='active' via metaConn — a non-null row means we
+          // have a live token + BM + ad accounts wired.
+          hasMetaConnection={!!metaConn}
         />
       )}
     </AppShell>

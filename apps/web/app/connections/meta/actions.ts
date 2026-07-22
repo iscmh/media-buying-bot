@@ -25,7 +25,7 @@ async function requireUser() {
  *   3. Soft-delete the meta_connections row.
  *   4. Cascade-pause the user (sets is_paused, writes pause log).
  *   5. Audit log meta_disconnected with revoke status.
- *   6. Redirect to /onboarding/meta — the gate will land them in the
+ *   6. Redirect to /settings/connections?tab=meta — the gate will land them in the
  *      paste form sub-state.
  *
  * If revoke fails, we still proceed. The token expires in ≤60 days; the
@@ -43,7 +43,7 @@ export async function disconnectMetaAction(): Promise<void> {
     columns: { id: true, accessTokenEncrypted: true },
   });
   if (!conn) {
-    redirect('/onboarding/meta');
+    redirect('/settings/connections?tab=meta');
   }
 
   let revokeStatus: number | null = null;
@@ -83,5 +83,5 @@ export async function disconnectMetaAction(): Promise<void> {
   });
 
   revalidatePath('/connections/meta');
-  redirect('/onboarding/meta');
+  redirect('/settings/connections?tab=meta');
 }

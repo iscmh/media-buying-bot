@@ -18,6 +18,9 @@ import { ToolCard } from '@/app/connections/tools/tool-card';
 import { MetaConnectedSummary } from '@/app/connections/meta/connected-summary';
 import { TelegramConnectedSummary } from '@/app/connections/telegram/connected-summary';
 import { DisconnectedNotice } from '@/app/connections/_shared/disconnected-notice';
+import { MetaTokenPasteForm } from './_meta/token-form';
+import { MetaSelectionForm } from './_meta/selection-form';
+import { listMetaResources } from './_meta/actions';
 
 export const metadata = { title: 'Connections' };
 export const dynamic = 'force-dynamic';
@@ -220,10 +223,19 @@ async function ProvidersTab({ userId }: { userId: string }) {
 // ---------------------------------------------------------------
 
 async function MetaTab({ userId }: { userId: string }) {
+  // Polish-25.2 Commit 13: inline 3-state flow. Restores the paste
+  // + selection UI that used to live at /onboarding/meta (deleted
+  // in Commit 10a) so users can connect Meta directly from this
+  // tab without a redirect to a non-existent onboarding route.
+  //
+  //   (a) no row              → MetaTokenPasteForm
+  //   (b) row + status=pending → MetaSelectionForm (BM + ad accts)
+  //   (c) row + status=active  → MetaConnectedSummary
   const db = getDb();
   const conn = await db.query.metaConnections.findFirst({
     where: and(eq(schema.metaConnections.userId, userId), isNull(schema.metaConnections.deletedAt)),
     columns: {
+      status: true,
       businessManagerId: true,
       adAccountIds: true,
       tokenExpiresAt: true,
@@ -234,21 +246,30 @@ async function MetaTab({ userId }: { userId: string }) {
     },
   });
 
+  // Sub-state (a): no token yet.
   if (!conn) {
+    return <MetaTokenPasteForm />;
+  }
+
+  // Sub-state (b): token verified but BM + ad accounts not picked.
+  if (conn.status === 'pending' && conn.tokenExpiresAt) {
+    const resources = await listMetaResources(userId);
+    if ('error' in resources) {
+      return (
+        <div className="border-[color:var(--accent-negative)]/50 bg-[color:var(--accent-negative)]/5 space-y-2 rounded-md border p-4 text-sm">
+          <p className="text-fg font-semibold">
+            Couldn&apos;t list your Business Managers + ad accounts.
+          </p>
+          <p className="text-fg-muted text-xs">{resources.error}</p>
+        </div>
+      );
+    }
     return (
-      <div className="space-y-4">
-        <p className="text-fg-muted text-sm">
-          Connect your Meta ad account only when you&apos;re ready to launch generated ads. You can
-          generate + review videos without connecting Meta.
-        </p>
-        <DisconnectedNotice
-          reconnectHref="/onboarding/agency-bm"
-          detail="Paste a long-lived Meta access token to link your Business Manager + ad accounts."
-        />
-      </div>
+      <MetaSelectionForm businesses={resources.businesses} adAccounts={resources.adAccounts} />
     );
   }
 
+  // Sub-state (c): fully connected.
   const pageCount = Array.isArray(conn.pages) ? conn.pages.length : 0;
   return (
     <MetaConnectedSummary

@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.2.1';
+export const POLISH_VERSION = '25.2.2';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.2.1';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.2 Commit 12 — user-facing copy overhaul (kill Polish-XX / MakeUGC / Phase N terminology, tighten generate + run pages)';
+  'Polish-25.2 Commit 13 — Meta 404 fixes + inline Meta connect flow on /settings/connections + launch button gated on Meta connection';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

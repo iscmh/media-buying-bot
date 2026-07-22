@@ -75,9 +75,22 @@ interface Props {
   conceptType: 'static' | 'ugc';
   variants: Variant[];
   launchSnapshot: LaunchSnapshot;
+  /**
+   * Polish-25.2 Commit 13: gate the Launch button visibility on
+   * whether the user has an active Meta connection. `false` hides
+   * the Launch button + shows an inline nudge with a link to
+   * /settings/connections?tab=meta.
+   */
+  hasMetaConnection: boolean;
 }
 
-export function JobReviewClient({ jobId, conceptType, variants: initial, launchSnapshot }: Props) {
+export function JobReviewClient({
+  jobId,
+  conceptType,
+  variants: initial,
+  launchSnapshot,
+  hasMetaConnection,
+}: Props) {
   const router = useRouter();
   // Optimistic local state. Server action triggers revalidatePath, but
   // optimistic updates make individual approvals feel instant.
@@ -259,33 +272,57 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
           >
             {bulkPending === 'rejected' ? 'Rejecting…' : 'Reject all pending'}
           </Button>
-          <Button
-            type="button"
-            size="sm"
-            onClick={onLaunchClick}
-            disabled={launchableCount === 0 || launchPending}
-            title={
-              launchableCount === 0
-                ? 'Approve at least one variant first.'
-                : `Launch ${launchableCount} approved variant${launchableCount === 1 ? '' : 's'}.`
-            }
-          >
-            <Rocket className="mr-1 h-4 w-4" />
-            Launch approved ({launchableCount})
-          </Button>
+          {/* Polish-25.2 Commit 13: Launch button only renders when
+              Meta is connected. Without a Meta connection the button
+              is useless (the launch flow can't complete), so we hide
+              it entirely and surface an inline nudge below. */}
+          {hasMetaConnection && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={onLaunchClick}
+              disabled={launchableCount === 0 || launchPending}
+              title={
+                launchableCount === 0
+                  ? 'Approve at least one variant first.'
+                  : `Launch ${launchableCount} approved variant${launchableCount === 1 ? '' : 's'}.`
+              }
+            >
+              <Rocket className="mr-1 h-4 w-4" />
+              Launch approved ({launchableCount})
+            </Button>
+          )}
         </div>
       </div>
 
-      {allDecided && approvedCount > 0 && (
-        // Polish-25.2 Commit 12: rewrote the "done" banner to remove
-        // the internal "Phase 4" reference. Reads as neutral product
-        // language regardless of whether the user has Meta connected
-        // yet.
+      {allDecided && approvedCount > 0 && !hasMetaConnection && (
+        // Polish-25.2 Commit 13: Meta-disconnected variant of the
+        // "ready for launch" banner. Links directly to the inline
+        // Meta connect flow at /settings/connections?tab=meta.
+        <div className="border-fg/20 bg-bg-surface mb-6 flex flex-wrap items-center justify-between gap-3 rounded-sm border p-4 text-sm">
+          <div>
+            <strong>Ready for launch.</strong>{' '}
+            <span className="text-muted-foreground">
+              {approvedCount} approved variant{approvedCount === 1 ? '' : 's'} waiting on a Meta ad
+              account. Connect Meta to push them live.
+            </span>
+          </div>
+          <a
+            href="/settings/connections?tab=meta"
+            className="border-fg/30 hover:bg-bg-surfaceHover inline-flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-xs font-medium"
+          >
+            <Rocket className="h-3.5 w-3.5" aria-hidden />
+            Connect Meta
+          </a>
+        </div>
+      )}
+
+      {allDecided && approvedCount > 0 && hasMetaConnection && (
         <div className="border-[color:var(--accent-positive)]/30 bg-[color:var(--accent-positive)]/10 mb-6 rounded-sm border p-4 text-sm">
           <strong>Ready for launch.</strong>{' '}
           <span className="text-muted-foreground">
-            {approvedCount} approved variant{approvedCount === 1 ? '' : 's'} ready to launch to
-            Meta. Connect your Meta ad account when you&apos;re ready to push them live.
+            {approvedCount} approved variant{approvedCount === 1 ? '' : 's'} — hit Launch approved
+            above to push them to Meta as paused ads.
           </span>
         </div>
       )}
