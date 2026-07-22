@@ -12,7 +12,11 @@ import {
   schema,
 } from '@mbb/db';
 import { fetchUserPages } from '@mbb/meta-api';
-import { PLATFORM_HARD_AD_DAILY_BUDGET_USD, checkBudgetMeetsMetaMinimum } from '@mbb/shared';
+import {
+  OfferUrlSchema,
+  PLATFORM_HARD_AD_DAILY_BUDGET_USD,
+  checkBudgetMeetsMetaMinimum,
+} from '@mbb/shared';
 import { auditMetaFromHeaders } from '@/lib/audit/request-meta';
 import { sendMetaLaunchEvent } from '@/lib/inngest/send';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
@@ -296,6 +300,22 @@ export async function launchApprovedAction(
   }
   if (mode === 'live' && !input.pageId) {
     return { ok: false, errorMessage: 'Pick a Facebook Page for the ad creative.' };
+  }
+
+  // Polish-25.2 Commit 15: server-side URL validation. Client already
+  // gates the Launch button on OfferUrlSchema.safeParse, but a caller
+  // that skips the client (CLI, direct action invocation, browser
+  // extension) still needs to hit this. Malformed URLs would be
+  // caught by Meta and land as launched_ads.status='rejected_by_meta'
+  // — cleaner to bounce here with a clear message.
+  if (mode === 'live') {
+    const parsed = OfferUrlSchema.safeParse(input.offerUrl ?? '');
+    if (!parsed.success) {
+      return {
+        ok: false,
+        errorMessage: `Offer URL is invalid: ${parsed.error.issues[0]?.message ?? 'malformed URL'}`,
+      };
+    }
   }
 
   // Polish-3.5: validate the picked page against the snapshot we stored

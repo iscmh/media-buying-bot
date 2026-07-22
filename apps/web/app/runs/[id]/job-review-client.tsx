@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, Download, Rocket, X } from 'lucide-react';
-import { checkBudgetMeetsMetaMinimum } from '@mbb/shared';
+import { checkBudgetMeetsMetaMinimum, isValidOfferUrl } from '@mbb/shared';
 import { formatDateTime } from '@/lib/format/date';
 import { Button } from '@/components/ui/button';
 import {
@@ -70,6 +70,13 @@ export interface LaunchSnapshot {
   remainingUsd: number;
 }
 
+export interface LaunchProblem {
+  id: string;
+  status: string;
+  errorMessage: string | null;
+  launchedAtIso: string | null;
+}
+
 interface Props {
   jobId: string;
   conceptType: 'static' | 'ugc';
@@ -82,6 +89,12 @@ interface Props {
    * /settings/connections?tab=meta.
    */
   hasMetaConnection: boolean;
+  /**
+   * Polish-25.2 Commit 15: launched_ads rows for this job with
+   * status ∈ (rejected_by_meta, launch_failed). Surface Meta's
+   * verbatim error inline so users know what to fix.
+   */
+  launchProblems: LaunchProblem[];
 }
 
 export function JobReviewClient({
@@ -90,6 +103,7 @@ export function JobReviewClient({
   variants: initial,
   launchSnapshot,
   hasMetaConnection,
+  launchProblems,
 }: Props) {
   const router = useRouter();
   // Optimistic local state. Server action triggers revalidatePath, but
@@ -108,6 +122,11 @@ export function JobReviewClient({
   const mode = 'live' as const;
   const [pageId, setPageId] = React.useState<string>(launchSnapshot.defaultPageId ?? '');
   const [offerUrl, setOfferUrl] = React.useState(launchSnapshot.defaultOfferUrl);
+  // Polish-25.2 Commit 15: gate Launch button on OfferUrlSchema.
+  // "https//foo.com" passes the HTML `type="url"` check in some
+  // browsers but fails Meta's stricter URL parser; catching it here
+  // saves a Meta API call + a rejected_by_meta row.
+  const offerUrlValid = isValidOfferUrl(offerUrl);
   const [countries, setCountries] = React.useState<string[]>(launchSnapshot.defaultCountries);
   const [ageMin, setAgeMin] = React.useState(launchSnapshot.defaultAgeMin);
   const [ageMax, setAgeMax] = React.useState(launchSnapshot.defaultAgeMax);
@@ -242,6 +261,48 @@ export function JobReviewClient({
 
   return (
     <>
+      {/* Polish-25.2 Commit 15: launched-ad rejections banner. Meta's
+          verbatim error surfaces here (and stays visible after
+          reload) so the user sees the failure without going to
+          Telegram or querying SQL. */}
+      {launchProblems.length > 0 && (
+        <div className="border-[color:var(--accent-negative)]/50 bg-[color:var(--accent-negative)]/5 mb-6 rounded-sm border p-4 text-sm">
+          <div className="flex items-start gap-2">
+            <div className="flex-1">
+              <p className="text-fg font-semibold">
+                {launchProblems.length === 1
+                  ? '1 ad was rejected by Meta.'
+                  : `${launchProblems.length} ads were rejected by Meta.`}
+              </p>
+              <p className="text-fg-muted mt-1 text-xs">
+                Fix the error below, then hit <strong>Launch approved</strong> above to try again.
+              </p>
+            </div>
+            <a
+              href="/launched"
+              className="border-fg/30 hover:bg-bg-surfaceHover shrink-0 rounded-sm border px-2 py-1 text-xs"
+            >
+              View all
+            </a>
+          </div>
+          <ul className="mt-3 space-y-2">
+            {launchProblems.map((p) => (
+              <li
+                key={p.id}
+                className="border-border-subtle bg-bg-inset/40 rounded-sm border p-3 font-mono text-xs leading-snug"
+              >
+                <div className="text-fg-subtle mb-1 uppercase tracking-wider">
+                  {p.status.replace(/_/g, ' ')}
+                </div>
+                <div className="text-fg whitespace-pre-wrap break-words">
+                  {p.errorMessage ?? '(no error message from Meta — check /launched for detail)'}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="bg-card mb-6 flex flex-col gap-3 rounded-sm border p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm">
           <strong>{approvedCount} approved</strong>
@@ -432,10 +493,19 @@ export function JobReviewClient({
                 value={offerUrl}
                 onChange={(e) => setOfferUrl(e.target.value)}
                 placeholder="https://your-offer.example/landing"
+                aria-invalid={offerUrl.length > 0 && !offerUrlValid}
               />
-              <p className="text-muted-foreground text-xs">
-                Where clicks send users. Pre-filled from the concept&apos;s offer URL.
-              </p>
+              {offerUrl.length > 0 && !offerUrlValid ? (
+                <p className="text-destructive text-xs">
+                  Enter a full URL starting with <code className="font-mono">http://</code> or{' '}
+                  <code className="font-mono">https://</code>. Meta will reject anything shorter and
+                  the ad won&apos;t launch.
+                </p>
+              ) : (
+                <p className="text-muted-foreground text-xs">
+                  Where clicks send users. Pre-filled from the concept&apos;s offer URL.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -566,7 +636,7 @@ export function JobReviewClient({
                 exceedsCap ||
                 exceedsFirstLaunchCap ||
                 !pageId ||
-                !offerUrl ||
+                !offerUrlValid ||
                 countries.length === 0
               }
             >

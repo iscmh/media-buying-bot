@@ -69,6 +69,21 @@ export default async function JobReviewPage({ params }: Props) {
       : null;
   const conceptType = concept?.contentType ?? 'static';
 
+  // Polish-25.2 Commit 15: surface Meta launch rejections + failures
+  // on the run detail page. Before Commit 15, the operator launched a
+  // variant, saw a green "1 ad launched" response from the action,
+  // and never learned that Meta rejected it — the rejection lived on
+  // launched_ads.status + launched_ads.error_message and only
+  // surfaced via SQL or /launched.
+  const launchedAdsForJob = await db.query.launchedAds.findMany({
+    where: and(eq(schema.launchedAds.userId, userId), eq(schema.launchedAds.generationJobId, id)),
+    columns: { id: true, status: true, errorMessage: true, launchedAt: true },
+    orderBy: asc(schema.launchedAds.launchedAt),
+  });
+  const launchProblems = launchedAdsForJob.filter(
+    (r) => r.status === 'rejected_by_meta' || r.status === 'launch_failed',
+  );
+
   // Phase 4a + 4b launch context: settings, cached pages, cap snapshot,
   // first-live-launch state. Passed into the client so the dialog
   // doesn't need a follow-up fetch on open.
@@ -305,6 +320,15 @@ export default async function JobReviewPage({ params }: Props) {
             Array.isArray(metaConn.adAccountIds) &&
             metaConn.adAccountIds.length > 0
           }
+          // Polish-25.2 Commit 15: launched-ad rejections surface as
+          // an inline banner above the review pane. Empty array →
+          // banner hidden.
+          launchProblems={launchProblems.map((r) => ({
+            id: r.id,
+            status: r.status,
+            errorMessage: r.errorMessage ?? null,
+            launchedAtIso: r.launchedAt?.toISOString() ?? null,
+          }))}
         />
       )}
     </AppShell>

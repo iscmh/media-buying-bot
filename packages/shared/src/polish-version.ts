@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.2.3';
+export const POLISH_VERSION = '25.2.4';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.2.3';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.2 Commit 14 — Meta selection flow completion (drop tokenExpiresAt gate on long-lived tokens; require full metadata for launch gate)';
+  'Polish-25.2 Commit 15 — Offer URL validation (client + server) + Meta rejection banner on run page';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
