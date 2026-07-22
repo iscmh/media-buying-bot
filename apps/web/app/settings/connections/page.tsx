@@ -228,9 +228,18 @@ async function MetaTab({ userId }: { userId: string }) {
   // in Commit 10a) so users can connect Meta directly from this
   // tab without a redirect to a non-existent onboarding route.
   //
-  //   (a) no row              → MetaTokenPasteForm
-  //   (b) row + status=pending → MetaSelectionForm (BM + ad accts)
-  //   (c) row + status=active  → MetaConnectedSummary
+  //   (a) no row                            → MetaTokenPasteForm
+  //   (b) row missing BM or ad accounts     → MetaSelectionForm
+  //   (c) row with full metadata + status=active → MetaConnectedSummary
+  //
+  // Polish-25.2 Commit 14: sub-state (b) gate simplified. Was
+  // `status === 'pending' && tokenExpiresAt` — but Meta long-lived
+  // access tokens report `expires_at = 0` (permanent), so
+  // tokenExpiresAt was stored null and the gate fell through to
+  // (c), rendering an empty summary. Also handle the corrupted
+  // case where status='active' but BM / ad_account_ids never got
+  // written — route those back to selection so users can complete
+  // setup.
   const db = getDb();
   const conn = await db.query.metaConnections.findFirst({
     where: and(eq(schema.metaConnections.userId, userId), isNull(schema.metaConnections.deletedAt)),
@@ -251,8 +260,15 @@ async function MetaTab({ userId }: { userId: string }) {
     return <MetaTokenPasteForm />;
   }
 
-  // Sub-state (b): token verified but BM + ad accounts not picked.
-  if (conn.status === 'pending' && conn.tokenExpiresAt) {
+  // Sub-state (b): token stored but BM + ad account selection not
+  // completed. `status === 'pending'` is the canonical "needs
+  // selection" signal (set by verifyMetaTokenAction). Also render
+  // selection when status='active' but metadata is missing — the
+  // partial-write recovery path.
+  const missingMetadata =
+    !conn.businessManagerId || !Array.isArray(conn.adAccountIds) || conn.adAccountIds.length === 0;
+  const needsSelection = conn.status === 'pending' || (conn.status === 'active' && missingMetadata);
+  if (needsSelection) {
     const resources = await listMetaResources(userId);
     if ('error' in resources) {
       return (
@@ -265,7 +281,15 @@ async function MetaTab({ userId }: { userId: string }) {
       );
     }
     return (
-      <MetaSelectionForm businesses={resources.businesses} adAccounts={resources.adAccounts} />
+      <div className="space-y-4">
+        {conn.status === 'active' && missingMetadata && (
+          <div className="border-[color:var(--accent-warning)]/40 bg-[color:var(--accent-warning)]/5 text-fg-muted rounded-md border p-3 text-xs">
+            Meta token is on file, but the Business Manager + ad account selection isn&apos;t
+            complete. Pick them below to finish the connection.
+          </div>
+        )}
+        <MetaSelectionForm businesses={resources.businesses} adAccounts={resources.adAccounts} />
+      </div>
     );
   }
 

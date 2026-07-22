@@ -94,12 +94,22 @@ export default async function JobReviewPage({ params }: Props) {
   // Polish-3.5: pull the active Meta connection so the launch dialog can
   // surface the account currency + min-budget for the budget preview
   // ("USD $10 → RON 45.50").
+  // Polish-25.2 Commit 14: pull businessManagerId + adAccountIds
+  // so hasMetaConnection can require the full metadata (not just
+  // status='active'). A partially-configured row — token verified
+  // but selection never completed — otherwise satisfies the
+  // status='active' check while being unusable for launch.
   const metaConn = await db.query.metaConnections.findFirst({
     where: and(
       eq(schema.metaConnections.userId, userId),
       eq(schema.metaConnections.status, 'active'),
     ),
-    columns: { accountCurrency: true, minDailyBudgetMinor: true },
+    columns: {
+      accountCurrency: true,
+      minDailyBudgetMinor: true,
+      businessManagerId: true,
+      adAccountIds: true,
+    },
   });
   const perAdBudget = Math.min(
     Number(settings?.defaultAdDailyBudgetUsd ?? 10),
@@ -282,11 +292,19 @@ export default async function JobReviewPage({ params }: Props) {
             format: v.format,
           }))}
           launchSnapshot={launchSnapshot}
-          // Polish-25.2 Commit 13: gate the Launch button on Meta
-          // being connected. Existing query already filters
-          // status='active' via metaConn — a non-null row means we
-          // have a live token + BM + ad accounts wired.
-          hasMetaConnection={!!metaConn}
+          // Polish-25.2 Commit 13 + 14: gate the Launch button on
+          // Meta being FULLY connected. Beyond status='active', we
+          // require a picked Business Manager + at least one ad
+          // account — a partially-configured row would otherwise
+          // satisfy the boolean check while being unusable for
+          // launch (root cause of the operator's stuck row on
+          // 25.2.2 walkthrough).
+          hasMetaConnection={
+            !!metaConn &&
+            !!metaConn.businessManagerId &&
+            Array.isArray(metaConn.adAccountIds) &&
+            metaConn.adAccountIds.length > 0
+          }
         />
       )}
     </AppShell>
