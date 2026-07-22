@@ -296,15 +296,43 @@ async function MetaTab({ userId }: { userId: string }) {
   // Sub-state (c): fully connected.
   const pageCount = Array.isArray(conn.pages) ? conn.pages.length : 0;
   return (
-    <MetaConnectedSummary
-      businessManagerId={conn.businessManagerId ?? '(unknown)'}
-      adAccountIds={conn.adAccountIds ?? []}
-      tokenExpiresAt={conn.tokenExpiresAt ?? null}
-      lastVerifiedAt={conn.lastVerifiedAt ?? null}
-      accountCurrency={conn.accountCurrency ?? null}
-      accountTimezone={conn.accountTimezone ?? null}
-      pageCount={pageCount}
-    />
+    <div className="space-y-4">
+      <MetaConnectedSummary
+        businessManagerId={conn.businessManagerId ?? '(unknown)'}
+        adAccountIds={conn.adAccountIds ?? []}
+        tokenExpiresAt={conn.tokenExpiresAt ?? null}
+        lastVerifiedAt={conn.lastVerifiedAt ?? null}
+        accountCurrency={conn.accountCurrency ?? null}
+        accountTimezone={conn.accountTimezone ?? null}
+        pageCount={pageCount}
+      />
+      {/* Polish-25.2 Commit 16b: point operators at the automation
+          rules explainer right after they connect Meta — the first
+          question every new operator asks is "what will the bot
+          do automatically?". Answer that inline before they
+          launch. */}
+      <div className="border-border-subtle bg-bg-surface rounded-md border p-4 text-sm">
+        <p className="text-fg font-medium">Before your first live launch</p>
+        <p className="text-fg-muted mt-1 text-xs leading-relaxed">
+          The bot auto-pauses (kills) ads that spend without converting and auto-scales winners.
+          Review the thresholds so nothing surprises you the first time an ad hits the kill rule.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link
+            href="/settings/rules"
+            className="border-fg/30 hover:bg-bg-surfaceHover inline-flex items-center rounded-sm border px-2.5 py-1 text-xs font-medium"
+          >
+            Review automation rules
+          </Link>
+          <Link
+            href="/settings/presets"
+            className="border-fg/30 hover:bg-bg-surfaceHover inline-flex items-center rounded-sm border px-2.5 py-1 text-xs font-medium"
+          >
+            Set up launch presets
+          </Link>
+        </div>
+      </div>
+    </div>
   );
 }
 

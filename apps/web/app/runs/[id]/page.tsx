@@ -14,6 +14,7 @@ import { AppShell } from '@/components/shell/app-shell';
 import { PageHeader } from '@/components/shell/page-header';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { loadPresetsForUser } from '@/app/settings/presets/actions';
 import { JobReviewClient } from './job-review-client';
 import { JobTimeline } from './job-timeline';
 
@@ -131,6 +132,11 @@ export default async function JobReviewPage({ params }: Props) {
     PLATFORM_HARD_AD_DAILY_BUDGET_USD,
   );
   const launchCap = await assertDailyLaunchBudgetCap(userId, 0);
+  // Polish-25.2 Commit 16b: named launch presets. Passed into the
+  // dialog dropdown; empty array → dropdown hidden. Clamp per-ad
+  // budget on preset apply too — user might have saved a preset
+  // before the platform ceiling dropped.
+  const launchPresets = await loadPresetsForUser(userId);
   const launchSnapshot = {
     acknowledged: !!settings?.launchAcknowledgedAt,
     liveAcknowledged: !!settings?.liveLaunchAcknowledgedAt,
@@ -329,6 +335,7 @@ export default async function JobReviewPage({ params }: Props) {
             errorMessage: r.errorMessage ?? null,
             launchedAtIso: r.launchedAt?.toISOString() ?? null,
           }))}
+          launchPresets={launchPresets}
         />
       )}
     </AppShell>

@@ -77,6 +77,21 @@ export interface LaunchProblem {
   launchedAtIso: string | null;
 }
 
+/**
+ * Polish-25.2 Commit 16b: named launch presets. Populated
+ * server-side from user_launch_presets via loadPresetsForUser().
+ */
+export interface LaunchPreset {
+  id: string;
+  name: string;
+  targetingCountries: string[];
+  ageMin: number;
+  ageMax: number;
+  optimizationGoal: string;
+  placementType: string;
+  perAdDailyBudgetUsd: number;
+}
+
 interface Props {
   jobId: string;
   conceptType: 'static' | 'ugc';
@@ -95,6 +110,11 @@ interface Props {
    * verbatim error inline so users know what to fix.
    */
   launchProblems: LaunchProblem[];
+  /**
+   * Polish-25.2 Commit 16b: user's saved launch presets. Empty
+   * array hides the preset dropdown in the launch dialog.
+   */
+  launchPresets: LaunchPreset[];
 }
 
 export function JobReviewClient({
@@ -104,6 +124,7 @@ export function JobReviewClient({
   launchSnapshot,
   hasMetaConnection,
   launchProblems,
+  launchPresets,
 }: Props) {
   const router = useRouter();
   // Optimistic local state. Server action triggers revalidatePath, but
@@ -130,6 +151,25 @@ export function JobReviewClient({
   const [countries, setCountries] = React.useState<string[]>(launchSnapshot.defaultCountries);
   const [ageMin, setAgeMin] = React.useState(launchSnapshot.defaultAgeMin);
   const [ageMax, setAgeMax] = React.useState(launchSnapshot.defaultAgeMax);
+  // Polish-25.2 Commit 16b: named preset dropdown. Empty string =
+  // "Custom (default)" — inline form is authoritative. Selecting a
+  // preset overwrites the inline fields with the preset's values.
+  // We DON'T track budget/goal/placement locally on the dialog —
+  // those live on launchSnapshot and applying a preset only
+  // rewrites the fields the dialog exposes (countries + age range).
+  // The rest is documented in the preset chip so operators see
+  // what a preset covers.
+  const [presetId, setPresetId] = React.useState<string>('');
+  function applyPreset(id: string) {
+    setPresetId(id);
+    if (!id) return;
+    const p = launchPresets.find((x) => x.id === id);
+    if (!p) return;
+    setCountries(p.targetingCountries);
+    setAgeMin(p.ageMin);
+    setAgeMax(p.ageMax);
+    setShowCustomizeTargeting(true);
+  }
   const [pages, setPages] = React.useState(launchSnapshot.metaPages);
   const [pagesRefreshing, setPagesRefreshing] = React.useState(false);
   const [pagesError, setPagesError] = React.useState<string | null>(null);
@@ -448,6 +488,37 @@ export function JobReviewClient({
             Ads are created PAUSED. They do not spend money until you activate them in Meta Ads
             Manager.
           </p>
+
+          {/* Polish-25.2 Commit 16b: preset dropdown. Only renders
+              when the user has ≥1 saved preset. Applies the
+              preset's targeting fields to the inline form. */}
+          {launchPresets.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="preset">Preset</Label>
+              <select
+                id="preset"
+                value={presetId}
+                onChange={(e) => applyPreset(e.target.value)}
+                className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
+              >
+                <option value="">Custom (use defaults below)</option>
+                {launchPresets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-fg-muted text-xs">
+                Presets fill in countries and age range.{' '}
+                <a
+                  href="/settings/presets"
+                  className="text-primary underline-offset-4 hover:underline"
+                >
+                  Manage presets
+                </a>
+              </p>
+            </div>
+          )}
 
           {/* Launch settings */}
           <>

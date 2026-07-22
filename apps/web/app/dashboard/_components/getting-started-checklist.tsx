@@ -43,6 +43,10 @@ interface Item {
   title: string;
   description: string;
   cta: { href: string; label: string };
+  // Polish-25.2 Commit 16b: optional secondary link under a step
+  // (used on step 4 to point at /settings/rules so operators can
+  // review kill/scale thresholds before a live launch).
+  secondary?: { href: string; label: string };
 }
 
 export function GettingStartedChecklist({ state }: Props) {
@@ -81,6 +85,7 @@ export function GettingStartedChecklist({ state }: Props) {
       title: 'Launch on Meta',
       description: 'Connect Meta when you’re ready to push a variant live.',
       cta: { href: '/settings/connections?tab=meta', label: 'Connect Meta' },
+      secondary: { href: '/settings/rules', label: 'Review auto-kill / scale rules' },
     },
   ];
 
@@ -133,6 +138,16 @@ export function GettingStartedChecklist({ state }: Props) {
                 {item.title}
               </p>
               <p className="text-fg-muted mt-0.5 text-xs leading-relaxed">{item.description}</p>
+              {item.secondary && !item.done && (
+                <p className="mt-1 text-xs">
+                  <Link
+                    href={item.secondary.href}
+                    className="text-fg-muted hover:text-fg underline-offset-4 hover:underline"
+                  >
+                    {item.secondary.label} →
+                  </Link>
+                </p>
+              )}
             </div>
             {!item.done && (
               <Link
