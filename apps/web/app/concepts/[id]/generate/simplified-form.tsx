@@ -18,9 +18,6 @@ import { cn } from '@/lib/utils';
 import { acknowledgeLiveGenerationAction } from './ack-action';
 import { createGenerationJobAction, type ConnectedProviders } from './actions';
 import {
-  LAUNCHER_VISIBLE_MODELS,
-  POLISH23_DESCRIPTION,
-  POLISH23_DISPLAY_NAME,
   POLISH25_DESCRIPTION,
   POLISH25_DISPLAY_NAME,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
@@ -32,12 +29,9 @@ import {
   clampVariantCount,
   estimatePolish23CostPerVariantUsd,
   estimatePolish25CostPerVariantUsd,
-  formatModelCostHintPerVariant,
   getDefaultProviderForModel,
   getSoleLauncherModel,
-  isRecommendedTier,
   type SimplifiedFormState,
-  type VideoModel,
   type VideoModelId,
 } from './simplified-form-helpers';
 
@@ -264,30 +258,24 @@ export function SimplifiedGenerationForm({
 
   return (
     <form onSubmit={onSubmit} className="space-y-6">
-      {/* Source preview */}
-      <section className="border-border bg-bg-surface rounded-md border p-4">
-        <div className="text-fg-subtle mb-2 text-xs font-semibold uppercase tracking-wider">
-          Source
-        </div>
-        {sourcePreviewUrl ? (
-          <div className="flex items-start gap-3">
-            <video
-              src={sourcePreviewUrl}
-              className="bg-bg-inset h-32 w-24 rounded object-cover"
-              muted
-              playsInline
-            />
-            <div className="text-fg-muted text-sm">
-              <p>Winning ad uploaded.</p>
-              {detectedSourceSeconds != null && (
-                <p className="text-fg-subtle text-xs">Detected length: {detectedSourceSeconds}s</p>
-              )}
-            </div>
+      {/* Source preview — Polish-25.2 Commit 12: video-only, no
+          text placeholder. If we don't have a preview URL (e.g. a
+          static-image concept) skip the section entirely instead
+          of showing empty-state copy. */}
+      {sourcePreviewUrl && (
+        <section className="border-border bg-bg-surface rounded-md border p-4">
+          <div className="text-fg-subtle mb-3 text-xs font-semibold uppercase tracking-wider">
+            Source
           </div>
-        ) : (
-          <p className="text-fg-muted text-sm">No source preview available.</p>
-        )}
-      </section>
+          <video
+            src={sourcePreviewUrl}
+            className="bg-bg-inset block max-h-96 w-full rounded object-contain"
+            muted
+            controls
+            playsInline
+          />
+        </section>
+      )}
 
       {/* Polish-25 Commit 2: MakeUGC pre-cast avatar card — primary
           recommended pipeline going forward. Positioned FIRST.
@@ -297,7 +285,6 @@ export function SimplifiedGenerationForm({
       <Polish25PickerCard
         picked={polish25Selected}
         disabled={isPending}
-        variantCount={variantCount}
         onPick={() => {
           setPolish25Selected(true);
           setPolish23Selected(false);
@@ -305,153 +292,91 @@ export function SimplifiedGenerationForm({
         }}
       />
 
-      {/* Polish-25.1 Commit 10b: Polish-23 picker + classic model
-          picker + advanced-form link collapsed into a "Change model"
-          <details> block. Polish-25 is the default; users who need
-          an alternate pipeline (Higgsfield Soul / Hedra / OpenAI
-          Sora / Nano Banana) expand this section deliberately. The
-          collapse defaults to OPEN when Polish-25 is not the picked
-          state so users who arrive on the form without Polish-25
-          keys still see the fallback picker without clicking. */}
-      <details className="border-border-subtle group rounded-md border" open={!polish25Selected}>
-        <summary className="text-fg-muted hover:text-fg cursor-pointer list-none px-4 py-3 text-xs font-medium uppercase tracking-wider transition-colors">
-          Change model
-          <span className="ml-2 text-[10px] normal-case tracking-normal">
-            (Polish-23 Higgsfield · Hedra · Sora · Nano Banana)
-          </span>
-        </summary>
-        <div className="border-border-subtle space-y-4 border-t p-4">
-          <Polish23PickerCard
-            picked={polish23Selected}
+      {/* Polish-25.2 Commit 12: model picker hidden for MVP. Only
+          Instant UGC is user-visible. Alternate pipelines
+          (Higgsfield UGC, Hedra, Sora, Nano Banana) stay wired in
+          the backend + will surface in a future release with a
+          proper picker + BYOK prompts. */}
+
+      {/* Polish-25.2 Commit 12: variant-count only. Length section
+          removed — duration always auto-detected from the source
+          video (client detection → worker fallback chain). Advanced-
+          form link removed too. */}
+      <div>
+        <label htmlFor="variant-count" className="text-fg block text-sm font-medium">
+          Generate
+        </label>
+        <div className="mt-1 flex items-center gap-2">
+          <input
+            id="variant-count"
+            type="number"
+            min={SIMPLIFIED_MIN_VARIANTS}
+            max={SIMPLIFIED_MAX_VARIANTS}
+            step={1}
+            value={variantCount}
+            onChange={(e) => setVariantCount(clampVariantCount(Number(e.target.value)))}
             disabled={isPending}
-            variantCount={variantCount}
-            onPick={() => {
-              setPolish23Selected(true);
-              setPolish25Selected(false);
-              setModelId(null);
-            }}
+            className="border-input bg-bg-elevated text-fg focus:ring-ring h-9 w-20 rounded-md border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-offset-1"
           />
-
-          {soleModel ? (
-            <section aria-labelledby="model-picker-heading" className="space-y-2">
-              <h2 id="model-picker-heading" className="text-fg text-sm font-medium">
-                Legacy model
-              </h2>
-              <div className="border-border bg-bg-surface rounded-md border px-4 py-3 text-sm">
-                <span className="text-fg font-semibold">{soleModel.displayName}</span>{' '}
-                <span className="text-fg-subtle text-xs">— {soleModel.description}</span>
-              </div>
-            </section>
-          ) : (
-            <section aria-labelledby="model-picker-heading" className="space-y-3">
-              <div className="flex items-baseline justify-between">
-                <h2 id="model-picker-heading" className="text-fg text-sm font-medium">
-                  Legacy models
-                </h2>
-                <span className="text-fg-subtle text-xs">
-                  Kept for compatibility with pre-Polish-25 flows
-                </span>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                {LAUNCHER_VISIBLE_MODELS.map((model) => (
-                  <ModelCard
-                    key={model.id}
-                    model={model}
-                    picked={modelId === model.id}
-                    disabled={isPending}
-                    targetSeconds={previewSeconds}
-                    onPick={() => {
-                      setModelId(model.id);
-                      setPolish23Selected(false);
-                      setPolish25Selected(false);
-                    }}
-                  />
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-      </details>
-
-      {/* Variant count + auto-detected duration indicator */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <label htmlFor="variant-count" className="text-fg block text-sm font-medium">
-            Generate
-          </label>
-          <div className="mt-1 flex items-center gap-2">
-            <input
-              id="variant-count"
-              type="number"
-              min={SIMPLIFIED_MIN_VARIANTS}
-              max={SIMPLIFIED_MAX_VARIANTS}
-              step={1}
-              value={variantCount}
-              onChange={(e) => setVariantCount(clampVariantCount(Number(e.target.value)))}
-              disabled={isPending}
-              className="border-input bg-bg-elevated text-fg focus:ring-ring h-9 w-20 rounded-md border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-offset-1"
-            />
-            <span className="text-fg-muted text-sm">variations</span>
-          </div>
-        </div>
-        {/* Polish-20.0.1: length picker removed. Duration flows from
-            client-side detection → worker's Polish-19.3.1 fallback
-            chain. Users who need explicit control go to /advanced. */}
-        <div>
-          <p className="text-fg block text-sm font-medium">Length</p>
-          {detectedSourceSeconds != null ? (
-            <p className="text-fg-muted mt-1 text-sm">
-              Auto-detected: <span className="text-fg font-mono">{detectedSourceSeconds}s</span>{' '}
-              <span className="text-fg-subtle text-xs">from source video</span>
-            </p>
-          ) : (
-            <p className="text-fg-subtle mt-1 text-xs">Auto-detected from source video.</p>
-          )}
-          <p className="text-fg-subtle mt-1 text-xs">
-            Need an override? Use the{' '}
-            <Link
-              href={`/concepts/${conceptId}/generate/advanced`}
-              className="hover:text-fg underline underline-offset-4"
-            >
-              advanced form
-            </Link>
-            .
-          </p>
+          <span className="text-fg-muted text-sm">variations</span>
         </div>
       </div>
 
-      {/* Cost estimate */}
+      {/* Polish-25.2 Commit 12: cost estimate visually anchored —
+          larger + bolder headline number. Breakdown lives inside a
+          <details> collapse so users can see per-provider cost
+          detail without it competing with the total. Cost is
+          computed from the actual detected source duration; falls
+          back to the shared default only until detection completes. */}
       <div
         className={cn(
-          'border-border bg-bg-surface rounded-md border px-4 py-3 text-sm',
+          'border-border bg-bg-surface rounded-md border px-4 py-4',
           overCap && 'border-[color:var(--accent-negative)]/60',
         )}
       >
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-fg-muted">Estimated cost (your keys)</span>
-          <span className="text-fg font-mono text-base">
+          <span className="text-fg-muted text-sm">Estimated cost</span>
+          <span className="text-fg font-mono text-2xl font-semibold tracking-tight">
             {estimate ? `$${estimate.estimateUsd.toFixed(2)}` : '—'}
           </span>
         </div>
-        {estimate != null && detectionPending && (
+        {estimate != null && (
           <p className="text-fg-subtle mt-1 text-xs">
-            Cost calculated after source analysis — showing preview at{' '}
-            {SIMPLIFIED_DEFAULT_DURATION_SECONDS}s default.
+            {variantCount} variation{variantCount === 1 ? '' : 's'} · {previewSeconds}s each
+            {detectionPending && ' · preview at 30s default until source analysis completes'}
           </p>
         )}
-        {estimate != null && !detectionPending && (
-          <p className="text-fg-subtle mt-1 text-xs">
-            {variantCount} variation{variantCount === 1 ? '' : 's'} × {previewSeconds}s each
-          </p>
-        )}
+
+        <details className="group mt-3">
+          <summary className="text-fg-muted hover:text-fg cursor-pointer list-none text-xs transition-colors">
+            Cost breakdown
+            <span className="text-fg-subtle ml-1 group-open:hidden">▸</span>
+            <span className="text-fg-subtle ml-1 hidden group-open:inline">▾</span>
+          </summary>
+          <ul className="border-border-subtle mt-2 space-y-1 border-t pt-2 text-xs">
+            <li className="flex items-baseline justify-between gap-3">
+              <span className="text-fg-muted">Instant UGC render</span>
+              <span className="text-fg font-mono">Included</span>
+            </li>
+            <li className="flex items-baseline justify-between gap-3">
+              <span className="text-fg-muted">Claude script condense</span>
+              <span className="text-fg font-mono">~$0.02 / variant</span>
+            </li>
+            <li className="flex items-baseline justify-between gap-3">
+              <span className="text-fg-muted">Gemini vision (concept + avatar match)</span>
+              <span className="text-fg font-mono">~$0.05 / variant</span>
+            </li>
+          </ul>
+        </details>
+
         {overCap && (
-          <p className="mt-1 text-xs text-[color:var(--accent-negative)]">
-            Over your remaining daily cap (${remaining.toFixed(2)} left). Raise the cap on Settings,
-            reduce variants, or pick a cheaper model.
+          <p className="mt-3 text-xs text-[color:var(--accent-negative)]">
+            Over your remaining daily cap (${remaining.toFixed(2)} left). Raise the cap in Settings
+            or reduce variants.
           </p>
         )}
         {!hasProviderKey && (modelId != null || polish23Selected || polish25Selected) && (
-          <p className="mt-1 text-xs text-[color:var(--accent-negative)]">
+          <p className="mt-3 text-xs text-[color:var(--accent-negative)]">
             Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
             <Link
               href="/settings/connections"
@@ -516,30 +441,18 @@ export function SimplifiedGenerationForm({
   );
 }
 
-interface ModelCardProps {
-  model: VideoModel;
+interface Polish25PickerCardProps {
   picked: boolean;
   disabled: boolean;
-  targetSeconds: number;
-  onPick: () => void;
-}
-
-interface Polish23PickerCardProps {
-  picked: boolean;
-  disabled: boolean;
-  variantCount: number;
   onPick: () => void;
 }
 
 /**
- * Polish-25 Commit 2: MakeUGC pre-cast avatar picker card. Same
- * visual language as Polish23PickerCard but positioned FIRST in the
- * form (primary recommended pipeline). Character consistency
- * guaranteed at platform level (pre-cast avatar library) at
- * ~$0.05 per 60s ad — 20-50x cheaper than Polish-23.
+ * Instant UGC picker card. Only pipeline surfaced in the MVP
+ * (Polish-25.2 Commit 12 hid alternate-model dropdown). Pre-cast
+ * avatar library keeps character consistency guaranteed.
  */
-function Polish25PickerCard({ picked, disabled, variantCount, onPick }: Polish23PickerCardProps) {
-  const perVariantUsd = estimatePolish25CostPerVariantUsd().usd;
+function Polish25PickerCard({ picked, disabled, onPick }: Polish25PickerCardProps) {
   return (
     <button
       type="button"
@@ -570,98 +483,12 @@ function Polish25PickerCard({ picked, disabled, variantCount, onPick }: Polish23
       </div>
       <div className="text-fg text-sm font-semibold">{POLISH25_DISPLAY_NAME}</div>
       <div className="text-fg-muted text-xs leading-relaxed">{POLISH25_DESCRIPTION}</div>
-      <div className="text-fg-subtle mt-1 font-mono text-xs">
-        Included · Claude + Gemini tokens ~${perVariantUsd.toFixed(4)}/variant × {variantCount}
-      </div>
     </button>
   );
 }
 
-function Polish23PickerCard({ picked, disabled, variantCount, onPick }: Polish23PickerCardProps) {
-  const perVariantUsd = estimatePolish23CostPerVariantUsd(null).usd;
-  const totalUsd = perVariantUsd * variantCount;
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      disabled={disabled}
-      aria-pressed={picked}
-      className={cn(
-        'group relative flex w-full flex-col gap-2 rounded-md border p-4 text-left transition-colors',
-        picked
-          ? 'border-fg bg-fg/5'
-          : 'border-[color:var(--accent-positive)]/50 bg-bg-surface hover:border-fg/50',
-        disabled && 'cursor-not-allowed opacity-60',
-      )}
-    >
-      <span
-        className={cn(
-          'absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
-          'bg-[color:var(--accent-positive)]/15 text-[color:var(--accent-positive)]',
-        )}
-      >
-        New — Recommended
-      </span>
-      {picked && (
-        <CheckCircle2 className="text-fg absolute right-24 top-3 h-4 w-4" aria-hidden="true" />
-      )}
-      <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
-        Polish-23 pipeline
-      </div>
-      <div className="text-fg text-sm font-semibold">{POLISH23_DISPLAY_NAME}</div>
-      <div className="text-fg-muted text-xs leading-relaxed">{POLISH23_DESCRIPTION}</div>
-      <div className="text-fg-subtle mt-1 font-mono text-xs">
-        ~${perVariantUsd.toFixed(2)}/variant × {variantCount} = ${totalUsd.toFixed(2)}
-      </div>
-    </button>
-  );
-}
-
-function ModelCard({ model, picked, disabled, targetSeconds, onPick }: ModelCardProps) {
-  const recommended = isRecommendedTier(model.id);
-  // Card shows the per-variant cost hint at the CURRENT preset so
-  // switching between 8s/15s/30s/60s live-updates every card.
-  const defaultProviderId = getDefaultProviderForModel(model.id)?.id;
-  const costHint = defaultProviderId
-    ? formatModelCostHintPerVariant(model.id, defaultProviderId, targetSeconds)
-    : '';
-  const tierLabel =
-    model.qualityTier === 'budget'
-      ? 'Budget'
-      : model.qualityTier === 'recommended'
-        ? 'Recommended'
-        : 'Premium';
-
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      disabled={disabled}
-      aria-pressed={picked}
-      className={cn(
-        'group relative flex flex-col items-start gap-2 rounded-md border p-4 text-left transition-colors',
-        picked
-          ? 'border-fg bg-fg/5'
-          : recommended
-            ? 'border-[color:var(--accent-positive)]/50 bg-bg-surface hover:border-fg/50'
-            : 'border-border bg-bg-surface hover:border-fg/50',
-        disabled && 'cursor-not-allowed opacity-60',
-      )}
-    >
-      {recommended && !picked && (
-        <span className="bg-[color:var(--accent-positive)]/15 absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[color:var(--accent-positive)]">
-          Recommended
-        </span>
-      )}
-      {picked && (
-        <CheckCircle2 className="text-fg absolute right-3 top-3 h-4 w-4" aria-hidden="true" />
-      )}
-      <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
-        {tierLabel}
-      </div>
-      <div className="text-fg text-sm font-semibold">{model.displayName}</div>
-      <div className="text-fg-muted text-xs leading-relaxed">{model.description}</div>
-      <div className="text-fg-subtle mt-auto pt-2 font-mono text-xs">{costHint}</div>
-    </button>
-  );
-}
+// Polish-25.2 Commit 12: Polish23PickerCard + ModelCard components
+// removed. They were only referenced from the "Change model"
+// dropdown, which is hidden for MVP. Backend descriptors +
+// pipeline routing stay intact; when the model picker returns,
+// these components come back with them.

@@ -38,7 +38,7 @@ export default async function ConceptsPage() {
     <AppShell crumbs={[{ label: 'Concepts' }]} contentClass="max-w-3xl">
       <PageHeader
         title="Upload a concept"
-        subtitle="Point Ads Bot at a winning UGC video or static image. Gemini analyzes the persona + hook, then Polish-25 generates fresh variants."
+        subtitle="Point Ads Bot at a winning UGC video or static ad. Generate variations you can review and launch."
       />
 
       <Card>

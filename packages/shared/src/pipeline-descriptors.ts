@@ -59,7 +59,7 @@ export interface PipelineDescriptor {
 const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   heygen_avatar_talking_head: {
     pipeline: 'heygen_avatar_talking_head',
-    label: 'Avatar talking head (HeyGen)',
+    label: 'Avatar talking head',
     providerChoice: 'heygen',
     format: 'avatar_talking_head',
     workerEvent: 'generation/ugc.requested',
@@ -67,7 +67,7 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   },
   sora_2_single_shot: {
     pipeline: 'sora_2_single_shot',
-    label: 'Single shot (Sora 2)',
+    label: 'Single-shot video',
     providerChoice: 'openai',
     format: 'sora_single_shot',
     workerEvent: 'generation/sora.requested',
@@ -75,7 +75,7 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   },
   nano_banana_static_image: {
     pipeline: 'nano_banana_static_image',
-    label: 'Static image (Nano Banana)',
+    label: 'Static image',
     providerChoice: 'gemini',
     format: 'nano_banana_static_image',
     workerEvent: 'generation/nano-banana.requested',
@@ -88,7 +88,7 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   // shape from day one.
   polish23_higgsfield_veo_lite: {
     pipeline: 'polish23_higgsfield_veo_lite',
-    label: 'UGC ad (Higgsfield Soul + kie.ai Veo 3.1 Lite — Polish-23)',
+    label: 'Higgsfield UGC ad',
     providerChoice: 'gemini',
     format: 'polish23_higgsfield_veo_lite',
     workerEvent: 'generation/polish23-veo-lite.requested',
@@ -100,7 +100,7 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
   // Claude for script condensing + MakeUGC for the video render.
   polish25_makeugc: {
     pipeline: 'polish25_makeugc',
-    label: 'UGC ad (MakeUGC pre-cast avatar — Polish-25)',
+    label: 'Instant UGC ad',
     providerChoice: 'makeugc',
     format: 'polish25_makeugc',
     workerEvent: 'generation/polish25-makeugc.requested',

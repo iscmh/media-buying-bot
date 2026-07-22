@@ -148,33 +148,31 @@ export default async function JobReviewPage({ params }: Props) {
           </Badge>
         }
         meta={
+          // Polish-25.2 Commit 12: dropped the "Provider" cell (users
+          // shouldn't need to see `makeugc` / `heygen` etc. — that's
+          // implementation detail). Pipeline label kept but comes
+          // through the descriptor's user-facing label (e.g.
+          // "Instant UGC ad").
           <div className="grid w-full gap-x-6 gap-y-1 text-xs sm:grid-cols-2 md:grid-cols-4">
             <div>
               <span className="text-fg-subtle uppercase tracking-wider">Variants </span>
               <span className="font-mono">{job.variantCount ?? variants.length}</span>
             </div>
-            <div>
-              <span className="text-fg-subtle uppercase tracking-wider">Provider </span>
-              <span className="font-mono">
-                {jobPipelineDesc?.providerChoice ?? job.providerChoice ?? 'gemini+claude'}
-              </span>
-            </div>
-            {jobPipelineDesc ? (
+            {jobPipelineDesc && (
               <div>
-                <span className="text-fg-subtle uppercase tracking-wider">Pipeline </span>
+                <span className="text-fg-subtle uppercase tracking-wider">Format </span>
                 <span className="font-mono">{jobPipelineDesc.label}</span>
               </div>
-            ) : (
-              conceptType === 'ugc' && (
-                <div>
-                  <span className="text-fg-subtle uppercase tracking-wider">Format </span>
-                  <span className="font-mono">
-                    {job.format === 'cinematic_voiceover'
-                      ? 'cinematic voiceover'
-                      : 'avatar talking head'}
-                  </span>
-                </div>
-              )
+            )}
+            {!jobPipelineDesc && conceptType === 'ugc' && (
+              <div>
+                <span className="text-fg-subtle uppercase tracking-wider">Format </span>
+                <span className="font-mono">
+                  {job.format === 'cinematic_voiceover'
+                    ? 'cinematic voiceover'
+                    : 'avatar talking head'}
+                </span>
+              </div>
             )}
             {job.estimatedCostUsd != null && (
               <div>
@@ -213,12 +211,19 @@ export default async function JobReviewPage({ params }: Props) {
       </div>
 
       {isProcessing && (
+        // Polish-25.2 Commit 12: silent 4s meta refresh (no user-
+        // facing "this page auto-refreshes" copy). The Working card
+        // uses a pulsing dot so users see something IS happening
+        // without a countdown timer or refresh notice.
         <Card>
           <CardHeader>
-            <CardTitle>Working</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <span aria-hidden className="bg-fg inline-block h-2 w-2 animate-pulse rounded-full" />
+              Working
+            </CardTitle>
           </CardHeader>
           <CardContent className="text-fg-muted text-sm">
-            This page auto-refreshes every 4 seconds.
+            Generation in progress. The pipeline usually finishes in a few minutes.
             <meta httpEquiv="refresh" content="4" />
           </CardContent>
         </Card>

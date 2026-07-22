@@ -6,12 +6,13 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 export const metadata = { title: 'Agency BM' };
 
 /**
- * Agency BM partner referral information page. Phase 7 will turn this into
- * the real referral integration. In Phase 2a it's an informational stop
- * users can land on while connecting Meta, so we gate it on auth only —
- * not on completed onboarding.
+ * Agency BM partner referral information page. Informational stop
+ * users can land on while connecting Meta. Auth-only gate — not
+ * gated on completed onboarding.
  *
- * Skips the wizard progress bar via the layout's path-based check.
+ * Polish-25.2 Commit 12: user-facing copy rewritten to remove
+ * internal phase references. Partner integration timing is neutral
+ * ("a future update") rather than "Phase 7".
  */
 export default async function AgencyBMPage() {
   const supabase = await getSupabaseServerClient();
@@ -26,7 +27,7 @@ export default async function AgencyBMPage() {
         <h1 className="text-3xl font-bold">Agency Business Manager (recommended)</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           Disclosure: We may receive referral compensation from agency BM partners in a future
-          phase. None today — partner integrations land in Phase 7.
+          update. No such relationships exist today.
         </p>
       </header>
 
@@ -40,11 +41,11 @@ export default async function AgencyBMPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground text-sm">
-            Partners list will populate here once the partner integration ships. For now, you can{' '}
-            <Link href="/onboarding/meta" className="underline">
-              connect your existing BM
+            Partner integrations land in a future update. For now, you can{' '}
+            <Link href="/settings/connections?tab=meta" className="underline">
+              connect your existing Business Manager
             </Link>{' '}
-            and acknowledge the risks during onboarding.
+            from Settings when you&apos;re ready.
           </p>
         </CardContent>
       </Card>

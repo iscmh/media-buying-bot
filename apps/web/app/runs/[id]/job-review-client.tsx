@@ -277,11 +277,15 @@ export function JobReviewClient({ jobId, conceptType, variants: initial, launchS
       </div>
 
       {allDecided && approvedCount > 0 && (
+        // Polish-25.2 Commit 12: rewrote the "done" banner to remove
+        // the internal "Phase 4" reference. Reads as neutral product
+        // language regardless of whether the user has Meta connected
+        // yet.
         <div className="border-[color:var(--accent-positive)]/30 bg-[color:var(--accent-positive)]/10 mb-6 rounded-sm border p-4 text-sm">
-          <strong>Done — ready for launch.</strong>{' '}
+          <strong>Ready for launch.</strong>{' '}
           <span className="text-muted-foreground">
-            {approvedCount} approved variants are sitting in `approved` status. Phase 4 (Meta auto-
-            launch) will pick them up.
+            {approvedCount} approved variant{approvedCount === 1 ? '' : 's'} ready to launch to
+            Meta. Connect your Meta ad account when you&apos;re ready to push them live.
           </span>
         </div>
       )}

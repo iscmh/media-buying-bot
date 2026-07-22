@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.2.0';
+export const POLISH_VERSION = '25.2.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.2.0';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.2 Commit 11 — MakeUGC becomes platform-managed "Instant UGC"; BYOK trimmed to Claude + Gemini';
+  'Polish-25.2 Commit 12 — user-facing copy overhaul (kill Polish-XX / MakeUGC / Phase N terminology, tighten generate + run pages)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

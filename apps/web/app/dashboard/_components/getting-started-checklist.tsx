@@ -40,33 +40,38 @@ interface Item {
 }
 
 export function GettingStartedChecklist({ state }: Props) {
+  // Polish-25.2 Commit 12: consolidated steps 2 + 3 (they both
+  // pointed at /concepts, felt like the same step). Now:
+  //   1. Connect keys → /settings/connections
+  //   2. Upload a winning ad → /concepts
+  //   3. Generate a variation → /concepts (open the uploaded ad
+  //      + click Generate)
+  //   4. Connect Meta to launch → /settings/connections?tab=meta
+  // Descriptions kept short — no more Claude / Gemini specifics
+  // in the user-facing copy.
   const items: Item[] = [
     {
       done: state.keysConnected,
       title: 'Connect your API keys',
-      description:
-        'Claude + Gemini. Bring-your-own-key — pay providers directly. Instant UGC video is included on the platform.',
+      description: 'Bring-your-own-key for Claude + Gemini. Instant UGC video is included.',
       cta: { href: '/settings/connections', label: 'Connect keys' },
     },
     {
       done: state.hasConcept,
       title: 'Upload a winning ad',
-      description:
-        'Point the bot at a proven UGC video or static image. Gemini will analyze the persona + hook.',
-      cta: { href: '/concepts', label: 'Upload a concept' },
+      description: 'UGC video or static image — the ad you want to iterate off of.',
+      cta: { href: '/concepts', label: 'Upload' },
     },
     {
       done: state.hasGeneratedAd,
-      title: 'Generate your first variant',
-      description:
-        'One click to run the Instant UGC pipeline. Included on the platform — you only pay for Claude + Gemini token usage.',
-      cta: { href: '/concepts', label: 'Open Concepts' },
+      title: 'Generate a variation',
+      description: 'Open your uploaded ad, hit Generate, review the variants.',
+      cta: { href: '/concepts', label: 'Open concepts' },
     },
     {
       done: state.hasLaunchedAd,
       title: 'Launch on Meta',
-      description:
-        'Connect Meta when you’re ready to push a variant live. Optional — you can generate + review videos first.',
+      description: 'Connect Meta when you’re ready to push a variant live.',
       cta: { href: '/settings/connections?tab=meta', label: 'Connect Meta' },
     },
   ];
