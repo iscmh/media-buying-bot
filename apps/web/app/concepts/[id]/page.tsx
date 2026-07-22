@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { and, desc, eq, isNull } from 'drizzle-orm';
+import { ArrowRight } from 'lucide-react';
 import { getDb, schema } from '@mbb/db';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
@@ -60,54 +60,66 @@ export default async function ConceptDetailPage({ params }: Props) {
 
   const displayName = concept.name ?? concept.staticHeadline ?? labelForType(concept.contentType);
 
+  // Polish-25.1 Commit 10b: single-CTA layout. Hero preview + one
+  // primary Generate button; metadata + history collapsed into a
+  // <details> drawer at the bottom so returning users can still
+  // inspect the source + prior jobs without cluttering the primary
+  // action.
   return (
     <AppShell
       crumbs={[{ label: 'Concepts', href: '/concepts' }, { label: displayName }]}
       contentClass="max-w-3xl"
-      action={
-        <Button asChild>
-          <Link href={`/concepts/${concept.id}/generate`}>Generate variants</Link>
-        </Button>
-      }
     >
-      <div className="mb-6">
+      <div className="mb-4">
         <ConceptNameEdit conceptId={concept.id} initialName={displayName} />
-        <p className="text-fg-muted mt-1 text-sm">
+        <p className="text-fg-muted mt-1 text-xs">
           {labelForType(concept.contentType)}
           {concept.nicheTag ? ` · ${concept.nicheTag}` : ''}
-          {concept.sourcePlatform ? ` · from ${concept.sourcePlatform}` : ''}
           {' · uploaded '}
           <span className="font-mono">{formatDateTime(concept.createdAt)}</span>
         </p>
       </div>
 
-      {/* Hero preview — image or video based on contentType. Bucket
-          is private; previewUrl is a 1h signed URL generated above. */}
       {previewUrl && (
-        <div className="border-border mb-6 overflow-hidden border bg-black">
+        <div className="border-border mb-6 overflow-hidden rounded-md border bg-black">
           {concept.contentType === 'ugc' ? (
             <video
               src={previewUrl}
               controls
               playsInline
-              className="block max-h-[70vh] w-full bg-black object-contain"
+              className="block max-h-[65vh] w-full bg-black object-contain"
             />
           ) : (
             <img
               src={previewUrl}
               alt={displayName}
-              className="block max-h-[70vh] w-full bg-black object-contain"
+              className="block max-h-[65vh] w-full bg-black object-contain"
             />
           )}
         </div>
       )}
 
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle>Source metadata</CardTitle>
-          <CardDescription className="font-mono text-xs">{concept.fileUrl ?? '—'}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
+      <div className="mb-8 flex items-center justify-between gap-3">
+        <p className="text-fg-muted text-sm">
+          {ourJobs.length === 0
+            ? 'Ready to generate your first variant?'
+            : `${ourJobs.length} generation${ourJobs.length === 1 ? '' : 's'} so far.`}
+        </p>
+        <Button asChild size="lg" className="gap-2">
+          <Link href={`/concepts/${concept.id}/generate`}>
+            Generate variants
+            <ArrowRight className="h-4 w-4" aria-hidden />
+          </Link>
+        </Button>
+      </div>
+
+      <details className="border-border-subtle group mb-4 rounded-md border">
+        <summary className="text-fg-muted hover:text-fg cursor-pointer list-none px-4 py-2.5 text-xs font-medium uppercase tracking-wider transition-colors">
+          Source metadata
+          <span className="ml-2 text-[10px] normal-case tracking-normal">(click to expand)</span>
+        </summary>
+        <div className="border-border-subtle space-y-3 border-t p-4 text-sm">
+          <Row label="File" value={concept.fileUrl ?? '—'} mono />
           {concept.contentType === 'static' && (
             <>
               <Row label="Headline" value={concept.staticHeadline ?? '—'} />
@@ -128,24 +140,24 @@ export default async function ConceptDetailPage({ params }: Props) {
             <Row label="Original ROAS" value={String(concept.originalRoas)} mono />
           )}
           {concept.description && <Row label="Notes" value={concept.description} />}
-        </CardContent>
-      </Card>
+          {concept.sourcePlatform && <Row label="Source" value={concept.sourcePlatform} />}
+        </div>
+      </details>
 
-      <section>
-        <h2 className="text-fg mb-3 text-xs font-medium uppercase tracking-wider">
-          Generation history
-        </h2>
-        {ourJobs.length === 0 ? (
-          <p className="text-fg-muted border-border-subtle border-y py-8 text-center text-sm">
-            No generations yet. Use the button above to run one.
-          </p>
-        ) : (
-          <ul className="border-border-subtle border-y">
+      {ourJobs.length > 0 && (
+        <details className="border-border-subtle group rounded-md border">
+          <summary className="text-fg-muted hover:text-fg cursor-pointer list-none px-4 py-2.5 text-xs font-medium uppercase tracking-wider transition-colors">
+            Generation history
+            <span className="ml-2 text-[10px] normal-case tracking-normal">
+              ({ourJobs.length} run{ourJobs.length === 1 ? '' : 's'})
+            </span>
+          </summary>
+          <ul className="border-border-subtle border-t">
             {ourJobs.map((j) => (
               <li key={j.id}>
                 <Link
                   href={`/runs/${j.id}`}
-                  className="hover:bg-bg-surfaceHover/50 border-border-subtle flex items-center justify-between gap-3 border-b px-3 py-2.5 transition-colors last:border-b-0"
+                  className="hover:bg-bg-surfaceHover/50 border-border-subtle flex items-center justify-between gap-3 border-b px-4 py-2.5 transition-colors last:border-b-0"
                 >
                   <div className="flex min-w-0 flex-col gap-0.5 text-sm">
                     <span className="text-fg font-medium">
@@ -169,8 +181,8 @@ export default async function ConceptDetailPage({ params }: Props) {
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </details>
+      )}
     </AppShell>
   );
 }

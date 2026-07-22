@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.1.0';
+export const POLISH_VERSION = '25.1.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.1.0';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.1 Commit 10a — onboarding trimmed to tos→risk→keys; /apply + /waitlist removed; 4 connection surfaces consolidated to /settings/connections';
+  'Polish-25.1 Commit 10b — dashboard empty-state checklist + Polish-25 default in generate form + concept-detail simplified + sidebar auto-hides "Launched ads" for new users';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

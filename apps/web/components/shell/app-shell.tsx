@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { eq } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { getDb, schema } from '@mbb/db';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { Sidebar } from './sidebar';
@@ -34,19 +34,34 @@ export async function AppShell({ crumbs, action, contentClass, children }: Props
   if (!user) redirect('/login');
 
   // Admin flag — drives whether the Admin nav item renders.
+  // Polish-25.1 Commit 10b: also check for ≥1 launched ad so the
+  // sidebar can auto-hide the "Launched ads" nav row for new users
+  // whose only real routes are Dashboard + Concepts.
   const db = getDb();
-  const userRow = await db.query.users.findFirst({
-    where: eq(schema.users.id, user.id),
-    columns: { role: true },
-  });
+  const [userRow, launchedRow] = await Promise.all([
+    db.query.users.findFirst({
+      where: eq(schema.users.id, user.id),
+      columns: { role: true },
+    }),
+    db.query.launchedAds.findFirst({
+      where: and(
+        eq(schema.launchedAds.userId, user.id),
+        // 'launch_failed' rows aren't real launches; exclude them so
+        // an all-failed history doesn't keep the nav row visible.
+        ne(schema.launchedAds.status, 'launch_failed'),
+      ),
+      columns: { id: true },
+    }),
+  ]);
   const isAdmin = userRow?.role === 'admin';
+  const showLaunchedAds = !!launchedRow;
 
   const cookieStore = await cookies();
   const initialCollapsed = cookieStore.get('sidebar_collapsed')?.value === '1';
 
   return (
     <div className="bg-bg flex min-h-screen">
-      <Sidebar initialCollapsed={initialCollapsed} />
+      <Sidebar initialCollapsed={initialCollapsed} showLaunchedAds={showLaunchedAds} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar crumbs={crumbs} action={action} email={user.email ?? 'unknown'} isAdmin={isAdmin} />
         <main className={`mx-auto w-full flex-1 px-6 py-6 ${contentClass ?? 'max-w-7xl'}`}>

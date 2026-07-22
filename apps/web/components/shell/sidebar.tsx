@@ -16,16 +16,32 @@ interface NavItem {
  * Polish-18 Commit 2: primary sidebar holds only the three operator
  * routes. Connections / Settings / Account / Billing / Sign out moved
  * into the side-panel triggered by the avatar button in TopBar.
+ *
+ * Polish-25.1 Commit 10b: "Launched ads" auto-hides when the user
+ * has zero launched ads — dead route disappears for new users so the
+ * sidebar shows only what's actually reachable. Reappears the moment
+ * the first ad ships.
  */
-const PRIMARY_NAV: NavItem[] = [
+const PRIMARY_NAV_BASE: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/concepts', label: 'Concepts', icon: FileVideo },
-  { href: '/launched', label: 'Launched ads', icon: Rocket },
 ];
+
+const LAUNCHED_ADS_NAV: NavItem = {
+  href: '/launched',
+  label: 'Launched ads',
+  icon: Rocket,
+};
 
 interface Props {
   /** Initial collapse state read from cookie on the server. */
   initialCollapsed: boolean;
+  /**
+   * Polish-25.1 Commit 10b: show the "Launched ads" nav row only
+   * when the user has ≥1 launched ad. Server-computed in AppShell
+   * from a launched_ads existence check.
+   */
+  showLaunchedAds: boolean;
 }
 
 /**
@@ -33,9 +49,13 @@ interface Props {
  * to icon-only (~64px) — collapse state persists via cookie so it
  * survives navigations and reloads.
  */
-export function Sidebar({ initialCollapsed }: Props) {
+export function Sidebar({ initialCollapsed, showLaunchedAds }: Props) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = React.useState(initialCollapsed);
+  const primaryNav = React.useMemo(
+    () => (showLaunchedAds ? [...PRIMARY_NAV_BASE, LAUNCHED_ADS_NAV] : PRIMARY_NAV_BASE),
+    [showLaunchedAds],
+  );
 
   function toggleCollapse() {
     const next = !collapsed;
@@ -62,7 +82,7 @@ export function Sidebar({ initialCollapsed }: Props) {
       </div>
 
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
-        {PRIMARY_NAV.map((item) => (
+        {primaryNav.map((item) => (
           <NavLink key={item.href} item={item} pathname={pathname} collapsed={collapsed} />
         ))}
       </nav>

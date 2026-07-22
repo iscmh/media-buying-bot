@@ -29,16 +29,21 @@ export default async function ConceptsPage() {
     limit: 20,
   });
 
+  // Polish-25.1 Commit 10b: upload is the ONE thing this page is
+  // for. Header + upload tabs sit above the fold; recent list moves
+  // to a de-emphasized bottom section so first-time users see the
+  // primary action immediately + returning users still have their
+  // history one scroll away.
   return (
     <AppShell crumbs={[{ label: 'Concepts' }]} contentClass="max-w-3xl">
       <PageHeader
-        title="Concepts"
-        subtitle="Upload winning creatives. The bot uses them as references when generating fresh variants."
+        title="Upload a concept"
+        subtitle="Point Ads Bot at a winning UGC video or static image. Gemini analyzes the persona + hook, then Polish-25 generates fresh variants."
       />
 
       <Card>
         <CardHeader>
-          <CardTitle>Upload a concept</CardTitle>
+          <CardTitle>New concept</CardTitle>
           <CardDescription>
             Pick the path that matches the source — image with copy (Static) or video (UGC).
           </CardDescription>
@@ -48,15 +53,14 @@ export default async function ConceptsPage() {
         </CardContent>
       </Card>
 
-      <section className="mt-10">
-        <h2 className="text-fg mb-3 text-xs font-medium uppercase tracking-wider">
-          Recent concepts
-        </h2>
-        {recent.length === 0 ? (
-          <p className="text-fg-muted border-border-subtle border-y py-8 text-center text-sm">
-            No concepts yet. Upload one above to get started.
-          </p>
-        ) : (
+      {recent.length > 0 && (
+        <section className="mt-12">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-fg-muted text-xs font-medium uppercase tracking-wider">
+              Recent concepts
+            </h2>
+            <span className="text-fg-subtle text-xs">Last {recent.length}</span>
+          </div>
           <ul className="border-border-subtle border-y">
             {recent.map((c) => (
               <li key={c.id}>
@@ -82,8 +86,8 @@ export default async function ConceptsPage() {
               </li>
             ))}
           </ul>
-        )}
-      </section>
+        </section>
+      )}
     </AppShell>
   );
 }

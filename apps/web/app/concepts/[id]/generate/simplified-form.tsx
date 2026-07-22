@@ -93,18 +93,29 @@ export function SimplifiedGenerationForm({
   // Polish-21: when there's exactly one launcher-visible model
   // (Hedra Character 3), auto-select it and hide the picker. Multi-
   // model state (Polish-22+) falls back to "user must pick".
+  //
+  // Polish-25.1 Commit 10b: Polish-25 (MakeUGC) is now the DEFAULT
+  // selection on mount — the recommended primary pipeline shouldn't
+  // require an extra click. If the user has the Polish-25 keys
+  // connected, we start with polish25Selected=true and everything
+  // else cleared. If they don't, we fall back to soleModel so the
+  // form still has a picked state to submit against.
   const soleModel = getSoleLauncherModel();
+  const canDefaultPolish25 =
+    connectedProviders.claude.connected &&
+    connectedProviders.gemini.connected &&
+    connectedProviders.makeugc.connected;
   const [modelId, setModelId] = React.useState<VideoModelId | null>(
-    soleModel ? soleModel.id : null,
+    canDefaultPolish25 ? null : soleModel ? soleModel.id : null,
   );
   // Polish-23 Commit 3.5: alternative "picked" state that bypasses
   // the VideoModel descriptor system. Picking Polish-23 clears
   // modelId; picking any classic model clears polish23Selected.
   const [polish23Selected, setPolish23Selected] = React.useState(false);
   // Polish-25 Commit 2: MakeUGC pre-cast avatar picker. Mutually
-  // exclusive with polish23Selected + modelId — picking any one
-  // clears the other two.
-  const [polish25Selected, setPolish25Selected] = React.useState(false);
+  // exclusive with polish23Selected + modelId. Polish-25.1 Commit 10b:
+  // defaults to picked when the Polish-25 keys are all connected.
+  const [polish25Selected, setPolish25Selected] = React.useState(canDefaultPolish25);
   const [variantCount, setVariantCount] = React.useState<number>(SIMPLIFIED_DEFAULT_VARIANTS);
 
   const [error, setError] = React.useState<string | null>(null);
@@ -290,61 +301,73 @@ export function SimplifiedGenerationForm({
         }}
       />
 
-      {/* Polish-23 Commit 3.5: pipeline card retained as a
-          parallel provider while Polish-25 validates in production
-          testing. Selecting it clears Polish-25 + modelId. */}
-      <Polish23PickerCard
-        picked={polish23Selected}
-        disabled={isPending}
-        variantCount={variantCount}
-        onPick={() => {
-          setPolish23Selected(true);
-          setPolish25Selected(false);
-          setModelId(null);
-        }}
-      />
+      {/* Polish-25.1 Commit 10b: Polish-23 picker + classic model
+          picker + advanced-form link collapsed into a "Change model"
+          <details> block. Polish-25 is the default; users who need
+          an alternate pipeline (Higgsfield Soul / Hedra / OpenAI
+          Sora / Nano Banana) expand this section deliberately. The
+          collapse defaults to OPEN when Polish-25 is not the picked
+          state so users who arrive on the form without Polish-25
+          keys still see the fallback picker without clicking. */}
+      <details className="border-border-subtle group rounded-md border" open={!polish25Selected}>
+        <summary className="text-fg-muted hover:text-fg cursor-pointer list-none px-4 py-3 text-xs font-medium uppercase tracking-wider transition-colors">
+          Change model
+          <span className="ml-2 text-[10px] normal-case tracking-normal">
+            (Polish-23 Higgsfield · Hedra · Sora · Nano Banana)
+          </span>
+        </summary>
+        <div className="border-border-subtle space-y-4 border-t p-4">
+          <Polish23PickerCard
+            picked={polish23Selected}
+            disabled={isPending}
+            variantCount={variantCount}
+            onPick={() => {
+              setPolish23Selected(true);
+              setPolish25Selected(false);
+              setModelId(null);
+            }}
+          />
 
-      {/* Polish-20 → Polish-21: model picker. Hidden when a single
-          model is launcher-visible (Hedra Character 3 alone). The
-          model + provider line still surfaces so operators know what
-          they're about to spend on. Multi-model state reintroduces
-          the 3-card picker automatically. */}
-      {soleModel ? (
-        <section aria-labelledby="model-picker-heading" className="space-y-2">
-          <h2 id="model-picker-heading" className="text-fg text-sm font-medium">
-            Model
-          </h2>
-          <div className="border-border bg-bg-surface rounded-md border px-4 py-3 text-sm">
-            <span className="text-fg font-semibold">{soleModel.displayName}</span>{' '}
-            <span className="text-fg-subtle text-xs">— {soleModel.description}</span>
-          </div>
-        </section>
-      ) : (
-        <section aria-labelledby="model-picker-heading" className="space-y-3">
-          <div className="flex items-baseline justify-between">
-            <h2 id="model-picker-heading" className="text-fg text-sm font-medium">
-              Model <span className="text-[color:var(--accent-negative)]">*</span>
-            </h2>
-            <span className="text-fg-subtle text-xs">Pick a model to continue</span>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {LAUNCHER_VISIBLE_MODELS.map((model) => (
-              <ModelCard
-                key={model.id}
-                model={model}
-                picked={modelId === model.id}
-                disabled={isPending}
-                targetSeconds={previewSeconds}
-                onPick={() => {
-                  setModelId(model.id);
-                  setPolish23Selected(false);
-                  setPolish25Selected(false);
-                }}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+          {soleModel ? (
+            <section aria-labelledby="model-picker-heading" className="space-y-2">
+              <h2 id="model-picker-heading" className="text-fg text-sm font-medium">
+                Legacy model
+              </h2>
+              <div className="border-border bg-bg-surface rounded-md border px-4 py-3 text-sm">
+                <span className="text-fg font-semibold">{soleModel.displayName}</span>{' '}
+                <span className="text-fg-subtle text-xs">— {soleModel.description}</span>
+              </div>
+            </section>
+          ) : (
+            <section aria-labelledby="model-picker-heading" className="space-y-3">
+              <div className="flex items-baseline justify-between">
+                <h2 id="model-picker-heading" className="text-fg text-sm font-medium">
+                  Legacy models
+                </h2>
+                <span className="text-fg-subtle text-xs">
+                  Kept for compatibility with pre-Polish-25 flows
+                </span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {LAUNCHER_VISIBLE_MODELS.map((model) => (
+                  <ModelCard
+                    key={model.id}
+                    model={model}
+                    picked={modelId === model.id}
+                    disabled={isPending}
+                    targetSeconds={previewSeconds}
+                    onPick={() => {
+                      setModelId(model.id);
+                      setPolish23Selected(false);
+                      setPolish25Selected(false);
+                    }}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+      </details>
 
       {/* Variant count + auto-detected duration indicator */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -427,12 +450,10 @@ export function SimplifiedGenerationForm({
           <p className="mt-1 text-xs text-[color:var(--accent-negative)]">
             Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
             <Link
-              href={
-                polish25Selected || polish23Selected ? '/connections' : '/connections/ai-provider'
-              }
+              href="/settings/connections"
               className="hover:text-fg underline underline-offset-4"
             >
-              /connections
+              Settings → Connections
             </Link>{' '}
             to generate.
           </p>
