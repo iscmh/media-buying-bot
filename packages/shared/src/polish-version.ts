@@ -37,11 +37,16 @@
  */
 
 /**
- * Bumped on every Polish-21.0.* release. Format: MAJOR.MINOR.PATCH.
+ * Bumped on every Polish release. Format: MAJOR.MINOR.PATCH.
  * Change here → next `pnpm build` cascades through @mbb/jobs +
  * apps/web (both `transpilePackages`-linked to @mbb/shared).
+ *
+ * Polish-25.1 (MINOR bump from 25.0.x) marks the UX-layer overhaul
+ * shipping in Commit 10a + 10b. The pipeline / worker / BYOK
+ * plumbing (Commits 1-9) is untouched; only the presentation +
+ * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.0.9';
+export const POLISH_VERSION = '25.1.0';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -50,7 +55,7 @@ export const POLISH_VERSION = '25.0.9';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25 Commit 9 — restore bare refresh-makeugc-avatar-index id so stale Inngest manifest routes events correctly';
+  'Polish-25.1 Commit 10a — onboarding trimmed to tos→risk→keys; /apply + /waitlist removed; 4 connection surfaces consolidated to /settings/connections';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -15,8 +15,8 @@ export default function LoginPage() {
             <CardTitle>Log in</CardTitle>
             <CardDescription>
               New here?{' '}
-              <Link href="/apply" className="hover:text-fg underline-offset-4 hover:underline">
-                Apply for access
+              <Link href="/signup" className="hover:text-fg underline-offset-4 hover:underline">
+                Create an account
               </Link>
             </CardDescription>
           </CardHeader>

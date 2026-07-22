@@ -47,23 +47,17 @@ export default async function BillingRequiredPage({ searchParams }: Props) {
               </p>
             )}
             <div className="flex flex-col gap-2 sm:flex-row">
-              {reason === 'no_subscription' ? (
-                <Button asChild>
-                  <Link href="/apply">Apply for access</Link>
-                </Button>
-              ) : (
-                <Button asChild>
-                  <a href="https://whop.com/orders" target="_blank" rel="noopener noreferrer">
-                    Manage billing on Whop
-                  </a>
-                </Button>
-              )}
+              <Button asChild>
+                <a href="https://whop.com/orders" target="_blank" rel="noopener noreferrer">
+                  Manage billing on Whop
+                </a>
+              </Button>
               <Button asChild variant="outline">
-                <Link href="/apply">Re-apply</Link>
+                <Link href="/login">Back to log in</Link>
               </Button>
             </div>
             <p className="text-fg-subtle text-xs">
-              Trouble accessing your account? Reply to your invite email and we&apos;ll sort it.
+              Trouble accessing your account? Email support and we&apos;ll sort it.
             </p>
           </CardContent>
         </Card>
@@ -88,7 +82,7 @@ const REASON_COPY: Record<Reason, { title: string; description: string }> = {
   no_subscription: {
     title: 'Subscription required',
     description:
-      'Access to Ads Bot is by application. Apply below and we review every submission personally — usually within 48 hours.',
+      'Your account needs an active subscription to continue. Manage billing on Whop to add one.',
   },
   past_due: {
     title: 'Payment failed',

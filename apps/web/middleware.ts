@@ -1,15 +1,11 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_PATHS = new Set([
-  '/',
-  '/signup',
-  '/login',
-  '/waitlist',
-  '/apply',
-  '/legal/tos',
-  '/legal/privacy',
-]);
+// Polish-25.1 Commit 10a: /apply + /waitlist removed as public
+// routes — signup no longer gated by an application/invite flow.
+// `/` is still public but only serves a server-side redirect to
+// /login or /dashboard depending on auth state.
+const PUBLIC_PATHS = new Set(['/', '/signup', '/login', '/legal/tos', '/legal/privacy']);
 
 const PUBLIC_PREFIXES = [
   '/api/auth',

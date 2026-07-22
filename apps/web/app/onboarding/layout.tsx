@@ -7,20 +7,22 @@ import { OnboardingProgress } from './_components/progress-bar';
 
 export const dynamic = 'force-dynamic';
 
+// Polish-25.1 Commit 10a: chain trimmed to tos → risk → keys. Meta
+// + Telegram are no longer onboarding steps; they moved to opt-in
+// surfaces under /settings/connections.
 const PATH_TO_STEP: Record<string, OnboardingStep> = {
   '/onboarding/tos': 'tos',
   '/onboarding/risk': 'risk',
-  '/onboarding/meta': 'meta',
-  '/onboarding/telegram': 'telegram',
+  '/onboarding/keys': 'keys',
 };
 
 /**
  * Onboarding wizard layout.
  *
- * For the four wizard steps (tos/risk/meta/telegram): renders the progress
- * indicator above {children}. For other /onboarding/* paths (e.g. the
- * Phase 7 agency-bm placeholder), skips the progress bar and just wraps
- * children in a container.
+ * For the three wizard steps (tos/risk/keys): renders the progress
+ * indicator above {children}. For other /onboarding/* paths (e.g.
+ * the Phase 7 agency-bm placeholder), skips the progress bar and
+ * just wraps children in a container.
  *
  * Each child page is responsible for its own redirect logic — see
  * `requireOnboardingStep` helper.

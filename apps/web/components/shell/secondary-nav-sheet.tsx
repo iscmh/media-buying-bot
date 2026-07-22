@@ -28,16 +28,14 @@ interface Section {
   links: SectionLink[];
 }
 
+// Polish-25.1 Commit 10a: 4 connection surfaces consolidated into
+// /settings/connections. The section now has one link that opens
+// the tabbed page (Providers / Meta / Telegram).
 const SECTIONS: Section[] = [
   {
     title: 'Connections',
     icon: Plug,
-    links: [
-      { href: '/connections/meta', label: 'Meta' },
-      { href: '/connections/telegram', label: 'Telegram' },
-      { href: '/connections/ai-provider', label: 'AI provider' },
-      { href: '/connections/tools', label: 'Tools' },
-    ],
+    links: [{ href: '/settings/connections', label: 'All connections' }],
   },
   {
     title: 'Settings',

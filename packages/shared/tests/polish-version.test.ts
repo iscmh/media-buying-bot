@@ -6,16 +6,17 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // Regression pin: any typo (`25..0.2`, `25.0.2-beta`, trailing
     // whitespace) breaks downstream string-format consumers. Keep
     // the schema tight so a future bump can only land clean values.
-    // Polish-25 series launched with the MakeUGC pivot Commit 1.
-    expect(POLISH_VERSION).toMatch(/^2(1|3|4|5)\.0\.\d+$/);
+    // Polish-25 launched patch-only (25.0.x) with the MakeUGC pivot;
+    // Polish-25.1 is the first MINOR bump for the UX-layer overhaul.
+    expect(POLISH_VERSION).toMatch(/^2(1|3|4|5)\.\d+\.\d+$/);
   });
 
-  it('is currently 25.0.9 (Polish-25 Commit 9 — bump this pin deliberately on the next hotfix)', () => {
+  it('is currently 25.1.0 (Polish-25.1 Commit 10a — bump this pin deliberately on the next release)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('25.0.9');
+    expect(POLISH_VERSION).toBe('25.1.0');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

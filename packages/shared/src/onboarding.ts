@@ -1,22 +1,33 @@
 import { z } from 'zod';
 
-export const ONBOARDING_STEPS = ['tos', 'risk', 'meta', 'telegram'] as const;
+/**
+ * Polish-25.1 Commit 10a: onboarding trimmed to the 3 steps needed
+ * for the Polish-25 creative-generation flow.
+ *   - tos:   accept terms of service
+ *   - risk:  ack the Meta-enforcement risk education
+ *   - keys:  paste + verify the 3 required BYOK keys
+ *            (Claude / Gemini / MakeUGC)
+ *
+ * Meta + Telegram are NO LONGER required at signup. They're opt-in
+ * surfaces at /settings/connections, prompted at the point of use
+ * (Meta when the user hits "Launch to Meta"; Telegram in settings).
+ * A signed-up user can generate ads without ever touching either.
+ */
+export const ONBOARDING_STEPS = ['tos', 'risk', 'keys'] as const;
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 /** Human labels for the wizard progress bar. */
 export const ONBOARDING_STEP_LABELS: Record<OnboardingStep, string> = {
   tos: 'Terms',
   risk: 'Risk',
-  meta: 'Meta',
-  telegram: 'Telegram',
+  keys: 'Keys',
 };
 
 /** Map step → URL path. Single source of truth for redirects. */
 export const ONBOARDING_STEP_PATHS: Record<OnboardingStep, string> = {
   tos: '/onboarding/tos',
   risk: '/onboarding/risk',
-  meta: '/onboarding/meta',
-  telegram: '/onboarding/telegram',
+  keys: '/onboarding/keys',
 };
 
 /**
