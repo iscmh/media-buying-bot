@@ -26,6 +26,12 @@ export interface ChecklistState {
   hasConcept: boolean;
   hasGeneratedAd: boolean;
   hasLaunchedAd: boolean;
+  // Polish-25.2 Commit 16a: when a concept exists, step 3's CTA
+  // deep-links to that concept's generate page instead of dumping
+  // users back on /concepts. Walkthrough finding: users reached
+  // /concepts, saw their upload sitting there, and had no visible
+  // signal that they needed to click INTO the row to hit Generate.
+  firstConceptId: string | null;
 }
 
 interface Props {
@@ -66,7 +72,9 @@ export function GettingStartedChecklist({ state }: Props) {
       done: state.hasGeneratedAd,
       title: 'Generate a variation',
       description: 'Open your uploaded ad, hit Generate, review the variants.',
-      cta: { href: '/concepts', label: 'Open concepts' },
+      cta: state.firstConceptId
+        ? { href: `/concepts/${state.firstConceptId}/generate`, label: 'Generate now' }
+        : { href: '/concepts', label: 'Open concepts' },
     },
     {
       done: state.hasLaunchedAd,

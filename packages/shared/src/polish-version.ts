@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.2.4';
+export const POLISH_VERSION = '25.2.5';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.2.4';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.2 Commit 15 — Offer URL validation (client + server) + Meta rejection banner on run page';
+  'Polish-25.2 Commit 16a — walkthrough follow-up polish (checklist deep-link, cost estimator source duration, timeline running-row polish, agency BM copy)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

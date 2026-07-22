@@ -116,6 +116,7 @@ export default async function DashboardPage({ searchParams }: Props) {
     hasConcept: !!conceptRow,
     hasGeneratedAd: !!generatedRow,
     hasLaunchedAd: !!launchedRow,
+    firstConceptId: conceptRow?.id ?? null,
   };
   // Empty-state mode when no launched-ad spend has landed yet. The
   // metrics grid + spend chart + per-ad table stay hidden until

@@ -78,11 +78,12 @@ function TimelineRow({ step, isLast }: { step: TimelineStep; isLast: boolean }) 
           ? 'text-fg'
           : 'text-fg-subtle';
 
+  const isRunning = step.status === 'running';
   return (
     <li className="flex gap-3 pb-3 last:pb-0">
       <div className="flex flex-col items-center">
         <div className="flex h-5 items-center">
-          <Icon className={cn('h-4 w-4', iconColor, step.status === 'running' && 'animate-spin')} />
+          <Icon className={cn('h-4 w-4', iconColor, isRunning && 'animate-spin')} />
         </div>
         {!isLast && (
           <div
@@ -93,20 +94,37 @@ function TimelineRow({ step, isLast }: { step: TimelineStep; isLast: boolean }) 
           />
         )}
       </div>
-      <div className="min-w-0 flex-1 pb-2">
+      {/* Polish-25.2 Commit 16a: running row now gets a subtle inset
+          background + a pulsing "in progress" dot so it reads as
+          "this is happening right now" even on a static screenshot
+          (walkthrough finding: users assumed the page had frozen when
+          scripts step ran for 30s). */}
+      <div
+        className={cn(
+          'min-w-0 flex-1 pb-2',
+          isRunning && 'bg-bg-inset/50 -my-1 -ml-2 rounded-md px-2 py-1',
+        )}
+      >
         <p
           className={cn(
-            'text-sm',
+            'flex items-center gap-2 text-sm',
             step.status === 'pending' ? 'text-fg-subtle' : 'text-fg',
-            step.status === 'running' && 'font-medium',
+            isRunning && 'font-medium',
           )}
         >
-          {step.label}
+          <span>{step.label}</span>
+          {isRunning && (
+            <span
+              aria-hidden
+              className="bg-fg/60 inline-block h-1.5 w-1.5 animate-pulse rounded-full"
+            />
+          )}
         </p>
         <div className="text-fg-muted font-mono text-xs">
           {step.at && <span>{formatDateTime(new Date(step.at))}</span>}
           {step.at && step.detail && <span> · </span>}
           {step.detail && <span>{step.detail}</span>}
+          {isRunning && !step.at && !step.detail && <span>in progress…</span>}
         </div>
       </div>
     </li>

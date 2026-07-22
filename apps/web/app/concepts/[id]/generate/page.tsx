@@ -31,10 +31,42 @@ export default async function GenerateRequestPage({ params }: Props) {
       eq(schema.concepts.userId, userId),
       isNull(schema.concepts.deletedAt),
     ),
-    columns: { id: true, contentType: true, fileUrl: true, staticHeadline: true, nicheTag: true },
+    columns: {
+      id: true,
+      contentType: true,
+      fileUrl: true,
+      staticHeadline: true,
+      nicheTag: true,
+      // Polish-25.2 Commit 16a: metadata.analysis.video_duration_seconds
+      // is populated by Gemini at analyze-concept time. Read it here so
+      // the cost estimator reflects the real source duration instead of
+      // the 30s fallback (operator report: 45s and 60s uploads were
+      // being priced as 30s).
+      metadata: true,
+    },
   });
   if (!concept) notFound();
   if (concept.contentType !== 'static' && concept.contentType !== 'ugc') notFound();
+
+  // Extract Gemini's measured duration from analysis metadata, if any.
+  // Analyzer may write `video_duration_seconds: 0` when it genuinely
+  // can't measure — treat 0 as "unknown" and fall through to the
+  // simplified-form's 30s default.
+  const analysisMeta =
+    concept.metadata &&
+    typeof concept.metadata === 'object' &&
+    'analysis' in (concept.metadata as Record<string, unknown>)
+      ? ((concept.metadata as Record<string, unknown>)['analysis'] as Record<
+          string,
+          unknown
+        > | null)
+      : null;
+  const analysisDurationRaw =
+    analysisMeta && typeof analysisMeta['video_duration_seconds'] === 'number'
+      ? (analysisMeta['video_duration_seconds'] as number)
+      : null;
+  const detectedSourceSeconds =
+    analysisDurationRaw != null && analysisDurationRaw > 0 ? Math.round(analysisDurationRaw) : null;
 
   // Polish-14.1: sign a short-lived URL for UGC sources so the form can
   // both preview and read duration client-side. The simplified form
@@ -71,7 +103,7 @@ export default async function GenerateRequestPage({ params }: Props) {
       <SimplifiedGenerationForm
         conceptId={concept.id}
         sourcePreviewUrl={sourcePreviewUrl}
-        detectedSourceSeconds={null}
+        detectedSourceSeconds={detectedSourceSeconds}
         connectedProviders={connectedProviders}
         spentTodayUsd={capCheck.spentTodayUsd}
         capUsd={capCheck.capUsd}
