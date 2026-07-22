@@ -7,7 +7,6 @@ import { TOOL_PROVIDER_META, type ToolProviderName } from '@mbb/shared';
 import { Button } from '@/components/ui/button';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingStep } from '@/lib/onboarding-gate';
-import { ProviderCard } from '@/app/connections/ai-provider/provider-card';
 import { ToolCard } from '@/app/connections/tools/tool-card';
 
 export const metadata = { title: 'Connect keys' };
@@ -15,45 +14,35 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Polish-25.1 Commit 10a: BYOK step. Third + final onboarding step
- * (after tos + risk). Prompts the user to paste + verify the 3 keys
- * the Polish-25 creative-generation pipeline needs:
+ * (after tos + risk).
+ *
+ * Polish-25.2 Commit 11: prompts for the TWO remaining BYOK keys —
+ * MakeUGC (rebranded "Instant UGC" in the UI) is now platform-
+ * managed. Instant UGC video generation uses a shared operator-run
+ * MakeUGC subscription pool; users never paste a MakeUGC key.
  *
  *   - Claude   (tool_connections) — script condenser
  *   - Gemini   (tool_connections) — source vision analysis + avatar
  *                                    thumbnail vision
- *   - MakeUGC  (ai_provider_connections) — video renderer
  *
- * All three must be active for onboarding to be considered complete
+ * Both must be active for onboarding to be considered complete
  * (see packages/db/src/onboarding.ts). Users can go back to
  * /settings/connections later to add optional providers (heygen,
  * hedra, wavespeed_ai, openai, replicate, elevenlabs) — those aren't
- * required for the Polish-25 default flow.
+ * required for the Instant UGC default flow.
  */
 export default async function OnboardingKeysPage() {
   const { userId } = await requireOnboardingStep('keys');
   const db = getDb();
 
-  // Reuse the same queries the /connections pages do — the ProviderCard
-  // + ToolCard components own the paste + verify UX.
-  const [toolRows, makeugcRow] = await Promise.all([
-    db.query.toolConnections.findMany({
-      where: and(
-        eq(schema.toolConnections.userId, userId),
-        isNull(schema.toolConnections.deletedAt),
-        inArray(schema.toolConnections.provider, ['claude', 'gemini']),
-      ),
-      columns: { provider: true, apiKeyVerifiedAt: true, status: true },
-    }),
-    db.query.aiProviderConnections.findFirst({
-      where: and(
-        eq(schema.aiProviderConnections.userId, userId),
-        eq(schema.aiProviderConnections.provider, 'makeugc'),
-        eq(schema.aiProviderConnections.status, 'active'),
-        isNull(schema.aiProviderConnections.deletedAt),
-      ),
-      columns: { apiKeyVerifiedAt: true, lastVerifiedAt: true, tier: true },
-    }),
-  ]);
+  const toolRows = await db.query.toolConnections.findMany({
+    where: and(
+      eq(schema.toolConnections.userId, userId),
+      isNull(schema.toolConnections.deletedAt),
+      inArray(schema.toolConnections.provider, ['claude', 'gemini']),
+    ),
+    columns: { provider: true, apiKeyVerifiedAt: true, status: true },
+  });
   const toolByProvider = new Map<ToolProviderName, (typeof toolRows)[number]>();
   for (const r of toolRows) toolByProvider.set(r.provider as ToolProviderName, r);
   const claudeConn = toolByProvider.get('claude');
@@ -61,9 +50,8 @@ export default async function OnboardingKeysPage() {
 
   const claudeReady = claudeConn?.status === 'active';
   const geminiReady = geminiConn?.status === 'active';
-  const makeugcReady = !!makeugcRow;
-  const allReady = claudeReady && geminiReady && makeugcReady;
-  const readyCount = [claudeReady, geminiReady, makeugcReady].filter(Boolean).length;
+  const allReady = claudeReady && geminiReady;
+  const readyCount = [claudeReady, geminiReady].filter(Boolean).length;
 
   // If a user lands here already complete, they'll be bounced by the
   // requireOnboardingStep helper. Belt-and-suspenders: also short-circuit
@@ -80,15 +68,15 @@ export default async function OnboardingKeysPage() {
       <header className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight">Connect your keys</h1>
         <p className="text-fg-muted mt-2 text-sm leading-relaxed">
-          Ads Bot is bring-your-own-key. Paste your API keys for the three services below and
-          we&apos;ll verify each one. You&apos;ll be able to generate your first ad the moment all
-          three turn green.
+          Ads Bot is bring-your-own-key for Claude and Gemini. Paste an API key for each and
+          we&apos;ll verify it. Instant UGC video generation is included on the platform — no extra
+          key needed.
         </p>
       </header>
 
       <div className="border-border-subtle text-fg-muted mb-6 flex items-center justify-between rounded-md border px-4 py-3 text-xs">
         <span>
-          <span className="text-fg font-medium">{readyCount} of 3</span> keys connected
+          <span className="text-fg font-medium">{readyCount} of 2</span> keys connected
         </span>
         {allReady && (
           <span className="flex items-center gap-1.5 text-[color:var(--accent-positive)]">
@@ -119,23 +107,11 @@ export default async function OnboardingKeysPage() {
           connected={geminiReady}
           verifiedDisplay={geminiConn ? formatDateTime(geminiConn.apiKeyVerifiedAt) : null}
         />
-        <ProviderCard
-          provider="makeugc"
-          connected={
-            makeugcRow
-              ? {
-                  apiKeyVerifiedAt: makeugcRow.apiKeyVerifiedAt,
-                  lastVerifiedAt: makeugcRow.lastVerifiedAt,
-                  tier: makeugcRow.tier,
-                }
-              : null
-          }
-        />
       </div>
 
       <div className="mt-8 flex items-center justify-between gap-3">
         <p className="text-fg-subtle text-xs">
-          Need more providers? Add HeyGen, Hedra, WaveSpeed AI, or others any time from{' '}
+          Need alternate pipelines? Add HeyGen, Hedra, WaveSpeed AI, or others any time from{' '}
           <Link href="/settings/connections" className="text-fg underline-offset-4 hover:underline">
             Settings → Connections
           </Link>
@@ -143,7 +119,7 @@ export default async function OnboardingKeysPage() {
         </p>
         <Button asChild disabled={!allReady} variant={allReady ? 'primary' : 'secondary'}>
           <Link href="/dashboard" aria-disabled={!allReady}>
-            {allReady ? 'Continue to dashboard' : 'Connect all 3 to continue'}
+            {allReady ? 'Continue to dashboard' : 'Connect both to continue'}
           </Link>
         </Button>
       </div>

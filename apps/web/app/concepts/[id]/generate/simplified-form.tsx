@@ -94,17 +94,20 @@ export function SimplifiedGenerationForm({
   // (Hedra Character 3), auto-select it and hide the picker. Multi-
   // model state (Polish-22+) falls back to "user must pick".
   //
-  // Polish-25.1 Commit 10b: Polish-25 (MakeUGC) is now the DEFAULT
-  // selection on mount — the recommended primary pipeline shouldn't
-  // require an extra click. If the user has the Polish-25 keys
-  // connected, we start with polish25Selected=true and everything
-  // else cleared. If they don't, we fall back to soleModel so the
-  // form still has a picked state to submit against.
+  // Polish-25.1 Commit 10b: Polish-25 (Instant UGC) is now the
+  // DEFAULT selection on mount — the recommended primary pipeline
+  // shouldn't require an extra click. If the user has the Instant
+  // UGC keys connected, we start with polish25Selected=true and
+  // everything else cleared. If they don't, we fall back to
+  // soleModel so the form still has a picked state to submit
+  // against.
+  //
+  // Polish-25.2 Commit 11: MakeUGC is platform-managed — the gate
+  // now only checks Claude + Gemini BYOK. The MakeUGC key comes
+  // from the MAKEUGC_MANAGED_KEY env var at worker submit time.
   const soleModel = getSoleLauncherModel();
   const canDefaultPolish25 =
-    connectedProviders.claude.connected &&
-    connectedProviders.gemini.connected &&
-    connectedProviders.makeugc.connected;
+    connectedProviders.claude.connected && connectedProviders.gemini.connected;
   const [modelId, setModelId] = React.useState<VideoModelId | null>(
     canDefaultPolish25 ? null : soleModel ? soleModel.id : null,
   );
@@ -191,12 +194,13 @@ export function SimplifiedGenerationForm({
   if (!connectedProviders.replicate.connected) polish23MissingKeys.push('Replicate');
   const hasPolish23Keys = polish23MissingKeys.length === 0;
 
-  // Polish-25 Commit 2: MakeUGC gate. Needs Claude (script condenser)
-  // + Gemini (concept vision analysis via analyze-concept) + MakeUGC.
+  // Polish-25 Commit 2 + Polish-25.2 Commit 11: Instant UGC gate.
+  // Needs Claude (script condenser) + Gemini (concept vision
+  // analysis via analyze-concept). MakeUGC is platform-managed
+  // post-Commit-11 — no user key check.
   const polish25MissingKeys: string[] = [];
   if (!connectedProviders.claude.connected) polish25MissingKeys.push('Claude');
   if (!connectedProviders.gemini.connected) polish25MissingKeys.push('Gemini');
-  if (!connectedProviders.makeugc.connected) polish25MissingKeys.push('MakeUGC');
   const hasPolish25Keys = polish25MissingKeys.length === 0;
 
   const legacyMissingKeys: string[] = [];
@@ -536,7 +540,6 @@ interface Polish23PickerCardProps {
  */
 function Polish25PickerCard({ picked, disabled, variantCount, onPick }: Polish23PickerCardProps) {
   const perVariantUsd = estimatePolish25CostPerVariantUsd().usd;
-  const totalUsd = perVariantUsd * variantCount;
   return (
     <button
       type="button"
@@ -563,12 +566,12 @@ function Polish25PickerCard({ picked, disabled, variantCount, onPick }: Polish23
         <CheckCircle2 className="text-fg absolute right-24 top-3 h-4 w-4" aria-hidden="true" />
       )}
       <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
-        Polish-25 pipeline
+        Instant UGC
       </div>
       <div className="text-fg text-sm font-semibold">{POLISH25_DISPLAY_NAME}</div>
       <div className="text-fg-muted text-xs leading-relaxed">{POLISH25_DESCRIPTION}</div>
       <div className="text-fg-subtle mt-1 font-mono text-xs">
-        ~${perVariantUsd.toFixed(4)}/variant × {variantCount} = ${totalUsd.toFixed(4)}
+        Included · Claude + Gemini tokens ~${perVariantUsd.toFixed(4)}/variant × {variantCount}
       </div>
     </button>
   );

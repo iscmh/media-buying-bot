@@ -10,14 +10,16 @@ import { cn } from '@/lib/utils';
  * signal. This checklist replaces it with a task list that mirrors
  * the real journey to first ad:
  *
- *   1. Keys connected (Claude + Gemini + MakeUGC)
+ *   1. Keys connected (Claude + Gemini — the two remaining BYOK
+ *      keys after Polish-25.2 Commit 11 moved MakeUGC to platform-
+ *      managed Instant UGC)
  *   2. First concept uploaded
- *   3. First ad generated (any completed generation job)
+ *   3. First variant generated
+ *   4. First ad launched on Meta
  *
  * Each row shows a green check when done, a hollow circle + CTA
- * link when not. Once all 3 are done, the checklist gives way to
- * the "Launch your first ad on Meta" nudge — the last step before
- * live-spend metrics start populating.
+ * link when not. As soon as launched-ad spend lands, the dashboard
+ * flips back to the full metrics layout.
  */
 export interface ChecklistState {
   keysConnected: boolean;
@@ -42,7 +44,8 @@ export function GettingStartedChecklist({ state }: Props) {
     {
       done: state.keysConnected,
       title: 'Connect your API keys',
-      description: 'Claude + Gemini + MakeUGC. Bring-your-own-key — pay providers directly.',
+      description:
+        'Claude + Gemini. Bring-your-own-key — pay providers directly. Instant UGC video is included on the platform.',
       cta: { href: '/settings/connections', label: 'Connect keys' },
     },
     {
@@ -55,7 +58,8 @@ export function GettingStartedChecklist({ state }: Props) {
     {
       done: state.hasGeneratedAd,
       title: 'Generate your first variant',
-      description: 'One click to run the Polish-25 MakeUGC pipeline. ~$0.07 per 60-second variant.',
+      description:
+        'One click to run the Instant UGC pipeline. Included on the platform — you only pay for Claude + Gemini token usage.',
       cta: { href: '/concepts', label: 'Open Concepts' },
     },
     {

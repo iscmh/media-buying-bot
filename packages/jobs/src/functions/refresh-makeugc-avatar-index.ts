@@ -64,6 +64,7 @@ import { getDb, schema } from '@mbb/db';
 import { POLISH_VERSION } from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
+import { resolveMakeugcKey } from '../lib/resolve-makeugc-key';
 import {
   MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
   parseMakeugcAvatarVisionAnalysis,
@@ -220,19 +221,23 @@ export async function refreshMakeugcAvatarIndexCore(
 
   // Step A: fetch live library.
   const liveAvatars = await step.run('fetch-avatar-list', async () => {
-    let keys;
+    // Polish-25.2 Commit 11: platform key preferred; user BYOK
+    // falls back for dev environments where MAKEUGC_MANAGED_KEY
+    // isn't set on the refresh user's context.
+    let makeugcKey: string;
     try {
-      keys = await loadDecryptedKeys(userId, ['makeugc']);
+      const resolved = await resolveMakeugcKey({ userId });
+      makeugcKey = resolved.apiKey;
     } catch (err) {
       if (err instanceof MissingProviderKeyError) {
         throw new NonRetriableError(
-          `refresh-makeugc-avatar-index: MakeUGC BYOK missing for refresh user ${userId}. ` +
-            err.message,
+          `refresh-makeugc-avatar-index: no MakeUGC key available for refresh ` +
+            `(env MAKEUGC_MANAGED_KEY missing + user ${userId} has no BYOK).`,
         );
       }
       throw err;
     }
-    const r = await listMakeugcAvatars({ userId, apiKey: keys.makeugc! });
+    const r = await listMakeugcAvatars({ userId, apiKey: makeugcKey });
     if (!r.ok) {
       throw new NonRetriableError(
         `refresh-makeugc-avatar-index: listMakeugcAvatars failed — ` +
@@ -286,14 +291,20 @@ export async function refreshMakeugcAvatarIndexCore(
     if (diff.toAnalyzeAvatars.length === 0) {
       return { attempted: 0, successful: 0, failed: 0, results: [] };
     }
+    // Polish-25.2 Commit 11: MakeUGC is platform-managed so we no
+    // longer need a MakeUGC row for the analyze batch; only Gemini
+    // BYOK is required here (the vision-analysis pass uses the
+    // refresh user's Gemini key). The listMakeugcAvatars call
+    // above already resolved the MakeUGC key via
+    // resolveMakeugcKey; the analyze step doesn't touch MakeUGC.
     let keys;
     try {
-      keys = await loadDecryptedKeys(userId, ['gemini', 'makeugc']);
+      keys = await loadDecryptedKeys(userId, ['gemini']);
     } catch (err) {
       if (err instanceof MissingProviderKeyError) {
         throw new NonRetriableError(
           `refresh-makeugc-avatar-index: Gemini BYOK missing for refresh user ${userId}. ` +
-            `${err.message}. MakeUGC key OK but vision analysis needs Gemini.`,
+            `${err.message}. Vision analysis needs Gemini.`,
         );
       }
       throw err;

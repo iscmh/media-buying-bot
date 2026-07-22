@@ -58,6 +58,7 @@ import { POLISH_VERSION, Polish23PersonaSchema } from '@mbb/shared';
 import { inngest } from '../client';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
+import { resolveMakeugcKey } from '../lib/resolve-makeugc-key';
 import {
   POLISH25_CLAUDE_SCRIPT_CONDENSER_SYSTEM_PROMPT,
   checkPolish25CondensedScript,
@@ -340,12 +341,18 @@ export const generatePolish25Makeugc = inngest.createFunction(
     const match = await step.run(
       'makeugc-avatar-match',
       async (): Promise<MakeugcMatchStepReturn> => {
-        let keys;
+        // Polish-25.2 Commit 11: MakeUGC is platform-managed. The
+        // resolver prefers MAKEUGC_MANAGED_KEY env, falls back to
+        // the user's BYOK row for dev + legacy contexts.
+        let makeugcKey: string;
         try {
-          keys = await loadDecryptedKeys(userId, ['makeugc']);
+          const resolved = await resolveMakeugcKey({ userId });
+          makeugcKey = resolved.apiKey;
         } catch (err) {
           if (err instanceof MissingProviderKeyError) {
-            const msg = `Polish-25 requires MakeUGC BYOK key. ${err.message}`;
+            const msg =
+              'Polish-25 Instant UGC platform key is not configured. ' +
+              'Set MAKEUGC_MANAGED_KEY env or ask an operator to connect one.';
             console.error(`[polish-25-worker] ${msg}`);
             await markJobFailed(jobId, userId, msg, 0);
             throw new NonRetriableError(msg);
@@ -359,7 +366,7 @@ export const generatePolish25Makeugc = inngest.createFunction(
         // and small enough to not need pre-analysis.
         const voicesResult = await listMakeugcVoicesCached({
           userId,
-          apiKey: keys.makeugc!,
+          apiKey: makeugcKey,
           gender: genderFilter,
           language: 'English',
           generationJobId: jobId,
@@ -472,7 +479,7 @@ export const generatePolish25Makeugc = inngest.createFunction(
         );
         const avatarsResult = await listMakeugcAvatarsCached({
           userId,
-          apiKey: keys.makeugc!,
+          apiKey: makeugcKey,
           gender: genderFilter,
           generationJobId: jobId,
         });
@@ -539,7 +546,9 @@ export const generatePolish25Makeugc = inngest.createFunction(
     }> = [];
 
     const videoId = await step.run('makeugc-submit-with-retry', async () => {
-      const keys = await loadDecryptedKeys(userId, ['makeugc']);
+      // Polish-25.2 Commit 11: resolver picks up MAKEUGC_MANAGED_KEY
+      // env; falls back to BYOK for dev + legacy contexts.
+      const { apiKey: makeugcKey } = await resolveMakeugcKey({ userId });
       for (let attempt = 0; attempt <= MAKEUGC_SUBMIT_MAX_RETRIES; attempt++) {
         if (attempt > 0) {
           console.warn(
@@ -552,7 +561,7 @@ export const generatePolish25Makeugc = inngest.createFunction(
         try {
           submit = await submitMakeugcVideo({
             userId,
-            apiKey: keys.makeugc!,
+            apiKey: makeugcKey,
             avatarId: match.avatarId,
             voiceId: match.voiceId,
             voiceScript: condensedScript,
@@ -621,10 +630,11 @@ export const generatePolish25Makeugc = inngest.createFunction(
     for (let pollAttempt = 0; pollAttempt < MAKEUGC_POLL_MAX_ATTEMPTS; pollAttempt++) {
       await step.sleep(`polish25-poll-wait-${pollAttempt}`, `${MAKEUGC_POLL_INTERVAL_SECONDS}s`);
       const pollOutcome = await step.run(`polish25-poll-${pollAttempt}`, async () => {
-        const keys = await loadDecryptedKeys(userId, ['makeugc']);
+        // Polish-25.2 Commit 11: env-then-BYOK resolver.
+        const { apiKey: makeugcKey } = await resolveMakeugcKey({ userId });
         const poll = await checkMakeugcVideoStatus({
           userId,
-          apiKey: keys.makeugc!,
+          apiKey: makeugcKey,
           videoId,
           generationJobId: jobId,
         });

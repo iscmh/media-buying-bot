@@ -74,50 +74,45 @@ export default async function DashboardPage({ searchParams }: Props) {
   // checklist state so the dashboard can swap the metrics grid for
   // an empty-state task list when totalSpendUsd === 0. Cheap
   // queries — all limit(1) existence checks.
-  const [metrics, perAdRaw, toolRows, makeugcRow, conceptRow, generatedRow, launchedRow] =
-    await Promise.all([
-      getDashboardMetrics({ userId: user.userId, range, userTimezone }),
-      getPerAdBreakdown({ userId: user.userId, range, userTimezone, sortBy: 'spend', limit: 50 }),
-      db.query.toolConnections.findMany({
-        where: and(
-          eq(schema.toolConnections.userId, user.userId),
-          eq(schema.toolConnections.status, 'active'),
-          isNull(schema.toolConnections.deletedAt),
-          inArray(schema.toolConnections.provider, ['claude', 'gemini']),
-        ),
-        columns: { provider: true },
-      }),
-      db.query.aiProviderConnections.findFirst({
-        where: and(
-          eq(schema.aiProviderConnections.userId, user.userId),
-          eq(schema.aiProviderConnections.provider, 'makeugc'),
-          eq(schema.aiProviderConnections.status, 'active'),
-          isNull(schema.aiProviderConnections.deletedAt),
-        ),
-        columns: { id: true },
-      }),
-      db.query.concepts.findFirst({
-        where: and(eq(schema.concepts.userId, user.userId), isNull(schema.concepts.deletedAt)),
-        columns: { id: true },
-      }),
-      db.query.generatedCreatives.findFirst({
-        where: eq(schema.generatedCreatives.userId, user.userId),
-        columns: { id: true },
-      }),
-      db.query.launchedAds.findFirst({
-        where: and(
-          eq(schema.launchedAds.userId, user.userId),
-          ne(schema.launchedAds.status, 'launch_failed'),
-        ),
-        columns: { id: true },
-      }),
-    ]);
+  //
+  // Polish-25.2 Commit 11: dropped the MakeUGC ai_provider row
+  // query. MakeUGC is now platform-managed under the "Instant UGC"
+  // brand — Claude + Gemini are the only user-facing BYOK keys that
+  // gate the "Connect your keys" step.
+  const [metrics, perAdRaw, toolRows, conceptRow, generatedRow, launchedRow] = await Promise.all([
+    getDashboardMetrics({ userId: user.userId, range, userTimezone }),
+    getPerAdBreakdown({ userId: user.userId, range, userTimezone, sortBy: 'spend', limit: 50 }),
+    db.query.toolConnections.findMany({
+      where: and(
+        eq(schema.toolConnections.userId, user.userId),
+        eq(schema.toolConnections.status, 'active'),
+        isNull(schema.toolConnections.deletedAt),
+        inArray(schema.toolConnections.provider, ['claude', 'gemini']),
+      ),
+      columns: { provider: true },
+    }),
+    db.query.concepts.findFirst({
+      where: and(eq(schema.concepts.userId, user.userId), isNull(schema.concepts.deletedAt)),
+      columns: { id: true },
+    }),
+    db.query.generatedCreatives.findFirst({
+      where: eq(schema.generatedCreatives.userId, user.userId),
+      columns: { id: true },
+    }),
+    db.query.launchedAds.findFirst({
+      where: and(
+        eq(schema.launchedAds.userId, user.userId),
+        ne(schema.launchedAds.status, 'launch_failed'),
+      ),
+      columns: { id: true },
+    }),
+  ]);
 
   const perAd = showTest ? perAdRaw : perAdRaw.filter((r) => !TEST_STATUSES.has(r.status));
 
   const toolProviders = new Set(toolRows.map((r) => r.provider));
   const checklistState = {
-    keysConnected: toolProviders.has('claude') && toolProviders.has('gemini') && !!makeugcRow,
+    keysConnected: toolProviders.has('claude') && toolProviders.has('gemini'),
     hasConcept: !!conceptRow,
     hasGeneratedAd: !!generatedRow,
     hasLaunchedAd: !!launchedRow,

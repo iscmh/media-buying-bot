@@ -96,16 +96,23 @@ export const POLISH23_DESCRIPTION =
   'Best character consistency at ~$1.65 per 60s ad. Recommended default.';
 
 /**
- * Polish-25 Commit 2: MakeUGC pre-cast avatar pipeline picker anchors.
+ * Polish-25 Commit 2: pre-cast avatar pipeline picker anchors.
  * Character consistency guaranteed at platform level (same actor
- * every clip). Single video output. Real ~$0.05 per 60s ad — 20-50x
- * cheaper than Polish-23. Recommended primary going forward.
+ * every clip). Single video output. Recommended primary.
+ *
+ * Polish-25.2 Commit 11: rebranded to "Instant UGC" in the UI. The
+ * pipeline ID + underlying worker names stay `polish25_makeugc`
+ * for forensic + metadata continuity — only the user-facing display
+ * string changed. Video generation is now platform-managed
+ * (operator-run MakeUGC subscription pool); users no longer paste
+ * a MakeUGC API key.
  */
 export const POLISH25_PIPELINE_ID = 'polish25_makeugc' as const;
-export const POLISH25_DISPLAY_NAME = 'Polish-25 UGC (MakeUGC pre-cast avatar)';
+export const POLISH25_DISPLAY_NAME = 'Instant UGC ad';
 export const POLISH25_DESCRIPTION =
-  'Character consistency guaranteed via pre-cast avatar library. ' +
-  'Real $0.05 per 60s ad. Fastest, cheapest option — recommended primary.';
+  'Pre-cast avatar picked to match your source persona. Character consistency ' +
+  'guaranteed. Fastest option — included on the platform, you only pay Claude ' +
+  '+ Gemini token usage.';
 
 /**
  * Polish-20.0.1: form state shape. Model picker is REQUIRED (per spec

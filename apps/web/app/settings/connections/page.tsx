@@ -91,8 +91,13 @@ function TabLink({ current, target, label }: { current: Tab; target: Tab; label:
 }
 
 // ---------------------------------------------------------------
-// Providers tab: Polish-25 required (Claude / Gemini / MakeUGC) at
-// the top, then the optional providers as an "Advanced" list.
+// Providers tab: Polish-25 required trio was Claude + Gemini +
+// MakeUGC pre-Commit-11. Polish-25.2 Commit 11: MakeUGC is now
+// platform-managed under the "Instant UGC" brand — no user-facing
+// card for it. Required section = Claude + Gemini only. The
+// MakeUGC card is hidden from the optional list too, since users
+// can't do anything with a personal MakeUGC key (the worker
+// resolver prefers MAKEUGC_MANAGED_KEY env).
 // ---------------------------------------------------------------
 
 async function ProvidersTab({ userId }: { userId: string }) {
@@ -119,19 +124,25 @@ async function ProvidersTab({ userId }: { userId: string }) {
   for (const r of toolRows) toolByProvider.set(r.provider as ToolProviderName, r);
   const aiByProvider = new Map(aiRows.map((r) => [r.provider as AIProviderName, r]));
 
-  // Polish-25 required trio, called out separately so users see them
-  // ranked over the optional/legacy set.
+  // Polish-25 required trio → duo (Commit 11 dropped MakeUGC to
+  // platform-managed).
   const REQUIRED_TOOLS: ToolProviderName[] = ['claude', 'gemini'];
-  const REQUIRED_AI_PROVIDER: AIProviderName = 'makeugc';
   const OPTIONAL_TOOLS = TOOL_PROVIDERS_ORDER.filter((p) => !REQUIRED_TOOLS.includes(p));
-  const OPTIONAL_AI_PROVIDERS = CONNECTABLE_AI_PROVIDERS.filter((p) => p !== REQUIRED_AI_PROVIDER);
+  // Polish-25.2 Commit 11: filter MakeUGC out of the user-facing
+  // optional list too. The row stays in CONNECTABLE_AI_PROVIDERS +
+  // the ai_provider enum so any legacy user rows keep working;
+  // this UI just hides the card.
+  const OPTIONAL_AI_PROVIDERS = CONNECTABLE_AI_PROVIDERS.filter((p) => p !== 'makeugc');
 
   return (
     <div className="space-y-8">
       <section>
         <h2 className="text-fg-muted mb-3 text-xs font-medium uppercase tracking-wider">
-          Required for Polish-25
+          Required
         </h2>
+        <p className="text-fg-subtle mb-3 text-xs">
+          Instant UGC video generation is included on the platform — no key needed.
+        </p>
         <div className="space-y-4">
           {REQUIRED_TOOLS.map((provider) => {
             const meta = TOOL_PROVIDER_META[provider];
@@ -150,18 +161,6 @@ async function ProvidersTab({ userId }: { userId: string }) {
               />
             );
           })}
-          <ProviderCard
-            provider={REQUIRED_AI_PROVIDER}
-            connected={
-              aiByProvider.get(REQUIRED_AI_PROVIDER)
-                ? {
-                    apiKeyVerifiedAt: aiByProvider.get(REQUIRED_AI_PROVIDER)!.apiKeyVerifiedAt,
-                    lastVerifiedAt: aiByProvider.get(REQUIRED_AI_PROVIDER)!.lastVerifiedAt,
-                    tier: aiByProvider.get(REQUIRED_AI_PROVIDER)!.tier,
-                  }
-                : null
-            }
-          />
         </div>
       </section>
 
