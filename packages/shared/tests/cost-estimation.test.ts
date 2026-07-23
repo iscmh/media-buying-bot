@@ -122,6 +122,52 @@ describe('Polish-20 Commit 4: surviving legacy-pipeline cost paths', () => {
     expect(r.estimateUsd).toBeCloseTo(0.6, 4);
   });
 
+  // -------------------------------------------------------------
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad
+  // -------------------------------------------------------------
+
+  it('static_openai_image medium (default): 5 variants = claude $0.10 + images $0.25 = $0.35', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'static',
+      variantCount: 5,
+      pipeline: 'static_openai_image',
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.35, 4);
+  });
+
+  it('static_openai_image low: 5 variants = claude $0.10 + images $0.10 = $0.20', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'static',
+      variantCount: 5,
+      pipeline: 'static_openai_image',
+      openaiStaticQuality: 'low',
+    });
+    expect(r.estimateUsd).toBeCloseTo(0.2, 4);
+  });
+
+  it('static_openai_image high: 5 variants = claude $0.10 + images $1.00 = $1.10', () => {
+    const r = estimateGenerationCost({
+      conceptType: 'static',
+      variantCount: 5,
+      pipeline: 'static_openai_image',
+      openaiStaticQuality: 'high',
+    });
+    expect(r.estimateUsd).toBeCloseTo(1.1, 4);
+  });
+
+  it('static_openai_image cost strictly increases with quality tier', () => {
+    const inputs = {
+      conceptType: 'static' as const,
+      variantCount: 3,
+      pipeline: 'static_openai_image' as const,
+    };
+    const low = estimateGenerationCost({ ...inputs, openaiStaticQuality: 'low' });
+    const medium = estimateGenerationCost({ ...inputs, openaiStaticQuality: 'medium' });
+    const high = estimateGenerationCost({ ...inputs, openaiStaticQuality: 'high' });
+    expect(low.estimateUsd).toBeLessThan(medium.estimateUsd);
+    expect(medium.estimateUsd).toBeLessThan(high.estimateUsd);
+  });
+
   it('defaults to avatar_talking_head pricing when format omitted', () => {
     const heygen = estimateGenerationCost({
       conceptType: 'ugc',

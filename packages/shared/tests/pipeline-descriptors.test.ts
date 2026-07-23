@@ -79,18 +79,46 @@ describe('Polish-20 Commit 4: defaultPipeline throws — no pipeline-level defau
 });
 
 describe('Polish-20 Commit 4 → Polish-23 Commit 1: ALL_PIPELINES coverage', () => {
-  it('covers legacy survivors + Polish-23 + Polish-25 pipelines', () => {
+  it('covers legacy survivors + Polish-23 + Polish-25 + Polish-25.3 pipelines', () => {
     // Polish-23 Commit 1 added polish23_higgsfield_veo_lite.
     // Polish-25 Commit 2 added polish25_makeugc as the primary
     // recommended pipeline (MakeUGC pre-cast avatar, ~$0.05 per
     // 60s ad — 20-50x cheaper than Polish-23).
+    // Polish-25.3 Commit 18b added static_openai_image — the new
+    // static-ad pipeline using OpenAI gpt-image-2 for reference-
+    // image-anchored edits + Claude for overlay-copy rewrites.
     const expected: PipelineType[] = [
       'heygen_avatar_talking_head',
       'sora_2_single_shot',
       'nano_banana_static_image',
       'polish23_higgsfield_veo_lite',
       'polish25_makeugc',
+      'static_openai_image',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
+  });
+});
+
+describe('Polish-25.3 Commit 18b: static_openai_image descriptor pins', () => {
+  it('routes to generation/static-openai.requested', () => {
+    const d = describePipeline('static_openai_image');
+    expect(d.workerEvent).toBe('generation/static-openai.requested');
+  });
+
+  it('requires claude + openai (no gemini/heygen/etc.)', () => {
+    const d = describePipeline('static_openai_image');
+    expect(new Set(d.requiredProviders)).toEqual(new Set(['claude', 'openai']));
+  });
+
+  it('surfaces friendly "Static ad" label — no enum strings leak', () => {
+    // Regression pin for the Commit 18a copy-leak fix.
+    const d = describePipeline('static_openai_image');
+    expect(d.label).toBe('Static ad');
+    expect(d.label).not.toMatch(/openai|gpt/i);
+  });
+
+  it('providerChoice column is "openai" — worker reads it, timeline maps it', () => {
+    const d = describePipeline('static_openai_image');
+    expect(d.providerChoice).toBe('openai');
   });
 });

@@ -6,6 +6,32 @@ export { CreatifyProvider } from './creatify';
 // Polish-8: verify-only providers for the BYOK connect cards.
 export { ReplicateProvider } from './replicate';
 export { OpenAIProvider } from './openai-provider';
+// Polish-25.3 Commit 18b: OpenAI image-gen client (gpt-image-2)
+// for the new "Static ad" pipeline. Reference-image-anchored via
+// /v1/images/edits; typed errors for content policy / quota /
+// rate-limit / bad reference image.
+export {
+  submitOpenaiImageGeneration,
+  estimateOpenaiImageCostUsd,
+  isOpenaiTransientError,
+  redactOpenaiApiKey,
+  OpenaiRateLimitError,
+  OpenaiContentPolicyError,
+  OpenaiInsufficientFundsError,
+  OpenaiInvalidImageError,
+  OPENAI_IMAGE_DEFAULT_MODEL,
+  OPENAI_IMAGE_MODELS,
+  OPENAI_IMAGE_QUALITIES,
+  OPENAI_IMAGE_SIZES,
+  OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE,
+  OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE,
+  OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE,
+  type OpenaiImageInput,
+  type OpenaiImageResult,
+  type OpenaiImageModel,
+  type OpenaiImageQuality,
+  type OpenaiImageSize,
+} from './openai-image-client';
 // Polish-21: Hedra Character 3 BYOK verify card.
 export { HedraProvider } from './hedra';
 // Polish-21.0.4 hotfix: ElevenLabs TTS BYOK verify card + client.

@@ -6,6 +6,7 @@ import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
 import { generatePolish23VeoLite } from './generate-polish23-veo-lite';
 import { generatePolish25Makeugc } from './generate-polish25-makeugc';
+import { generateStaticOpenaiImageVariants } from './generate-static-openai-image-variants';
 import {
   refreshMakeugcAvatarIndexCron,
   refreshMakeugcAvatarIndexManual,
@@ -58,6 +59,13 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // output ($0.0495 per 60s @ Starter tier). Replaces Polish-23/24
   // as the primary pipeline going forward.
   'generation/polish25-makeugc.requested',
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad pipeline.
+  // Reference-image-anchored via /v1/images/edits — user uploads a
+  // winning static ad, Claude rewrites overlay copy per variant,
+  // OpenAI edits the image to match. Quality tier (low/medium/high)
+  // drives per-image cost; defaults to medium ($0.05) matching
+  // Instant UGC per-variant economics.
+  'generation/static-openai.requested',
 ] as const);
 
 export const functions = [
@@ -80,6 +88,8 @@ export const functions = [
   generatePolish23VeoLite,
   // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
   generatePolish25Makeugc,
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
+  generateStaticOpenaiImageVariants,
   // Polish-25 Commit 7: enriched MakeUGC avatar index refresh.
   // Commit 8 SPLIT the original multi-trigger function into two
   // single-trigger functions — matches the repo's existing pattern

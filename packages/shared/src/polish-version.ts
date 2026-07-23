@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.3.0';
+export const POLISH_VERSION = '25.3.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.3.0';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.3 Commit 18a — timeline copy-leak fix (providerChoice → descriptor label) + MINOR bump opening the Polish-25.3 static-ad-pipeline series';
+  'Polish-25.3 Commit 18b — OpenAI gpt-image-2 static ad pipeline (client + worker + generate-form picker + quality tier + cost estimator + tests)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

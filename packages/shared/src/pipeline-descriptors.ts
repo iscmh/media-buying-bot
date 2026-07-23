@@ -41,7 +41,9 @@ export interface PipelineDescriptor {
     // though the worker file doesn't land until Commit 3.
     | 'generation/polish23-veo-lite.requested'
     // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
-    | 'generation/polish25-makeugc.requested';
+    | 'generation/polish25-makeugc.requested'
+    // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
+    | 'generation/static-openai.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -106,6 +108,19 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     workerEvent: 'generation/polish25-makeugc.requested',
     requiredProviders: ['claude', 'gemini', 'makeugc'],
   },
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad — user
+  // uploads a winning static ad, Claude rewrites the overlay copy
+  // per variant, OpenAI /v1/images/edits produces the corresponding
+  // image variation anchored on the reference. Quality tier drives
+  // per-image cost (low $0.02 / medium $0.05 / high $0.20).
+  static_openai_image: {
+    pipeline: 'static_openai_image',
+    label: 'Static ad',
+    providerChoice: 'openai',
+    format: 'static_openai_image',
+    workerEvent: 'generation/static-openai.requested',
+    requiredProviders: ['claude', 'openai'],
+  },
 };
 
 export function describePipeline(pipeline: PipelineType): PipelineDescriptor {
@@ -147,4 +162,6 @@ export const ALL_PIPELINES: PipelineType[] = [
   // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad — primary
   // pipeline going forward (single video output @ ~$0.05).
   'polish25_makeugc',
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad pipeline.
+  'static_openai_image',
 ];

@@ -1,4 +1,5 @@
 import 'server-only';
+import { describePipeline, pipelineFromString } from '@mbb/shared';
 import { inngest } from '@mbb/jobs';
 
 /**
@@ -8,17 +9,27 @@ import { inngest } from '@mbb/jobs';
  * 3b; mock JSON in 3a) and the analyzer fans out to
  * `generation/ugc.requested` when it completes.
  *
- * Phase 3a sends mock-mode events; Phase 3b will pass through the same
- * shape with `mode: 'live'` once real API calls are wired.
+ * Polish-25.3 Commit 18b: routing extended to honor `pickedPipeline`.
+ * When the caller passes a pipeline that maps to a static-content
+ * descriptor (e.g. `static_openai_image` → `generation/static-openai
+ * .requested`), we send directly to that worker's event instead of
+ * the generic static/analyze fan-out. UGC pipelines still go through
+ * analyze-concept, which resolves the picked pipeline from job.metadata
+ * and dispatches to the right worker.
  */
 export async function sendGenerationJobEvent(input: {
   contentType: 'static' | 'ugc';
   jobId: string;
   userId: string;
   mode: 'mock' | 'live';
+  /**
+   * The pipeline the caller picked (from the descriptor table).
+   * Static pipelines dispatch to their descriptor.workerEvent
+   * directly; UGC pipelines let analyze-concept route.
+   */
+  pickedPipeline?: string | null;
 }): Promise<void> {
-  const eventName =
-    input.contentType === 'static' ? 'generation/static.requested' : 'generation/analyze.requested';
+  const eventName = resolveEventName(input.contentType, input.pickedPipeline ?? null);
   await inngest.send({
     name: eventName,
     data: {
@@ -27,6 +38,33 @@ export async function sendGenerationJobEvent(input: {
       mode: input.mode,
     },
   });
+}
+
+function resolveEventName(
+  contentType: 'static' | 'ugc',
+  pickedPipeline: string | null,
+):
+  | 'generation/static.requested'
+  | 'generation/analyze.requested'
+  | 'generation/static-openai.requested' {
+  // Static path: check the descriptor first so new static workers
+  // (like Polish-25.3 Commit 18b's OpenAI worker) route directly
+  // without touching this switch. Fallback keeps the legacy
+  // Gemini/nano-banana path alive at `generation/static.requested`.
+  if (contentType === 'static') {
+    const pipeline = pipelineFromString(pickedPipeline);
+    if (pipeline) {
+      const workerEvent = describePipeline(pipeline).workerEvent;
+      if (workerEvent === 'generation/static-openai.requested') {
+        return 'generation/static-openai.requested';
+      }
+    }
+    return 'generation/static.requested';
+  }
+  // UGC path always goes through analyze-concept — it resolves
+  // pickedPipeline via the descriptor and dispatches to the right
+  // downstream worker.
+  return 'generation/analyze.requested';
 }
 
 /**

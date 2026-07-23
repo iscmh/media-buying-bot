@@ -389,6 +389,8 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   // lookup already returns this string; typing the union keeps
   // analyze-concept in lockstep.
   | 'generation/polish25-makeugc.requested'
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
+  | 'generation/static-openai.requested'
 > {
   try {
     const db = getDb();

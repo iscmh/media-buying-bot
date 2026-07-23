@@ -77,7 +77,37 @@ const PRICING = {
   polish23VeoLite1080pUsdPerClip: 0.175,
   polish23VeoClipSeconds: 8,
   polish23ReplicateConcatUsd: 0.15,
+
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static-ad pipeline.
+  // Per-image costs at 1024x1024 sourced from operator brief
+  // (verify against OpenAI's live pricing page before every ship):
+  //   High:   $0.20/image  (premium visual fidelity)
+  //   Medium: $0.05/image  (default — matches Polish-25 UGC per-variant)
+  //   Low:    $0.02/image  (cost-optimized)
+  // Plus a Claude copy rewrite (~$0.02/variant) that generates the
+  // headline + primary text variations fed into the image edit.
+  //
+  // These constants are mirrored (and canonically owned) at
+  // packages/ai-providers/src/openai-image-client.ts —
+  // OPENAI_GPT_IMAGE_2_*_USD_PER_IMAGE. Kept duplicated here
+  // rather than imported because @mbb/shared cannot depend on
+  // @mbb/ai-providers (would circle the dep graph). Version-bump
+  // test in tests/openai-static-cost-estimation.test.ts pins the
+  // duplicated values so drift surfaces on CI.
+  openaiStaticClaudeUsd: 0.02,
+  openaiStaticImageHighUsd: 0.2,
+  openaiStaticImageMediumUsd: 0.05,
+  openaiStaticImageLowUsd: 0.02,
 } as const;
+
+/**
+ * Polish-25.3 Commit 18b: quality tier for the OpenAI static-ad
+ * pipeline. Mirrored from the ai-providers client's
+ * OpenaiImageQuality union — kept as a plain string union here so
+ * @mbb/shared has zero runtime imports from @mbb/ai-providers
+ * (see PRICING comment above).
+ */
+export type OpenaiStaticImageQuality = 'low' | 'medium' | 'high';
 
 export interface CostBreakdownItem {
   item: string;
@@ -105,7 +135,14 @@ export type PipelineType =
   // video output ($0.0495 per 60s @ API Starter tier — 20-50x
   // cheaper than Polish-23/24). Character consistency guaranteed
   // via pre-cast avatar library.
-  | 'polish25_makeugc';
+  | 'polish25_makeugc'
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad.
+  // Reference-image-anchored via /v1/images/edits — user uploads a
+  // winning static image, Claude rewrites overlay copy, OpenAI
+  // edits the image to match. Quality tier drives per-image cost
+  // (low/medium/high), defaults to medium ($0.05) to match Instant
+  // UGC per-variant economics.
+  | 'static_openai_image';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -141,6 +178,14 @@ export interface EstimateInput {
    */
   videoModelId?: VideoModelId;
   videoProviderId?: VideoProviderId;
+  /**
+   * Polish-25.3 Commit 18b: quality tier for the OpenAI static-ad
+   * pipeline. Only consulted when pipeline === 'static_openai_image';
+   * ignored elsewhere. Defaults to 'medium' when omitted so the
+   * preview number is stable across form re-mounts before the user
+   * touches the quality selector.
+   */
+  openaiStaticQuality?: OpenaiStaticImageQuality;
 }
 
 export function estimateGenerationCost(input: EstimateInput): CostEstimate {
@@ -177,6 +222,9 @@ export function estimateGenerationCost(input: EstimateInput): CostEstimate {
       input.pipeline,
       variantCount,
       input.sourceDurationSeconds ?? input.estimatedDurationSeconds,
+      // Polish-25.3 Commit 18b: quality tier passed through only for
+      // the static-openai branch; other branches ignore it.
+      input.openaiStaticQuality,
     );
   }
 
@@ -252,6 +300,7 @@ function estimateByPipeline(
   pipeline: PipelineType,
   variantCount: number,
   _estimatedDurationSeconds: number | undefined,
+  openaiStaticQuality: OpenaiStaticImageQuality | undefined,
 ): CostEstimate {
   const breakdown: CostBreakdownItem[] = [];
   switch (pipeline) {
@@ -324,6 +373,29 @@ function estimateByPipeline(
       breakdown.push({
         item: `Replicate ffmpeg-concat (${variantCount} × $${PRICING.polish23ReplicateConcatUsd.toFixed(2)})`,
         cost: round4(variantCount * PRICING.polish23ReplicateConcatUsd),
+      });
+      break;
+    }
+    case 'static_openai_image': {
+      // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static-ad
+      // pipeline. Per-variant cost = Claude copy rewrite + one
+      // OpenAI image edit. Quality tier drives the per-image
+      // cost (low/medium/high). Defaults to medium ($0.05) —
+      // matches the Instant UGC per-variant target.
+      const q: OpenaiStaticImageQuality = openaiStaticQuality ?? 'medium';
+      const perImage =
+        q === 'high'
+          ? PRICING.openaiStaticImageHighUsd
+          : q === 'low'
+            ? PRICING.openaiStaticImageLowUsd
+            : PRICING.openaiStaticImageMediumUsd;
+      breakdown.push({
+        item: `Claude copy rewrite (${variantCount} × $${PRICING.openaiStaticClaudeUsd.toFixed(2)})`,
+        cost: round4(variantCount * PRICING.openaiStaticClaudeUsd),
+      });
+      breakdown.push({
+        item: `OpenAI gpt-image-2 ${q} (${variantCount} × $${perImage.toFixed(2)})`,
+        cost: round4(variantCount * perImage),
       });
       break;
     }

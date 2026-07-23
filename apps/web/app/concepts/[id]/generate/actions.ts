@@ -116,6 +116,14 @@ export async function createGenerationJobAction(
     typeof rawProviderId === 'string' && rawProviderId.trim().length > 0
       ? rawProviderId.trim()
       : null;
+  // Polish-25.3 Commit 18b: OpenAI static-ad quality tier
+  // (low/medium/high). Only meaningful when pipeline = static_openai_image;
+  // the worker reads it off job.metadata.static_openai_quality.
+  const rawStaticQuality = formData.get('staticOpenaiQuality');
+  const staticOpenaiQuality =
+    rawStaticQuality === 'low' || rawStaticQuality === 'medium' || rawStaticQuality === 'high'
+      ? rawStaticQuality
+      : null;
 
   if (!conceptId) return { ok: false, errorMessage: 'Missing concept id.' };
   if (!VALID_INTENSITY.has(intensity)) {
@@ -271,7 +279,10 @@ export async function createGenerationJobAction(
       // reads model_id + provider_id to look up ModelProviderConfig
       // and dispatches accordingly. All fields nullable — workers
       // tolerate absent columns and fall back to safe defaults.
-      ...(sourceDurationSeconds != null || modelId != null || providerId != null
+      ...(sourceDurationSeconds != null ||
+      modelId != null ||
+      providerId != null ||
+      staticOpenaiQuality != null
         ? {
             metadata: {
               ...(sourceDurationSeconds != null
@@ -279,6 +290,11 @@ export async function createGenerationJobAction(
                 : {}),
               ...(modelId != null ? { model_id: modelId } : {}),
               ...(providerId != null ? { provider_id: providerId } : {}),
+              // Polish-25.3 Commit 18b: quality tier surfaces to the
+              // static-openai worker via extractQuality(metadata).
+              ...(staticOpenaiQuality != null
+                ? { static_openai_quality: staticOpenaiQuality }
+                : {}),
             },
           }
         : {}),
@@ -325,6 +341,11 @@ export async function createGenerationJobAction(
     jobId,
     userId: user.id,
     mode,
+    // Polish-25.3 Commit 18b: static pipelines dispatch directly
+    // via the descriptor's workerEvent (see resolveEventName in
+    // apps/web/lib/inngest/send.ts). UGC always fans through
+    // analyze-concept regardless.
+    pickedPipeline: pipelineDesc?.pipeline ?? null,
   });
 
   revalidatePath(`/concepts/${conceptId}`);

@@ -83,6 +83,10 @@ export type Events = {
   'generation/polish25-makeugc.requested': {
     data: { userId: string; jobId: string; mode: 'mock' | 'live' };
   };
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
+  'generation/static-openai.requested': {
+    data: { userId: string; jobId: string; mode: 'mock' | 'live' };
+  };
   // Polish-25 Commit 7: on-demand trigger for the enriched avatar
   // index refresh. Nightly cron does the same work with empty
   // event.data — the manual path here lets the operator force an

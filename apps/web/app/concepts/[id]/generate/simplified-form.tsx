@@ -24,14 +24,19 @@ import {
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
   SIMPLIFIED_MIN_VARIANTS,
+  STATIC_OPENAI_DEFAULT_QUALITY,
+  STATIC_OPENAI_DESCRIPTION,
+  STATIC_OPENAI_DISPLAY_NAME,
   buildSubmissionFormData,
   canSubmitState,
   clampVariantCount,
   estimatePolish23CostPerVariantUsd,
   estimatePolish25CostPerVariantUsd,
+  estimateStaticOpenaiCostPerVariantUsd,
   getDefaultProviderForModel,
   getSoleLauncherModel,
   type SimplifiedFormState,
+  type StaticOpenaiQuality,
   type VideoModelId,
 } from './simplified-form-helpers';
 
@@ -113,6 +118,13 @@ export function SimplifiedGenerationForm({
   // exclusive with polish23Selected + modelId. Polish-25.1 Commit 10b:
   // defaults to picked when the Polish-25 keys are all connected.
   const [polish25Selected, setPolish25Selected] = React.useState(canDefaultPolish25);
+  // Polish-25.3 Commit 18b: static ad picker + quality tier. Mutually
+  // exclusive with polish23Selected + polish25Selected + modelId.
+  // Defaults to Medium quality — matches the shipped cost line.
+  const [staticOpenaiSelected, setStaticOpenaiSelected] = React.useState(false);
+  const [staticOpenaiQuality, setStaticOpenaiQuality] = React.useState<StaticOpenaiQuality>(
+    STATIC_OPENAI_DEFAULT_QUALITY,
+  );
   const [variantCount, setVariantCount] = React.useState<number>(SIMPLIFIED_DEFAULT_VARIANTS);
 
   const [error, setError] = React.useState<string | null>(null);
@@ -130,6 +142,8 @@ export function SimplifiedGenerationForm({
     variantCount,
     polish23Selected,
     polish25Selected,
+    staticOpenaiSelected,
+    staticOpenaiQuality,
   };
   const canSubmit = canSubmitState(state);
 
@@ -152,18 +166,27 @@ export function SimplifiedGenerationForm({
   const polish25Estimate = polish25Selected
     ? { estimateUsd: variantCount * estimatePolish25CostPerVariantUsd().usd }
     : null;
-  const estimate = polish25Estimate
-    ? polish25Estimate
-    : polish23Estimate
-      ? polish23Estimate
-      : modelId
-        ? estimateGenerationCost({
-            conceptType: 'ugc',
-            variantCount,
-            videoModelId: modelId,
-            sourceDurationSeconds: previewSeconds,
-          })
-        : null;
+  // Polish-25.3 Commit 18b: static-openai cost preview per quality
+  // tier. Fixed per-variant, no duration scaling (image, not video).
+  const staticOpenaiEstimate = staticOpenaiSelected
+    ? {
+        estimateUsd: variantCount * estimateStaticOpenaiCostPerVariantUsd(staticOpenaiQuality).usd,
+      }
+    : null;
+  const estimate = staticOpenaiEstimate
+    ? staticOpenaiEstimate
+    : polish25Estimate
+      ? polish25Estimate
+      : polish23Estimate
+        ? polish23Estimate
+        : modelId
+          ? estimateGenerationCost({
+              conceptType: 'ugc',
+              variantCount,
+              videoModelId: modelId,
+              sourceDurationSeconds: previewSeconds,
+            })
+          : null;
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate != null && estimate.estimateUsd > remaining;
@@ -197,21 +220,34 @@ export function SimplifiedGenerationForm({
   if (!connectedProviders.gemini.connected) polish25MissingKeys.push('Gemini');
   const hasPolish25Keys = polish25MissingKeys.length === 0;
 
+  // Polish-25.3 Commit 18b: static-openai gate. Needs Claude
+  // (copy rewrite) + OpenAI (gpt-image-2). Gemini optional (source
+  // vision analysis is skipped for the static path). Missing keys
+  // surface in the disabled-Generate tooltip + inline nudge.
+  const staticOpenaiMissingKeys: string[] = [];
+  if (!connectedProviders.claude.connected) staticOpenaiMissingKeys.push('Claude');
+  if (!connectedProviders.openai.connected) staticOpenaiMissingKeys.push('OpenAI');
+  const hasStaticOpenaiKeys = staticOpenaiMissingKeys.length === 0;
+
   const legacyMissingKeys: string[] = [];
   if (!hasHedraKey) legacyMissingKeys.push('Hedra');
   if (!hasElevenLabsKey) legacyMissingKeys.push('ElevenLabs');
   const hasLegacyKeys = hasHedraKey && hasElevenLabsKey;
 
-  const hasProviderKey = polish25Selected
-    ? hasPolish25Keys
-    : polish23Selected
-      ? hasPolish23Keys
-      : hasLegacyKeys;
-  const missingKeys = polish25Selected
-    ? polish25MissingKeys
-    : polish23Selected
-      ? polish23MissingKeys
-      : legacyMissingKeys;
+  const hasProviderKey = staticOpenaiSelected
+    ? hasStaticOpenaiKeys
+    : polish25Selected
+      ? hasPolish25Keys
+      : polish23Selected
+        ? hasPolish23Keys
+        : hasLegacyKeys;
+  const missingKeys = staticOpenaiSelected
+    ? staticOpenaiMissingKeys
+    : polish25Selected
+      ? polish25MissingKeys
+      : polish23Selected
+        ? polish23MissingKeys
+        : legacyMissingKeys;
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -288,8 +324,28 @@ export function SimplifiedGenerationForm({
         onPick={() => {
           setPolish25Selected(true);
           setPolish23Selected(false);
+          setStaticOpenaiSelected(false);
           setModelId(null);
         }}
+      />
+
+      {/* Polish-25.3 Commit 18b: Static ad picker. Rendered next to
+          Instant UGC. Reveals a low/medium/high quality selector when
+          picked. Card body describes the reference-image edit flow so
+          the operator understands what OpenAI does (vs. the video-
+          only Instant UGC card). Mutually exclusive with Polish-25 +
+          Polish-23 + modelId. */}
+      <StaticOpenaiPickerCard
+        picked={staticOpenaiSelected}
+        disabled={isPending}
+        quality={staticOpenaiQuality}
+        onPick={() => {
+          setStaticOpenaiSelected(true);
+          setPolish25Selected(false);
+          setPolish23Selected(false);
+          setModelId(null);
+        }}
+        onQualityChange={setStaticOpenaiQuality}
       />
 
       {/* Polish-25.2 Commit 12: model picker hidden for MVP. Only
@@ -503,3 +559,94 @@ function Polish25PickerCard({ picked, disabled, onPick }: Polish25PickerCardProp
 // dropdown, which is hidden for MVP. Backend descriptors +
 // pipeline routing stay intact; when the model picker returns,
 // these components come back with them.
+
+// -------------------------------------------------------------------
+// Polish-25.3 Commit 18b: Static ad picker card
+// -------------------------------------------------------------------
+
+interface StaticOpenaiPickerCardProps {
+  picked: boolean;
+  disabled: boolean;
+  quality: StaticOpenaiQuality;
+  onPick: () => void;
+  onQualityChange: (q: StaticOpenaiQuality) => void;
+}
+
+/**
+ * Static ad picker card. Reveals a low/medium/high quality
+ * selector when picked so the operator can trade cost vs.
+ * fidelity before submitting. Copy explains what the pipeline
+ * actually does (reference-image edit via OpenAI gpt-image-2 +
+ * Claude overlay-copy rewrite) so the operator understands the
+ * flow without reading docs.
+ */
+function StaticOpenaiPickerCard({
+  picked,
+  disabled,
+  quality,
+  onPick,
+  onQualityChange,
+}: StaticOpenaiPickerCardProps) {
+  return (
+    <div
+      className={cn(
+        'group relative w-full rounded-md border p-4 text-left transition-colors',
+        picked ? 'border-fg bg-fg/5' : 'border-border bg-bg-surface hover:border-fg/50',
+        disabled && 'opacity-60',
+      )}
+    >
+      <button
+        type="button"
+        onClick={onPick}
+        disabled={disabled}
+        aria-pressed={picked}
+        className={cn('flex w-full flex-col gap-2 text-left', disabled && 'cursor-not-allowed')}
+      >
+        {picked && (
+          <CheckCircle2 className="text-fg absolute right-3 top-3 h-4 w-4" aria-hidden="true" />
+        )}
+        <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
+          Static ad
+        </div>
+        <div className="text-fg text-sm font-semibold">{STATIC_OPENAI_DISPLAY_NAME}</div>
+        <div className="text-fg-muted text-xs leading-relaxed">{STATIC_OPENAI_DESCRIPTION}</div>
+      </button>
+
+      {picked && (
+        <div className="border-border-subtle mt-3 border-t pt-3">
+          <div className="text-fg-subtle mb-1.5 text-[10px] font-semibold uppercase tracking-wider">
+            Image quality
+          </div>
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Image quality">
+            {(['low', 'medium', 'high'] as StaticOpenaiQuality[]).map((q) => {
+              const priceLabel = q === 'high' ? '$0.20' : q === 'medium' ? '$0.05' : '$0.02';
+              return (
+                <button
+                  key={q}
+                  type="button"
+                  role="radio"
+                  aria-checked={quality === q}
+                  onClick={() => onQualityChange(q)}
+                  disabled={disabled}
+                  className={cn(
+                    'min-w-[6rem] flex-1 rounded-md border px-3 py-2 text-xs transition-colors',
+                    quality === q
+                      ? 'border-fg bg-fg/10 text-fg font-medium'
+                      : 'border-border text-fg-muted hover:border-fg/50 hover:text-fg',
+                    disabled && 'cursor-not-allowed',
+                  )}
+                >
+                  <div className="capitalize">{q}</div>
+                  <div className="text-fg-subtle mt-0.5 font-mono">{priceLabel}/img</div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-fg-subtle mt-2 text-[11px]">
+            Medium is the recommended default — matches Instant UGC per-variant cost.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}

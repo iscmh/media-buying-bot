@@ -115,6 +115,42 @@ export const POLISH25_DESCRIPTION =
   '+ Gemini token usage.';
 
 /**
+ * Polish-25.3 Commit 18b: static-ad pipeline metadata. Backs the
+ * "Static ad" picker card + submission FormData routing. Pipeline
+ * ID matches the descriptor at packages/shared/src/pipeline-
+ * descriptors.ts so the analyze-concept dispatch resolves cleanly.
+ */
+export const STATIC_OPENAI_PIPELINE_ID = 'static_openai_image' as const;
+export const STATIC_OPENAI_DISPLAY_NAME = 'Static ad';
+export const STATIC_OPENAI_DESCRIPTION =
+  'Upload a winning static ad; Claude rewrites the overlay copy and OpenAI ' +
+  'gpt-image-2 edits the image for each variant. Quality tier (low / medium ' +
+  '/ high) drives per-image cost.';
+
+export type StaticOpenaiQuality = 'low' | 'medium' | 'high';
+export const STATIC_OPENAI_DEFAULT_QUALITY: StaticOpenaiQuality = 'medium';
+
+/**
+ * Per-quality cost preview. Values mirror the shared cost estimator
+ * (packages/shared/src/cost-estimation.ts PRICING.openaiStaticImage*)
+ * so a change in either file must land alongside the other.
+ * Cost line = variantCount × (Claude copy $0.02 + OpenAI image per
+ * quality). Kept as a small local helper because the form doesn't
+ * need the full estimator machinery — just the total number.
+ */
+export function estimateStaticOpenaiCostPerVariantUsd(quality: StaticOpenaiQuality): {
+  usd: number;
+} {
+  const OPENAI_CLAUDE_USD = 0.02;
+  const OPENAI_IMAGE_USD = quality === 'high' ? 0.2 : quality === 'low' ? 0.02 : 0.05;
+  return { usd: round4(OPENAI_CLAUDE_USD + OPENAI_IMAGE_USD) };
+}
+
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+/**
  * Polish-20.0.1: form state shape. Model picker is REQUIRED (per spec
  * user MUST pick), represented as `modelId | null`. Generate button
  * stays disabled until non-null. `providerId` defaults to the model's
@@ -143,6 +179,14 @@ export interface SimplifiedFormState {
    * generation/polish25-makeugc.requested worker event.
    */
   polish25Selected?: boolean;
+  /**
+   * Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad flag.
+   * Mutually exclusive with polish23Selected / polish25Selected /
+   * modelId. Companion field `staticOpenaiQuality` selects the
+   * per-image cost tier when this is true.
+   */
+  staticOpenaiSelected?: boolean;
+  staticOpenaiQuality?: StaticOpenaiQuality;
 }
 
 /**
@@ -154,7 +198,10 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
   // Polish-23 / Polish-25: pipeline-selected flags are alternative
   // "picked" signals that bypass the modelId requirement. Any one of
   // {modelId, polish23Selected, polish25Selected} satisfies the gate.
-  const hasPickedPipeline = state.polish23Selected === true || state.polish25Selected === true;
+  const hasPickedPipeline =
+    state.polish23Selected === true ||
+    state.polish25Selected === true ||
+    state.staticOpenaiSelected === true;
   if (!hasPickedPipeline && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
     return false;
@@ -229,6 +276,14 @@ export function buildSubmissionFormData(input: {
     // (generation/polish25-makeugc.requested). Same pattern as
     // polish23Selected — set `pipeline` instead of modelId.
     fd.set('pipeline', POLISH25_PIPELINE_ID);
+    return fd;
+  }
+  if (input.state.staticOpenaiSelected === true) {
+    // Polish-25.3 Commit 18b: static ad routing. Descriptor routes
+    // to generation/static-openai.requested. Quality tier lands in
+    // job.metadata.static_openai_quality (see actions.ts).
+    fd.set('pipeline', STATIC_OPENAI_PIPELINE_ID);
+    fd.set('staticOpenaiQuality', input.state.staticOpenaiQuality ?? STATIC_OPENAI_DEFAULT_QUALITY);
     return fd;
   }
   if (input.state.polish23Selected === true) {
