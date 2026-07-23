@@ -80,6 +80,11 @@ export default async function ConceptDetailPage({ params }: Props) {
         </p>
       </div>
 
+      {/* Polish-25.2 Commit 17: capped the source preview at 50vh
+          instead of 65vh so the Generate CTA reliably lands above
+          the fold on typical desktop viewports. Operator report:
+          the CTA required a scroll to reach on a 1440x900 screen
+          when the source video was tall (portrait UGC). */}
       {previewUrl && (
         <div className="border-border mb-6 overflow-hidden rounded-md border bg-black">
           {concept.contentType === 'ugc' ? (
@@ -87,30 +92,36 @@ export default async function ConceptDetailPage({ params }: Props) {
               src={previewUrl}
               controls
               playsInline
-              className="block max-h-[65vh] w-full bg-black object-contain"
+              className="mx-auto block max-h-[50vh] w-auto max-w-full bg-black object-contain"
             />
           ) : (
             <img
               src={previewUrl}
               alt={displayName}
-              className="block max-h-[65vh] w-full bg-black object-contain"
+              className="mx-auto block max-h-[50vh] w-auto max-w-full bg-black object-contain"
             />
           )}
         </div>
       )}
 
-      <div className="mb-8 flex items-center justify-between gap-3">
-        <p className="text-fg-muted text-sm">
-          {ourJobs.length === 0
-            ? 'Ready to generate your first variant?'
-            : `${ourJobs.length} generation${ourJobs.length === 1 ? '' : 's'} so far.`}
-        </p>
-        <Button asChild size="lg" className="gap-2">
+      {/* Polish-25.2 Commit 17: killed the "Ready to generate your
+          first variant?" hint copy — it was redundant next to the
+          giant CTA button that follows. Prior-generation count
+          survives as a muted subline under the CTA. Button is
+          centered + full-width on mobile, auto width on desktop
+          for visual weight parity with the source preview. */}
+      <div className="mb-8 flex flex-col items-center gap-2">
+        <Button asChild size="lg" className="w-full gap-2 sm:w-auto sm:px-8">
           <Link href={`/concepts/${concept.id}/generate`}>
             Generate variants
             <ArrowRight className="h-4 w-4" aria-hidden />
           </Link>
         </Button>
+        {ourJobs.length > 0 && (
+          <p className="text-fg-muted text-xs">
+            {ourJobs.length} generation{ourJobs.length === 1 ? '' : 's'} so far.
+          </p>
+        )}
       </div>
 
       <details className="border-border-subtle group mb-4 rounded-md border">

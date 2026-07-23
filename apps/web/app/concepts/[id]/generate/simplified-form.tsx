@@ -336,7 +336,18 @@ export function SimplifiedGenerationForm({
       >
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-fg-muted text-sm">Estimated cost</span>
-          <span className="text-fg font-mono text-2xl font-semibold tracking-tight">
+          {/* Polish-25.2 Commit 17: dollar figure rendered in the
+              positive-accent green when the estimate is valid + not
+              over cap. Money-signal — reads as "cheap, safe to
+              proceed" at a glance. Falls back to text-fg on over-cap
+              so the number pairs visually with the red warning
+              beneath it. */}
+          <span
+            className={cn(
+              'font-mono text-2xl font-semibold tracking-tight',
+              estimate && !overCap ? 'text-[color:var(--accent-positive)]' : 'text-fg',
+            )}
+          >
             {estimate ? `$${estimate.estimateUsd.toFixed(2)}` : '—'}
           </span>
         </div>

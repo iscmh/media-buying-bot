@@ -151,6 +151,33 @@ function deriveSteps(
     job.metadata !== null && job.metadata !== undefined && typeof job.metadata === 'object';
   const hasAnyVariant = variants.length > 0;
 
+  // Polish-25.2 Commit 17: read metadata.polish25_progress.step
+  // written by generate-polish25-makeugc's step.run() boundaries.
+  // Before Commit 17 the UGC timeline derived state from
+  // { hasAnalysis, hasAnyVariant } only, which is wrong once the
+  // worker starts writing metadata: metadata goes non-null on the
+  // very first step (mark-processing), flipping "Source analyzed"
+  // to complete AND "Scripts" + "Avatars" both to running for the
+  // entire remaining runtime. The persisted step string is the
+  // real source of truth. Strings the worker emits:
+  //   mark-processing → source-context → script-condensed →
+  //   avatar-matched → submitted → video-ready
+  const polish25Step: string | null =
+    job.metadata &&
+    typeof job.metadata === 'object' &&
+    'polish25_progress' in (job.metadata as Record<string, unknown>) &&
+    typeof (job.metadata as Record<string, unknown>)['polish25_progress'] === 'object' &&
+    (job.metadata as Record<string, unknown>)['polish25_progress'] !== null &&
+    'step' in
+      ((job.metadata as Record<string, Record<string, unknown>>)['polish25_progress'] as Record<
+        string,
+        unknown
+      >)
+      ? String(
+          (job.metadata as Record<string, Record<string, unknown>>)['polish25_progress']!['step'],
+        )
+      : null;
+
   if (conceptType === 'static') {
     return [
       {
@@ -185,59 +212,197 @@ function deriveSteps(
     ];
   }
 
-  // UGC flow.
-  return [
+  // UGC flow. Prefer the worker-persisted step over inferred
+  // proxies whenever polish25_progress is present.
+  return deriveUgcSteps({
+    requestedIso,
+    completedIso,
+    isFailed,
+    isDone,
+    isProcessing,
+    hasAnalysis,
+    hasAnyVariant,
+    written,
+    expected,
+    providerChoice: job.providerChoice,
+    errorMessage: job.errorMessage,
+    polish25Step,
+  });
+}
+
+interface UgcDeriveInput {
+  requestedIso: string;
+  completedIso: string | null;
+  isFailed: boolean;
+  isDone: boolean;
+  isProcessing: boolean;
+  hasAnalysis: boolean;
+  hasAnyVariant: boolean;
+  written: number;
+  expected: number;
+  providerChoice: string | null;
+  errorMessage: string | null;
+  polish25Step: string | null;
+}
+
+/**
+ * Rank ordering of Polish-25 worker step names. Every earlier
+ * step is `completed`, the matching step is `running`, every
+ * later step is `pending`. On job.status === completed, the
+ * final "complete" row wins; on failed, whichever step was
+ * running gets marked failed.
+ *
+ * Kept as an ordered list (not a Set) so a future step string
+ * from the worker slots in cleanly at the right position.
+ */
+const POLISH25_STEP_ORDER = [
+  'mark-processing',
+  'source-context',
+  'script-condensed',
+  'avatar-matched',
+  'submitted',
+  'video-ready',
+] as const;
+
+/**
+ * Map polish25_progress.step → which UGC-timeline row should be
+ * marked `running`. Everything before it is `completed`,
+ * everything after is `pending`.
+ */
+const POLISH25_STEP_TO_TIMELINE: Record<(typeof POLISH25_STEP_ORDER)[number], string> = {
+  'mark-processing': 'analyze',
+  'source-context': 'scripts',
+  'script-condensed': 'avatars',
+  'avatar-matched': 'videos',
+  submitted: 'videos',
+  'video-ready': 'complete',
+};
+
+function deriveUgcSteps(input: UgcDeriveInput): TimelineStep[] {
+  const {
+    requestedIso,
+    completedIso,
+    isFailed,
+    isDone,
+    isProcessing,
+    hasAnalysis,
+    hasAnyVariant,
+    written,
+    expected,
+    providerChoice,
+    errorMessage,
+    polish25Step,
+  } = input;
+
+  // Row order — must match the id sequence downstream depends on
+  // for the "everything before running is completed" walk.
+  const rowIds = ['submitted', 'analyze', 'scripts', 'avatars', 'videos', 'complete'] as const;
+  type RowId = (typeof rowIds)[number];
+
+  // Baseline status per row from polish25_progress when present.
+  // When polish25_progress is missing (legacy Polish-23 job or
+  // pre-Commit-17 rows) fall back to the old proxy-based logic
+  // so those jobs still render coherently.
+  const baseline: Record<RowId, StepStatus> = {
+    submitted: 'completed',
+    analyze: 'pending',
+    scripts: 'pending',
+    avatars: 'pending',
+    videos: 'pending',
+    complete: 'pending',
+  };
+
+  if (
+    polish25Step &&
+    (POLISH25_STEP_ORDER as readonly string[]).includes(polish25Step) &&
+    polish25Step in POLISH25_STEP_TO_TIMELINE
+  ) {
+    const runningRow = POLISH25_STEP_TO_TIMELINE[
+      polish25Step as (typeof POLISH25_STEP_ORDER)[number]
+    ] as RowId;
+    let seenRunning = false;
+    for (const id of rowIds) {
+      if (id === runningRow) {
+        baseline[id] = 'running';
+        seenRunning = true;
+      } else if (!seenRunning) {
+        baseline[id] = 'completed';
+      }
+    }
+  } else {
+    // Legacy fallback: same shape as pre-Commit-17. Kept so
+    // Polish-23 (Veo Lite) jobs + any job predating the worker's
+    // progress writes still animate reasonably.
+    baseline.analyze = hasAnalysis ? 'completed' : 'running';
+    baseline.scripts = hasAnyVariant ? 'completed' : hasAnalysis ? 'running' : 'pending';
+    baseline.avatars = hasAnyVariant
+      ? 'completed'
+      : isProcessing && hasAnalysis
+        ? 'running'
+        : 'pending';
+    baseline.videos =
+      written >= expected && expected > 0 ? 'completed' : hasAnyVariant ? 'running' : 'pending';
+  }
+
+  // Terminal overrides. isDone flips the final row to completed;
+  // isFailed marks the currently-running row (or the final row
+  // when no row is running) as failed.
+  if (isDone) baseline.complete = 'completed';
+  if (isFailed) {
+    let stamped = false;
+    for (const id of rowIds) {
+      if (baseline[id] === 'running') {
+        baseline[id] = 'failed';
+        stamped = true;
+        break;
+      }
+    }
+    if (!stamped) baseline.complete = 'failed';
+  }
+
+  const rows: TimelineStep[] = [
     {
       id: 'submitted',
       label: 'Job submitted',
-      status: 'completed',
+      status: baseline.submitted,
       at: requestedIso,
-      detail: job.providerChoice ?? 'heygen',
+      detail: providerChoice ?? 'heygen',
     },
     {
       id: 'analyze',
-      label: hasAnalysis ? 'Source analyzed' : 'Analyzing source',
-      status: isFailed && !hasAnalysis ? 'failed' : hasAnalysis ? 'completed' : 'running',
+      label: baseline.analyze === 'completed' ? 'Source analyzed' : 'Analyzing source',
+      status: baseline.analyze,
     },
     {
       id: 'scripts',
-      label: hasAnyVariant ? 'Scripts generated' : 'Generating scripts',
-      status:
-        isFailed && !hasAnyVariant
-          ? 'failed'
-          : hasAnyVariant
-            ? 'completed'
-            : hasAnalysis
-              ? 'running'
-              : 'pending',
+      label: baseline.scripts === 'completed' ? 'Scripts generated' : 'Generating scripts',
+      status: baseline.scripts,
     },
     {
       id: 'avatars',
-      label: 'Avatars picked',
-      // We can't tell precisely from the snapshot — once a variant has
-      // any state at all, avatar pick has happened. Use "any variant
-      // exists" as a proxy.
-      status: hasAnyVariant ? 'completed' : isProcessing && hasAnalysis ? 'running' : 'pending',
+      label: baseline.avatars === 'completed' ? 'Avatars picked' : 'Picking avatars',
+      status: baseline.avatars,
     },
     {
       id: 'videos',
-      label: written >= expected && expected > 0 ? 'Videos generated' : 'Generating videos',
-      status:
-        isFailed && written < expected
-          ? 'failed'
-          : written >= expected && expected > 0
-            ? 'completed'
-            : hasAnyVariant
-              ? 'running'
-              : 'pending',
+      label:
+        baseline.videos === 'completed'
+          ? 'Videos generated'
+          : polish25Step === 'submitted'
+            ? 'Rendering videos (this is the slow one)'
+            : 'Generating videos',
+      status: baseline.videos,
       detail: expected > 0 ? `${written}/${expected} ready` : undefined,
     },
     {
       id: 'complete',
-      label: isFailed ? 'Failed' : isDone ? 'Completed' : 'Pending completion',
-      status: isFailed ? 'failed' : isDone ? 'completed' : 'pending',
+      label:
+        baseline.complete === 'failed' ? 'Failed' : isDone ? 'Completed' : 'Pending completion',
+      status: baseline.complete,
       at: completedIso,
-      detail: isFailed ? (job.errorMessage ?? undefined) : undefined,
+      detail: baseline.complete === 'failed' ? (errorMessage ?? undefined) : undefined,
     },
   ];
+
+  return rows;
 }

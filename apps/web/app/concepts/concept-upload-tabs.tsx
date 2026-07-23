@@ -211,15 +211,19 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
           <FormField name="staticDescription" label="Description (optional)" maxLength={500} />
         </>
       )}
-      {contentType === 'ugc' && (
-        <FormField
-          name="ugcOriginalScript"
-          label="Original script (optional)"
-          textarea
-          maxLength={4000}
-          help="If you have it — speeds up generation."
-        />
-      )}
+      {/* Polish-25.2 Commit 17: "Original script (optional)" field
+          removed. The current default UGC pipeline (Polish-25 /
+          Instant UGC) does not read concepts.ugcOriginalScript —
+          it derives everything from Gemini's source analysis
+          persisted at metadata.analysis. The legacy Polish-23
+          pipeline uses it as a persona-fallback source but
+          degrades gracefully to prior_analysis when NULL. Keeping
+          the schema column so historical rows survive; simply
+          removing the input from the form.
+
+          Operator report: field felt like busywork — the whole
+          point of the pipeline is that the user just uploads the
+          winning ad and the bot figures out the script. */}
 
       {/*
        * Polish-15 Fix 3: every field below is optional metadata used

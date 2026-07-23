@@ -64,60 +64,94 @@ export default async function OnboardingKeysPage() {
   const geminiMeta = TOOL_PROVIDER_META.gemini;
 
   return (
-    <article className="mx-auto max-w-2xl">
-      <header className="mb-6">
-        <h1 className="text-3xl font-bold tracking-tight">Connect your keys</h1>
-        <p className="text-fg-muted mt-2 text-sm leading-relaxed">
+    // Polish-25.2 Commit 17: visual polish. Prior version felt
+    // cheap next to /settings/connections' Providers tab despite
+    // using the same ToolCard component — the wrapper was flat +
+    // token-mismatched. Changes:
+    //   - Wider max-w so cards breathe like Settings' cards
+    //   - Progress indicator moved to a bespoke "step X of Y"
+    //     header row that reads intentional instead of dashed
+    //   - Section heading over the card list ("Required to
+    //     continue") in the same treatment Providers tab uses
+    //   - Sticky-ish footer with the continue CTA + a right-
+    //     aligned secondary "add more later" link (was a stacked
+    //     row previously — read as a footnote)
+    <article className="mx-auto max-w-3xl px-4 pb-24 pt-6 sm:pt-10">
+      <header className="mb-8">
+        <p className="text-fg-subtle mb-2 text-[11px] font-semibold uppercase tracking-[0.15em]">
+          Step 3 of 3
+        </p>
+        <h1 className="text-fg text-3xl font-bold tracking-tight">Connect your keys</h1>
+        <p className="text-fg-muted mt-2 max-w-prose text-sm leading-relaxed">
           Ads Bot is bring-your-own-key for Claude and Gemini. Paste an API key for each and
-          we&apos;ll verify it. Instant UGC video generation is included on the platform — no extra
-          key needed.
+          we&apos;ll verify it on the spot. Instant UGC video generation is included on the platform
+          — no extra key needed.
         </p>
       </header>
 
-      <div className="border-border-subtle text-fg-muted mb-6 flex items-center justify-between rounded-md border px-4 py-3 text-xs">
-        <span>
-          <span className="text-fg font-medium">{readyCount} of 2</span> keys connected
-        </span>
+      <div className="border-border-subtle bg-bg-surface mb-6 flex items-center justify-between rounded-md border px-4 py-3">
+        <div className="flex items-center gap-3 text-sm">
+          <span className="border-fg/25 text-fg flex h-6 min-w-[3rem] items-center justify-center rounded-full border px-2 font-mono text-xs font-semibold">
+            {readyCount} / 2
+          </span>
+          <span className="text-fg-muted">
+            {allReady ? 'All required keys verified.' : 'Required keys connected'}
+          </span>
+        </div>
         {allReady && (
-          <span className="flex items-center gap-1.5 text-[color:var(--accent-positive)]">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            All required keys verified
+          <span className="flex items-center gap-1.5 text-xs text-[color:var(--accent-positive)]">
+            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+            Ready
           </span>
         )}
       </div>
 
-      <div className="space-y-4">
-        <ToolCard
-          provider="claude"
-          label={claudeMeta.label}
-          role={claudeMeta.role}
-          description={claudeMeta.description}
-          apiDocsUrl={claudeMeta.apiDocsUrl}
-          keyHint={claudeMeta.keyHint}
-          connected={claudeReady}
-          verifiedDisplay={claudeConn ? formatDateTime(claudeConn.apiKeyVerifiedAt) : null}
-        />
-        <ToolCard
-          provider="gemini"
-          label={geminiMeta.label}
-          role={geminiMeta.role}
-          description={geminiMeta.description}
-          apiDocsUrl={geminiMeta.apiDocsUrl}
-          keyHint={geminiMeta.keyHint}
-          connected={geminiReady}
-          verifiedDisplay={geminiConn ? formatDateTime(geminiConn.apiKeyVerifiedAt) : null}
-        />
-      </div>
+      <section>
+        <h2 className="text-fg-subtle mb-3 text-xs font-semibold uppercase tracking-wider">
+          Required to continue
+        </h2>
+        <div className="space-y-3">
+          <ToolCard
+            provider="claude"
+            label={claudeMeta.label}
+            role={claudeMeta.role}
+            description={claudeMeta.description}
+            apiDocsUrl={claudeMeta.apiDocsUrl}
+            keyHint={claudeMeta.keyHint}
+            connected={claudeReady}
+            verifiedDisplay={claudeConn ? formatDateTime(claudeConn.apiKeyVerifiedAt) : null}
+          />
+          <ToolCard
+            provider="gemini"
+            label={geminiMeta.label}
+            role={geminiMeta.role}
+            description={geminiMeta.description}
+            apiDocsUrl={geminiMeta.apiDocsUrl}
+            keyHint={geminiMeta.keyHint}
+            connected={geminiReady}
+            verifiedDisplay={geminiConn ? formatDateTime(geminiConn.apiKeyVerifiedAt) : null}
+          />
+        </div>
+      </section>
 
-      <div className="mt-8 flex items-center justify-between gap-3">
+      <div className="border-border-subtle mt-10 flex flex-col items-start justify-between gap-4 border-t pt-6 sm:flex-row sm:items-center">
         <p className="text-fg-subtle text-xs">
           Need alternate pipelines? Add HeyGen, Hedra, WaveSpeed AI, or others any time from{' '}
-          <Link href="/settings/connections" className="text-fg underline-offset-4 hover:underline">
+          <Link
+            href="/settings/connections"
+            className="text-fg-muted hover:text-fg underline-offset-4 hover:underline"
+          >
             Settings → Connections
           </Link>
           .
         </p>
-        <Button asChild disabled={!allReady} variant={allReady ? 'primary' : 'secondary'}>
+        <Button
+          asChild
+          size="lg"
+          disabled={!allReady}
+          variant={allReady ? 'primary' : 'secondary'}
+          className="w-full sm:w-auto"
+        >
           <Link href="/dashboard" aria-disabled={!allReady}>
             {allReady ? 'Continue to dashboard' : 'Connect both to continue'}
           </Link>

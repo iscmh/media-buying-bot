@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.2.6';
+export const POLISH_VERSION = '25.2.7';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.2.6';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.2 Commit 16b — launch presets (CRUD + dialog dropdown) + read-only /settings/rules automation surface';
+  'Polish-25.2 Commit 17 — timeline reads worker polish25_progress + onboarding-keys polish + founding-member tooltip + concept-form + green cost estimate';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

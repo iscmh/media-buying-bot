@@ -19,6 +19,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AppShell } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/shell/empty-state';
 import { PageHeader } from '@/components/shell/page-header';
@@ -150,7 +151,31 @@ export default async function DashboardPage({ searchParams }: Props) {
       <PageHeader
         title="Dashboard"
         subtitle={`${user.email} · timezone ${userTimezone}`}
-        actions={isFoundingMember ? <Badge variant="secondary">FOUNDING MEMBER</Badge> : undefined}
+        // Polish-25.2 Commit 17: Founding-member badge was
+        // unexplained — operator survey read it as decorative.
+        // It actually grants meaningful access (bypasses the
+        // Whop subscription paywall — checkActiveSubscription
+        // short-circuits at packages/db/src/subscription.ts:45).
+        // Wrap in a tooltip so anyone hovering learns what it
+        // gets them, but keep the badge visible so the perk
+        // still feels earned rather than hidden.
+        actions={
+          isFoundingMember ? (
+            <TooltipProvider delayDuration={100}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-block cursor-help">
+                    <Badge variant="secondary">FOUNDING MEMBER</Badge>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs text-xs">
+                  You&apos;re one of the first 50 users. Ads Bot access stays free forever — no
+                  subscription required.
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : undefined
+        }
       />
 
       {/* Polish-25.1 Commit 10b: empty-state mode swaps the metrics
