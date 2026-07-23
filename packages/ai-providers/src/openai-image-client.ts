@@ -42,14 +42,37 @@ export const OPENAI_IMAGE_MODELS = ['gpt-image-2', 'gpt-image-1.5', 'gpt-image-1
 export type OpenaiImageModel = (typeof OPENAI_IMAGE_MODELS)[number];
 
 /**
- * Per-image cost in USD for gpt-image-2 at 1024x1024. Operator
- * pricing brief — verify against OpenAI's live pricing page before
- * enabling live launches. The rest of the codebase computes
- * per-variant totals against these constants.
+ * Per-image cost in USD for gpt-image-2. Verified July 2026 pricing:
+ *
+ *   Square 1024x1024:
+ *     Low    $0.006
+ *     Medium $0.053
+ *     High   $0.211
+ *
+ *   Rectangular (1024x1536 or 1536x1024) — actually cheaper than
+ *   square per OpenAI's current pricing shape:
+ *     Low    $0.005
+ *     Medium $0.041
+ *     High   $0.165
+ *
+ * The rest of the codebase computes per-variant totals against
+ * these constants. `estimateOpenaiImageCostUsd()` picks the right
+ * pair based on the size input; NEVER interpolate — OpenAI's
+ * pricing is stepped, not linear.
+ *
+ * 18b-hotfix drift from 18b:
+ *   Old  Low $0.02  Medium $0.05  High $0.20  (rectangular = 1.5×)
+ *   New  Low $0.006 Medium $0.053 High $0.211 (rectangular table above)
+ * Bugs the drift caused: cost estimate was ~3.3× too high on Low,
+ * ~1.5× too high per non-square size (multiplier was upside-down —
+ * rectangular is CHEAPER, not more expensive).
  */
-export const OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE = 0.2;
-export const OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE = 0.05;
-export const OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE = 0.02;
+export const OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE = 0.211;
+export const OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE = 0.053;
+export const OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE = 0.006;
+export const OPENAI_GPT_IMAGE_2_HIGH_RECT_USD_PER_IMAGE = 0.165;
+export const OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE = 0.041;
+export const OPENAI_GPT_IMAGE_2_LOW_RECT_USD_PER_IMAGE = 0.005;
 
 /**
  * Sizes exposed to the picker. The static pipeline uses 1024x1024
@@ -64,31 +87,28 @@ export const OPENAI_IMAGE_QUALITIES = ['low', 'medium', 'high'] as const;
 export type OpenaiImageQuality = (typeof OPENAI_IMAGE_QUALITIES)[number];
 
 /**
- * Per-quality cost helper. Only 1024x1024 pricing is pinned on
- * initial ship. Larger sizes fall back to the 1024 cost + a small
- * multiplier flag so the estimator doesn't lie about a future
- * higher-res picker — operators asked for cost transparency.
+ * Per-quality × per-size cost helper. Uses the verified July 2026
+ * gpt-image-2 pricing table above — NOT a multiplier, because
+ * OpenAI's pricing is stepped and non-square is actually cheaper
+ * per image (opposite direction from the pre-hotfix multiplier).
  */
 export function estimateOpenaiImageCostUsd(input: {
   quality: OpenaiImageQuality;
   size?: OpenaiImageSize;
 }): number {
-  const base =
-    input.quality === 'high'
-      ? OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE
+  const isRect = input.size === '1024x1536' || input.size === '1536x1024';
+  if (isRect) {
+    return input.quality === 'high'
+      ? OPENAI_GPT_IMAGE_2_HIGH_RECT_USD_PER_IMAGE
       : input.quality === 'medium'
-        ? OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE
-        : OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE;
-  // Non-square sizes at gpt-image-2 are roughly 1.5x the square
-  // cost per OpenAI's public pricing shape. Rough multiplier so the
-  // estimator doesn't over-promise; refine when we surface a size
-  // picker.
-  const sizeMultiplier = input.size && input.size !== '1024x1024' ? 1.5 : 1;
-  return round4(base * sizeMultiplier);
-}
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
+        ? OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE
+        : OPENAI_GPT_IMAGE_2_LOW_RECT_USD_PER_IMAGE;
+  }
+  return input.quality === 'high'
+    ? OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE
+    : input.quality === 'medium'
+      ? OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE
+      : OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE;
 }
 
 // =========================================================================
@@ -157,6 +177,29 @@ export class OpenaiInvalidImageError extends Error {
   }
 }
 
+/**
+ * 18b-hotfix: 502 / 503 / 504 from OpenAI's edge — RETRYABLE.
+ * gpt-image-2 High takes 15-30s per generation and OpenAI's edge
+ * routinely returns 504 during that window when a request lands
+ * on a warming node. Worker step.run boundary re-fires so the
+ * next attempt hits a healthy node.
+ *
+ * Distinct from OpenaiRateLimitError (429) because the operator-
+ * facing message differs — 429 is "you're going too fast", 5xx
+ * is "OpenAI is having a moment". Same retry behavior; different
+ * telemetry.
+ */
+export class OpenaiTransientError extends Error {
+  readonly kind = 'openai_transient' as const;
+  constructor(
+    message: string,
+    readonly statusCode: number,
+  ) {
+    super(message);
+    this.name = 'OpenaiTransientError';
+  }
+}
+
 // =========================================================================
 // Client
 // =========================================================================
@@ -193,7 +236,22 @@ export interface OpenaiImageResult {
   revisedPrompt?: string;
 }
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * 18b-hotfix: quality-aware timeouts. Verified July 2026 gpt-image-2
+ * generation times:
+ *   Low    ~5-10s   → 30s ceiling
+ *   Medium ~10-20s  → 60s ceiling
+ *   High   ~15-30s  → 120s ceiling
+ * A single flat 60s default (18b initial) was too tight for High —
+ * operator saw AbortErrors on legitimately-slow-but-successful
+ * requests, which then re-tried via step.run and burned budget on
+ * the retry rather than just waiting.
+ */
+function defaultTimeoutForQuality(q: OpenaiImageQuality): number {
+  if (q === 'high') return 120_000;
+  if (q === 'medium') return 60_000;
+  return 30_000;
+}
 const OPENAI_IMAGES_GENERATIONS_URL = 'https://api.openai.com/v1/images/generations';
 const OPENAI_IMAGES_EDITS_URL = 'https://api.openai.com/v1/images/edits';
 
@@ -220,7 +278,7 @@ export async function submitOpenaiImageGeneration(
   const model = input.model ?? OPENAI_IMAGE_DEFAULT_MODEL;
   const quality = input.quality ?? 'medium';
   const size = input.size ?? '1024x1024';
-  const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = input.timeoutMs ?? defaultTimeoutForQuality(quality);
   const jobId = input.generationJobId ?? '(no-job-id)';
 
   const useEdits =
@@ -381,6 +439,14 @@ function classifyOpenaiError(input: {
     throw new OpenaiRateLimitError(message, statusCode);
   }
 
+  // 18b-hotfix: 5xx edge failures on gpt-image-2 High are common
+  // during long generations. Throw a typed transient class so the
+  // worker's catch retries (step.run re-fires on throws; returning
+  // { ok: false } here would NOT retry).
+  if (statusCode >= 500 && statusCode <= 599) {
+    throw new OpenaiTransientError(message, statusCode);
+  }
+
   return {
     ok: false,
     statusCode,
@@ -408,6 +474,7 @@ export function redactOpenaiApiKey(apiKey: string): string {
  */
 export function isOpenaiTransientError(err: unknown): boolean {
   if (err instanceof OpenaiRateLimitError) return true;
+  if (err instanceof OpenaiTransientError) return true;
   if (err instanceof Error && /timeout|ECONNRESET|EAI_AGAIN|ETIMEDOUT/i.test(err.message)) {
     return true;
   }

@@ -1,13 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  OPENAI_GPT_IMAGE_2_HIGH_RECT_USD_PER_IMAGE,
   OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE,
+  OPENAI_GPT_IMAGE_2_LOW_RECT_USD_PER_IMAGE,
   OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE,
+  OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE,
   OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE,
   OPENAI_IMAGE_DEFAULT_MODEL,
   OpenaiContentPolicyError,
   OpenaiInsufficientFundsError,
   OpenaiInvalidImageError,
   OpenaiRateLimitError,
+  OpenaiTransientError,
   estimateOpenaiImageCostUsd,
   isOpenaiTransientError,
   redactOpenaiApiKey,
@@ -227,36 +231,91 @@ describe('OpenAI image-gen — typed error classification', () => {
     expect(r.statusCode).toBe(400);
     expect(r.errorMessage).toMatch(/other_error|something else/);
   });
+
+  it('throws OpenaiTransientError on 504 so worker step.run retries (18b-hotfix)', async () => {
+    // gpt-image-2 High routinely 504s during 15-30s generations;
+    // the throw here is what makes step.run re-fire.
+    mockFetchOnce({
+      status: 504,
+      body: { error: { message: 'Gateway timeout' } },
+    });
+    await expect(
+      submitOpenaiImageGeneration({ apiKey: 'sk-x', prompt: 'x' }),
+    ).rejects.toBeInstanceOf(OpenaiTransientError);
+  });
+
+  it('throws OpenaiTransientError on 502 + 503 (all 5xx are transient)', async () => {
+    mockFetchOnce({ status: 502, body: { error: { message: 'bad gateway' } } });
+    await expect(
+      submitOpenaiImageGeneration({ apiKey: 'sk-x', prompt: 'x' }),
+    ).rejects.toBeInstanceOf(OpenaiTransientError);
+
+    mockFetchOnce({ status: 503, body: { error: { message: 'unavailable' } } });
+    await expect(
+      submitOpenaiImageGeneration({ apiKey: 'sk-x', prompt: 'x' }),
+    ).rejects.toBeInstanceOf(OpenaiTransientError);
+  });
 });
 
-describe('OpenAI image-gen — cost estimation', () => {
-  it('pins per-quality cost at 1024x1024', () => {
+describe('OpenAI image-gen — cost estimation (18b-hotfix verified pricing)', () => {
+  it('pins verified July 2026 pricing at 1024x1024', () => {
+    // Pin the exact numbers so a future silent edit surfaces on CI.
+    expect(OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE).toBe(0.211);
+    expect(OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE).toBe(0.053);
+    expect(OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE).toBe(0.006);
+  });
+
+  it('pins verified rectangular pricing', () => {
+    expect(OPENAI_GPT_IMAGE_2_HIGH_RECT_USD_PER_IMAGE).toBe(0.165);
+    expect(OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE).toBe(0.041);
+    expect(OPENAI_GPT_IMAGE_2_LOW_RECT_USD_PER_IMAGE).toBe(0.005);
+  });
+
+  it('estimateOpenaiImageCostUsd picks square vs. rectangular table', () => {
+    // Square (default when size omitted OR 1024x1024).
     expect(estimateOpenaiImageCostUsd({ quality: 'high' })).toBe(
       OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE,
     );
-    expect(estimateOpenaiImageCostUsd({ quality: 'medium' })).toBe(
+    expect(estimateOpenaiImageCostUsd({ quality: 'medium', size: '1024x1024' })).toBe(
       OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE,
     );
-    expect(estimateOpenaiImageCostUsd({ quality: 'low' })).toBe(
-      OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE,
-    );
-  });
-
-  it('applies 1.5x multiplier for non-square sizes', () => {
+    // Rectangular — actually CHEAPER, not more expensive (18b initial
+    // used a wrong-direction 1.5x multiplier).
     expect(estimateOpenaiImageCostUsd({ quality: 'medium', size: '1024x1536' })).toBe(
-      round4(OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE * 1.5),
+      OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE,
     );
     expect(estimateOpenaiImageCostUsd({ quality: 'medium', size: '1536x1024' })).toBe(
-      round4(OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE * 1.5),
+      OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE,
+    );
+    expect(estimateOpenaiImageCostUsd({ quality: 'low', size: '1024x1536' })).toBe(
+      OPENAI_GPT_IMAGE_2_LOW_RECT_USD_PER_IMAGE,
     );
   });
 
-  it('has-a-price relationships: low < medium < high', () => {
+  it('rectangular cost < square cost across all tiers (regression pin)', () => {
+    expect(OPENAI_GPT_IMAGE_2_LOW_RECT_USD_PER_IMAGE).toBeLessThan(
+      OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE,
+    );
+    expect(OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE).toBeLessThan(
+      OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE,
+    );
+    expect(OPENAI_GPT_IMAGE_2_HIGH_RECT_USD_PER_IMAGE).toBeLessThan(
+      OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE,
+    );
+  });
+
+  it('has-a-price relationships: low < medium < high (square + rect)', () => {
     expect(OPENAI_GPT_IMAGE_2_LOW_USD_PER_IMAGE).toBeLessThan(
       OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE,
     );
     expect(OPENAI_GPT_IMAGE_2_MEDIUM_USD_PER_IMAGE).toBeLessThan(
       OPENAI_GPT_IMAGE_2_HIGH_USD_PER_IMAGE,
+    );
+    expect(OPENAI_GPT_IMAGE_2_LOW_RECT_USD_PER_IMAGE).toBeLessThan(
+      OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE,
+    );
+    expect(OPENAI_GPT_IMAGE_2_MEDIUM_RECT_USD_PER_IMAGE).toBeLessThan(
+      OPENAI_GPT_IMAGE_2_HIGH_RECT_USD_PER_IMAGE,
     );
   });
 });
@@ -268,15 +327,13 @@ describe('OpenAI image-gen — helpers', () => {
     expect(redactOpenaiApiKey('')).toBe('(empty)');
   });
 
-  it('isOpenaiTransientError catches rate-limit + network errors', () => {
+  it('isOpenaiTransientError catches rate-limit + 5xx + network errors', () => {
     expect(isOpenaiTransientError(new OpenaiRateLimitError('x', 429))).toBe(true);
+    // 18b-hotfix: 502/503/504 route through OpenaiTransientError.
+    expect(isOpenaiTransientError(new OpenaiTransientError('x', 504))).toBe(true);
     expect(isOpenaiTransientError(new Error('request timeout'))).toBe(true);
     expect(isOpenaiTransientError(new Error('ECONNRESET'))).toBe(true);
     expect(isOpenaiTransientError(new OpenaiContentPolicyError('x', 400))).toBe(false);
     expect(isOpenaiTransientError(new Error('some other error'))).toBe(false);
   });
 });
-
-function round4(n: number): number {
-  return Math.round(n * 10000) / 10000;
-}

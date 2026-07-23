@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.3.1';
+export const POLISH_VERSION = '25.3.2';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.3.1';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.3 Commit 18b — OpenAI gpt-image-2 static ad pipeline (client + worker + generate-form picker + quality tier + cost estimator + tests)';
+  'Polish-25.3 Commit 18b-hotfix — verified July 2026 gpt-image-2 pricing (0.006/0.053/0.211 square + rectangular table) + OpenaiTransientError 5xx retry + quality-aware timeouts + OpenAI Org Verification note';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

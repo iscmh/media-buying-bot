@@ -178,7 +178,15 @@ export const AI_PROVIDER_META: Record<
   },
   openai: {
     label: 'OpenAI',
-    description: 'Whisper audio transcription on uploaded reference videos. Sora 2 (when public).',
+    // Polish-25.3 Commit 18b-hotfix: description now names the Static
+    // ad pipeline (gpt-image-2) as the primary user of this key and
+    // flags the API Organization Verification requirement — OpenAI
+    // gates ALL Image API calls behind org verification, so an
+    // unverified operator's Static-ad launches would 400 without
+    // ever leaving the worker. The pointer saves a "why is my
+    // launch failing" support round-trip.
+    description:
+      'Powers Static ad pipeline (gpt-image-2 reference-image edits) + Whisper transcription. NOTE: OpenAI requires API Organization Verification for Image API access — verify at platform.openai.com/settings/organization/general before your first Static ad generation.',
     pricingUrl: 'https://openai.com/api/pricing',
     apiDocsUrl: 'https://platform.openai.com/docs/api-reference',
     verificationMethod: 'api',

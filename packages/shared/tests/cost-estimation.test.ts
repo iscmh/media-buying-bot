@@ -126,33 +126,34 @@ describe('Polish-20 Commit 4: surviving legacy-pipeline cost paths', () => {
   // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad
   // -------------------------------------------------------------
 
-  it('static_openai_image medium (default): 5 variants = claude $0.10 + images $0.25 = $0.35', () => {
+  // 18b-hotfix pricing: verified July 2026 gpt-image-2 numbers.
+  it('static_openai_image medium (default): 5 variants = claude $0.10 + images $0.265 = $0.365', () => {
     const r = estimateGenerationCost({
       conceptType: 'static',
       variantCount: 5,
       pipeline: 'static_openai_image',
     });
-    expect(r.estimateUsd).toBeCloseTo(0.35, 4);
+    expect(r.estimateUsd).toBeCloseTo(0.365, 4);
   });
 
-  it('static_openai_image low: 5 variants = claude $0.10 + images $0.10 = $0.20', () => {
+  it('static_openai_image low: 5 variants = claude $0.10 + images $0.03 = $0.13', () => {
     const r = estimateGenerationCost({
       conceptType: 'static',
       variantCount: 5,
       pipeline: 'static_openai_image',
       openaiStaticQuality: 'low',
     });
-    expect(r.estimateUsd).toBeCloseTo(0.2, 4);
+    expect(r.estimateUsd).toBeCloseTo(0.13, 4);
   });
 
-  it('static_openai_image high: 5 variants = claude $0.10 + images $1.00 = $1.10', () => {
+  it('static_openai_image high: 5 variants = claude $0.10 + images $1.055 = $1.155', () => {
     const r = estimateGenerationCost({
       conceptType: 'static',
       variantCount: 5,
       pipeline: 'static_openai_image',
       openaiStaticQuality: 'high',
     });
-    expect(r.estimateUsd).toBeCloseTo(1.1, 4);
+    expect(r.estimateUsd).toBeCloseTo(1.155, 4);
   });
 
   it('static_openai_image cost strictly increases with quality tier', () => {

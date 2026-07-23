@@ -141,8 +141,12 @@ export const STATIC_OPENAI_DEFAULT_QUALITY: StaticOpenaiQuality = 'medium';
 export function estimateStaticOpenaiCostPerVariantUsd(quality: StaticOpenaiQuality): {
   usd: number;
 } {
+  // 18b-hotfix: verified July 2026 gpt-image-2 pricing at 1024x1024.
+  // Mirrors PRICING.openaiStaticImage{High,Medium,Low}Usd in
+  // packages/shared/src/cost-estimation.ts — any change here MUST
+  // land alongside the shared constants in one commit.
   const OPENAI_CLAUDE_USD = 0.02;
-  const OPENAI_IMAGE_USD = quality === 'high' ? 0.2 : quality === 'low' ? 0.02 : 0.05;
+  const OPENAI_IMAGE_USD = quality === 'high' ? 0.211 : quality === 'low' ? 0.006 : 0.053;
   return { usd: round4(OPENAI_CLAUDE_USD + OPENAI_IMAGE_USD) };
 }
 

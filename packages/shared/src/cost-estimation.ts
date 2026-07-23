@@ -78,26 +78,27 @@ const PRICING = {
   polish23VeoClipSeconds: 8,
   polish23ReplicateConcatUsd: 0.15,
 
-  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static-ad pipeline.
-  // Per-image costs at 1024x1024 sourced from operator brief
-  // (verify against OpenAI's live pricing page before every ship):
-  //   High:   $0.20/image  (premium visual fidelity)
-  //   Medium: $0.05/image  (default — matches Polish-25 UGC per-variant)
-  //   Low:    $0.02/image  (cost-optimized)
+  // Polish-25.3 Commit 18b + 18b-hotfix: OpenAI gpt-image-2
+  // static-ad pipeline. Verified July 2026 pricing at 1024x1024:
+  //   High:   $0.211/image
+  //   Medium: $0.053/image
+  //   Low:    $0.006/image
   // Plus a Claude copy rewrite (~$0.02/variant) that generates the
   // headline + primary text variations fed into the image edit.
   //
-  // These constants are mirrored (and canonically owned) at
-  // packages/ai-providers/src/openai-image-client.ts —
-  // OPENAI_GPT_IMAGE_2_*_USD_PER_IMAGE. Kept duplicated here
-  // rather than imported because @mbb/shared cannot depend on
-  // @mbb/ai-providers (would circle the dep graph). Version-bump
-  // test in tests/openai-static-cost-estimation.test.ts pins the
-  // duplicated values so drift surfaces on CI.
+  // Constants mirror packages/ai-providers/src/openai-image-client.ts
+  // — OPENAI_GPT_IMAGE_2_*_USD_PER_IMAGE. Kept duplicated here rather
+  // than imported because @mbb/shared cannot depend on
+  // @mbb/ai-providers (would circle the dep graph). Any change here
+  // MUST land alongside the mirror constants in one commit.
+  //
+  // 18b-hotfix drift correction: Low was $0.02 (~3.3× too high),
+  // Medium was $0.05, High was $0.20. Real pricing verified against
+  // OpenAI's current pricing page.
   openaiStaticClaudeUsd: 0.02,
-  openaiStaticImageHighUsd: 0.2,
-  openaiStaticImageMediumUsd: 0.05,
-  openaiStaticImageLowUsd: 0.02,
+  openaiStaticImageHighUsd: 0.211,
+  openaiStaticImageMediumUsd: 0.053,
+  openaiStaticImageLowUsd: 0.006,
 } as const;
 
 /**

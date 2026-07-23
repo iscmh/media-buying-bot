@@ -5,6 +5,7 @@ import {
   OpenaiInsufficientFundsError,
   OpenaiInvalidImageError,
   OpenaiRateLimitError,
+  OpenaiTransientError,
   callClaude,
   redactOpenaiApiKey,
   submitOpenaiImageGeneration,
@@ -411,9 +412,17 @@ async function renderOneOpenaiVariant(input: {
       });
       throw new NonRetriableError(err.message);
     }
-    // Rate-limit and other Errors bubble → step.run retries.
+    // 18b-hotfix: rate-limit + transient 5xx bubble → step.run
+    // retries. gpt-image-2 High routinely 504s during 15-30s
+    // generations; the retry lands on a healthy edge node.
     if (err instanceof OpenaiRateLimitError) {
       console.log(`[static-openai] variant=${input.variantIndex} rate-limit — throwing for retry`);
+      throw err;
+    }
+    if (err instanceof OpenaiTransientError) {
+      console.log(
+        `[static-openai] variant=${input.variantIndex} transient status=${err.statusCode} — throwing for retry`,
+      );
       throw err;
     }
     throw err;

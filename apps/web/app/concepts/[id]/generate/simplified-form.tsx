@@ -619,7 +619,8 @@ function StaticOpenaiPickerCard({
           </div>
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Image quality">
             {(['low', 'medium', 'high'] as StaticOpenaiQuality[]).map((q) => {
-              const priceLabel = q === 'high' ? '$0.20' : q === 'medium' ? '$0.05' : '$0.02';
+              // 18b-hotfix: verified July 2026 gpt-image-2 pricing.
+              const priceLabel = q === 'high' ? '$0.211' : q === 'medium' ? '$0.053' : '$0.006';
               return (
                 <button
                   key={q}
