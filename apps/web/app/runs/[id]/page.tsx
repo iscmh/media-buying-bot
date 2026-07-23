@@ -229,6 +229,10 @@ export default async function JobReviewPage({ params }: Props) {
             completedAt: job.completedAt,
             variantCount: job.variantCount,
             providerChoice: job.providerChoice,
+            // Polish-25.3 Commit 18a: thread the picked pipeline
+            // so JobTimeline can render a friendly descriptor
+            // label instead of the raw providerChoice enum.
+            pickedPipeline: job.pickedPipeline,
             errorMessage: job.errorMessage,
             metadata: job.metadata,
           }}

@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.2.7';
+export const POLISH_VERSION = '25.3.0';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.2.7';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.2 Commit 17 — timeline reads worker polish25_progress + onboarding-keys polish + founding-member tooltip + concept-form + green cost estimate';
+  'Polish-25.3 Commit 18a — timeline copy-leak fix (providerChoice → descriptor label) + MINOR bump opening the Polish-25.3 static-ad-pipeline series';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

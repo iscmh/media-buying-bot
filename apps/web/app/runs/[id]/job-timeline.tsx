@@ -1,4 +1,5 @@
 import { AlertCircle, CheckCircle2, CircleDashed, Loader2 } from 'lucide-react';
+import { describePipeline, pipelineFromString } from '@mbb/shared';
 import { formatDateTime } from '@/lib/format/date';
 import { cn } from '@/lib/utils';
 
@@ -23,6 +24,11 @@ interface Props {
     completedAt: Date | null;
     variantCount: number | null;
     providerChoice: string | null;
+    // Polish-25.3 Commit 18a: pass through the picked pipeline so
+    // the timeline can render a friendly descriptor label instead
+    // of the raw providerChoice enum. Optional so legacy jobs
+    // (pre-descriptor era) still render.
+    pickedPipeline: string | null;
     errorMessage: string | null;
     metadata: unknown;
   };
@@ -32,6 +38,26 @@ interface Props {
     fileUrl: string | null;
     createdAtIso: string;
   }>;
+}
+
+/**
+ * Polish-25.3 Commit 18a: map job.pickedPipeline → user-facing
+ * label using the shared descriptor table. Prevents raw enum
+ * strings like `makeugc`, `openai`, `gemini`, `heygen` from
+ * bleeding into the "Job submitted · X" detail line on the
+ * timeline (operator report from Commit 17 walkthrough: "Job
+ * submitted · makeugc" surfaced on every Polish-25 job).
+ *
+ * Returns null when the pipeline is unknown so the caller can
+ * skip rendering rather than leak a raw code path. Also returns
+ * null when the descriptor's label is one of the "internal-
+ * looking" ones we don't want on the top-of-page timeline
+ * (e.g. legacy Nano Banana / Sora surfacing on old rows).
+ */
+function friendlyPipelineLabel(pickedPipeline: string | null): string | null {
+  const pipeline = pipelineFromString(pickedPipeline);
+  if (!pipeline) return null;
+  return describePipeline(pipeline).label;
 }
 
 /**
@@ -178,6 +204,13 @@ function deriveSteps(
         )
       : null;
 
+  // Polish-25.3 Commit 18a: resolve the friendly label ONCE per
+  // deriveSteps call so both static + UGC branches use the same
+  // logic and neither leaks a raw enum. `label ?? undefined`
+  // pattern hides the detail line entirely when the pipeline
+  // can't be resolved (legacy pre-descriptor rows).
+  const submittedDetail = friendlyPipelineLabel(job.pickedPipeline) ?? undefined;
+
   if (conceptType === 'static') {
     return [
       {
@@ -185,7 +218,7 @@ function deriveSteps(
         label: 'Job submitted',
         status: 'completed',
         at: requestedIso,
-        detail: job.providerChoice ?? 'gemini+claude',
+        detail: submittedDetail,
       },
       {
         id: 'generating',
@@ -224,7 +257,10 @@ function deriveSteps(
     hasAnyVariant,
     written,
     expected,
-    providerChoice: job.providerChoice,
+    // Polish-25.3 Commit 18a: pass the resolved friendly label
+    // (or undefined) rather than the raw providerChoice enum,
+    // so downstream never has an opportunity to leak.
+    submittedDetail,
     errorMessage: job.errorMessage,
     polish25Step,
   });
@@ -240,7 +276,7 @@ interface UgcDeriveInput {
   hasAnyVariant: boolean;
   written: number;
   expected: number;
-  providerChoice: string | null;
+  submittedDetail: string | undefined;
   errorMessage: string | null;
   polish25Step: string | null;
 }
@@ -289,7 +325,7 @@ function deriveUgcSteps(input: UgcDeriveInput): TimelineStep[] {
     hasAnyVariant,
     written,
     expected,
-    providerChoice,
+    submittedDetail,
     errorMessage,
     polish25Step,
   } = input;
@@ -366,7 +402,7 @@ function deriveUgcSteps(input: UgcDeriveInput): TimelineStep[] {
       label: 'Job submitted',
       status: baseline.submitted,
       at: requestedIso,
-      detail: providerChoice ?? 'heygen',
+      detail: submittedDetail,
     },
     {
       id: 'analyze',
