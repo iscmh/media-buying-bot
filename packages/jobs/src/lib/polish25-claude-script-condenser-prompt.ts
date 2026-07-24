@@ -160,12 +160,24 @@ export const Polish25CondensedScriptSchema = z
     message: 'condensed script contains appearance words (avatar handles appearance visually)',
   });
 
+import { SHARED_ANTI_AI_VOICE_RULES } from '@mbb/shared';
+
 /**
  * System prompt for the Claude script condensation pass. Operator-
  * tuned constraints reflected verbatim — do not paraphrase without
  * regression-pin updates.
+ *
+ * Polish-25.3 Commit 18b-hotfix-2: injects the shared
+ * anti-AI-voice ruleset (no em dashes, no hedging, direct-response
+ * structure) inline so the UGC condenser output stops reading as
+ * obvious AI-generated. Same drift the static-ad copy prompt had.
  */
 export const POLISH25_CLAUDE_SCRIPT_CONDENSER_SYSTEM_PROMPT = `You are a UGC-ad script condenser for a pre-cast avatar video pipeline.
+
+${SHARED_ANTI_AI_VOICE_RULES}
+
+# BACK TO THE CONDENSER TASK
+
 
 INPUT: source-video vision analysis (JSON with transcript + persona
 + emotional_arc + hook_structure + niche_category + setting_details).

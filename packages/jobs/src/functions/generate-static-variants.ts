@@ -97,6 +97,7 @@ export const generateStaticVariants = inngest.createFunction(
             ctaVariantIndex: i,
             aspectRatio: aspectRatio as '1:1' | '4:5' | '9:16',
             status: 'ready_for_review' as const,
+            format: 'static_gemini_image',
             generationMetadata: { mock: true, variant_index: i },
           };
         });
@@ -355,6 +356,11 @@ async function renderOneStaticVariant(input: {
       ctaVariantIndex: input.variantIndex,
       aspectRatio: aspectRatioForIndex(input.variantIndex),
       status: 'rejected',
+      // Polish-25.3 Commit 18b-hotfix-2: tag every Gemini static
+      // row (success + failure) so the review page's variant-level
+      // image predicate flips to <img> even when the source
+      // concept was uploaded as UGC video.
+      format: 'static_gemini_image',
       generationMetadata: {
         variant_index: input.variantIndex,
         error: image.errorMessage ?? 'Gemini Image returned no data',
@@ -403,6 +409,7 @@ async function renderOneStaticVariant(input: {
     ctaVariantIndex: input.variantIndex,
     aspectRatio: aspectRatioForIndex(input.variantIndex),
     status: 'ready_for_review',
+    format: 'static_gemini_image',
     generationMetadata: {
       variant_index: input.variantIndex,
       claude_rationale: input.copy.rationale ?? null,

@@ -43,6 +43,34 @@ interface Variant {
   isClipPart?: boolean;
   clipIndex?: number | null;
   format?: string;
+  /**
+   * Polish-25.3 Commit 18b-hotfix-2: non-null when the row is a
+   * static image (Gemini Nano Banana OR OpenAI gpt-image-2 static
+   * ad). Preferred signal for the render branch — a
+   * concept.contentType='ugc' picking the static_openai pipeline
+   * would otherwise render PNG URLs in a <video> tag and silently
+   * blank out.
+   */
+  imageStoragePath?: string | null;
+}
+
+/**
+ * Polish-25.3 Commit 18b-hotfix-2: variant-level image predicate.
+ * Replaces the old `conceptType === 'static'` branch that silently
+ * broke Static-ad pipeline runs when the underlying concept was
+ * uploaded as UGC (video). Signals in priority order:
+ *   1. imageStoragePath present → definitely an image (worker set it)
+ *   2. format starts with 'static_' or 'nano_banana' → static image
+ *      pipelines (static_openai_image, static_gemini_image, legacy
+ *      nano_banana_static_image)
+ *   3. concept-type fallback (last-resort for pre-Commit-18b rows
+ *      that predate the format tagging)
+ */
+function isImageVariant(variant: Variant, conceptType: 'static' | 'ugc'): boolean {
+  if (variant.imageStoragePath) return true;
+  const f = variant.format ?? '';
+  if (f.startsWith('static_') || f.startsWith('nano_banana')) return true;
+  return conceptType === 'static';
 }
 
 export interface LaunchSnapshot {
@@ -467,7 +495,11 @@ export function JobReviewClient({
           </div>
         </details>
       )}
-      {conceptType === 'static' && variants.length > 0 && (
+      {/* Polish-25.3 Commit 18b-hotfix-2: hint now shows whenever
+          the job produced ANY image variants (either a static concept
+          OR a Static-ad pipeline run on a UGC concept), not only
+          when the concept itself is static. */}
+      {variants.some((v) => isImageVariant(v, conceptType)) && variants.length > 0 && (
         <p className="text-muted-foreground mt-4 text-center text-xs">
           Click any image to view full size and download.
         </p>
@@ -860,7 +892,14 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
   const primaryTextNeedsClamp =
     variant.primaryText != null && variant.primaryText.length > 160 && !copyExpanded;
 
-  const downloadFilename = `variant-${variant.id}.png`;
+  // Polish-25.3 Commit 18b-hotfix-2: variant-level image predicate
+  // replaces the old conceptType-only branch. Without this, a
+  // Static-ad pipeline run on a UGC-video concept dumped PNG URLs
+  // into a <video> tag → silent blank square on the review page
+  // (operator report from 18b live-fire test).
+  const isImage = isImageVariant(variant, conceptType);
+
+  const downloadFilename = `variant-${variant.id}${isImage ? '.png' : '.mp4'}`;
   async function onDownload() {
     setDownloading(true);
     try {
@@ -878,7 +917,7 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
       }
     >
       <div className="bg-muted aspect-square w-full">
-        {conceptType === 'static' ? (
+        {isImage ? (
           // Plain img — Phase 3a uses placehold.co (external) and Phase 3c
           // stores Supabase public URLs. next/image's optimizer doesn't
           // help either case.
@@ -904,7 +943,7 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
         )}
       </div>
 
-      {conceptType === 'static' && (
+      {isImage && (
         <Dialog open={expandOpen} onOpenChange={setExpandOpen}>
           <DialogContent className="max-h-[95vh] max-w-4xl overflow-y-auto p-0 sm:p-0">
             <DialogTitle className="sr-only">

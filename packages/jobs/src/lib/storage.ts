@@ -57,8 +57,15 @@ export async function downloadAsBase64(input: {
  * Upload base64 image data to Supabase Storage at the user-scoped path
  * `<userId>/generated/<jobId>/<variantIndex>.png`. Returns both the
  * object path (for backend ops like deletion) and the public URL (for
- * the UI). The `generated-creatives` bucket is public; if it ever needs
- * to go private, swap getPublicUrl() for createSignedUrl().
+ * the UI).
+ *
+ * The `generated-creatives` bucket MUST be public — see
+ * supabase/migrations/0039_generated_creatives_bucket_public.sql.
+ * On a private bucket getPublicUrl() still returns a URL but that
+ * URL 400s without a signed token, and every rendered variant on
+ * the review page silently fails (Polish-25.3 Commit 18b-hotfix-2
+ * bug report). If a future change wants the bucket private again,
+ * swap getPublicUrl() for createSignedUrl() here AND flip 0039.
  */
 export async function uploadGeneratedImage(input: {
   userId: string;

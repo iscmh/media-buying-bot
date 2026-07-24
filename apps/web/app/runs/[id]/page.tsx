@@ -315,6 +315,11 @@ export default async function JobReviewPage({ params }: Props) {
             isClipPart: v.isClipPart,
             clipIndex: v.clipIndex,
             format: v.format,
+            // Polish-25.3 Commit 18b-hotfix-2: threaded so the
+            // variant-level image predicate on the review client
+            // can flip static-image variants to <img> even when
+            // the concept was uploaded as UGC video.
+            imageStoragePath: v.imageStoragePath,
           }))}
           launchSnapshot={launchSnapshot}
           // Polish-25.2 Commit 13 + 14: gate the Launch button on
