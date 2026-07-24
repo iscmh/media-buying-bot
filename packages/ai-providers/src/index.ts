@@ -20,6 +20,7 @@ export {
   OpenaiInsufficientFundsError,
   OpenaiInvalidImageError,
   OpenaiTransientError,
+  OpenaiTimeoutError,
   OPENAI_IMAGE_DEFAULT_MODEL,
   OPENAI_IMAGE_MODELS,
   OPENAI_IMAGE_QUALITIES,

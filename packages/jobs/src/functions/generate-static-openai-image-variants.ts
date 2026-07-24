@@ -5,6 +5,7 @@ import {
   OpenaiInsufficientFundsError,
   OpenaiInvalidImageError,
   OpenaiRateLimitError,
+  OpenaiTimeoutError,
   OpenaiTransientError,
   callClaude,
   redactOpenaiApiKey,
@@ -422,6 +423,19 @@ async function renderOneOpenaiVariant(input: {
     if (err instanceof OpenaiTransientError) {
       console.log(
         `[static-openai] variant=${input.variantIndex} transient status=${err.statusCode} — throwing for retry`,
+      );
+      throw err;
+    }
+    // Commit 19: AbortSignal.timeout() lands here. Prior versions
+    // caught it inside the client and returned { ok: false }, which
+    // step.run did NOT retry — operator hit "operation was aborted
+    // due to timeout" on every Static-ad variant with no retry.
+    // Now the client throws OpenaiTimeoutError; worker bubbles it
+    // → step.run re-fires (function-level retries: 1). Effective
+    // budget per variant = 2× per-quality timeout.
+    if (err instanceof OpenaiTimeoutError) {
+      console.log(
+        `[static-openai] variant=${input.variantIndex} timeout timeout_ms=${err.timeoutMs} — throwing for retry`,
       );
       throw err;
     }

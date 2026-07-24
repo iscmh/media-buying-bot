@@ -200,6 +200,36 @@ export class OpenaiTransientError extends Error {
   }
 }
 
+/**
+ * Commit 19: AbortError from AbortSignal.timeout(). Client fetched
+ * OpenAI, waited N ms, gave up. RETRYABLE at the worker step.run
+ * boundary — a re-fire lands with a fresh timer + often a warmer
+ * OpenAI node.
+ *
+ * Distinct from OpenaiTransientError because:
+ *   - Transient = OpenAI's edge returned 5xx (their fault)
+ *   - Timeout = we gave up waiting (network fault OR OpenAI slow)
+ * The operator-facing signal differs, and forensic replay wants
+ * the actual timeout ms so we know whether to raise the ceiling.
+ *
+ * The prior behavior (Commit 18b through 18b-hotfix-2) caught
+ * AbortError in the fetch try/catch and returned `{ ok: false }`
+ * with the timeout message — Inngest step.run does NOT retry
+ * `{ ok: false }` returns, only throws. Operator's Static-ad run
+ * failed every variant with "The operation was aborted due to
+ * timeout" and no retry ever ran.
+ */
+export class OpenaiTimeoutError extends Error {
+  readonly kind = 'openai_timeout' as const;
+  constructor(
+    message: string,
+    readonly timeoutMs: number,
+  ) {
+    super(message);
+    this.name = 'OpenaiTimeoutError';
+  }
+}
+
 // =========================================================================
 // Client
 // =========================================================================
@@ -237,20 +267,27 @@ export interface OpenaiImageResult {
 }
 
 /**
- * 18b-hotfix: quality-aware timeouts. Verified July 2026 gpt-image-2
- * generation times:
- *   Low    ~5-10s   → 30s ceiling
- *   Medium ~10-20s  → 60s ceiling
- *   High   ~15-30s  → 120s ceiling
- * A single flat 60s default (18b initial) was too tight for High —
- * operator saw AbortErrors on legitimately-slow-but-successful
- * requests, which then re-tried via step.run and burned budget on
- * the retry rather than just waiting.
+ * 18b-hotfix + Commit 19: quality-aware timeouts. Verified July 2026
+ * gpt-image-2 latency floor / p50 / p95:
+ *   Low    ~5s / ~10s / ~30s   → 60s ceiling (was 30s pre-19)
+ *   Medium ~10s / ~20s / ~90s  → 120s ceiling (was 60s pre-19)
+ *   High   ~15s / ~30s / ~150s → 180s ceiling (was 120s pre-19)
+ *
+ * Bumped in Commit 19 after operator hit "The operation was aborted
+ * due to timeout" AbortErrors on Medium (60s was p95 tail). Latency
+ * spikes past p95 are also common during OpenAI edge congestion.
+ * Vercel's serverless ceiling for this route is 300s (set at
+ * apps/web/app/api/inngest/route.ts:21) — plenty of headroom for
+ * 180s + retry.
+ *
+ * The timeout is ALSO the ceiling for a single retry — worker
+ * step.run re-fires on OpenaiTimeoutError throws (Commit 19), so
+ * the effective budget per variant is 2× the ceiling below.
  */
 function defaultTimeoutForQuality(q: OpenaiImageQuality): number {
-  if (q === 'high') return 120_000;
-  if (q === 'medium') return 60_000;
-  return 30_000;
+  if (q === 'high') return 180_000;
+  if (q === 'medium') return 120_000;
+  return 60_000;
 }
 const OPENAI_IMAGES_GENERATIONS_URL = 'https://api.openai.com/v1/images/generations';
 const OPENAI_IMAGES_EDITS_URL = 'https://api.openai.com/v1/images/edits';
@@ -286,7 +323,7 @@ export async function submitOpenaiImageGeneration(
   const url = useEdits ? OPENAI_IMAGES_EDITS_URL : OPENAI_IMAGES_GENERATIONS_URL;
 
   console.log(
-    `[openai-image-client] submit job=${jobId} url=${url} model=${model} quality=${quality} size=${size} ref_bytes=${useEdits ? Math.floor((input.referenceImageBase64!.length * 3) / 4) : 0}`,
+    `[openai-image-client] submit job=${jobId} url=${url} model=${model} quality=${quality} size=${size} timeout_ms=${timeoutMs} ref_bytes=${useEdits ? Math.floor((input.referenceImageBase64!.length * 3) / 4) : 0}`,
   );
 
   let res: Response;
@@ -334,6 +371,24 @@ export async function submitOpenaiImageGeneration(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // Commit 19: AbortSignal.timeout() fires a DOMException with
+    // name='AbortError' AND / OR name='TimeoutError' depending on
+    // the runtime (Node 20+ uses TimeoutError; some polyfills use
+    // AbortError). Match either so step.run retries.
+    const isTimeout =
+      err instanceof Error &&
+      (err.name === 'TimeoutError' ||
+        err.name === 'AbortError' ||
+        /aborted due to timeout|operation was aborted/i.test(msg));
+    if (isTimeout) {
+      console.log(
+        `[openai-image-client] timeout job=${jobId} timeout_ms=${timeoutMs} — throwing OpenaiTimeoutError for retry`,
+      );
+      throw new OpenaiTimeoutError(
+        `OpenAI image call exceeded ${timeoutMs}ms timeout (${msg})`,
+        timeoutMs,
+      );
+    }
     console.log(`[openai-image-client] network job=${jobId} error=${msg}`);
     return {
       ok: false,
@@ -475,6 +530,7 @@ export function redactOpenaiApiKey(apiKey: string): string {
 export function isOpenaiTransientError(err: unknown): boolean {
   if (err instanceof OpenaiRateLimitError) return true;
   if (err instanceof OpenaiTransientError) return true;
+  if (err instanceof OpenaiTimeoutError) return true;
   if (err instanceof Error && /timeout|ECONNRESET|EAI_AGAIN|ETIMEDOUT/i.test(err.message)) {
     return true;
   }

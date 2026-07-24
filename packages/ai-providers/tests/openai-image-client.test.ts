@@ -11,6 +11,7 @@ import {
   OpenaiInsufficientFundsError,
   OpenaiInvalidImageError,
   OpenaiRateLimitError,
+  OpenaiTimeoutError,
   OpenaiTransientError,
   estimateOpenaiImageCostUsd,
   isOpenaiTransientError,
@@ -255,6 +256,91 @@ describe('OpenAI image-gen — typed error classification', () => {
       submitOpenaiImageGeneration({ apiKey: 'sk-x', prompt: 'x' }),
     ).rejects.toBeInstanceOf(OpenaiTransientError);
   });
+
+  // -----------------------------------------------------------
+  // Commit 19: timeout classification.
+  // -----------------------------------------------------------
+
+  it('throws OpenaiTimeoutError on AbortError (Commit 19) so worker step.run retries', async () => {
+    // Simulate the AbortSignal.timeout() firing before OpenAI
+    // responds. Node 20+ uses DOMException with name='TimeoutError';
+    // some polyfills use 'AbortError'. The client catches either.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const err = new Error('The operation was aborted due to timeout');
+        err.name = 'TimeoutError';
+        throw err;
+      }),
+    );
+    await expect(
+      submitOpenaiImageGeneration({
+        apiKey: 'sk-x',
+        prompt: 'x',
+        quality: 'medium',
+        timeoutMs: 1_000,
+      }),
+    ).rejects.toBeInstanceOf(OpenaiTimeoutError);
+  });
+
+  it('throws OpenaiTimeoutError with name="AbortError" too (polyfill compat)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        throw err;
+      }),
+    );
+    await expect(
+      submitOpenaiImageGeneration({
+        apiKey: 'sk-x',
+        prompt: 'x',
+        quality: 'high',
+        timeoutMs: 5_000,
+      }),
+    ).rejects.toBeInstanceOf(OpenaiTimeoutError);
+  });
+
+  it('OpenaiTimeoutError carries the actual timeoutMs used', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        const err = new Error('aborted due to timeout');
+        err.name = 'TimeoutError';
+        throw err;
+      }),
+    );
+    try {
+      await submitOpenaiImageGeneration({
+        apiKey: 'sk-x',
+        prompt: 'x',
+        quality: 'low',
+        timeoutMs: 60_000,
+      });
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(OpenaiTimeoutError);
+      if (err instanceof OpenaiTimeoutError) {
+        expect(err.timeoutMs).toBe(60_000);
+      }
+    }
+  });
+
+  it('non-timeout network errors still return { ok: false } (no retry)', async () => {
+    // ENOTFOUND / ECONNREFUSED — worker should NOT retry these
+    // (usually a DNS / config issue that won't self-heal). Keep
+    // the { ok: false } path for non-timeout Errors.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('getaddrinfo ENOTFOUND api.openai.com');
+      }),
+    );
+    const r = await submitOpenaiImageGeneration({ apiKey: 'sk-x', prompt: 'x' });
+    expect(r.ok).toBe(false);
+    expect(r.errorMessage).toMatch(/ENOTFOUND/);
+  });
 });
 
 describe('OpenAI image-gen — cost estimation (18b-hotfix verified pricing)', () => {
@@ -327,10 +413,12 @@ describe('OpenAI image-gen — helpers', () => {
     expect(redactOpenaiApiKey('')).toBe('(empty)');
   });
 
-  it('isOpenaiTransientError catches rate-limit + 5xx + network errors', () => {
+  it('isOpenaiTransientError catches rate-limit + 5xx + timeout + network errors', () => {
     expect(isOpenaiTransientError(new OpenaiRateLimitError('x', 429))).toBe(true);
     // 18b-hotfix: 502/503/504 route through OpenaiTransientError.
     expect(isOpenaiTransientError(new OpenaiTransientError('x', 504))).toBe(true);
+    // Commit 19: AbortSignal.timeout() → OpenaiTimeoutError.
+    expect(isOpenaiTransientError(new OpenaiTimeoutError('x', 60_000))).toBe(true);
     expect(isOpenaiTransientError(new Error('request timeout'))).toBe(true);
     expect(isOpenaiTransientError(new Error('ECONNRESET'))).toBe(true);
     expect(isOpenaiTransientError(new OpenaiContentPolicyError('x', 400))).toBe(false);
