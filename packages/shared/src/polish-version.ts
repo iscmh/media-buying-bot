@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.3.4';
+export const POLISH_VERSION = '25.3.5';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.3.4';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.3 Commit 19 — OpenaiTimeoutError typed class + step.run retry on AbortError + bumped default timeouts (Low 60s / Medium 120s / High 180s) so gpt-image-2 latency tails do not blank the run';
+  'Polish-25.3 Commit 20 — DR copy quality upgrade: 8 vertical anchor examples (MMO/biz-opp/weight loss/nutra/credit/ecom/SaaS/info), adaptive DR framework roster, HOOK/AGITATION/PROOF/CLOSE pattern library, soft-close banlist, first-40-chars number rule, UGC condenser specificity anchor';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -348,12 +348,14 @@ The following rules are AI-tell markers. Violating any is treated as a wrong ans
 3. NO curly / smart quotes. Use straight quotes ("...") only.
 4. NO ellipsis character. Use three literal periods (...) if you must.
 5. NO emojis unless the source material explicitly used them. NEVER open with an emoji.
-6. NO corporate hedging phrases: "leverage", "unlock", "empower", "revolutionize", "cutting-edge", "game-changing", "unleash", "elevate", "seamless", "transform your".
+6. NO corporate hedging phrases: "leverage", "unlock", "empower", "revolutionize", "cutting-edge", "game-changing", "unleash", "elevate", "seamless", "transform your", "streamline", "optimize", "next-level", "supercharge", "solutions", "innovative", "may help", "might", "could", "perhaps".
 7. NO AI opener tells: "In today's fast-paced world", "Let's dive into", "It's important to note", "Discover the power of", "Are you tired of".
 8. NO Oxford-comma-heavy long lists. Prefer 2-3 items max per beat.
 9. Numbers beat adjectives. "$2,100 in 6 days" beats "significant weekly returns".
 10. Concrete beats abstract. "took me 3 weeks" beats "took some time".
 11. Second-person address ("you", "your") for body copy. Never third-person for the reader.
+12. NO soft-close phrases (cited across Halbert / Kennedy / Georgi / Settle canon): "check it out", "worth a look", "worth checking out", "hard to argue with", "give it a try", "click here", "learn more", "find out how", "see for yourself", "why not try", "take a peek". Use hard closes: command + reason, two-choice frame, named scarcity, cost-of-waiting, or direct micro-commitment ("take the 60-second quiz", "grab the doc", "answer 3 questions to see if you qualify").
+13. AT LEAST ONE variant per batch MUST open with a specific number in the first 40 characters of the headline (Meta's guaranteed-visible unit under 2026 Advantage+ delivery). Odd numbers ($2,847 beats $2,000) read as more real.
 
 # CAPITALIZATION RULES
 
@@ -370,7 +372,7 @@ Body copy should hit these beats in order (skip only what the source obviously s
 - AGITATION (1 sentence, optional). The cost of NOT solving it.
 - SOLUTION (1 sentence). The offer, framed as a discovery, not a pitch.
 - PROOF (specific numbers, timeframes, or names). Concrete beats abstract.
-- CTA (implicit or soft). "check it out", "see for yourself", never "click here".
+- CTA (hard close, per rule #12). "Tap Get Offer, intro price ends Sunday." / "Take the 60-second quiz." / "247 kits left in this batch." / "Answer 3 questions to see if you qualify."
 
 # CONTRARIAN FRAMING TOOLKIT
 
@@ -430,6 +432,109 @@ The variants must be:
 # Knowledge
 
 ${SHARED_ANTI_AI_VOICE_RULES}
+
+## DR FRAMEWORK ROSTER (adaptive selection)
+
+Given ONE source ad + \`variant_count\` slots, pick 4-5 of these frameworks that BEST amplify or complement the source's core angle. SKIP any framework that would require inventing an off-brand angle. Source fidelity beats framework diversity.
+
+- **PAS re-cut** (Problem-Agitate-Solution). Same offer, sharper pain in line 1, harder close. Default choice when the source is already a strong PAS structure.
+- **Story-lead (Georgi RMBC)**. First-person incident open, mechanism reveal in middle, hard close. Use when the source has any origin-story or personal-transformation angle.
+- **Contrarian / named-enemy** (Schwartz). Attack the category's default assumption. "The 'eat less' lie." Use when source hints at fighting conventional wisdom.
+- **Warning / loss-aversion**. Reframe as "stop doing X" instead of "start doing Y". Often outperforms positive framing per 2026 Meta ad-library analyses. Use when source has any cost-of-inaction beat.
+- **Awareness-shift (Schwartz 5-stages)**. If source is Product-Aware, write one variant for Problem-Aware. Expands cold audience reach. Use when source assumes reader already knows the product.
+
+HARD RULE: at least one variant per batch must open with a specific number in the first 40 characters of the headline. Odd numbers ($2,847 not $2,000) read as more real.
+
+## HOOK / AGITATION / PROOF / CLOSE PATTERN LIBRARY
+
+Draw from these when composing variant hooks and bodies. Every template has a real DR provenance (Halbert, Kennedy, Schwartz, Georgi, Settle, or 2026 Meta ad-library breakdowns).
+
+### Hook openers (pick one per variant, don't repeat across the batch)
+
+1. **Story-Incident Open** (Georgi RMBC lead) — "In 2014 a freak horse-riding accident nearly killed me..."
+2. **Callout + Disqualifier** (Halbert) — "Every attractive woman in Miami serious about a modeling career, read this before you spend a dollar."
+3. **Warning / Loss-Aversion** (Kennedy) — "If you're still running Facebook ads this way, you're leaving money on the table every day."
+4. **Specific-Number Punch-Fact** (Georgi mechanism-first) — "3 grams of this stops a 4pm sugar crash in 11 minutes."
+5. **Named-Enemy Contrarian** (Schwartz enemy-frame) — "The FDA-approved 'diet food' aisle is why your belly won't shrink."
+6. **Real-Pain Question** (Settle customer-profile) — "Why does your credit score drop the month after you pay a card off?"
+7. **Reverse-Promise Confession** (MMO advertorial canon) — "I made $42k last month. I also spent 6 hours a day watching Netflix."
+8. **Dated News Hook** (Georgi advertorial) — "As of July 2026, Chase quietly changed how it reports authorized users."
+
+### Agitation moves (deploy in body copy, one per variant)
+
+1. **Timeline Torque** (Kennedy future-pacing) — "It's not the 15 lbs. It's the 40 in 3 years when your knees make the choice for you."
+2. **Named Cost of Inaction** — "Every month on 22% APR, Chase makes $340 off you. That's a car payment."
+3. **Public-Embarrassment Frame** (Halbert inner-audience) — "You already know how your brother-in-law looks at your car."
+4. **Mechanism-of-Failure Reveal** (Georgi mechanism pillar) — "It's not willpower. It's leptin that stops responding at day 90."
+5. **Cheap Fix vs Slow Bleed Contrast** (Kennedy price-anchoring) — "$47 once, or another $8,000 year of the same."
+
+### Proof stack patterns (every variant should hit at least one)
+
+1. **Number + Timeframe + Named Source** — "In a 12-week Stanford trial (n=214), the group lost 3.1x more visceral fat."
+2. **Named Individual + City + Result** — "Sarah M., 43, Phoenix. Down 27 lbs since March."
+3. **Screenshot-Language** (MMO canon) — "Here's my Stripe dashboard from Tuesday: $4,382."
+4. **Anti-Authority Credential** (Georgi) — "18 years as an ER nurse. I'm not supposed to say this out loud."
+5. **Reverse-Guarantee Specificity** (Halbert / Kennedy) — "Drop a pants size in 60 days or I refund you AND send $20 for your time."
+
+### Close patterns (see rule #12; hard closes only)
+
+1. **Command + Reason** — "Tap Get Offer, intro price ends Sunday."
+2. **Two-Choice Frame** — "Keep guessing, or take the 60-second quiz."
+3. **Named-Scarcity** — "247 kits left in this batch. Next batch ships December."
+4. **Cost-of-Waiting** — "Every day you wait is another $11 on the card."
+5. **Direct Ask + Micro-Commitment** — "Answer 3 questions to see if you qualify."
+
+## EIGHT ANCHOR EXAMPLES (mirror this quality bar)
+
+These are constructed anchor ads showing the DR patterns above applied end-to-end across the target vertical mix. Your output should read at this quality bar or better. Do NOT paste these examples verbatim; they show the SHAPE of good output, not the content to copy.
+
+### 1. MMO
+- headline: "I Made $9,412 In 30 Days"
+- primary_text: "No ads. No funnel. Just one Google Doc I stole from a friend in Austin. Grab the doc, I'm giving it away until Sunday."
+- framework: Story-lead + specific-number + dated scarcity close.
+- why it works: odd dollar amount, mechanism named (Google Doc), dated scarcity, hard close.
+
+### 2. Weight loss (supplement-safe, Meta-compliant)
+- headline: "The 4PM Hormone Fix"
+- primary_text: "A Stanford study found one hormone spikes at 4pm and stalls fat burn for 6 hours. 3 grams of this shuts it down. Take the 60-second quiz."
+- framework: Mechanism reveal (RMBC) + named authority + quiz micro-commitment.
+- why it works: names the enemy (hormone), specific timeframe, avoids PII language ("you struggle"), low-friction CTA.
+
+### 3. Nutra (sleep / energy / focus, distinct from weight loss)
+- headline: "Fall Asleep In 8 Minutes"
+- primary_text: "A 2024 Kyoto trial found 400mg of this shortened sleep latency by 43%. It's not melatonin. Sold out 4 times this year, restocked Wednesday."
+- framework: Specific-number punch + mechanism reveal + anti-authority contrast + scarcity.
+- why it works: exact minutes, named study city, exact dose, contrarian angle ("not melatonin"), dated restock.
+
+### 4. Credit repair / personal finance
+- headline: "The 609 Letter Chase Hates"
+- primary_text: "A 43-year-old nurse in Phoenix used one letter to remove 4 collections in 27 days. Take the 60-second quiz to see if it works on your report."
+- framework: Named-enemy + named-individual proof + quiz micro-commitment.
+- why it works: specific letter (609), named city, odd number of days, low-friction CTA.
+
+### 5. Biz-opp
+- headline: "71 Days. $0 to $8,400/Mo."
+- primary_text: "I was a Home Depot floor manager in March. In July I fired my boss. The 3-step system is inside, 200 spots this week."
+- framework: Callout + timeline + hard-close named scarcity.
+- why it works: specific former job, specific month, specific dollar figure, capped scarcity.
+
+### 6. Ecom (physical product)
+- headline: "Slides On In 4 Seconds"
+- primary_text: "Zero-lace runner for people whose knees hate running. 11,240 sold since April. Free returns for 90 days."
+- framework: Punch-fact + spec + volume proof + risk-reversal close.
+- why it works: concrete spec, specific unit count, named month, guarantee.
+
+### 7. SaaS / AI tool
+- headline: "Cut 12 Hours A Week From Ops"
+- primary_text: "The tool a 47-person agency uses to auto-log client calls into Notion. $19/mo. First 500 signups get grandfathered pricing."
+- framework: Specific-number punch + named authority + capped scarcity close.
+- why it works: exact hour count, specific team size + tool combo, dollar amount, capped scarcity.
+
+### 8. Info product / template pack
+- headline: "The 3-Page Contract That Ends Chargebacks"
+- primary_text: "A copywriter in Denver lost $14k to chargebacks in 2023. He wrote this. Zero disputes since. Grab the template for $27."
+- framework: Story-lead + named individual + specific loss amount + hard close.
+- why it works: exact page count, named city, specific loss figure, timeline, low-friction price.
 
 ## Intensity Definitions
 

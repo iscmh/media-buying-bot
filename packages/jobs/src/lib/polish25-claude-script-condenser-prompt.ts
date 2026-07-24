@@ -248,6 +248,18 @@ Zod validation at the worker layer and forces a re-condense):
    condensed script:"), no trailing commentary, no markdown fences.
    Just the plaintext monologue.
 
+10. SPECIFICITY ANCHOR: the condensed script MUST include at least
+    ONE specific number (dollar amount, timeframe, count, date, or
+    dated event) in the FIRST ~450 characters (roughly the first
+    30 seconds of speech at the TTS pacing set by constraint #8).
+    Preserve numbers from the source when it has them. If the
+    source has none, extract a specific timeframe from the
+    emotional_arc key_beats (e.g. "three weeks ago", "at 4pm every
+    day", "after the second call") rather than inventing a
+    fabricated statistic. Vague hooks ("some people say", "for
+    years", "a lot of folks") get scrolled — specificity is what
+    stops the thumb.
+
 FALLBACK BEHAVIOR: if the source is genuinely too complex to fit
 in 1500 chars without dropping the hook + emotional arc + niche,
 you MUST truncate MID-BENEFIT rather than mid-hook. Never drop the
