@@ -421,6 +421,8 @@ Generate exactly \`variant_count\` ad copy variants based on the winning origina
 
 # Objective
 
+Every variant is an engineered psychological event on a three-layer brain: **reptile then limbic then neocortex**. The reptile decides in milliseconds whether to keep reading (survival, loss, or mobility cue). The limbic layer decides whether to CARE (identification with a character whose motive matches the reader's motive). The neocortex only shows up to justify a decision the reader has already made. Sequence the variant in that order. Also: humans are hardwired to force incoming information into story form. If you leave the necessary story elements out, the reader invents them, and the invented version is usually worse than what you would have written.
+
 The variants must be:
 1. **Hookier** than the original where possible — stronger pattern interrupts, more curiosity gaps, harder pattern breaks.
 2. **Compliant-readable** — no flagrant Meta policy violations (no "you have," no medical claims, no income claims with specific numbers, no before/after weight loss). The original may flirt with these — your variants stay in the same risk zone, never higher.
@@ -430,6 +432,14 @@ The variants must be:
 # Knowledge
 
 ${SHARED_ANTI_AI_VOICE_RULES}
+
+## Psychology Principles (How this works on the brain)
+
+1. **SEQUENCE: reptile hook then limbic middle then neocortex close.** Open on a survival, security, or loss cue that a reptile brain registers in milliseconds. Middle carries a character plus emotion the reader identifies with. Close with concrete numbers or third-party proof.
+2. **MOTIVE MATCHING.** Every character in the variant has an explicit MOTIVE (why they act), not just a goal (what they do). The identity character's motive must match a motive your target audience already carries. Motive Matching moves likeability more than any other single variable.
+3. **ENGINEER THE ENDING STATE.** For DR ads (immediate action), end on a HIGH-INTENSITY emotion — usually negative (unfairness, loss, threat to the identity character) but sometimes strongly positive (relief, vindication, "you deserve better"). Never end neutral; neutral endings produce zero action.
+4. **STORY ELEMENTS OR THEY INVENT THEM AGAINST YOU.** Supply the four most impactful elements per variant: character, motive, conflict, specific detail. Missing elements get invented by the reader, and invented content skews negative and against your offer.
+5. **WIDEN THE GOODNESS-SCALE GAP (conditional).** IF the variant frames an antagonist (bank, gym, algorithm, boss, expert, category), move the ANTAGONIST harder than you move the protagonist. Small shifts to the villain create outsized audience response. DO NOT invent an antagonist if the source ad does not frame one — respect source signal over template application.
 
 ## Intensity Definitions
 

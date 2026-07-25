@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.3.6';
+export const POLISH_VERSION = '25.3.7';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.3.6';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.3 Commit 21 — revert Commit 20 prompt-layer changes (DR anchor examples + framework roster + soft-close banlist + first-40-chars rule + UGC condenser #10 all rolled back to Commit 19 shape). Non-prompt Commit 20 code preserved.';
+  'Polish-25.3 Commit 22 — PSYWAR corpus injection into STATIC_WINNER_IMPORT_SYSTEM_PROMPT: Objective reframed as three-layer-brain event (reptile / limbic / neocortex), one Psychology Principles block with 5 numbered rules (SEQUENCE / MOTIVE MATCHING / ENGINEER THE ENDING STATE / STORY ELEMENTS / WIDEN THE GOODNESS-SCALE GAP). No new anchor examples. Static-only.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

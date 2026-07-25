@@ -112,3 +112,60 @@ describe('Polish-25.3 Commit 18b-hotfix-2: STATIC_WINNER_IMPORT_SYSTEM_PROMPT em
     expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toMatch(/max 125 characters/);
   });
 });
+
+describe('Polish-25.3 Commit 22: PSYWAR corpus injection (Objective + Psychology Principles)', () => {
+  it('Objective reframes the piece as a three-layer-brain event (reptile / limbic / neocortex)', () => {
+    // Framing shift from the corpus (Psywar.ai decks + Berthoz +
+    // Neuroscience-of-Decision) — the intro paragraph must name
+    // all three layers so Claude anchors on the sequencing rule.
+    for (const layer of ['reptile', 'limbic', 'neocortex']) {
+      expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toContain(layer);
+    }
+  });
+
+  it('names the Neural Story Net insight ("humans force incoming information into story form")', () => {
+    // Haven Story_Smart Part II — if the prompt drops this, the
+    // "story elements or they invent them against you" rule below
+    // loses its rationale. Pin the exact core wording.
+    expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toMatch(
+      /force incoming information into story form/,
+    );
+  });
+
+  it('contains the "Psychology Principles" section header', () => {
+    expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toMatch(/## Psychology Principles/);
+  });
+
+  it('contains all 5 principle labels verbatim (SEQUENCE / MOTIVE MATCHING / ENGINEER THE ENDING STATE / STORY ELEMENTS / WIDEN THE GOODNESS-SCALE GAP)', () => {
+    // Regression pin: a future edit that renames a label or drops
+    // one has to update this test intentionally. Same discipline
+    // as the SHARED_ANTI_AI_VOICE_RULES constraint pins.
+    for (const label of [
+      'SEQUENCE',
+      'MOTIVE MATCHING',
+      'ENGINEER THE ENDING STATE',
+      'STORY ELEMENTS OR THEY INVENT THEM AGAINST YOU',
+      'WIDEN THE GOODNESS-SCALE GAP',
+    ]) {
+      expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toContain(label);
+    }
+  });
+
+  it('principle #3 preserves the "never neutral" ending-state insight AND hedges positive-vs-negative', () => {
+    // Operator's greenlight explicitly softened the "always
+    // negative" rule to hedge for verticals that land better with
+    // positive-intensity endings. Pin both halves of the hedge so
+    // a future edit can't silently drop the positive branch.
+    expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toMatch(/HIGH-INTENSITY/);
+    expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toMatch(/Never end neutral/);
+    expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toMatch(/relief, vindication/);
+  });
+
+  it('principle #5 is conditional (do NOT invent an antagonist)', () => {
+    // Prevents the pattern-application failure mode from Commit
+    // 20 — Claude inventing villains for offers that don't have
+    // them. Pin the exact "DO NOT invent" wording.
+    expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toMatch(/DO NOT invent an antagonist/);
+    expect(STATIC_WINNER_IMPORT_SYSTEM_PROMPT).toMatch(/respect source signal/);
+  });
+});
