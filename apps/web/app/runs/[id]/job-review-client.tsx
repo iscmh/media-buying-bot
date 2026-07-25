@@ -371,13 +371,13 @@ export function JobReviewClient({
         </div>
       )}
 
-      <div className="bg-card mb-6 flex flex-col gap-3 rounded-sm border p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="bg-bg-surface mb-6 flex flex-col gap-3 rounded-sm border p-4 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm">
           <strong>{approvedCount} approved</strong>
           {' · '}
-          <span className="text-destructive">{rejectedCount} rejected</span>
+          <span className="text-[color:var(--accent-negative)]">{rejectedCount} rejected</span>
           {' · '}
-          <span className="text-muted-foreground">{undecidedCount} pending</span>
+          <span className="text-fg-muted">{undecidedCount} pending</span>
           {' / '}
           {total} total
         </p>
@@ -397,7 +397,7 @@ export function JobReviewClient({
             variant="outline"
             onClick={() => bulk('rejected')}
             disabled={!!bulkPending || allDecided}
-            className="text-destructive"
+            className="text-[color:var(--accent-negative)]"
           >
             {bulkPending === 'rejected' ? 'Rejecting…' : 'Reject all pending'}
           </Button>
@@ -432,7 +432,7 @@ export function JobReviewClient({
         <div className="border-fg/20 bg-bg-surface mb-6 flex flex-wrap items-center justify-between gap-3 rounded-sm border p-4 text-sm">
           <div>
             <strong>Ready for launch.</strong>{' '}
-            <span className="text-muted-foreground">
+            <span className="text-fg-muted">
               {approvedCount} approved variant{approvedCount === 1 ? '' : 's'} waiting on a Meta ad
               account. Connect Meta to push them live.
             </span>
@@ -450,7 +450,7 @@ export function JobReviewClient({
       {allDecided && approvedCount > 0 && hasMetaConnection && (
         <div className="border-[color:var(--accent-positive)]/30 bg-[color:var(--accent-positive)]/10 mb-6 rounded-sm border p-4 text-sm">
           <strong>Ready for launch.</strong>{' '}
-          <span className="text-muted-foreground">
+          <span className="text-fg-muted">
             {approvedCount} approved variant{approvedCount === 1 ? '' : 's'} — hit Launch approved
             above to push them to Meta as paused ads.
           </span>
@@ -501,7 +501,7 @@ export function JobReviewClient({
           OR a Static-ad pipeline run on a UGC concept), not only
           when the concept itself is static. */}
       {variants.some((v) => isImageVariant(v, conceptType)) && variants.length > 0 && (
-        <p className="text-muted-foreground mt-4 text-center text-xs">
+        <p className="text-fg-muted mt-4 text-center text-xs">
           Click any image to view full size and download.
         </p>
       )}
@@ -568,7 +568,7 @@ export function JobReviewClient({
                 </button>
               </div>
               {pages.length === 0 ? (
-                <p className="text-muted-foreground text-xs">
+                <p className="text-fg-muted text-xs">
                   No pages cached yet. Click &quot;Refresh pages&quot; to fetch from Meta.
                 </p>
               ) : (
@@ -586,7 +586,9 @@ export function JobReviewClient({
                   ))}
                 </select>
               )}
-              {pagesError && <p className="text-destructive text-xs">{pagesError}</p>}
+              {pagesError && (
+                <p className="text-xs text-[color:var(--accent-negative)]">{pagesError}</p>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -600,13 +602,13 @@ export function JobReviewClient({
                 aria-invalid={offerUrl.length > 0 && !offerUrlValid}
               />
               {offerUrl.length > 0 && !offerUrlValid ? (
-                <p className="text-destructive text-xs">
+                <p className="text-xs text-[color:var(--accent-negative)]">
                   Enter a full URL starting with <code className="font-mono">http://</code> or{' '}
                   <code className="font-mono">https://</code>. Meta will reject anything shorter and
                   the ad won&apos;t launch.
                 </p>
               ) : (
-                <p className="text-muted-foreground text-xs">
+                <p className="text-fg-muted text-xs">
                   Where clicks send users. Pre-filled from the concept&apos;s offer URL.
                 </p>
               )}
@@ -623,12 +625,12 @@ export function JobReviewClient({
                   {showCustomizeTargeting ? 'Hide' : 'Customize'}
                 </button>
               </div>
-              <p className="text-muted-foreground text-xs">
+              <p className="text-fg-muted text-xs">
                 {countries.join(', ')} · Age {ageMin}–{ageMax} · {launchSnapshot.optimizationGoal} ·{' '}
                 {launchSnapshot.placementType}
               </p>
               {showCustomizeTargeting && (
-                <div className="bg-card space-y-3 rounded-md border p-3">
+                <div className="bg-bg-surface space-y-3 rounded-md border p-3">
                   <div>
                     <Label className="text-xs">Countries</Label>
                     <Input
@@ -705,13 +707,13 @@ export function JobReviewClient({
               <strong>${launchSnapshot.remainingUsd.toFixed(2)}</strong>
             </p>
             {exceedsCap && (
-              <p className="text-destructive text-xs">
+              <p className="text-xs text-[color:var(--accent-negative)]">
                 This launch would exceed your remaining daily cap. Reduce approved variants, raise
                 the cap in Settings, or wait until tomorrow.
               </p>
             )}
             {exceedsFirstLaunchCap && (
-              <p className="text-destructive text-xs">
+              <p className="text-xs text-[color:var(--accent-negative)]">
                 First live launch cannot exceed ${launchSnapshot.firstLaunchCapUsd.toFixed(2)} total
                 daily exposure. Reduce variants or lower per-ad budget in Settings.
               </p>
@@ -719,7 +721,7 @@ export function JobReviewClient({
           </div>
 
           {launchError && (
-            <p className="text-destructive text-sm" role="alert">
+            <p className="text-sm text-[color:var(--accent-negative)]" role="alert">
               {launchError}
             </p>
           )}
@@ -796,7 +798,7 @@ export function JobReviewClient({
               </span>
             </label>
           </div>
-          <p className="text-muted-foreground text-xs">
+          <p className="text-fg-muted text-xs">
             Your first live launch is hard-capped at ${launchSnapshot.firstLaunchCapUsd.toFixed(2)}{' '}
             total daily exposure. Subsequent launches use your daily launch cap from Settings.
           </p>
@@ -915,7 +917,7 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
   return (
     <article
       className={
-        'bg-card flex flex-col overflow-hidden rounded-sm border transition-opacity ' +
+        'bg-bg-surface flex flex-col overflow-hidden rounded-sm border transition-opacity ' +
         (isRejected ? 'opacity-50' : '')
       }
     >
@@ -972,13 +974,11 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
                       </p>
                     )}
                     {variant.description && (
-                      <p className="text-muted-foreground text-xs leading-snug">
-                        {variant.description}
-                      </p>
+                      <p className="text-fg-muted text-xs leading-snug">{variant.description}</p>
                     )}
                   </div>
                 )}
-                <p className="text-muted-foreground text-xs">
+                <p className="text-fg-muted text-xs">
                   {variant.aspectRatio} · {formatDateTime(new Date(variant.createdAtIso))}
                 </p>
                 <div className="flex flex-col gap-2 sm:flex-row">
@@ -1039,17 +1039,17 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
               <button
                 type="button"
                 onClick={() => setCopyExpanded((v) => !v)}
-                className="text-muted-foreground hover:text-foreground self-start text-xs underline"
+                className="text-fg-muted hover:text-fg self-start text-xs underline"
               >
                 {copyExpanded ? 'See less' : 'See more'}
               </button>
             )}
             {variant.description && (
-              <p className="text-muted-foreground text-xs leading-snug">{variant.description}</p>
+              <p className="text-fg-muted text-xs leading-snug">{variant.description}</p>
             )}
           </div>
         )}
-        <p className="text-muted-foreground text-xs">
+        <p className="text-fg-muted text-xs">
           {variant.aspectRatio} · {formatDateTime(new Date(variant.createdAtIso))}
         </p>
         <div className="flex gap-2">

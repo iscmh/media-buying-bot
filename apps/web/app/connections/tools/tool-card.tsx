@@ -71,26 +71,26 @@ export function ToolCard({
   }
 
   return (
-    <article className="bg-card space-y-4 rounded-lg border p-6">
+    <article className="bg-bg-surface space-y-4 rounded-lg border p-6">
       <header className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold">{label}</h2>
-          <p className="text-muted-foreground text-xs">{role}</p>
+          <p className="text-fg-muted text-xs">{role}</p>
         </div>
         {connected && (
-          <span className="inline-flex items-center gap-1 text-xs text-green-700">
+          <span className="inline-flex items-center gap-1 text-xs text-[color:var(--accent-positive)]">
             <span className="h-2 w-2 rounded-full bg-green-600" aria-hidden />
             Connected · verified {verifiedDisplay}
           </span>
         )}
       </header>
 
-      <p className="text-muted-foreground text-sm">{description}</p>
+      <p className="text-fg-muted text-sm">{description}</p>
 
       {connected ? (
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="outline" size="sm" className="text-destructive">
+            <Button variant="outline" size="sm" className="text-[color:var(--accent-negative)]">
               Disconnect
             </Button>
           </DialogTrigger>
@@ -128,18 +128,18 @@ export function ToolCard({
                 spellCheck={false}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-md border px-3 py-2 pr-10 font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
+                className="border-input bg-background ring-offset-background placeholder:text-fg-muted focus-visible:ring-ring flex h-10 w-full rounded-md border px-3 py-2 pr-10 font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2"
               />
               <button
                 type="button"
                 onClick={() => setReveal((v) => !v)}
                 aria-label={reveal ? 'Hide key' : 'Reveal key'}
-                className="text-muted-foreground hover:text-foreground absolute right-2 top-1/2 -translate-y-1/2"
+                className="text-fg-muted hover:text-fg absolute right-2 top-1/2 -translate-y-1/2"
               >
                 {reveal ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
             </div>
-            <p className="text-muted-foreground text-xs">
+            <p className="text-fg-muted text-xs">
               {keyHint}{' '}
               <a href={apiDocsUrl} target="_blank" rel="noreferrer" className="underline">
                 Docs
@@ -147,7 +147,7 @@ export function ToolCard({
             </p>
           </div>
           {error && (
-            <p className="text-destructive text-sm" role="alert">
+            <p className="text-sm text-[color:var(--accent-negative)]" role="alert">
               {error}
             </p>
           )}

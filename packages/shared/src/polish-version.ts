@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.4.1';
+export const POLISH_VERSION = '25.5.0';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.4.1';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.4 Commit 26 — expand amber + CellFlash + semantic badges. Amber variant on 9 more primary CTAs (Verify+save both cards, Approve all pending, Create/Save preset, Launch confirm, Continue to launch, I understand+generate, Save concept, Verify token, Save+continue, Save settings). Dashboard KPI tiles wrapped in CellFlash — tick-flash on data revalidation. Per-ad table status column now uses semantic Badge variants (active=success, paused=warning, killed/rejected/failed=destructive).';
+  'Polish-25.5 Commit 27 — full Trader Terminal aesthetic build. New AppShell v2 (48px icon rail + 40px top toolbar with Cmd+K command palette), reusable SidePanel primitive, KpiTile with inline recharts sparkline, TimeseriesChart (recharts) replacing hand-rolled SVG, row-level ROI shading + client-side grouping on the per-ad table, /runs index + /pending cross-run approval queue as new top-level pages, master-detail concept library, mobile drawer fallback for the rail, legacy shadcn token sweep on the three biggest offenders (job-review-client, tool-card, onboarding progress-bar).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { and, eq, inArray, isNull, ne } from 'drizzle-orm';
-import { BarChart3, Rocket, Skull, Target, TrendingUp, Wallet } from 'lucide-react';
+import { Rocket, Skull, Target, TrendingUp, Wallet } from 'lucide-react';
 import {
   getDashboardMetrics,
   getDb,
@@ -10,37 +10,24 @@ import {
   schema,
   type TimeRange,
 } from '@mbb/db';
-import { Badge, type BadgeVariant } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { KpiTile } from '@/components/ui/kpi-tile';
+import { TimeseriesChart, type TimeseriesPoint } from '@/components/ui/timeseries-chart';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { AppShell } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/shell/empty-state';
 import { PageHeader } from '@/components/shell/page-header';
-import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { GettingStartedChecklist } from './_components/getting-started-checklist';
-import { MetricCard } from './_components/metric-card';
 import { PauseBanner } from './_components/pause-banner';
-import { SpendChart } from './_components/spend-chart';
+import { PerAdTable } from './_components/per-ad-table';
 import { TimeRangePicker } from './_components/time-range-picker';
+import { BarChart3 } from 'lucide-react';
 
 export const metadata = { title: 'Dashboard' };
 export const dynamic = 'force-dynamic';
 
 const VALID_RANGES: TimeRange[] = ['24h', '7d', '30d', 'all'];
-
-/**
- * Statuses that represent test / dead-end ads. Hidden from the
- * per-ad table by default so the dashboard reads as production-ish
- * even with mock-mode rows in the database.
- */
 const TEST_STATUSES = new Set(['dry_run', 'rejected_by_meta', 'launch_failed']);
 
 interface Props {
@@ -71,15 +58,6 @@ export default async function DashboardPage({ searchParams }: Props) {
     getUserTimezone(user.userId),
   ]);
 
-  // Polish-25.1 Commit 10b: also compute the getting-started
-  // checklist state so the dashboard can swap the metrics grid for
-  // an empty-state task list when totalSpendUsd === 0. Cheap
-  // queries — all limit(1) existence checks.
-  //
-  // Polish-25.2 Commit 11: dropped the MakeUGC ai_provider row
-  // query. MakeUGC is now platform-managed under the "Instant UGC"
-  // brand — Claude + Gemini are the only user-facing BYOK keys that
-  // gate the "Connect your keys" step.
   const [metrics, perAdRaw, toolRows, conceptRow, generatedRow, launchedRow] = await Promise.all([
     getDashboardMetrics({ userId: user.userId, range, userTimezone }),
     getPerAdBreakdown({ userId: user.userId, range, userTimezone, sortBy: 'spend', limit: 50 }),
@@ -119,22 +97,27 @@ export default async function DashboardPage({ searchParams }: Props) {
     hasLaunchedAd: !!launchedRow,
     firstConceptId: conceptRow?.id ?? null,
   };
-  // Empty-state mode when no launched-ad spend has landed yet. The
-  // metrics grid + spend chart + per-ad table stay hidden until
-  // there's real data to show. As soon as totalSpendUsd > 0 the
-  // dashboard flips back to the full performance layout.
   const isFirstAdMode = metrics.totalSpendUsd === 0;
 
   const roasTone =
     metrics.impliedRoas == null
       ? 'neutral'
       : metrics.impliedRoas >= 2
-        ? 'good'
+        ? 'positive'
         : metrics.impliedRoas < 1
-          ? 'bad'
+          ? 'negative'
           : 'neutral';
 
-  // Build show/hide test-ads link preserving the current range param.
+  // Polish-25.5 Commit 27: build recharts-friendly timeseries + tile
+  // sparklines from the same daily-summary points.
+  const chartData: TimeseriesPoint[] = metrics.timeSeries.map((p) => ({
+    date: p.date,
+    primary: p.spendUsd,
+    secondary: p.conversions,
+  }));
+  const spendSpark = metrics.timeSeries.map((p) => ({ v: p.spendUsd }));
+  const convSpark = metrics.timeSeries.map((p) => ({ v: p.conversions }));
+
   const toggleHref = `/dashboard?range=${range}&show_test=${showTest ? '0' : '1'}`;
 
   return (
@@ -151,14 +134,6 @@ export default async function DashboardPage({ searchParams }: Props) {
       <PageHeader
         title="Dashboard"
         subtitle={`${user.email} · timezone ${userTimezone}`}
-        // Polish-25.2 Commit 17: Founding-member badge was
-        // unexplained — operator survey read it as decorative.
-        // It actually grants meaningful access (bypasses the
-        // Whop subscription paywall — checkActiveSubscription
-        // short-circuits at packages/db/src/subscription.ts:45).
-        // Wrap in a tooltip so anyone hovering learns what it
-        // gets them, but keep the badge visible so the perk
-        // still feels earned rather than hidden.
         actions={
           isFoundingMember ? (
             <TooltipProvider delayDuration={100}>
@@ -178,79 +153,83 @@ export default async function DashboardPage({ searchParams }: Props) {
         }
       />
 
-      {/* Polish-25.1 Commit 10b: empty-state mode swaps the metrics
-          grid + spend chart + per-ad table for a getting-started
-          checklist. Users see actionable next steps instead of six
-          $0 metric cards + an empty chart. Flips back automatically
-          the moment totalSpendUsd > 0. */}
       {isFirstAdMode && <GettingStartedChecklist state={checklistState} />}
 
       {!isFirstAdMode && (
         <>
-          {/* Metric cards — 3 columns on desktop, 2 on tablet, 1 on mobile.
-              Polish-25.4 Commit 26: each numeric backing value threaded to
-              the MetricCard's CellFlash wrapper. Tile flashes green/red
-              on delta between renders (dashboard re-fetches on route
-              revalidation). Silent on first render — a fresh page load
-              never paints the whole strip red/green. */}
-          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <MetricCard
+          {/* Polish-25.5 Commit 27: KpiTile grid replaces the old MetricCard
+              strip. New tiles carry inline sparklines for metrics with time-
+              series data (spend, conversions); tiles without a series render
+              plain (ROAS, active/killed/scaled counts). Layout is 12-col
+              friendly: 6 tiles across a wide screen (2 rows on tablet, 1 on
+              mobile). CellFlash still wraps the numeric value so tick-updates
+              flash green/red. */}
+          <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+            <KpiTile
               label="Total spend"
               value={`$${metrics.totalSpendUsd.toFixed(2)}`}
               numericValue={metrics.totalSpendUsd}
               icon={Wallet}
-              hint={`${metrics.totalImpressions.toLocaleString()} impressions · ${metrics.totalClicks.toLocaleString()} clicks`}
+              spark={spendSpark}
+              hint={`${metrics.totalImpressions.toLocaleString()} impr · ${metrics.totalClicks.toLocaleString()} clk`}
             />
-            <MetricCard
+            <KpiTile
               label="Conversions"
               value={metrics.totalConversions.toLocaleString()}
               numericValue={metrics.totalConversions}
               icon={Target}
+              spark={convSpark}
               hint={
                 metrics.avgCtrPct != null
                   ? `CTR ${metrics.avgCtrPct.toFixed(2)}% · CPC $${(metrics.avgCpcUsd ?? 0).toFixed(2)}`
-                  : '—'
+                  : undefined
               }
             />
-            <MetricCard
+            <KpiTile
               label="Implied ROAS"
               value={metrics.impliedRoas != null ? `${metrics.impliedRoas.toFixed(2)}x` : '—'}
               numericValue={metrics.impliedRoas}
               icon={TrendingUp}
               tone={roasTone}
-              hint="Heuristic — $20 assumed per conv."
+              hint="Heuristic — $20 assumed / conv"
             />
-            <MetricCard
+            <KpiTile
               label="Active ads"
               value={metrics.adsActiveCount.toString()}
               numericValue={metrics.adsActiveCount}
               icon={Rocket}
             />
-            <MetricCard
+            <KpiTile
               label="Killed (period)"
               value={metrics.adsKilledCount.toString()}
               numericValue={metrics.adsKilledCount}
               icon={Skull}
-              tone={metrics.adsKilledCount > 0 ? 'bad' : 'neutral'}
+              tone={metrics.adsKilledCount > 0 ? 'negative' : 'neutral'}
             />
-            <MetricCard
+            <KpiTile
               label="Scaled (period)"
               value={metrics.adsScaledCount.toString()}
               numericValue={metrics.adsScaledCount}
               icon={TrendingUp}
-              tone={metrics.adsScaledCount > 0 ? 'good' : 'neutral'}
+              tone={metrics.adsScaledCount > 0 ? 'positive' : 'neutral'}
             />
           </div>
 
-          {/* Spend chart */}
-          <div className="mb-6">
-            <SpendChart data={metrics.timeSeries} />
+          <div className="mb-4">
+            <TimeseriesChart
+              data={chartData}
+              primaryLabel="Spend"
+              secondaryLabel="Conversions"
+              primaryFormat={(v) => `$${v.toFixed(0)}`}
+              height={220}
+            />
           </div>
 
-          {/* Per-ad breakdown */}
-          <div className="mb-8">
-            <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-fg text-base font-semibold">Per-ad performance</h2>
+          <div className="mb-6">
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-fg text-sm font-semibold uppercase tracking-wider">
+                Per-ad performance
+              </h2>
               <div className="text-fg-muted flex items-center gap-3 text-xs">
                 <Link
                   href={toggleHref}
@@ -277,106 +256,11 @@ export default async function DashboardPage({ searchParams }: Props) {
                 }
               />
             ) : (
-              <div className="overflow-x-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Ad</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Budget</TableHead>
-                      <TableHead>Spend</TableHead>
-                      <TableHead>Conv</TableHead>
-                      <TableHead>CTR</TableHead>
-                      <TableHead>CPC</TableHead>
-                      <TableHead>ROAS</TableHead>
-                      <TableHead>Launched</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {perAd.map((r) => (
-                      <TableRow key={r.launchedAdId}>
-                        <TableCell>
-                          <div className="flex items-start gap-2">
-                            {r.imageUrl ? (
-                              <Link href={`/runs/${r.generationJobId ?? ''}`}>
-                                <img
-                                  src={r.imageUrl}
-                                  alt={r.headline ?? 'variant'}
-                                  className="bg-bg-active h-10 w-10 rounded object-cover"
-                                />
-                              </Link>
-                            ) : (
-                              <div className="bg-bg-active h-10 w-10 rounded" />
-                            )}
-                            <p className="text-fg line-clamp-2 max-w-[16ch] text-xs font-medium">
-                              {r.headline ?? '(no headline)'}
-                            </p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {/* Polish-25.4 Commit 26: semantic status badge
-                              via variant mapping — active/paused/killed
-                              light up the appropriate --pos/--warn/--neg
-                              tokens instead of rendering as gray text. */}
-                          <Badge variant={adStatusBadgeVariant(r.status)}>
-                            {r.status.replace(/_/g, ' ')}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          ${r.dailyBudgetUsd.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">
-                          ${r.totalSpendUsd.toFixed(2)}
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{r.totalConversions}</TableCell>
-                        <TableCell className="font-mono text-xs">{r.ctrPct.toFixed(2)}%</TableCell>
-                        <TableCell className="font-mono text-xs">${r.cpcUsd.toFixed(2)}</TableCell>
-                        <TableCell
-                          className={
-                            'font-mono text-xs ' +
-                            (r.impliedRoas >= 2
-                              ? 'text-success'
-                              : r.impliedRoas < 1 && r.totalSpendUsd > 0
-                                ? 'text-[color:var(--destructive-color)]'
-                                : 'text-fg')
-                          }
-                        >
-                          {r.totalSpendUsd > 0 ? `${r.impliedRoas.toFixed(2)}x` : '—'}
-                        </TableCell>
-                        <TableCell className="text-fg-muted font-mono text-xs">
-                          {formatDateTime(new Date(r.launchedAtIso))}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <PerAdTable rows={perAd} />
             )}
           </div>
         </>
       )}
     </AppShell>
   );
-}
-
-/**
- * Polish-25.4 Commit 26: map launched_ads.status to the appropriate
- * Badge variant so the per-ad table lights up semantic colors instead
- * of gray text.
- *
- *   active            → success (--pos)  live + producing
- *   paused            → warning (--warn) recoverable, needs attention
- *   killed            → destructive      terminal, killed by rules
- *   rejected_by_meta  → destructive      Meta rejected the creative
- *   launch_failed     → destructive      our Meta API call errored
- *   dry_run           → outline           test / preview run
- *   default fallback  → outline           unknown status stays neutral
- */
-function adStatusBadgeVariant(status: string): BadgeVariant {
-  if (status === 'active') return 'success';
-  if (status === 'paused') return 'warning';
-  if (status === 'killed' || status === 'rejected_by_meta' || status === 'launch_failed') {
-    return 'destructive';
-  }
-  return 'outline';
 }

@@ -29,18 +29,13 @@ export function OnboardingProgress({ current, completed }: ProgressBarProps) {
                     ? 'border-primary bg-primary text-primary-foreground'
                     : isCurrent
                       ? 'border-primary bg-background text-primary'
-                      : 'border-muted bg-muted text-muted-foreground',
+                      : 'border-border bg-bg-inset text-fg-muted',
                 )}
                 aria-current={isCurrent ? 'step' : undefined}
               >
                 {isComplete ? <Check className="h-4 w-4" /> : idx + 1}
               </div>
-              <span
-                className={cn(
-                  'text-xs font-medium',
-                  isCurrent ? 'text-foreground' : 'text-muted-foreground',
-                )}
-              >
+              <span className={cn('text-xs font-medium', isCurrent ? 'text-fg' : 'text-fg-muted')}>
                 {ONBOARDING_STEP_LABELS[step]}
               </span>
             </div>
