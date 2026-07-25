@@ -33,8 +33,16 @@ const DialogContent = React.forwardRef<
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
+      // Polish-25.4 Commit 25: Trader Terminal modal.
+      //   * Dropped shadow-lg — pro tools use bordered panels, not
+      //     drop shadows, for elevation.
+      //   * Dropped sm:rounded-lg — the global --radius=2px already
+      //     makes the default `border` classes render squarely;
+      //     the rounded-lg override was fighting the token spec.
+      //   * Kept bg-background + border so the modal reads as a
+      //     panel docked to the viewport, not a floating card.
       className={cn(
-        'bg-background fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border p-6 shadow-lg sm:rounded-lg',
+        'bg-background fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border p-6',
         className,
       )}
       {...props}

@@ -54,6 +54,15 @@ const config: Config = {
         'accent-negative': 'var(--accent-negative)',
         'accent-warning': 'var(--accent-warning)',
         'accent-info': 'var(--accent-info)',
+        // Polish-25.4 Commit 25: Trader Terminal amber. Signature accent
+        // for primary CTAs (Generate variants, Launch approved, Continue)
+        // + active tabs + data-row hover borders. See globals.css for
+        // the token rationale (Bloomberg-orange trust signal for media
+        // buyers pattern-matching to trading-desk tooling).
+        'accent-amber': {
+          DEFAULT: 'var(--accent-amber)',
+          fg: 'var(--accent-amber-fg)',
+        },
 
         // Shadcn aliases — repainted to the brand palette so existing
         // primitives in components/ui/* keep working untouched.

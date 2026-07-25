@@ -111,7 +111,7 @@ export default async function ConceptDetailPage({ params }: Props) {
           centered + full-width on mobile, auto width on desktop
           for visual weight parity with the source preview. */}
       <div className="mb-8 flex flex-col items-center gap-2">
-        <Button asChild size="lg" className="w-full gap-2 sm:w-auto sm:px-8">
+        <Button asChild variant="accent" size="lg" className="w-full gap-2 sm:w-auto sm:px-8">
           <Link href={`/concepts/${concept.id}/generate`}>
             Generate variants
             <ArrowRight className="h-4 w-4" aria-hidden />

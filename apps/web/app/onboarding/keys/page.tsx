@@ -149,7 +149,7 @@ export default async function OnboardingKeysPage() {
           asChild
           size="lg"
           disabled={!allReady}
-          variant={allReady ? 'primary' : 'secondary'}
+          variant={allReady ? 'accent' : 'secondary'}
           className="w-full sm:w-auto"
         >
           <Link href="/dashboard" aria-disabled={!allReady}>

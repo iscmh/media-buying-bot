@@ -21,6 +21,14 @@ const buttonVariants = cva(
         primary: 'bg-fg text-fg-inverse hover:bg-fg/90',
         secondary: 'bg-bg-surface text-fg border border-border hover:bg-bg-surfaceHover',
         ghost: 'bg-transparent text-fg-muted hover:text-fg hover:bg-bg-surface',
+        // Polish-25.4 Commit 25: Trader Terminal signature CTA variant.
+        // Amber-filled for the top-of-flow actions the operator wants
+        // to visually pop: Generate variants, Launch approved,
+        // Continue to dashboard. Never for destructive or secondary.
+        // Text is near-black (--accent-amber-fg) — amber has enough
+        // luminance that white text against it fails WCAG.
+        accent:
+          'bg-[color:var(--accent-amber)] text-[color:var(--accent-amber-fg)] hover:bg-[color:var(--accent-amber)]/90 font-semibold',
         // Legacy variants — preserved so existing pages don't break.
         // Repainted lightly to track the Phase 1 token shifts.
         default: 'bg-primary text-primary-foreground hover:bg-primary/90',

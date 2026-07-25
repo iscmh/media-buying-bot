@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.3.8';
+export const POLISH_VERSION = '25.4.0';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.3.8';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.3 Commit 23 — Beta tag on Static ad pipeline: badge on generate-form picker + disclaimer copy + matching badge on run detail page. Sets expectation without gating.';
+  'Polish-25.4 Commit 25 — Trader Terminal visual refresh. Bloomberg-orange amber signature accent (#FFA028) as primary CTA fill + table-row hover left-border. Global tabular-nums on tables. CellFlash primitive for tick-updates. Dialog shed shadow-lg + rounded-lg for pro-tool hard-edged modal. Token-layer + 4 primitives + 4 CTA amber applications — MINOR bump opening the Polish-25.4 visual-design series.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

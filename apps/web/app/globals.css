@@ -54,6 +54,33 @@
     --accent-warning: #facc15; /* warnings, attention needed */
     --accent-info: #60a5fa; /* informational, links (sparingly) */
 
+    /* === Polish-25.4 Commit 25: Trader Terminal amber signature accent ===
+     *
+     * Bloomberg-orange amber for primary CTAs, active tabs, and
+     * data-row hover highlights. Chosen deliberately over the
+     * SaaS-default blue: media buyers running MMO/biz-opp/nutra
+     * pattern-match trust to trading-desk tooling (Bloomberg /
+     * TradingView / ThinkOrSwim) more than to SaaS product surfaces
+     * (Linear / Vercel / Stripe). Amber is the single visual move
+     * that separates Ads Bot from every dashboard the operator has
+     * already dismissed as "boring black and white."
+     *
+     * Two variants for foreground contrast:
+     *   --accent-amber:      #FFA028   solid — for filled buttons + hover borders
+     *   --accent-amber-fg:   #0A0A0A   inverse — text on amber-filled surfaces
+     *
+     * Semantic aliases (Trader Terminal semantic-color vocabulary):
+     *   --pos / --neg / --warn / --info — alias the existing accent-*
+     *   tokens so pro-tool consumers can use the shorter names the
+     *   operator's design spec cited.
+     */
+    --accent-amber: #ffa028;
+    --accent-amber-fg: #0a0a0a;
+    --pos: #4ade80;
+    --neg: #ef4444;
+    --warn: #facc15;
+    --info: #60a5fa;
+
     /* === Shadcn compatibility remap (HSL for `hsl(var(...))` consumers) === */
     --background: 0 0% 4%;
     --foreground: 0 0% 93%;
@@ -95,6 +122,15 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+  }
+
+  /* Polish-25.4 Commit 25: tabular-nums on every table cell globally.
+     Trader-terminal discipline — numbers must align vertically without
+     per-cell classnames. Applies to <th>, <td>, and any element
+     inside a <table>. Non-numeric cells are unaffected (variable-
+     width glyphs still render normally). */
+  table {
+    font-variant-numeric: tabular-nums;
   }
 
   /* Cleaner focus ring than shadcn's default — single muted ring. */

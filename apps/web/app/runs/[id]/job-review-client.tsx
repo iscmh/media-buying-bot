@@ -408,6 +408,7 @@ export function JobReviewClient({
           {hasMetaConnection && (
             <Button
               type="button"
+              variant="accent"
               size="sm"
               onClick={onLaunchClick}
               disabled={launchableCount === 0 || launchPending}

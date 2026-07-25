@@ -468,6 +468,8 @@ export function SimplifiedGenerationForm({
         </p>
         <Button
           type="submit"
+          variant="accent"
+          size="lg"
           disabled={isPending || overCap || !canSubmit || !hasProviderKey}
           title={
             !canSubmit

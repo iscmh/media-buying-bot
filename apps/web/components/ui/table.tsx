@@ -42,10 +42,19 @@ TableBody.displayName = 'TableBody';
 
 const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTMLTableRowElement>>(
   ({ className, ...props }, ref) => (
+    // Polish-25.4 Commit 25: Trader Terminal row hover treatment.
+    // Was a subtle bg-lighten; now a 2px amber left-border that
+    // appears on hover. Matches Bloomberg/TradingView row-highlight
+    // pattern where the accent color marks the active/hovered row
+    // instead of a background wash. The transparent placeholder
+    // border on rest keeps row heights stable (no layout shift
+    // when the border pops in on hover).
     <tr
       ref={ref}
       className={cn(
-        'border-border-subtle hover:bg-bg-surfaceHover/50 border-b transition-colors',
+        'border-border-subtle border-b transition-colors',
+        'border-l-2 border-l-transparent hover:border-l-[color:var(--accent-amber)]',
+        'hover:bg-bg-surfaceHover/30',
         className,
       )}
       {...props}
