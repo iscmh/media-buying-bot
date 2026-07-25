@@ -76,6 +76,7 @@ export function PresetsManager({ initial, optimizationGoals, placementTypes }: P
       <div className="flex justify-end">
         <Button
           type="button"
+          variant="accent"
           size="sm"
           onClick={() => setEditing({ mode: 'create' })}
           disabled={editing !== null}
@@ -382,7 +383,7 @@ function PresetDialog({
             <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" variant="accent" disabled={submitting}>
               {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create preset'}
             </Button>
           </div>

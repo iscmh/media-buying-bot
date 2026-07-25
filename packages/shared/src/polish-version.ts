@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.4.0';
+export const POLISH_VERSION = '25.4.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.4.0';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.4 Commit 25 — Trader Terminal visual refresh. Bloomberg-orange amber signature accent (#FFA028) as primary CTA fill + table-row hover left-border. Global tabular-nums on tables. CellFlash primitive for tick-updates. Dialog shed shadow-lg + rounded-lg for pro-tool hard-edged modal. Token-layer + 4 primitives + 4 CTA amber applications — MINOR bump opening the Polish-25.4 visual-design series.';
+  'Polish-25.4 Commit 26 — expand amber + CellFlash + semantic badges. Amber variant on 9 more primary CTAs (Verify+save both cards, Approve all pending, Create/Save preset, Launch confirm, Continue to launch, I understand+generate, Save concept, Verify token, Save+continue, Save settings). Dashboard KPI tiles wrapped in CellFlash — tick-flash on data revalidation. Per-ad table status column now uses semantic Badge variants (active=success, paused=warning, killed/rejected/failed=destructive).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

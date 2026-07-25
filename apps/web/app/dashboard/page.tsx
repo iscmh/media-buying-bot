@@ -10,7 +10,7 @@ import {
   schema,
   type TimeRange,
 } from '@mbb/db';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -187,17 +187,24 @@ export default async function DashboardPage({ searchParams }: Props) {
 
       {!isFirstAdMode && (
         <>
-          {/* Metric cards — 3 columns on desktop, 2 on tablet, 1 on mobile. */}
+          {/* Metric cards — 3 columns on desktop, 2 on tablet, 1 on mobile.
+              Polish-25.4 Commit 26: each numeric backing value threaded to
+              the MetricCard's CellFlash wrapper. Tile flashes green/red
+              on delta between renders (dashboard re-fetches on route
+              revalidation). Silent on first render — a fresh page load
+              never paints the whole strip red/green. */}
           <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <MetricCard
               label="Total spend"
               value={`$${metrics.totalSpendUsd.toFixed(2)}`}
+              numericValue={metrics.totalSpendUsd}
               icon={Wallet}
               hint={`${metrics.totalImpressions.toLocaleString()} impressions · ${metrics.totalClicks.toLocaleString()} clicks`}
             />
             <MetricCard
               label="Conversions"
               value={metrics.totalConversions.toLocaleString()}
+              numericValue={metrics.totalConversions}
               icon={Target}
               hint={
                 metrics.avgCtrPct != null
@@ -208,6 +215,7 @@ export default async function DashboardPage({ searchParams }: Props) {
             <MetricCard
               label="Implied ROAS"
               value={metrics.impliedRoas != null ? `${metrics.impliedRoas.toFixed(2)}x` : '—'}
+              numericValue={metrics.impliedRoas}
               icon={TrendingUp}
               tone={roasTone}
               hint="Heuristic — $20 assumed per conv."
@@ -215,17 +223,20 @@ export default async function DashboardPage({ searchParams }: Props) {
             <MetricCard
               label="Active ads"
               value={metrics.adsActiveCount.toString()}
+              numericValue={metrics.adsActiveCount}
               icon={Rocket}
             />
             <MetricCard
               label="Killed (period)"
               value={metrics.adsKilledCount.toString()}
+              numericValue={metrics.adsKilledCount}
               icon={Skull}
               tone={metrics.adsKilledCount > 0 ? 'bad' : 'neutral'}
             />
             <MetricCard
               label="Scaled (period)"
               value={metrics.adsScaledCount.toString()}
+              numericValue={metrics.adsScaledCount}
               icon={TrendingUp}
               tone={metrics.adsScaledCount > 0 ? 'good' : 'neutral'}
             />
@@ -302,8 +313,14 @@ export default async function DashboardPage({ searchParams }: Props) {
                             </p>
                           </div>
                         </TableCell>
-                        <TableCell className="text-fg-muted font-mono text-xs">
-                          {r.status.replace(/_/g, ' ')}
+                        <TableCell>
+                          {/* Polish-25.4 Commit 26: semantic status badge
+                              via variant mapping — active/paused/killed
+                              light up the appropriate --pos/--warn/--neg
+                              tokens instead of rendering as gray text. */}
+                          <Badge variant={adStatusBadgeVariant(r.status)}>
+                            {r.status.replace(/_/g, ' ')}
+                          </Badge>
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           ${r.dailyBudgetUsd.toFixed(2)}
@@ -340,4 +357,26 @@ export default async function DashboardPage({ searchParams }: Props) {
       )}
     </AppShell>
   );
+}
+
+/**
+ * Polish-25.4 Commit 26: map launched_ads.status to the appropriate
+ * Badge variant so the per-ad table lights up semantic colors instead
+ * of gray text.
+ *
+ *   active            → success (--pos)  live + producing
+ *   paused            → warning (--warn) recoverable, needs attention
+ *   killed            → destructive      terminal, killed by rules
+ *   rejected_by_meta  → destructive      Meta rejected the creative
+ *   launch_failed     → destructive      our Meta API call errored
+ *   dry_run           → outline           test / preview run
+ *   default fallback  → outline           unknown status stays neutral
+ */
+function adStatusBadgeVariant(status: string): BadgeVariant {
+  if (status === 'active') return 'success';
+  if (status === 'paused') return 'warning';
+  if (status === 'killed' || status === 'rejected_by_meta' || status === 'launch_failed') {
+    return 'destructive';
+  }
+  return 'outline';
 }

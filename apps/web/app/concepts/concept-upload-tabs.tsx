@@ -292,7 +292,7 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
       )}
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" variant="accent" disabled={pending}>
           {pending ? 'Uploading…' : 'Save concept'}
         </Button>
       </div>

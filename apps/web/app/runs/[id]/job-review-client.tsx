@@ -385,7 +385,7 @@ export function JobReviewClient({
           <Button
             type="button"
             size="sm"
-            variant="outline"
+            variant="accent"
             onClick={() => bulk('approved')}
             disabled={!!bulkPending || allDecided}
           >
@@ -734,6 +734,7 @@ export function JobReviewClient({
             </Button>
             <Button
               type="button"
+              variant="accent"
               onClick={confirmLaunch}
               disabled={
                 launchPending ||
@@ -810,6 +811,7 @@ export function JobReviewClient({
             </Button>
             <Button
               type="button"
+              variant="accent"
               onClick={confirmTripleAck}
               disabled={!(ack1 && ack2 && ack3) || tripleAckPending}
             >

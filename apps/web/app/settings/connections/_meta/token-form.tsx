@@ -10,7 +10,7 @@ import { verifyMetaTokenAction } from './actions';
 function VerifyButton() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending} size="lg">
+    <Button type="submit" variant="accent" disabled={pending} size="lg">
       {pending ? 'Verifying with Meta…' : 'Verify token'}
     </Button>
   );

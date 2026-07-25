@@ -31,7 +31,7 @@ interface Props {
 function VerifyButton() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={pending} size="sm">
+    <Button type="submit" variant="accent" disabled={pending} size="sm">
       {pending ? 'Saving…' : 'Verify and save'}
     </Button>
   );

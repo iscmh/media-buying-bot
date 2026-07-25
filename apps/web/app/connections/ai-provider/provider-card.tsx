@@ -204,7 +204,7 @@ function DisconnectedBody({ provider }: { provider: AIProviderName }) {
         <KeyHint provider={provider} />
       </div>
       {error && <p className="text-xs text-[color:var(--destructive-color)]">{error}</p>}
-      <Button type="submit" size="sm" disabled={pending || apiKey.length === 0}>
+      <Button type="submit" variant="accent" size="sm" disabled={pending || apiKey.length === 0}>
         {pending ? 'Verifying…' : 'Verify and save'}
       </Button>
     </form>

@@ -500,7 +500,7 @@ export function SimplifiedGenerationForm({
                 Cancel
               </Button>
             </DialogClose>
-            <Button type="button" onClick={confirmLiveDialog} disabled={isPending}>
+            <Button type="button" variant="accent" onClick={confirmLiveDialog} disabled={isPending}>
               I understand, generate
             </Button>
           </div>

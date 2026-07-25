@@ -20,7 +20,7 @@ interface Props {
 function SaveButton({ disabled }: { disabled: boolean }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" disabled={disabled || pending} size="lg">
+    <Button type="submit" variant="accent" disabled={disabled || pending} size="lg">
       {pending ? 'Saving…' : 'Save and continue'}
     </Button>
   );

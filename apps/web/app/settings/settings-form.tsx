@@ -504,7 +504,7 @@ export function SettingsForm({
                     {toast.message}
                   </span>
                 )}
-                <Button type="submit" disabled={pending}>
+                <Button type="submit" variant="accent" disabled={pending}>
                   <Save className="h-4 w-4" />
                   {pending ? 'Saving…' : 'Save'}
                 </Button>
