@@ -605,11 +605,27 @@ function StaticOpenaiPickerCard({
         {picked && (
           <CheckCircle2 className="text-fg absolute right-3 top-3 h-4 w-4" aria-hidden="true" />
         )}
-        <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
-          Static ad
+        {/* Polish-25.3 Commit 23: Beta tag so operators set the right
+            quality expectation before spending. Static pipeline works
+            end-to-end but copy quality is still being tuned (see
+            Commit 20/21/22 iteration history). Not gated — just
+            labeled. */}
+        <div className="flex items-center gap-2">
+          <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
+            Static ad
+          </div>
+          <span
+            className="border-[color:var(--accent-warning,#a68a00)]/40 bg-[color:var(--accent-warning,#a68a00)]/10 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[color:var(--accent-warning,#a68a00)]"
+            aria-label="Beta feature"
+          >
+            Beta
+          </span>
         </div>
         <div className="text-fg text-sm font-semibold">{STATIC_OPENAI_DISPLAY_NAME}</div>
         <div className="text-fg-muted text-xs leading-relaxed">{STATIC_OPENAI_DESCRIPTION}</div>
+        <div className="text-fg-subtle mt-1 text-[11px] italic leading-relaxed">
+          Copy quality varies. We recommend editing outputs before launching.
+        </div>
       </button>
 
       {picked && (

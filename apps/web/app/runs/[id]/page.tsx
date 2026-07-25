@@ -193,6 +193,18 @@ export default async function JobReviewPage({ params }: Props) {
               <div>
                 <span className="text-fg-subtle uppercase tracking-wider">Format </span>
                 <span className="font-mono">{jobPipelineDesc.label}</span>
+                {/* Polish-25.3 Commit 23: mirror the Beta tag from the
+                    generate-form picker on any static-openai run so
+                    approvers see the same expectation-setting signal
+                    the operator saw at submit time. */}
+                {jobPipelineEnum === 'static_openai_image' && (
+                  <span
+                    className="border-[color:var(--accent-warning,#a68a00)]/40 bg-[color:var(--accent-warning,#a68a00)]/10 ml-2 rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-[color:var(--accent-warning,#a68a00)]"
+                    aria-label="Beta pipeline"
+                  >
+                    Beta
+                  </span>
+                )}
               </div>
             )}
             {!jobPipelineDesc && conceptType === 'ugc' && (

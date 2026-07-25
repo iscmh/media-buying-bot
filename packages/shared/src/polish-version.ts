@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.3.7';
+export const POLISH_VERSION = '25.3.8';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.3.7';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.3 Commit 22 — PSYWAR corpus injection into STATIC_WINNER_IMPORT_SYSTEM_PROMPT: Objective reframed as three-layer-brain event (reptile / limbic / neocortex), one Psychology Principles block with 5 numbered rules (SEQUENCE / MOTIVE MATCHING / ENGINEER THE ENDING STATE / STORY ELEMENTS / WIDEN THE GOODNESS-SCALE GAP). No new anchor examples. Static-only.';
+  'Polish-25.3 Commit 23 — Beta tag on Static ad pipeline: badge on generate-form picker + disclaimer copy + matching badge on run detail page. Sets expectation without gating.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
