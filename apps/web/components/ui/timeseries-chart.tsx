@@ -13,6 +13,7 @@ import {
 
 /**
  * Polish-25.5 Commit 27: standardized timeseries chart wrapper.
+ * Polish-25.5 Commit 29: client-only render (SSR crash fix).
  *
  * TradingView / Datadog treatment — dashed low-contrast gridlines,
  * inline legend swatch, tabular-num labels, tooltip on hover.
@@ -21,6 +22,14 @@ import {
  *
  * Empty / one-point series renders a hint block instead of an
  * unusable chart — matches EmptyState treatment.
+ *
+ * WHY THE MOUNT GATE (Commit 29 fix):
+ * `ResponsiveContainer` uses `ResizeObserver`, which doesn't exist
+ * server-side under Next.js SSR — the operator hit digest
+ * 2795558093 the moment Commit 28's predicate fix started routing
+ * the paused-launch flow through this component. Server render
+ * emits an equal-height empty panel; on hydration, the effect fires
+ * and the real chart mounts. Zero layout shift.
  */
 export interface TimeseriesPoint {
   date: string;
@@ -49,6 +58,11 @@ export function TimeseriesChart({
   secondaryFormat = defaultFmt,
   height = 220,
 }: Props) {
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
   if (!data || data.length < 2) {
     return (
       <div
@@ -57,6 +71,19 @@ export function TimeseriesChart({
       >
         Not enough data to draw a trend yet.
       </div>
+    );
+  }
+
+  if (!mounted) {
+    // SSR-safe placeholder — same height as the real chart so hydration
+    // doesn't reflow the surrounding grid. Border matches the real
+    // rendered panel so no visual pop when the chart mounts.
+    return (
+      <div
+        className="bg-bg-surface rounded-sm border"
+        style={{ height: height + 40 }}
+        aria-hidden
+      />
     );
   }
 

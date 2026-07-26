@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.5.1';
+export const POLISH_VERSION = '25.5.2';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.5.1';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.5 Commit 28 — dashboard empty-state predicate fix. The Commit 10b checklist flip keyed on `metrics.totalSpendUsd === 0`, which trapped operators who launch ads into Paused (the TOS-recommended flow) on the Getting Started screen forever — no spend, no metric grid. Flip now keys on any-of-{hasConcept, hasGeneratedAd, hasLaunchedAd}. Genuinely fresh users still see the checklist; anyone who has proved they know the flow gets the KPI grid.';
+  'Polish-25.5 Commit 29 — recharts SSR crash fix (digest 2795558093). Sparkline + TimeseriesChart wrap ResponsiveContainer, which needs ResizeObserver (client-only). Commit 27 shipped the components but the buggy Commit 10b predicate hid them from the paused-launch flow, so the SSR crash never fired. Commit 28 fixed the predicate → KpiTile branch rendered → SSR blew up. Both components now render an equal-height placeholder on the server and mount the real chart on hydration. Zero layout shift.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
