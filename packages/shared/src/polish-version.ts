@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.5.4';
+export const POLISH_VERSION = '25.5.5';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.5.4';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.5 Commit 31 — real fix for digest 2795558093: Server→Client function-prop crash. Commits 29+30 chased a recharts SSR theory that never applied — the actual crash was `<TimeseriesChart primaryFormat={(v) => "$"+v.toFixed(0)} />` in the dashboard (Server Component) passing an inline arrow to a Client Component, which Next 14 App Router rejects at serialization time. Format props are now a string enum (usd|plain|k|pct); the inner component maps enum → formatter locally. Only the dashboard passed a function → only the dashboard crashed → Commit 28 uncovered it, Commit 31 fixes it.';
+  'Polish-25.5 Commit 32 — REAL real fix for digest 2795558093. Vercel stack trace showed `{$$typeof, render: function, displayName}` — a React.forwardRef object, i.e. a Lucide icon component. Root cause: I reflexively marked KpiTile "use client" in Commit 27 even though it uses no client hooks. That made `<KpiTile icon={Wallet} />` a Server→Client crossing with a forwardRef component prop, which Next 14 rejects. Old MetricCard was a Server Component so the same `icon={...}` prop was server→server and always worked. Fix: dropped "use client" from KpiTile; the embedded CellFlash + Sparkline keep their own client boundaries. Commit 31 caught the inline-arrow primaryFormat prop; Commit 32 catches the forwardRef icon prop that was hiding right next to it.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
