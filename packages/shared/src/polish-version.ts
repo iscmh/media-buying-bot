@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.5.2';
+export const POLISH_VERSION = '25.5.3';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.5.2';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.5 Commit 29 — recharts SSR crash fix (digest 2795558093). Sparkline + TimeseriesChart wrap ResponsiveContainer, which needs ResizeObserver (client-only). Commit 27 shipped the components but the buggy Commit 10b predicate hid them from the paused-launch flow, so the SSR crash never fired. Commit 28 fixed the predicate → KpiTile branch rendered → SSR blew up. Both components now render an equal-height placeholder on the server and mount the real chart on hydration. Zero layout shift.';
+  'Polish-25.5 Commit 30 — recharts import-time SSR fix (digest 2795558093 persisted after 25.5.2). Commit 29 mount-flag prevented render but not module import — recharts 2.15 transitive deps (react-resize-detector etc.) touch DOM at load-time. Sparkline + TimeseriesChart now split into -inner (real recharts, client-only) + wrapper (`next/dynamic({ssr:false})`) so the recharts module graph never enters the server bundle. Placeholders match real component height so no layout shift.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
