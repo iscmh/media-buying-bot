@@ -14,16 +14,16 @@ import {
 /**
  * Polish-25.5 Commit 30: recharts render only. This file is NEVER
  * imported into the server bundle — the sibling `timeseries-chart.tsx`
- * wraps it in `next/dynamic({ ssr: false })` so recharts (and its
- * transitive DOM-touching deps) stay off the server. Consumers
- * import from `./timeseries-chart`, not from here.
+ * wraps it in `next/dynamic({ ssr: false })`.
  *
  * TradingView / Datadog treatment — dashed low-contrast gridlines,
  * inline legend swatch, tabular-num labels, tooltip on hover.
  * Dual-series out of the box: primary (spend) + secondary (conversions).
  *
- * Empty / one-point series renders a hint block instead of an
- * unusable chart — matches EmptyState treatment.
+ * Polish-25.5 Commit 31: format props are a string enum (safe to
+ * cross the Server → Client Component boundary). The formatter
+ * function itself lives here — mapped from the enum at render time.
+ * Server code never touches these formatter functions.
  */
 export interface TimeseriesPoint {
   date: string;
@@ -31,25 +31,37 @@ export interface TimeseriesPoint {
   secondary: number;
 }
 
+export type TimeseriesNumberFormat = 'plain' | 'usd' | 'k' | 'pct';
+
 interface Props {
   data: TimeseriesPoint[];
   primaryLabel: string;
   secondaryLabel: string;
-  /** Format each primary value for the tooltip (e.g. usd, k, plain). */
-  primaryFormat?: (v: number) => string;
-  /** Format each secondary value for the tooltip. */
-  secondaryFormat?: (v: number) => string;
+  primaryFormat?: TimeseriesNumberFormat;
+  secondaryFormat?: TimeseriesNumberFormat;
   height?: number;
 }
 
-const defaultFmt = (v: number) => v.toLocaleString();
+function formatterFor(kind: TimeseriesNumberFormat): (v: number) => string {
+  switch (kind) {
+    case 'usd':
+      return (v) => `$${v.toFixed(0)}`;
+    case 'k':
+      return (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toLocaleString());
+    case 'pct':
+      return (v) => `${v.toFixed(1)}%`;
+    case 'plain':
+    default:
+      return (v) => v.toLocaleString();
+  }
+}
 
 export function TimeseriesChart({
   data,
   primaryLabel,
   secondaryLabel,
-  primaryFormat = defaultFmt,
-  secondaryFormat = defaultFmt,
+  primaryFormat = 'plain',
+  secondaryFormat = 'plain',
   height = 220,
 }: Props) {
   if (!data || data.length < 2) {
@@ -62,6 +74,9 @@ export function TimeseriesChart({
       </div>
     );
   }
+
+  const fmtPrimary = formatterFor(primaryFormat);
+  const fmtSecondary = formatterFor(secondaryFormat);
 
   return (
     <div className="bg-bg-surface flex flex-col rounded-sm border p-3">
@@ -114,7 +129,7 @@ export function TimeseriesChart({
               tickLine={false}
               axisLine={false}
               width={40}
-              tickFormatter={(v: number) => primaryFormat(v)}
+              tickFormatter={(v: number) => fmtPrimary(v)}
             />
             <YAxis
               yAxisId="secondary"
@@ -124,6 +139,7 @@ export function TimeseriesChart({
               tickLine={false}
               axisLine={false}
               width={40}
+              tickFormatter={(v: number) => fmtSecondary(v)}
             />
             <Tooltip
               cursor={{ stroke: 'var(--border-strong)' }}
@@ -137,8 +153,8 @@ export function TimeseriesChart({
               }}
               labelStyle={{ color: 'var(--fg-muted)' }}
               formatter={(v: number, name: string) => {
-                if (name === 'primary') return [primaryFormat(v), primaryLabel];
-                return [secondaryFormat(v), secondaryLabel];
+                if (name === 'primary') return [fmtPrimary(v), primaryLabel];
+                return [fmtSecondary(v), secondaryLabel];
               }}
             />
             <Area

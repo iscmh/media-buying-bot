@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.5.3';
+export const POLISH_VERSION = '25.5.4';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.5.3';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.5 Commit 30 — recharts import-time SSR fix (digest 2795558093 persisted after 25.5.2). Commit 29 mount-flag prevented render but not module import — recharts 2.15 transitive deps (react-resize-detector etc.) touch DOM at load-time. Sparkline + TimeseriesChart now split into -inner (real recharts, client-only) + wrapper (`next/dynamic({ssr:false})`) so the recharts module graph never enters the server bundle. Placeholders match real component height so no layout shift.';
+  'Polish-25.5 Commit 31 — real fix for digest 2795558093: Server→Client function-prop crash. Commits 29+30 chased a recharts SSR theory that never applied — the actual crash was `<TimeseriesChart primaryFormat={(v) => "$"+v.toFixed(0)} />` in the dashboard (Server Component) passing an inline arrow to a Client Component, which Next 14 App Router rejects at serialization time. Format props are now a string enum (usd|plain|k|pct); the inner component maps enum → formatter locally. Only the dashboard passed a function → only the dashboard crashed → Commit 28 uncovered it, Commit 31 fixes it.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

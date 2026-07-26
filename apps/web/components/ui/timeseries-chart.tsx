@@ -5,44 +5,54 @@ import dynamic from 'next/dynamic';
 
 /**
  * Polish-25.5 Commit 30: client-only wrapper around the recharts
- * TimeseriesChart. Uses `next/dynamic({ ssr: false })` so recharts
- * (and its transitive DOM-touching deps like react-resize-detector)
- * NEVER loads on the server.
+ * TimeseriesChart.
  *
- * WHY THE DYNAMIC WRAPPER (Commit 30 fix):
+ * Polish-25.5 Commit 31: fix the ACTUAL crash behind digest 2795558093.
  *
- * Commit 29 tried to fix digest 2795558093 with a mount-flag inside
- * the component. That prevented render-time crashes but NOT
- * import-time ones — recharts 2.15's transitive deps touch DOM APIs
- * at module load. Even though the render was gated, the module was
- * still imported into the server bundle, and importing it crashed
- * SSR. `next/dynamic({ ssr: false })` is the only way to keep those
- * modules out of the server bundle entirely.
+ * Commits 29 + 30 chased a recharts SSR theory that never applied.
+ * The real bug: this wrapper's Props previously accepted
+ * `primaryFormat?: (v: number) => string`. The dashboard is a Server
+ * Component and rendered `<TimeseriesChart primaryFormat={(v) =>
+ * `$${v.toFixed(0)}`} … />`. Next.js 14 App Router prohibits arbitrary
+ * function values across the Server → Client Component prop boundary
+ * (only serializable JSON + Server Actions + component references are
+ * allowed). That inline arrow blew up at serialization time, taking
+ * the whole page render with it. Only the dashboard rendered a
+ * function prop, which is why only the dashboard crashed. Only
+ * Commit 28 unhid the metrics-grid branch that renders this chart,
+ * which is why the crash didn't surface before 25.5.1.
  *
- * The `loading` fallback matches the real component's final height
- * so there is no layout shift between initial paint and hydration.
+ * Fix: format props are a string enum now. The inner component maps
+ * the enum to the actual tick-formatter internally. Callers can no
+ * longer pass a function → the serialization boundary is safe by
+ * construction. Adding a new format = adding a new enum value + one
+ * switch case, cheap.
  *
- * `TimeseriesPoint` is re-exported from the inner module so
- * consumers can import the type alongside the component without
- * loading the recharts module themselves (type-only re-export
- * elides at compile time).
+ * `next/dynamic({ ssr: false })` is kept from Commit 30 for defense-
+ * in-depth: recharts genuinely does have client-only deps and
+ * skipping it on the server is still correct even though it wasn't
+ * the crash trigger.
  */
 export type { TimeseriesPoint } from './timeseries-chart-inner';
+
+/**
+ * Enum of numeric formatters the chart understands. Server-safe by
+ * design — string values serialize trivially across the RSC boundary.
+ */
+export type TimeseriesNumberFormat = 'plain' | 'usd' | 'k' | 'pct';
 
 interface Props {
   data: Array<{ date: string; primary: number; secondary: number }>;
   primaryLabel: string;
   secondaryLabel: string;
-  primaryFormat?: (v: number) => string;
-  secondaryFormat?: (v: number) => string;
+  /** How to format Y-axis + tooltip values for the primary series. */
+  primaryFormat?: TimeseriesNumberFormat;
+  /** How to format Y-axis + tooltip values for the secondary series. */
+  secondaryFormat?: TimeseriesNumberFormat;
   height?: number;
 }
 
 function Placeholder() {
-  // Default height (220) + wrapper padding (16) + legend row (~24) ≈ 260
-  // so the initial paint's outer grid slot matches the real chart. On
-  // hydration the dynamic import resolves and the real component swaps
-  // in without reflow.
   return <div className="bg-bg-surface rounded-sm border" style={{ height: 260 }} aria-hidden />;
 }
 

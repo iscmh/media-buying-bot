@@ -235,7 +235,7 @@ export default async function DashboardPage({ searchParams }: Props) {
               data={chartData}
               primaryLabel="Spend"
               secondaryLabel="Conversions"
-              primaryFormat={(v) => `$${v.toFixed(0)}`}
+              primaryFormat="usd"
               height={220}
             />
           </div>
