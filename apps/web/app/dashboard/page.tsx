@@ -97,7 +97,22 @@ export default async function DashboardPage({ searchParams }: Props) {
     hasLaunchedAd: !!launchedRow,
     firstConceptId: conceptRow?.id ?? null,
   };
-  const isFirstAdMode = metrics.totalSpendUsd === 0;
+  // Polish-25.5 Commit 28: the checklist flip used to key on
+  // `metrics.totalSpendUsd === 0`, which was wrong: paused ads never
+  // spend, and the recommended launch flow (per TOS) launches into
+  // Paused. So an operator with 68 completed jobs and 27 launched ads
+  // could stay stuck on the "Getting Started" checklist forever
+  // because none of those ads had accumulated spend yet.
+  //
+  // The right predicate: has the user done ANY meaningful step? If a
+  // concept exists, or a variant has been generated, or an ad has
+  // been launched — they've proved they know the flow. Show them the
+  // KPI grid (even if it renders all zeros) instead of the checklist.
+  //
+  // Genuinely fresh users (zero concepts, zero variants, zero ads)
+  // still land on the checklist as before.
+  const isFirstAdMode =
+    !checklistState.hasConcept && !checklistState.hasGeneratedAd && !checklistState.hasLaunchedAd;
 
   const roasTone =
     metrics.impliedRoas == null

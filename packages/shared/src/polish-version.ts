@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.5.0';
+export const POLISH_VERSION = '25.5.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.5.0';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.5 Commit 27 — full Trader Terminal aesthetic build. New AppShell v2 (48px icon rail + 40px top toolbar with Cmd+K command palette), reusable SidePanel primitive, KpiTile with inline recharts sparkline, TimeseriesChart (recharts) replacing hand-rolled SVG, row-level ROI shading + client-side grouping on the per-ad table, /runs index + /pending cross-run approval queue as new top-level pages, master-detail concept library, mobile drawer fallback for the rail, legacy shadcn token sweep on the three biggest offenders (job-review-client, tool-card, onboarding progress-bar).';
+  'Polish-25.5 Commit 28 — dashboard empty-state predicate fix. The Commit 10b checklist flip keyed on `metrics.totalSpendUsd === 0`, which trapped operators who launch ads into Paused (the TOS-recommended flow) on the Getting Started screen forever — no spend, no metric grid. Flip now keys on any-of-{hasConcept, hasGeneratedAd, hasLaunchedAd}. Genuinely fresh users still see the checklist; anyone who has proved they know the flow gets the KPI grid.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
