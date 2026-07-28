@@ -145,20 +145,15 @@ export function SecondaryNavSheet({ email, isAdmin }: Props) {
                 <Shield className="h-3 w-3" />
                 Admin
               </div>
-              <Link
-                href="/admin/applications"
-                className={cn(
-                  'block rounded-sm px-3 py-1.5 text-sm transition-colors',
-                  pathname.startsWith('/admin')
-                    ? 'bg-bg-inset text-fg'
-                    : 'text-fg-muted hover:bg-bg-surfaceHover hover:text-fg',
-                )}
-              >
-                Applications
-              </Link>
+              <div className="space-y-0.5">
+                <AdminNavLink href="/admin/applications" pathname={pathname} label="Applications" />
+                <AdminNavLink href="/admin/raw-ugc" pathname={pathname} label="Raw UGC generator" />
+              </div>
             </div>
           )}
         </nav>
+
+        {/* end nav */}
 
         <SheetFooter>
           <button
@@ -172,5 +167,28 @@ export function SecondaryNavSheet({ email, isAdmin }: Props) {
         </SheetFooter>
       </SheetContent>
     </Sheet>
+  );
+}
+
+function AdminNavLink({
+  href,
+  pathname,
+  label,
+}: {
+  href: string;
+  pathname: string;
+  label: string;
+}) {
+  const active = pathname === href || pathname.startsWith(href + '/');
+  return (
+    <Link
+      href={href}
+      className={cn(
+        'block rounded-sm px-3 py-1.5 text-sm transition-colors',
+        active ? 'bg-bg-inset text-fg' : 'text-fg-muted hover:bg-bg-surfaceHover hover:text-fg',
+      )}
+    >
+      {label}
+    </Link>
   );
 }

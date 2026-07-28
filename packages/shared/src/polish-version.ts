@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.6.0';
+export const POLISH_VERSION = '25.6.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.6.0';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.6 Commit 34 — launch-blocker sweep (minor bump, launch-readiness milestone). Five fixes shipped atomic: (1) real Privacy Policy at /legal/privacy sourcing from lib/content/privacy.ts + PRIVACY_VERSION in shared, tone-matched to /legal/tos; (2) Telegram tab removed from /settings/connections for MVP + AutomationAcks/rules/settings-form/pause-banner copy reframed to describe web-based approval, backend telegram_connections rows left in-place; (3) inline Approve/Skip kill/scale buttons on /launched (new server actions in launched/actions.ts that fire the same approval/decision.received Inngest event Telegram would fire — no worker code touched); (4) onboarding progress bar rewritten as Client Component using usePathname, removes fragile x-pathname middleware header dependency; (5) /launched table upgrade — ROAS column, sortable spend/roas/conv/launched headers via ?sort=&dir=, status filter chips including kill_recommended/scale_recommended, row-level ROI shading; (6) jargon sweep — new friendlyPipeline helper applied to /runs, /pending, /concepts/[id] history rows so makeugc/polish25_makeugc/openai never surface raw; (7) /performance stub deleted; (8) "Optional providers" list collapsed behind a <details> disclosure on /settings/connections.';
+  'Polish-25.6 Commit 35 — admin-only raw MakeUGC generator at /admin/raw-ugc. Operator personal tool: pick avatar from makeugc_avatar_index (with gender/age/ethnicity/name filters), paste script, optional voice override, submit → client polls MakeUGC every 5s → download the mp4 straight from MakeUGC CDN. Zero DB persistence, zero shared code with the Polish-25 user pipeline, zero user-facing surface (requireAdmin gate + nav link only visible when isAdmin). Uses MAKEUGC_MANAGED_KEY directly; falls back to a clear error if unset. Also added second row to the Admin section of the account menu.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
