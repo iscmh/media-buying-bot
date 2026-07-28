@@ -50,10 +50,19 @@ type Status =
   | { kind: 'submitting' }
   | { kind: 'polling'; videoId: string; attempts: number }
   | { kind: 'done'; videoId: string; url: string }
+  // Polish-25.6 Commit 36: distinct "still processing after poll cap"
+  // state. Not an error — MakeUGC credit was already charged and the
+  // video is legitimately still generating. Recheck button fires
+  // `checkRawUgcStatusAction` on demand so the admin can resume
+  // watching without regenerating.
+  | { kind: 'processing_timeout'; videoId: string; rechecking: boolean }
   | { kind: 'error'; message: string };
 
 const POLL_INTERVAL_MS = 5_000;
-const MAX_POLL_ATTEMPTS = 40; // ~3.3 min
+// Polish-25.6 Commit 36: bumped 40 → 120 polls (10 min at 5s each).
+// MakeUGC queue backups occasionally push videos past the old 3.3 min
+// cap; false timeouts were the operator's first-real-use bug report.
+const MAX_POLL_ATTEMPTS = 120;
 
 export function RawUgcClient({ avatars }: Props) {
   const [selectedAvatar, setSelectedAvatar] = React.useState<AvatarOption | null>(null);
@@ -139,16 +148,43 @@ export function RawUgcClient({ avatars }: Props) {
         return;
       }
       if (status.attempts + 1 >= MAX_POLL_ATTEMPTS) {
-        setStatus({
-          kind: 'error',
-          message: `Timed out waiting for MakeUGC (${MAX_POLL_ATTEMPTS} polls). Video may still complete — check MakeUGC dashboard for id ${status.videoId}.`,
-        });
+        // Polish-25.6 Commit 36: MakeUGC status is still non-terminal
+        // (processing / queued) after the poll cap. Flip to the
+        // processing_timeout state so the operator sees "still generating
+        // — check back" instead of a red error. Credit is already spent
+        // on MakeUGC; the video will land eventually.
+        setStatus({ kind: 'processing_timeout', videoId: status.videoId, rechecking: false });
         return;
       }
       setStatus({ kind: 'polling', videoId: status.videoId, attempts: status.attempts + 1 });
     }, POLL_INTERVAL_MS);
     return () => clearTimeout(timer);
   }, [status]);
+
+  // Polish-25.6 Commit 36: manual recheck triggered from the
+  // processing_timeout panel. Re-uses `checkRawUgcStatusAction` — no
+  // new server action needed. Three outcomes: still processing →
+  // stays in processing_timeout with the rechecking flag flipped
+  // back to false; completed → 'done' with the video URL; failed
+  // → 'error'.
+  async function recheckStatus(videoId: string) {
+    setStatus({ kind: 'processing_timeout', videoId, rechecking: true });
+    const r = await checkRawUgcStatusAction(videoId);
+    if (!r.ok || r.status === 'failed') {
+      setStatus({
+        kind: 'error',
+        message: r.errorMessage ?? 'MakeUGC returned status=failed with no reason.',
+      });
+      return;
+    }
+    if (r.status === 'completed' && r.url) {
+      setStatus({ kind: 'done', videoId, url: r.url });
+      return;
+    }
+    // Still processing — keep the operator in the processing_timeout
+    // panel so they can re-poll again after another wait.
+    setStatus({ kind: 'processing_timeout', videoId, rechecking: false });
+  }
 
   async function handleSubmit() {
     if (!selectedAvatar) return;
@@ -166,7 +202,10 @@ export function RawUgcClient({ avatars }: Props) {
     setStatus({ kind: 'polling', videoId: r.videoId, attempts: 0 });
   }
 
-  const busy = status.kind === 'submitting' || status.kind === 'polling';
+  const busy =
+    status.kind === 'submitting' ||
+    status.kind === 'polling' ||
+    (status.kind === 'processing_timeout' && status.rechecking);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
@@ -328,7 +367,9 @@ export function RawUgcClient({ avatars }: Props) {
             ? 'Submitting…'
             : status.kind === 'polling'
               ? `Generating (${status.attempts + 1}/${MAX_POLL_ATTEMPTS})…`
-              : 'Generate video'}
+              : status.kind === 'processing_timeout'
+                ? 'Still generating on MakeUGC…'
+                : 'Generate video'}
         </Button>
         <p className="text-fg-subtle text-[10px]">
           Uses MAKEUGC_MANAGED_KEY. Video URL comes back from MakeUGC&apos;s CDN — download + use
@@ -360,9 +401,43 @@ export function RawUgcClient({ avatars }: Props) {
               />
             </div>
             <p className="text-fg-subtle text-[10px]">
-              Videos usually complete in 30-90s. If this hits the poll cap, the video may still
-              finish on MakeUGC — check the MakeUGC dashboard for the video id.
+              Videos usually complete in 30-90s. If MakeUGC&apos;s queue is backed up they can take
+              up to ~10 min. If this hits the poll cap you&apos;ll see a &ldquo;still
+              generating&rdquo; panel with a Recheck button — credit is already charged and the
+              video finishes eventually.
             </p>
+          </div>
+        )}
+        {status.kind === 'processing_timeout' && (
+          <div className="space-y-2 text-xs">
+            <p className="text-fg font-medium">Still generating on MakeUGC.</p>
+            <p className="text-fg-muted leading-snug">
+              We polled {MAX_POLL_ATTEMPTS} times (
+              {Math.round((MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 60_000)} min) and the video is
+              still processing. Credit is already charged — the render will land on MakeUGC
+              eventually. Come back in a few minutes and hit Recheck, or open the MakeUGC dashboard
+              to watch it directly.
+            </p>
+            <p className="text-fg-subtle font-mono text-[10px]">videoId: {status.videoId}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="accent"
+                size="sm"
+                disabled={status.rechecking}
+                onClick={() => recheckStatus(status.videoId)}
+              >
+                {status.rechecking ? 'Rechecking…' : 'Recheck status'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setStatus({ kind: 'idle' })}
+              >
+                Dismiss
+              </Button>
+            </div>
           </div>
         )}
         {status.kind === 'done' && (

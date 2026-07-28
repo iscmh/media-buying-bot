@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.6.1';
+export const POLISH_VERSION = '25.6.2';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.6.1';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.6 Commit 35 — admin-only raw MakeUGC generator at /admin/raw-ugc. Operator personal tool: pick avatar from makeugc_avatar_index (with gender/age/ethnicity/name filters), paste script, optional voice override, submit → client polls MakeUGC every 5s → download the mp4 straight from MakeUGC CDN. Zero DB persistence, zero shared code with the Polish-25 user pipeline, zero user-facing surface (requireAdmin gate + nav link only visible when isAdmin). Uses MAKEUGC_MANAGED_KEY directly; falls back to a clear error if unset. Also added second row to the Admin section of the account menu.';
+  'Polish-25.6 Commit 36 — admin raw UGC poll timeout + recheck. Operator hit false timeout at 3.3 min when MakeUGC queue was backed up and the video was still legitimately generating (credit already charged). Poll cap bumped 40 → 120 (10 min at 5s each). New processing_timeout state distinct from error: after the cap, panel shows "still generating on MakeUGC" with videoId + Recheck button that reuses the existing checkRawUgcStatusAction. Three outcomes on recheck: still processing → stays in the panel; completed → flips to done with the video; failed → flips to error (red).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
