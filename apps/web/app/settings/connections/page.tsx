@@ -16,8 +16,6 @@ import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { ProviderCard } from '@/app/connections/ai-provider/provider-card';
 import { ToolCard } from '@/app/connections/tools/tool-card';
 import { MetaConnectedSummary } from '@/app/connections/meta/connected-summary';
-import { TelegramConnectedSummary } from '@/app/connections/telegram/connected-summary';
-import { DisconnectedNotice } from '@/app/connections/_shared/disconnected-notice';
 import { MetaTokenPasteForm } from './_meta/token-form';
 import { MetaSelectionForm } from './_meta/selection-form';
 import { listMetaResources } from './_meta/actions';
@@ -25,27 +23,36 @@ import { listMetaResources } from './_meta/actions';
 export const metadata = { title: 'Connections' };
 export const dynamic = 'force-dynamic';
 
-type Tab = 'providers' | 'meta' | 'telegram';
-const VALID_TABS: readonly Tab[] = ['providers', 'meta', 'telegram'];
+type Tab = 'providers' | 'meta';
+const VALID_TABS: readonly Tab[] = ['providers', 'meta'];
 
 interface Props {
   searchParams: Promise<{ tab?: string }>;
 }
 
 /**
- * Polish-25.1 Commit 10a: consolidated connections surface.
+ * Polish-25.6 Commit 34: Telegram tab REMOVED for MVP.
  *
- * Replaces the 4 pre-Commit-10 pages
- *   /connections/ai-provider
- *   /connections/tools
- *   /connections/meta
- *   /connections/telegram
- * with a single 3-tab page. Each old route is preserved as a
- * redirect stub for bookmarks — see /connections/*.
+ * WHY: the pre-Commit-34 Telegram tab surfaced a disconnected notice
+ * with no working Connect button — no bot username link, no deep
+ * link, `reconnectHref="/settings"` was a dead redirect. Kill/scale
+ * automation copy in Settings + Rules + AutomationAcks referenced
+ * Telegram as the approval channel, which meant users acked those
+ * rules and then had no way to approve fired recommendations. The
+ * launch-blocker audit (Commit 33) called this out as bug 1.1.
  *
- * Tabs are URL-driven (`?tab=providers|meta|telegram`) so the page
- * stays server-rendered end-to-end + individual tabs are
- * bookmark-linkable.
+ * Fix for MVP: deprecate Telegram entirely. Approve/reject fires via
+ * inline buttons on /launched (Commit 34 also adds those). Legacy
+ * telegram_connections rows are left in-place — nothing hard-deletes
+ * them, they just don't render anywhere. Telegram will be re-added
+ * post-launch with a real Connect flow.
+ *
+ * Also Polish-25.6 Commit 34: "Optional providers" section is
+ * collapsed behind a `<details>` disclosure so a fresh user only
+ * sees the two Required providers (Claude + Gemini) unless they
+ * explicitly opt in to see the alternate pipelines. Audit called
+ * this out as launch-blocker item 5 — five unfamiliar brand names
+ * on the primary connections surface read as "half-baked plumbing."
  */
 export default async function SettingsConnectionsPage({ searchParams }: Props) {
   const { userId } = await requireOnboardingComplete();
@@ -58,7 +65,7 @@ export default async function SettingsConnectionsPage({ searchParams }: Props) {
     <AppShell crumbs={[{ label: 'Settings' }, { label: 'Connections' }]} contentClass="max-w-3xl">
       <PageHeader
         title="Connections"
-        subtitle="AI providers, ad accounts, and notifications — all in one place."
+        subtitle="AI providers and your Meta ad account — all in one place."
       />
 
       <nav
@@ -67,12 +74,10 @@ export default async function SettingsConnectionsPage({ searchParams }: Props) {
       >
         <TabLink current={tab} target="providers" label="Providers" />
         <TabLink current={tab} target="meta" label="Meta" />
-        <TabLink current={tab} target="telegram" label="Telegram" />
       </nav>
 
       {tab === 'providers' && <ProvidersTab userId={userId} />}
       {tab === 'meta' && <MetaTab userId={userId} />}
-      {tab === 'telegram' && <TelegramTab userId={userId} />}
     </AppShell>
   );
 }
@@ -92,16 +97,6 @@ function TabLink({ current, target, label }: { current: Tab; target: Tab; label:
     </Link>
   );
 }
-
-// ---------------------------------------------------------------
-// Providers tab: Polish-25 required trio was Claude + Gemini +
-// MakeUGC pre-Commit-11. Polish-25.2 Commit 11: MakeUGC is now
-// platform-managed under the "Instant UGC" brand — no user-facing
-// card for it. Required section = Claude + Gemini only. The
-// MakeUGC card is hidden from the optional list too, since users
-// can't do anything with a personal MakeUGC key (the worker
-// resolver prefers MAKEUGC_MANAGED_KEY env).
-// ---------------------------------------------------------------
 
 async function ProvidersTab({ userId }: { userId: string }) {
   const db = getDb();
@@ -127,15 +122,15 @@ async function ProvidersTab({ userId }: { userId: string }) {
   for (const r of toolRows) toolByProvider.set(r.provider as ToolProviderName, r);
   const aiByProvider = new Map(aiRows.map((r) => [r.provider as AIProviderName, r]));
 
-  // Polish-25 required trio → duo (Commit 11 dropped MakeUGC to
-  // platform-managed).
   const REQUIRED_TOOLS: ToolProviderName[] = ['claude', 'gemini'];
   const OPTIONAL_TOOLS = TOOL_PROVIDERS_ORDER.filter((p) => !REQUIRED_TOOLS.includes(p));
-  // Polish-25.2 Commit 11: filter MakeUGC out of the user-facing
-  // optional list too. The row stays in CONNECTABLE_AI_PROVIDERS +
-  // the ai_provider enum so any legacy user rows keep working;
-  // this UI just hides the card.
   const OPTIONAL_AI_PROVIDERS = CONNECTABLE_AI_PROVIDERS.filter((p) => p !== 'makeugc');
+
+  // Count how many optional providers the user has already connected —
+  // if any, expand the disclosure by default so they can see + manage them.
+  const connectedOptionalCount =
+    OPTIONAL_TOOLS.filter((p) => toolByProvider.get(p)?.status === 'active').length +
+    OPTIONAL_AI_PROVIDERS.filter((p) => aiByProvider.get(p)).length;
 
   return (
     <div className="space-y-8">
@@ -168,78 +163,70 @@ async function ProvidersTab({ userId }: { userId: string }) {
       </section>
 
       <section>
-        <h2 className="text-fg-muted mb-3 text-xs font-medium uppercase tracking-wider">
-          Optional providers
-        </h2>
-        <p className="text-fg-muted mb-4 text-xs">
-          Add these only if you want to run alternate pipelines (HeyGen avatars, Hedra Character 3,
-          Higgsfield Soul, OpenAI Sora, Replicate hosted models).
-        </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {OPTIONAL_AI_PROVIDERS.map((provider) => {
-            const row = aiByProvider.get(provider);
-            return (
-              <ProviderCard
-                key={provider}
-                provider={provider}
-                connected={
-                  row
-                    ? {
-                        apiKeyVerifiedAt: row.apiKeyVerifiedAt,
-                        lastVerifiedAt: row.lastVerifiedAt,
-                        tier: row.tier,
-                      }
-                    : null
-                }
-              />
-            );
-          })}
-          {OPTIONAL_TOOLS.map((provider) => {
-            const meta = TOOL_PROVIDER_META[provider];
-            const conn = toolByProvider.get(provider);
-            return (
-              <ToolCard
-                key={provider}
-                provider={provider}
-                label={meta.label}
-                role={meta.role}
-                description={meta.description}
-                apiDocsUrl={meta.apiDocsUrl}
-                keyHint={meta.keyHint}
-                connected={conn?.status === 'active'}
-                verifiedDisplay={conn ? formatDateTime(conn.apiKeyVerifiedAt) : null}
-              />
-            );
-          })}
-        </div>
+        <details open={connectedOptionalCount > 0} className="group">
+          <summary className="text-fg-muted hover:text-fg flex cursor-pointer list-none items-center justify-between gap-2 text-xs font-medium uppercase tracking-wider group-open:mb-4">
+            <span>
+              Alternate pipelines{' '}
+              <span className="text-fg-subtle normal-case tracking-normal">
+                (optional — only if you want to run a specific model)
+              </span>
+            </span>
+            <span
+              aria-hidden
+              className="text-fg-subtle text-[10px] transition-transform group-open:rotate-90"
+            >
+              ▶
+            </span>
+          </summary>
+          <p className="text-fg-muted mb-4 text-xs">
+            Add these only if you want to swap the default UGC video pipeline for a specific model
+            (HeyGen avatars, Hedra Character 3, Higgsfield Soul, OpenAI Sora, or a Replicate-hosted
+            model). Leave collapsed if you&apos;re not sure — the default works.
+          </p>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {OPTIONAL_AI_PROVIDERS.map((provider) => {
+              const row = aiByProvider.get(provider);
+              return (
+                <ProviderCard
+                  key={provider}
+                  provider={provider}
+                  connected={
+                    row
+                      ? {
+                          apiKeyVerifiedAt: row.apiKeyVerifiedAt,
+                          lastVerifiedAt: row.lastVerifiedAt,
+                          tier: row.tier,
+                        }
+                      : null
+                  }
+                />
+              );
+            })}
+            {OPTIONAL_TOOLS.map((provider) => {
+              const meta = TOOL_PROVIDER_META[provider];
+              const conn = toolByProvider.get(provider);
+              return (
+                <ToolCard
+                  key={provider}
+                  provider={provider}
+                  label={meta.label}
+                  role={meta.role}
+                  description={meta.description}
+                  apiDocsUrl={meta.apiDocsUrl}
+                  keyHint={meta.keyHint}
+                  connected={conn?.status === 'active'}
+                  verifiedDisplay={conn ? formatDateTime(conn.apiKeyVerifiedAt) : null}
+                />
+              );
+            })}
+          </div>
+        </details>
       </section>
     </div>
   );
 }
 
-// ---------------------------------------------------------------
-// Meta tab: was /connections/meta before Commit 10a. Meta is now
-// opt-in — the user only needs it when they hit the launch flow.
-// ---------------------------------------------------------------
-
 async function MetaTab({ userId }: { userId: string }) {
-  // Polish-25.2 Commit 13: inline 3-state flow. Restores the paste
-  // + selection UI that used to live at /onboarding/meta (deleted
-  // in Commit 10a) so users can connect Meta directly from this
-  // tab without a redirect to a non-existent onboarding route.
-  //
-  //   (a) no row                            → MetaTokenPasteForm
-  //   (b) row missing BM or ad accounts     → MetaSelectionForm
-  //   (c) row with full metadata + status=active → MetaConnectedSummary
-  //
-  // Polish-25.2 Commit 14: sub-state (b) gate simplified. Was
-  // `status === 'pending' && tokenExpiresAt` — but Meta long-lived
-  // access tokens report `expires_at = 0` (permanent), so
-  // tokenExpiresAt was stored null and the gate fell through to
-  // (c), rendering an empty summary. Also handle the corrupted
-  // case where status='active' but BM / ad_account_ids never got
-  // written — route those back to selection so users can complete
-  // setup.
   const db = getDb();
   const conn = await db.query.metaConnections.findFirst({
     where: and(eq(schema.metaConnections.userId, userId), isNull(schema.metaConnections.deletedAt)),
@@ -255,16 +242,10 @@ async function MetaTab({ userId }: { userId: string }) {
     },
   });
 
-  // Sub-state (a): no token yet.
   if (!conn) {
     return <MetaTokenPasteForm />;
   }
 
-  // Sub-state (b): token stored but BM + ad account selection not
-  // completed. `status === 'pending'` is the canonical "needs
-  // selection" signal (set by verifyMetaTokenAction). Also render
-  // selection when status='active' but metadata is missing — the
-  // partial-write recovery path.
   const missingMetadata =
     !conn.businessManagerId || !Array.isArray(conn.adAccountIds) || conn.adAccountIds.length === 0;
   const needsSelection = conn.status === 'pending' || (conn.status === 'active' && missingMetadata);
@@ -293,7 +274,6 @@ async function MetaTab({ userId }: { userId: string }) {
     );
   }
 
-  // Sub-state (c): fully connected.
   const pageCount = Array.isArray(conn.pages) ? conn.pages.length : 0;
   return (
     <div className="space-y-4">
@@ -306,11 +286,6 @@ async function MetaTab({ userId }: { userId: string }) {
         accountTimezone={conn.accountTimezone ?? null}
         pageCount={pageCount}
       />
-      {/* Polish-25.2 Commit 16b: point operators at the automation
-          rules explainer right after they connect Meta — the first
-          question every new operator asks is "what will the bot
-          do automatically?". Answer that inline before they
-          launch. */}
       <div className="border-border-subtle bg-bg-surface rounded-md border p-4 text-sm">
         <p className="text-fg font-medium">Before your first live launch</p>
         <p className="text-fg-muted mt-1 text-xs leading-relaxed">
@@ -333,43 +308,5 @@ async function MetaTab({ userId }: { userId: string }) {
         </div>
       </div>
     </div>
-  );
-}
-
-// ---------------------------------------------------------------
-// Telegram tab: was /connections/telegram before Commit 10a.
-// ---------------------------------------------------------------
-
-async function TelegramTab({ userId }: { userId: string }) {
-  const db = getDb();
-  const conn = await db.query.telegramConnections.findFirst({
-    where: eq(schema.telegramConnections.userId, userId),
-    columns: { tgChatId: true, linkedAt: true, status: true, metadata: true, updatedAt: true },
-  });
-
-  if (!conn || conn.status !== 'active' || !conn.tgChatId) {
-    return (
-      <div className="space-y-4">
-        <p className="text-fg-muted text-sm">
-          Connect Telegram to receive kill/scale decision pings + daily P&amp;L summaries. Optional
-          — Ads Bot works without it.
-        </p>
-        <DisconnectedNotice
-          reconnectHref="/settings"
-          detail="Send /start to the Ads Bot Telegram bot from your account to link this app."
-        />
-      </div>
-    );
-  }
-
-  const metadata = (conn.metadata ?? {}) as Record<string, unknown>;
-  const tgUsername =
-    typeof metadata['username'] === 'string' ? (metadata['username'] as string) : null;
-  return (
-    <TelegramConnectedSummary
-      tgChatId={conn.tgChatId}
-      tgUsername={tgUsername}
-      linkedAt={conn.linkedAt ?? null}
-    />
   );
 }

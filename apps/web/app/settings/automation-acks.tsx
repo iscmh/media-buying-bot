@@ -21,9 +21,13 @@ interface Props {
  * Phase 5: surface the two automation acks the bot needs before it can
  * execute a kill or scale on the user's behalf. Each card shows current
  * state and, when un-acked, opens a one-time confirmation dialog
- * explaining what the action means. The bot's callback handler reads
- * user_settings.{kill,scale}_acknowledged_at to gate Confirm taps —
- * un-acked users get a "set this up in settings first" reply.
+ * explaining what the action means.
+ *
+ * Polish-25.6 Commit 34: copy rewritten to describe the web-based
+ * approval flow (Approve/Skip buttons on /launched) since Telegram
+ * was deprecated for MVP. Server actions unchanged — the ack timestamp
+ * is still what gates the underlying action, whether it fires from
+ * Telegram (post-launch) or the /launched inline button (MVP).
  */
 export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Props) {
   const [killAt, setKillAt] = React.useState(killAcknowledgedAt);
@@ -76,7 +80,7 @@ export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Prop
           </p>
         </div>
         {killAt ? (
-          <span className="text-xs text-green-700">✓ Ready</span>
+          <span className="text-xs text-[color:var(--accent-positive)]">✓ Ready</span>
         ) : (
           <Button type="button" size="sm" onClick={() => setShowKill(true)}>
             Acknowledge
@@ -94,7 +98,7 @@ export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Prop
           </p>
         </div>
         {scaleAt ? (
-          <span className="text-xs text-green-700">✓ Ready</span>
+          <span className="text-xs text-[color:var(--accent-positive)]">✓ Ready</span>
         ) : (
           <Button type="button" size="sm" onClick={() => setShowScale(true)}>
             Acknowledge
@@ -107,9 +111,9 @@ export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Prop
           <DialogHeader>
             <DialogTitle>Acknowledge kill action</DialogTitle>
             <DialogDescription>
-              When the bot recommends killing an ad and you tap Confirm in Telegram, the ad is set
-              to PAUSED on your Meta account. It stops spending immediately. You can resume it
-              manually in Ads Manager at any time.
+              When the bot recommends killing an ad and you tap Approve on the /launched page, the
+              ad is set to PAUSED on your Meta account. It stops spending immediately. You can
+              resume it manually in Ads Manager at any time.
             </DialogDescription>
           </DialogHeader>
           <p className="text-muted-foreground text-xs">
@@ -136,10 +140,10 @@ export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Prop
           <DialogHeader>
             <DialogTitle>Acknowledge scale action</DialogTitle>
             <DialogDescription>
-              When the bot recommends scaling an ad and you tap Confirm in Telegram, the ad set’s
-              daily_budget is raised on Meta. Spend goes up immediately. The bot enforces hard
-              ceilings (2× per scale event, your settings max, daily launch cap; +25% for your first
-              5 scales) but the increase itself can&apos;t be reversed — only paused.
+              When the bot recommends scaling an ad and you tap Approve on the /launched page, the
+              ad set&rsquo;s daily_budget is raised on Meta. Spend goes up immediately. The bot
+              enforces hard ceilings (2× per scale event, your settings max, daily launch cap; +25%
+              for your first 5 scales) but the increase itself can&apos;t be reversed — only paused.
             </DialogDescription>
           </DialogHeader>
           <p className="text-muted-foreground text-xs">

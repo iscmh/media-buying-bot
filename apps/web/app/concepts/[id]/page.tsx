@@ -4,6 +4,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { ArrowRight } from 'lucide-react';
 import { getDb, schema } from '@mbb/db';
 import { Button } from '@/components/ui/button';
+import { friendlyPipeline } from '@/lib/format/pipeline-label';
 import { AppShell } from '@/components/shell/app-shell';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
@@ -174,8 +175,8 @@ export default async function ConceptDetailPage({ params }: Props) {
                     <span className="text-fg font-medium">
                       <span className="font-mono">{j.variantCount ?? 0}</span> variants
                       {j.providerChoice && (
-                        <span className="text-fg-muted ml-1.5 font-mono text-xs">
-                          · {j.providerChoice}
+                        <span className="text-fg-muted ml-1.5 text-xs">
+                          · {friendlyPipeline(j.providerChoice)}
                         </span>
                       )}
                     </span>

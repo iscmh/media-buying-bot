@@ -15,6 +15,7 @@ import { AppShell } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/shell/empty-state';
 import { PageHeader } from '@/components/shell/page-header';
 import { formatDateTime } from '@/lib/format/date';
+import { friendlyPipeline } from '@/lib/format/pipeline-label';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 
 export const metadata = { title: 'Runs' };
@@ -93,8 +94,8 @@ export default async function RunsPage() {
                   <TableCell>
                     <Badge variant={jobStatusVariant(j.status)}>{j.status}</Badge>
                   </TableCell>
-                  <TableCell className="text-fg-muted font-mono text-xs">
-                    {j.providerChoice ?? j.format ?? '—'}
+                  <TableCell className="text-fg-muted text-xs">
+                    {friendlyPipeline(j.providerChoice ?? j.format)}
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs">
                     {j.generatedCreativeCount}

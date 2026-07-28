@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { and, desc, eq, inArray, not } from 'drizzle-orm';
-import { Rocket } from 'lucide-react';
+import { ArrowDown, ArrowUp, Rocket } from 'lucide-react';
 import { getDb, schema } from '@mbb/db';
+import { ASSUMED_CONVERSION_VALUE_USD } from '@mbb/shared';
 import { Badge, type BadgeVariant } from '@/components/ui/badge';
 import {
   Table,
@@ -14,53 +15,145 @@ import {
 import { AppShell } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/shell/empty-state';
 import { PageHeader } from '@/components/shell/page-header';
+import { roiTone, roiRowClass, roiTextClass } from '@/components/ui/roi-tone';
 import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { cn } from '@/lib/utils';
+import { ApprovalButtons } from './_components/approval-buttons';
 
 export const metadata = { title: 'Launched ads' };
 export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 20;
 
-/**
- * Statuses considered "test data" — hidden from the table by default so
- * the launched view reads as production-ish. Toggle via ?show_test=1.
- */
 // Polish-5: 'archived' joins the hidden-by-default set. Stale rows
-// (no meta_ad_id or last_polled_at > 24h on launched_at > 14d) get
-// archived by the cron; ops can still see them via ?show_test=1.
+// get archived by the cron; ops can still see them via ?show_test=1.
 const TEST_STATUSES = ['dry_run', 'rejected_by_meta', 'launch_failed', 'archived'] satisfies Array<
   'dry_run' | 'rejected_by_meta' | 'launch_failed' | 'archived' | 'active' | 'killed' | 'paused'
 >;
 
+type SortKey = 'launched' | 'spend' | 'roas' | 'conv';
+type SortDir = 'asc' | 'desc';
+type StatusFilter =
+  | 'all'
+  | 'active'
+  | 'paused'
+  | 'killed'
+  | 'kill_recommended'
+  | 'scale_recommended';
+
+const VALID_SORTS: readonly SortKey[] = ['launched', 'spend', 'roas', 'conv'];
+const VALID_STATUS: readonly StatusFilter[] = [
+  'all',
+  'active',
+  'paused',
+  'killed',
+  'kill_recommended',
+  'scale_recommended',
+];
+
 interface Props {
-  searchParams: Promise<{ page?: string; show_test?: string }>;
+  searchParams: Promise<{
+    page?: string;
+    show_test?: string;
+    sort?: string;
+    dir?: string;
+    status?: string;
+  }>;
 }
 
+/**
+ * Polish-25.6 Commit 34: launched ads table upgrade.
+ *
+ * Additions from the launch-blocker audit (Commit 33 §7 item 4):
+ *
+ *   - ROAS column: (conversions × ASSUMED_CONVERSION_VALUE_USD) / spend.
+ *     Dashboard already had it; parity here so the buyer's #1 question
+ *     ("which ads are winning") is answerable from this page.
+ *   - Sortable column headers via ?sort=&dir= (URL-driven so the state
+ *     is bookmarkable + shareable).
+ *   - Status filter dropdown via ?status=. Adds "kill_recommended" and
+ *     "scale_recommended" as first-class filters so pending-review rows
+ *     surface quickly.
+ *   - Row-level ROI shading via `roiRowClass` — same primitive dashboard
+ *     uses.
+ *   - Inline Approve/Skip buttons on rows with kill_recommended_at or
+ *     scale_recommended_at (client component `ApprovalButtons`). This
+ *     is the MVP replacement for the Telegram approval flow deprecated
+ *     in this same commit — buyers can now approve kill/scale
+ *     recommendations without the Telegram bot.
+ *
+ * Sort is in-memory over the fetched window (up to PAGE_SIZE+1). For
+ * a $500/day operator with a few hundred launched ads this is fine;
+ * scaling past a thousand rows will want SQL-side sort.
+ */
 export default async function LaunchedAdsPage({ searchParams }: Props) {
   const { userId } = await requireOnboardingComplete();
-  const { page: pageParam, show_test: showTestParam } = await searchParams;
-  const page = Math.max(1, Number(pageParam ?? '1') || 1);
-  const offset = (page - 1) * PAGE_SIZE;
-  const showTest = showTestParam === '1';
+  const { page: pageParam, show_test, sort, dir, status } = await searchParams;
+  const pageNum = Math.max(1, Number(pageParam ?? '1') || 1);
+  const offset = (pageNum - 1) * PAGE_SIZE;
+  const showTest = show_test === '1';
+  const sortKey: SortKey = VALID_SORTS.includes(sort as SortKey) ? (sort as SortKey) : 'launched';
+  const sortDir: SortDir = dir === 'asc' ? 'asc' : 'desc';
+  const statusFilter: StatusFilter = VALID_STATUS.includes(status as StatusFilter)
+    ? (status as StatusFilter)
+    : 'all';
 
   const db = getDb();
-  const rows = await db.query.launchedAds.findMany({
-    where: showTest
-      ? eq(schema.launchedAds.userId, userId)
-      : and(
-          eq(schema.launchedAds.userId, userId),
-          not(inArray(schema.launchedAds.status, TEST_STATUSES)),
-        ),
+
+  // Base where: user's own ads. Test-status exclusion still applies
+  // unless show_test is on. Status filter narrows further.
+  const baseWhere = showTest
+    ? eq(schema.launchedAds.userId, userId)
+    : and(
+        eq(schema.launchedAds.userId, userId),
+        not(inArray(schema.launchedAds.status, TEST_STATUSES)),
+      );
+
+  const rowsUnfiltered = await db.query.launchedAds.findMany({
+    where: baseWhere,
     orderBy: desc(schema.launchedAds.launchedAt),
-    limit: PAGE_SIZE + 1,
-    offset,
+    limit: 500, // pull a bigger window when we're sorting/filtering client-side
   });
 
-  const hasNextPage = rows.length > PAGE_SIZE;
-  const visible = hasNextPage ? rows.slice(0, PAGE_SIZE) : rows;
+  // Apply recommendation-status filter (kill_recommended /
+  // scale_recommended are computed from the timestamp columns, not
+  // stored as launched_ads.status values).
+  const rowsFiltered = rowsUnfiltered.filter((r) => {
+    if (statusFilter === 'all') return true;
+    if (statusFilter === 'kill_recommended')
+      return r.killRecommendedAt != null && r.status !== 'killed';
+    if (statusFilter === 'scale_recommended') return r.scaleRecommendedAt != null;
+    return r.status === statusFilter;
+  });
 
-  // Fetch variant copy + thumbnail for each row in one query.
+  // In-memory sort.
+  const sortMultiplier = sortDir === 'asc' ? 1 : -1;
+  const rowsSorted = [...rowsFiltered].sort((a, b) => {
+    switch (sortKey) {
+      case 'spend':
+        return sortMultiplier * (Number(a.metaSpendUsd ?? 0) - Number(b.metaSpendUsd ?? 0));
+      case 'roas': {
+        const roasA = computeRoas(a);
+        const roasB = computeRoas(b);
+        return sortMultiplier * (roasA - roasB);
+      }
+      case 'conv':
+        return sortMultiplier * ((a.metaConversions ?? 0) - (b.metaConversions ?? 0));
+      case 'launched':
+      default: {
+        const ta = a.launchedAt?.getTime() ?? 0;
+        const tb = b.launchedAt?.getTime() ?? 0;
+        return sortMultiplier * (ta - tb);
+      }
+    }
+  });
+
+  const pageSlice = rowsSorted.slice(offset, offset + PAGE_SIZE + 1);
+  const hasNextPage = pageSlice.length > PAGE_SIZE;
+  const visible = hasNextPage ? pageSlice.slice(0, PAGE_SIZE) : pageSlice;
+
+  // Fetch variant copy + thumbnail for each visible row.
   const creativeIds = visible.map((r) => r.generatedCreativeId);
   const creatives =
     creativeIds.length > 0
@@ -71,40 +164,71 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
       : [];
   const creativeById = new Map(creatives.map((c) => [c.id, c]));
 
-  const toggleHref = `/launched?show_test=${showTest ? '0' : '1'}`;
-
   return (
     <AppShell crumbs={[{ label: 'Launched ads' }]}>
       <PageHeader title="Launched ads" subtitle="Every ad the bot has pushed to Meta." />
-      <p className="text-fg-muted -mt-4 mb-6 text-sm">
-        {!showTest && (
-          <>
-            Test rows (dry-run, rejected, failed) hidden by default.{' '}
-            <Link href={toggleHref} className="text-fg underline-offset-4 hover:underline">
-              Show
-            </Link>
-            .
-          </>
-        )}
-        {showTest && (
-          <>
-            Showing test rows.{' '}
-            <Link href={toggleHref} className="text-fg underline-offset-4 hover:underline">
-              Hide
-            </Link>
-            .
-          </>
-        )}
-      </p>
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-fg-subtle font-mono uppercase tracking-wider">Status</span>
+          <StatusFilterDropdown
+            current={statusFilter}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            showTest={showTest}
+          />
+        </div>
+        <p className="text-fg-muted text-xs">
+          {!showTest ? (
+            <>
+              Test rows hidden.{' '}
+              <Link
+                href={buildHref({
+                  status: statusFilter,
+                  sort: sortKey,
+                  dir: sortDir,
+                  showTest: true,
+                })}
+                className="text-fg underline-offset-4 hover:underline"
+              >
+                Show
+              </Link>
+            </>
+          ) : (
+            <>
+              Showing test rows.{' '}
+              <Link
+                href={buildHref({
+                  status: statusFilter,
+                  sort: sortKey,
+                  dir: sortDir,
+                  showTest: false,
+                })}
+                className="text-fg underline-offset-4 hover:underline"
+              >
+                Hide
+              </Link>
+            </>
+          )}
+        </p>
+      </div>
 
       {visible.length === 0 ? (
         <EmptyState
           icon={Rocket}
-          title={showTest ? 'No launches yet.' : 'No live ads launched yet.'}
+          title={
+            statusFilter === 'all'
+              ? showTest
+                ? 'No launches yet.'
+                : 'No live ads launched yet.'
+              : `No ads matching "${statusFilter.replace(/_/g, ' ')}".`
+          }
           description={
-            showTest
-              ? 'Approve variants on a generation job, then launch them to see rows here.'
-              : 'Approve and launch variants to see them here. Test rows are hidden — toggle "Show" above to include them.'
+            statusFilter === 'all'
+              ? showTest
+                ? 'Approve variants on a generation job, then launch them to see rows here.'
+                : 'Approve and launch variants to see them here. Test rows hidden — toggle "Show" above.'
+              : 'Try clearing the status filter above.'
           }
         />
       ) : (
@@ -114,13 +238,42 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
               <TableRow>
                 <TableHead>Variant</TableHead>
                 <TableHead>Meta IDs</TableHead>
-                <TableHead>Daily budget</TableHead>
+                <TableHead>Budget</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Spend</TableHead>
+                <SortableHead
+                  label="Spend"
+                  columnKey="spend"
+                  currentSort={sortKey}
+                  currentDir={sortDir}
+                  statusFilter={statusFilter}
+                  showTest={showTest}
+                />
                 <TableHead>Impr / CTR</TableHead>
                 <TableHead>Clicks / CPC</TableHead>
-                <TableHead>Conv</TableHead>
-                <TableHead>Launched</TableHead>
+                <SortableHead
+                  label="Conv"
+                  columnKey="conv"
+                  currentSort={sortKey}
+                  currentDir={sortDir}
+                  statusFilter={statusFilter}
+                  showTest={showTest}
+                />
+                <SortableHead
+                  label="ROAS"
+                  columnKey="roas"
+                  currentSort={sortKey}
+                  currentDir={sortDir}
+                  statusFilter={statusFilter}
+                  showTest={showTest}
+                />
+                <SortableHead
+                  label="Launched"
+                  columnKey="launched"
+                  currentSort={sortKey}
+                  currentDir={sortDir}
+                  statusFilter={statusFilter}
+                  showTest={showTest}
+                />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -135,9 +288,14 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                     ? (clicks / impressions) * 100
                     : null;
                 const cpc = clicks && clicks > 0 && spend != null ? spend / clicks : null;
+                const roas = computeRoas(row);
+                const tone = roiTone({ spendUsd: spend ?? 0, roas });
                 const displayStatus = computeDisplayStatus(row);
+                const isKillReco = row.killRecommendedAt != null && row.status !== 'killed';
+                const isScaleReco = row.scaleRecommendedAt != null;
+
                 return (
-                  <TableRow key={row.id}>
+                  <TableRow key={row.id} className={cn(roiRowClass(tone))}>
                     <TableCell>
                       <div className="flex items-start gap-3">
                         {creative?.fileUrl ? (
@@ -184,22 +342,32 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                       ${Number(row.dailyBudgetUsd).toFixed(2)}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(displayStatus)}>
-                        {displayStatus.replace(/_/g, ' ')}
-                      </Badge>
-                      {/* Polish-3.5: surface Meta's actual error for
-                          rejected / failed launches. errorMessage is
-                          already preferred to be error_user_msg from
-                          extractMetaError (launch.ts). */}
-                      {(displayStatus === 'rejected_by_meta' ||
-                        displayStatus === 'launch_failed') &&
-                        row.errorMessage && (
-                          <p className="text-fg-muted mt-1 font-mono text-xs leading-snug">
-                            {row.errorMessage}
-                          </p>
+                      <div className="flex flex-col gap-1">
+                        <Badge variant={statusVariant(displayStatus)}>
+                          {displayStatus.replace(/_/g, ' ')}
+                        </Badge>
+                        {(displayStatus === 'rejected_by_meta' ||
+                          displayStatus === 'launch_failed') &&
+                          row.errorMessage && (
+                            <p className="text-fg-muted mt-1 font-mono text-xs leading-snug">
+                              {row.errorMessage}
+                            </p>
+                          )}
+                        {(isKillReco || isScaleReco) && (
+                          <ApprovalButtons
+                            launchedAdId={row.id}
+                            kind={isKillReco ? 'kill' : 'scale'}
+                            scaleFrom={isScaleReco ? Number(row.dailyBudgetUsd) : null}
+                            scaleTo={
+                              isScaleReco && row.scaleRecommendedToUsd != null
+                                ? Number(row.scaleRecommendedToUsd)
+                                : null
+                            }
+                          />
                         )}
+                      </div>
                     </TableCell>
-                    <TableCell className="font-mono text-xs">
+                    <TableCell className="text-right font-mono text-xs">
                       {spend != null ? `$${spend.toFixed(2)}` : '—'}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
@@ -212,7 +380,12 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                         ? `${clicks.toLocaleString()} / ${cpc != null ? `$${cpc.toFixed(2)}` : '—'}`
                         : '—'}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{conversions ?? '—'}</TableCell>
+                    <TableCell className="text-right font-mono text-xs">
+                      {conversions ?? '—'}
+                    </TableCell>
+                    <TableCell className={cn('text-right font-mono text-xs', roiTextClass(tone))}>
+                      {spend != null && spend > 0 ? `${roas.toFixed(2)}x` : '—'}
+                    </TableCell>
                     <TableCell className="text-fg-muted font-mono text-xs">
                       {formatDateTime(row.launchedAt)}
                     </TableCell>
@@ -224,40 +397,59 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
         </div>
       )}
 
-      {(page > 1 || hasNextPage) && (
+      {(pageNum > 1 || hasNextPage) && (
         <nav className="mt-4 flex items-center justify-between text-sm" aria-label="Pagination">
-          {page > 1 ? (
+          {pageNum > 1 ? (
             <Link
-              href={`/launched?page=${page - 1}${showTest ? '&show_test=1' : ''}`}
+              href={buildHref({
+                status: statusFilter,
+                sort: sortKey,
+                dir: sortDir,
+                showTest,
+                page: pageNum - 1,
+              })}
               className="text-fg-muted hover:text-fg underline-offset-4 transition-colors hover:underline"
             >
-              Previous
+              ← Previous
             </Link>
           ) : (
             <span />
           )}
-          <span className="text-fg-subtle font-mono text-xs">Page {page}</span>
+          <span className="text-fg-subtle font-mono text-xs">Page {pageNum}</span>
           {hasNextPage ? (
             <Link
-              href={`/launched?page=${page + 1}${showTest ? '&show_test=1' : ''}`}
+              href={buildHref({
+                status: statusFilter,
+                sort: sortKey,
+                dir: sortDir,
+                showTest,
+                page: pageNum + 1,
+              })}
               className="text-fg-muted hover:text-fg underline-offset-4 transition-colors hover:underline"
             >
-              Next
+              Next →
             </Link>
           ) : (
             <span />
           )}
         </nav>
       )}
+
+      <p className="text-fg-subtle mt-6 text-xs">
+        ROAS uses ${ASSUMED_CONVERSION_VALUE_USD} assumed value per conversion (heuristic). Real
+        conversion values land in a future update.
+      </p>
     </AppShell>
   );
 }
 
-/**
- * Phase 5: collapse the raw launched_ads.status + recommendation
- * timestamps into one display label. Precedence (highest wins):
- *   killed > kill_recommended > scale_recommended > paused > active > dry_run > *
- */
+function computeRoas(row: { metaSpendUsd: string | null; metaConversions: number | null }): number {
+  const spend = row.metaSpendUsd != null ? Number(row.metaSpendUsd) : 0;
+  const conv = row.metaConversions ?? 0;
+  if (spend <= 0) return 0;
+  return (conv * ASSUMED_CONVERSION_VALUE_USD) / spend;
+}
+
 function computeDisplayStatus(row: {
   status: string;
   killRecommendedAt: Date | null;
@@ -294,4 +486,99 @@ function truncateMiddle(s: string, max: number): string {
   const head = Math.ceil(max / 2) - 1;
   const tail = Math.floor(max / 2) - 2;
   return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
+function buildHref(input: {
+  status: StatusFilter;
+  sort: SortKey;
+  dir: SortDir;
+  showTest: boolean;
+  page?: number;
+}): string {
+  const params = new URLSearchParams();
+  if (input.status !== 'all') params.set('status', input.status);
+  if (input.sort !== 'launched') params.set('sort', input.sort);
+  if (input.dir !== 'desc') params.set('dir', input.dir);
+  if (input.showTest) params.set('show_test', '1');
+  if (input.page && input.page > 1) params.set('page', String(input.page));
+  const qs = params.toString();
+  return qs ? `/launched?${qs}` : '/launched';
+}
+
+function StatusFilterDropdown({
+  current,
+  sortKey,
+  sortDir,
+  showTest,
+}: {
+  current: StatusFilter;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  showTest: boolean;
+}) {
+  const options: Array<{ value: StatusFilter; label: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'active', label: 'Active' },
+    { value: 'paused', label: 'Paused' },
+    { value: 'killed', label: 'Killed' },
+    { value: 'kill_recommended', label: 'Kill recommended' },
+    { value: 'scale_recommended', label: 'Scale recommended' },
+  ];
+  return (
+    <div className="flex flex-wrap gap-1">
+      {options.map((o) => {
+        const isActive = current === o.value;
+        return (
+          <Link
+            key={o.value}
+            href={buildHref({ status: o.value, sort: sortKey, dir: sortDir, showTest })}
+            className={cn(
+              'inline-flex h-7 items-center rounded-sm border px-2 text-xs transition-colors',
+              isActive
+                ? 'border-fg bg-bg-surface text-fg'
+                : 'border-border text-fg-muted hover:bg-bg-surfaceHover hover:text-fg',
+            )}
+          >
+            {o.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function SortableHead({
+  label,
+  columnKey,
+  currentSort,
+  currentDir,
+  statusFilter,
+  showTest,
+}: {
+  label: string;
+  columnKey: SortKey;
+  currentSort: SortKey;
+  currentDir: SortDir;
+  statusFilter: StatusFilter;
+  showTest: boolean;
+}) {
+  const isActive = currentSort === columnKey;
+  const nextDir: SortDir = isActive && currentDir === 'desc' ? 'asc' : 'desc';
+  const href = buildHref({ status: statusFilter, sort: columnKey, dir: nextDir, showTest });
+  return (
+    <TableHead className="text-right">
+      <Link
+        href={href}
+        className={cn('hover:text-fg inline-flex items-center gap-1', isActive && 'text-fg')}
+      >
+        {label}
+        {isActive &&
+          (currentDir === 'desc' ? (
+            <ArrowDown className="h-3 w-3" />
+          ) : (
+            <ArrowUp className="h-3 w-3" />
+          ))}
+      </Link>
+    </TableHead>
+  );
 }

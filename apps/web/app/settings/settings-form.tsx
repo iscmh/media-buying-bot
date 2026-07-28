@@ -182,7 +182,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Kill if CPC exceeds (after $3 spent)',
     help: 'USD per click. Single-signal kill once warm.',
     tooltip:
-      'Once an ad has spent $3+ on clicks, this single-signal CPC threshold fires kill recommendations to Telegram. Faster than the two-signal rule above; use it as a hard upper bound.',
+      'Once an ad has spent $3+ on clicks, this single-signal CPC threshold fires kill recommendations you can approve on /launched. Faster than the two-signal rule above; use it as a hard upper bound.',
     type: 'currency',
     section: 'kill',
   },
@@ -219,16 +219,16 @@ const FIELDS: FieldConfig[] = [
     label: 'Tier 2 daily budget cap (second scale)',
     help: 'Second scale step — for ads that survived tier 1. USD.',
     tooltip:
-      'After an ad performs well at Tier 1, it gets promoted to Tier 2. This is the "I\'m confident — push it" cap. Past Tier 2, the bot asks you on Telegram before going further.',
+      'After an ad performs well at Tier 1, it gets promoted to Tier 2. This is the "I\'m confident — push it" cap. Past Tier 2, the bot queues an approval prompt on /launched before going further.',
     type: 'currency',
     section: 'scale',
   },
   {
     name: 'manualApprovalThreshold',
     label: 'Ask before scaling beyond',
-    help: 'Above this daily budget, ping on Telegram first. USD.',
+    help: 'Above this daily budget, prompt for approval on /launched first. USD.',
     tooltip:
-      'Your "before you scale this further, check with me" line. The bot will send a Telegram inline-keyboard prompt instead of auto-scaling past this.',
+      'Your "before you scale this further, check with me" line. The bot will queue an approval prompt on /launched instead of auto-scaling past this.',
     type: 'currency',
     section: 'scale',
   },
@@ -271,8 +271,8 @@ const FIELDS: FieldConfig[] = [
   // === summary ===
   {
     name: 'dailySummaryEnabled',
-    label: 'Daily summary on Telegram',
-    help: 'P&L recap sent to your Telegram chat once per day.',
+    label: 'Daily summary email',
+    help: 'P&L recap emailed to your account address once per day. (Telegram delivery ships in a later release.)',
     tooltip:
       "A morning briefing: yesterday's spend, conversions, ROAS, kills, scales. Skip it if you'd rather just check the dashboard.",
     type: 'boolean',

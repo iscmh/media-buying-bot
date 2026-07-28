@@ -14,6 +14,7 @@ import { AppShell } from '@/components/shell/app-shell';
 import { EmptyState } from '@/components/shell/empty-state';
 import { PageHeader } from '@/components/shell/page-header';
 import { formatDateTime } from '@/lib/format/date';
+import { friendlyPipeline } from '@/lib/format/pipeline-label';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 
 export const metadata = { title: 'Pending approval' };
@@ -123,8 +124,8 @@ export default async function PendingPage() {
                       {v.generationJobId.slice(0, 8)}
                     </Link>
                   </TableCell>
-                  <TableCell className="text-fg-muted font-mono text-xs">
-                    {v.format ?? '—'}
+                  <TableCell className="text-fg-muted text-xs">
+                    {friendlyPipeline(v.format)}
                   </TableCell>
                   <TableCell className="text-fg-muted font-mono text-xs">
                     {formatDateTime(v.createdAt)}

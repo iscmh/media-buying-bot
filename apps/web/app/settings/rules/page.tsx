@@ -167,7 +167,7 @@ export default async function RulesPage() {
             <ul className="text-fg text-sm">
               <RuleRow
                 label="Cascade pause"
-                value="Meta / Telegram / AI provider disconnects → pause all launches until reconnected"
+                value="Meta or AI provider disconnects → pause all launches until reconnected"
               />
               <RuleRow
                 label="Rejection-rate pause"
