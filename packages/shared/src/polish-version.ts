@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.7.5';
+export const POLISH_VERSION = '25.7.6';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.7.5';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.7 Commit 44 \u2014 beta-readiness triple: BETA banner + Sentry redaction/user-context + admin activity view. Persistent amber BetaBanner strip rendered on every Meta-launch surface (/launched top, launch dialog inside runs/[id], Meta tab of /settings/connections) with a Telegram bug-report link so testers know this path is still hardening. Sentry Next.js integration (already installed) gained a shared credential-redaction beforeSend hook that scrubs Anthropic (sk-ant-) / OpenAI (sk-) / Google (AIza) / Meta (EAA) / Bearer / JWT-shaped tokens from message + exception + breadcrumb + request payloads, plus a sensitive-key allowlist (token/secret/password/api_key/access_token/refresh_token/encrypted) that wipes values by key name. setSentryUser() called from requireOnboardingComplete() + requireAdmin() attaches user_id / email / is_admin to the current per-request scope so every event is attributable. New /admin/activity page: one row per beta user with connection state (BYOK Claude/Gemini + Meta), pipeline counts (concepts + generations total/7d succeeded/7d failed), launched counts (total/active/7d rejected), bot state (paused-with-reason chip), and last-activity timestamp. Filter chips: All / Active last 7d / Has failed generations / Is paused / Connection issue. Sortable columns. Nav entry added to SecondaryNavSheet Admin section (only visible to admins). Data fetched via getAdminActivityRows() in @mbb/db with a handful of parallel per-metric queries merged in-process (beta cohort <100 users so no fat join). Read-only \u2014 no user actions from this surface.';
+  'Polish-25.7 Commit 45 \u2014 pre-beta cleanup: deleted the throwaway /api/sentry-test probe route (08d473c). Sentry verification will happen against real error signal from beta testers instead of a synthetic probe. No other functional changes \u2014 Sentry pipeline (client + server init, beforeSend credential redaction, setSentryUser scoping) from Commit 44 stays wired and ready for the operator to add NEXT_PUBLIC_SENTRY_DSN + SENTRY_DSN in Vercel.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
