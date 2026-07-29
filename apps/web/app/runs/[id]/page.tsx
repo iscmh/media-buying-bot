@@ -17,6 +17,7 @@ import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { loadPresetsForUser } from '@/app/settings/presets/actions';
 import { JobReviewClient } from './job-review-client';
 import { JobTimeline } from './job-timeline';
+import { ProcessingTimeoutCard } from './_components/processing-timeout-card';
 
 export const metadata = { title: 'Variant review' };
 export const dynamic = 'force-dynamic';
@@ -162,6 +163,22 @@ export default async function JobReviewPage({ params }: Props) {
 
   const isProcessing = job.status === 'queued' || job.status === 'processing';
   const isFailed = job.status === 'failed';
+  // Polish-25.6 Commit 37: distinguish "MakeUGC still processing after
+  // the 60-min poll cap" from a hard failure. Worker stamps
+  // metadata.polish25_processing_timeout=true + the stuck videoId on
+  // cap-hit; the run detail renders a Recheck card instead of the red
+  // error UI so the operator can recover the video without paying a
+  // second credit for regeneration.
+  const jobMeta = (job.metadata ?? {}) as Record<string, unknown>;
+  const isProcessingTimeout = isFailed && jobMeta['polish25_processing_timeout'] === true;
+  const stuckVideoId =
+    typeof jobMeta['polish25_stuck_video_id'] === 'string'
+      ? (jobMeta['polish25_stuck_video_id'] as string)
+      : typeof jobMeta['polish25_makeugc_video_id'] === 'string'
+        ? (jobMeta['polish25_makeugc_video_id'] as string)
+        : null;
+  const timeoutAtRaw = jobMeta['polish25_processing_timeout_at'];
+  const timeoutAt = typeof timeoutAtRaw === 'string' ? timeoutAtRaw : null;
 
   // Polish-9.2: render the actual picked pipeline (label + canonical
   // providerChoice) instead of the legacy format-derived "avatar talking
@@ -276,7 +293,11 @@ export default async function JobReviewPage({ params }: Props) {
         </Card>
       )}
 
-      {isFailed && (
+      {isProcessingTimeout && stuckVideoId && (
+        <ProcessingTimeoutCard jobId={job.id} stuckVideoId={stuckVideoId} timeoutAt={timeoutAt} />
+      )}
+
+      {isFailed && !isProcessingTimeout && (
         <Card>
           <CardHeader>
             <CardTitle className="text-[color:var(--accent-negative)]">Generation failed</CardTitle>

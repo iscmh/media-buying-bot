@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.6.2';
+export const POLISH_VERSION = '25.6.3';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.6.2';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.6 Commit 36 — admin raw UGC poll timeout + recheck. Operator hit false timeout at 3.3 min when MakeUGC queue was backed up and the video was still legitimately generating (credit already charged). Poll cap bumped 40 → 120 (10 min at 5s each). New processing_timeout state distinct from error: after the cap, panel shows "still generating on MakeUGC" with videoId + Recheck button that reuses the existing checkRawUgcStatusAction. Three outcomes on recheck: still processing → stays in the panel; completed → flips to done with the video; failed → flips to error (red).';
+  'Polish-25.6 Commit 37 — Polish-25 worker poll timeout + Recheck. Same fix pattern as Commit 36 admin tool but on the real user pipeline. Production job (videoId cms5ldpz000082mdt62fre1ng) hit the 30-min poll cap during MakeUGC queue backup while video was still processing → user saw "generation failed" even though credit was already charged. Worker cap bumped 180 → 360 attempts (60 min at 10s each). On cap-hit, worker now stamps metadata.polish25_processing_timeout=true + metadata.polish25_stuck_video_id=<id>; run detail spots the flag and renders a Recheck card (not the red error UI). Server action recheckPolish25MakeugcAction rehits MakeUGC status: completed → creates generated_creatives row + flips job to completed (mirrors worker Step J/K, no double charge); failed → clears flag + surfaces real error; still processing → no-op with "check back later" reply. resolveMakeugcKey exposed from @mbb/jobs so the recheck uses the same env-first/BYOK-fallback resolution the worker does.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

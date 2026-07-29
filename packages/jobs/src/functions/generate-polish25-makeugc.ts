@@ -67,7 +67,7 @@ import {
 
 console.log(`[jobs.generate-polish25-makeugc] cold start — POLISH_VERSION=${POLISH_VERSION}`);
 
-// Poll cadence: 10s interval × 180 attempts = 30 min max wait.
+// Poll cadence: 10s interval × 360 attempts = 60 min max wait.
 //
 // Polish-25 Commit 6: raised from 60→180 attempts after job 3634604b
 // (MakeUGC video cmrt9t0yo000713fkiqltdp2k) proved the marketing
@@ -75,8 +75,17 @@ console.log(`[jobs.generate-polish25-makeugc] cold start — POLISH_VERSION=${PO
 // still at ~50% completion 15+ min in. Real queue-depth latency
 // pushes routine renders to 20-30 min. The prior 10-min cap turned
 // otherwise-successful renders into false timeout-fails.
+//
+// Polish-25.6 Commit 37: raised from 180→360 (30 → 60 min) after
+// production job with videoId cms5ldpz000082mdt62fre1ng blew past
+// the 30-min cap during a MakeUGC queue backup while the video was
+// still legitimately processing. Credit had already been charged.
+// Also: on cap-hit we now mark the job with a distinct
+// `polish25_processing_timeout` metadata flag so the run detail UI
+// can render a Recheck button instead of a red "failed" error —
+// the operator recovers the stuck video without regenerating.
 const MAKEUGC_POLL_INTERVAL_SECONDS = 10;
-export const MAKEUGC_POLL_MAX_ATTEMPTS = 180;
+export const MAKEUGC_POLL_MAX_ATTEMPTS = 360;
 // Log a heartbeat every Nth poll to Vercel Runtime Logs so a stuck
 // render is visible without waiting for the final timeout message.
 const MAKEUGC_POLL_HEARTBEAT_EVERY = 30;
@@ -717,11 +726,27 @@ export const generatePolish25Makeugc = inngest.createFunction(
       throw new NonRetriableError(msg);
     }
     if (videoUrl === null) {
+      // Polish-25.6 Commit 37: distinguish "still processing after
+      // poll cap" from a hard MakeUGC failure. Credit is already
+      // charged and the video usually lands — we stamp the job with
+      // a metadata flag + preserve videoId so the run detail UI can
+      // render a Recheck button (fires recheckPolish25MakeugcAction
+      // in the web app) and complete the job in-place when MakeUGC
+      // eventually returns status=completed. Status still flips to
+      // 'failed' for backward-compat with every consumer that reads
+      // the enum; the timeout FLAG is what unlocks the recovery UI.
+      const timeoutMin = (MAKEUGC_POLL_MAX_ATTEMPTS * MAKEUGC_POLL_INTERVAL_SECONDS) / 60;
       const msg =
         `Polish-25 poll timeout after ${MAKEUGC_POLL_MAX_ATTEMPTS} attempts ` +
-        `(~${(MAKEUGC_POLL_MAX_ATTEMPTS * MAKEUGC_POLL_INTERVAL_SECONDS) / 60} min). ` +
-        `videoId=${videoId}. MakeUGC likely stuck — real processing can exceed 30 min, retry may work.`;
+        `(~${timeoutMin} min). videoId=${videoId}. MakeUGC likely stuck ` +
+        `— real processing can exceed ${timeoutMin} min. Hit Recheck on the ` +
+        `run detail page to recover the video once MakeUGC finishes.`;
       console.error(`[polish-25-worker] ${msg}`);
+      await patchMetadata(jobId, {
+        polish25_processing_timeout: true,
+        polish25_processing_timeout_at: nowIso(),
+        polish25_stuck_video_id: videoId,
+      });
       await markJobFailed(jobId, userId, msg, 0);
       throw new NonRetriableError(msg);
     }

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
+import { checkMakeugcVideoStatus, estimateMakeugcVideoCostUsd } from '@mbb/ai-providers';
 import {
   assertDailyLaunchBudgetCap,
   assertFirstLiveLaunchCap,
@@ -11,9 +12,11 @@ import {
   logAuditEvent,
   schema,
 } from '@mbb/db';
+import { resolveMakeugcKey } from '@mbb/jobs';
 import { fetchUserPages } from '@mbb/meta-api';
 import {
   OfferUrlSchema,
+  POLISH_VERSION,
   PLATFORM_HARD_AD_DAILY_BUDGET_USD,
   checkBudgetMeetsMetaMinimum,
 } from '@mbb/shared';
@@ -444,5 +447,200 @@ export async function launchApprovedAction(
     committedTodayUsd: cap.committedTodayUsd,
     capUsd: cap.capUsd,
     plannedBudgetUsd,
+  };
+}
+
+// ============================================================================
+// Polish-25.6 Commit 37: recover Polish-25 jobs stuck in the
+// processing_timeout state.
+//
+// The worker's poll loop caps at 60 min (MAKEUGC_POLL_MAX_ATTEMPTS=360).
+// When the cap fires while MakeUGC's status is still non-terminal, the
+// worker now stamps `metadata.polish25_processing_timeout=true` +
+// `metadata.polish25_stuck_video_id=<id>` and marks the job failed
+// (backward-compat for consumers reading the enum). The run detail UI
+// spots the flag and renders a Recheck button instead of the red
+// error UI; this action is what that button fires.
+//
+// Three outcomes when the operator clicks Recheck:
+//   1. MakeUGC returns status=completed → we mirror the worker's
+//      Step J (insert generated_creatives + patch metadata) + flip
+//      the job back to 'completed'. Cost is stamped identically to
+//      the worker path so /dashboard + /launched aggregates match.
+//   2. MakeUGC returns status=failed → we clear the timeout flag +
+//      stamp the real error message. The UI flips to normal red
+//      error state.
+//   3. MakeUGC still processing → no-op on the DB; return "still
+//      processing" so the client can render "check back later".
+// ============================================================================
+
+export interface RecheckPolish25Result {
+  ok: boolean;
+  status: 'completed' | 'failed' | 'still_processing';
+  message: string;
+}
+
+export async function recheckPolish25MakeugcAction(jobId: string): Promise<RecheckPolish25Result> {
+  const user = await requireUser();
+  const db = getDb();
+
+  const job = await db.query.generationJobs.findFirst({
+    where: and(eq(schema.generationJobs.id, jobId), eq(schema.generationJobs.userId, user.id)),
+    columns: {
+      id: true,
+      userId: true,
+      status: true,
+      metadata: true,
+    },
+  });
+  if (!job) {
+    return { ok: false, status: 'failed', message: 'Job not found.' };
+  }
+  const meta = (job.metadata ?? {}) as Record<string, unknown>;
+  const timeoutFlag = meta['polish25_processing_timeout'] === true;
+  const videoId =
+    typeof meta['polish25_stuck_video_id'] === 'string'
+      ? (meta['polish25_stuck_video_id'] as string)
+      : typeof meta['polish25_makeugc_video_id'] === 'string'
+        ? (meta['polish25_makeugc_video_id'] as string)
+        : null;
+  if (!timeoutFlag) {
+    return {
+      ok: false,
+      status: 'failed',
+      message: 'This job is not in the processing-timeout state.',
+    };
+  }
+  if (!videoId) {
+    return {
+      ok: false,
+      status: 'failed',
+      message: 'No MakeUGC videoId on the job — nothing to recheck.',
+    };
+  }
+
+  let apiKey: string;
+  try {
+    const resolved = await resolveMakeugcKey({ userId: job.userId });
+    apiKey = resolved.apiKey;
+  } catch (err) {
+    return {
+      ok: false,
+      status: 'failed',
+      message:
+        err instanceof Error
+          ? err.message
+          : 'MakeUGC key resolution failed (env + BYOK both missing).',
+    };
+  }
+
+  const poll = await checkMakeugcVideoStatus({
+    userId: job.userId,
+    apiKey,
+    videoId,
+    generationJobId: job.id,
+  });
+
+  // MakeUGC's own status=failed OR our call failed non-transiently.
+  if (!poll.ok || poll.status === 'failed') {
+    const errMsg = poll.reason ?? poll.errorMessage ?? 'MakeUGC returned failed with no reason.';
+    // Clear the timeout flag so the UI stops offering Recheck; stamp
+    // the real reason so translateGenerationError can surface it.
+    await db
+      .update(schema.generationJobs)
+      .set({
+        errorMessage: errMsg,
+        metadata: { ...meta, polish25_processing_timeout: false },
+      })
+      .where(eq(schema.generationJobs.id, job.id));
+    await logAuditEvent({
+      userId: user.id,
+      eventType: 'generation_job_completed',
+      eventData: { job_id: job.id, ok: false, error: errMsg, recovered_via: 'recheck' },
+    });
+    revalidatePath(`/runs/${job.id}`);
+    return { ok: true, status: 'failed', message: errMsg };
+  }
+
+  // Still processing on MakeUGC — nothing to do server-side.
+  if (poll.status !== 'completed' || !poll.url) {
+    return {
+      ok: true,
+      status: 'still_processing',
+      message: 'MakeUGC still reports the video as processing. Come back in a few minutes.',
+    };
+  }
+
+  // Completed — mirror the worker's Step J + Step K. Insert one
+  // generated_creatives row (ready_for_review) and flip the job back
+  // to 'completed' with the correct actualCostUsd.
+  const videoUrl = poll.url;
+  const costUsd = estimateMakeugcVideoCostUsd('starter');
+
+  // Match metadata written by the worker so downstream code + logs
+  // read the same shape whether the job completed inline or via
+  // recheck. Preserve any existing avatarId/avatarName written earlier
+  // by the successful match step (metadata.polish25_makeugc_avatar_*).
+  const nextMeta: Record<string, unknown> = {
+    ...meta,
+    polish25_video_url: videoUrl,
+    polish25_makeugc_credits_used: {
+      creditsUsed: 1,
+      costUsd,
+      tier: 'starter',
+      at: new Date().toISOString(),
+      recovered_via: 'recheck',
+    },
+    polish25_progress: { step: 'video-ready', pct: 100, at: new Date().toISOString() },
+    polish25_processing_timeout: false,
+  };
+
+  await db.transaction(async (tx) => {
+    await tx.insert(schema.generatedCreatives).values({
+      userId: job.userId,
+      generationJobId: job.id,
+      fileUrl: videoUrl,
+      aspectRatio: '9:16',
+      status: 'ready_for_review',
+      format: 'polish25_makeugc',
+      generationMetadata: {
+        polish_version: POLISH_VERSION,
+        recovered_via: 'recheck',
+        costUsd,
+      },
+    });
+    await tx
+      .update(schema.generationJobs)
+      .set({
+        status: 'completed',
+        completedAt: new Date(),
+        generatedCreativeCount: 1,
+        actualCostUsd: costUsd.toFixed(4),
+        errorMessage: null,
+        metadata: nextMeta,
+      })
+      .where(eq(schema.generationJobs.id, job.id));
+  });
+
+  await logAuditEvent({
+    userId: user.id,
+    eventType: 'generation_job_completed',
+    eventData: {
+      job_id: job.id,
+      variant_count: 1,
+      mode: 'live',
+      recovered_via: 'recheck',
+      cost_usd: costUsd,
+      video_id: videoId,
+    },
+  });
+
+  revalidatePath(`/runs/${job.id}`);
+  revalidatePath('/pending');
+  revalidatePath('/dashboard');
+  return {
+    ok: true,
+    status: 'completed',
+    message: 'Recovered — the variant landed. Refresh to review + launch.',
   };
 }
