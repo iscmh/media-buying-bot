@@ -32,6 +32,8 @@ export async function unpauseUserAction(): Promise<UnpauseResult> {
 
   const result = await unpauseUser(user.id);
   revalidatePath('/dashboard');
+  // Polish-25.7 Commit 43: /settings also renders the pause banner now.
+  revalidatePath('/settings');
 
   if (!result) {
     return { ok: true, message: 'Bot was not paused.' };

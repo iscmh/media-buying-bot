@@ -7,6 +7,13 @@ interface Props {
   pausedAt: Date;
   pausedBy: 'user' | 'admin' | 'auto';
   openPauseCount: number;
+  /**
+   * Polish-25.7 Commit 43: full list of open pause reasons (not just the
+   * latest). Threaded into UnpauseButton so it can warn on
+   * meta_disconnected + metaStillDisconnected.
+   */
+  openReasons: string[];
+  metaStillDisconnected: boolean;
 }
 
 const REASON_LABELS: Record<string, string> = {
@@ -22,7 +29,14 @@ const REASON_LABELS: Record<string, string> = {
  * Static parts are server-rendered; the Unpause button is a small client
  * component (UnpauseButton) that owns the confirm dialog + action call.
  */
-export function PauseBanner({ reason, pausedAt, pausedBy, openPauseCount }: Props) {
+export function PauseBanner({
+  reason,
+  pausedAt,
+  pausedBy,
+  openPauseCount,
+  openReasons,
+  metaStillDisconnected,
+}: Props) {
   const message = REASON_LABELS[reason] ?? `Bot is paused: ${reason}.`;
 
   return (
@@ -35,7 +49,11 @@ export function PauseBanner({ reason, pausedAt, pausedBy, openPauseCount }: Prop
           Paused {formatDateTime(pausedAt)} by {pausedBy === 'auto' ? 'the platform' : pausedBy}.
         </p>
       </div>
-      <UnpauseButton openPauseCount={openPauseCount} />
+      <UnpauseButton
+        openPauseCount={openPauseCount}
+        openReasons={openReasons}
+        metaStillDisconnected={metaStillDisconnected}
+      />
     </div>
   );
 }

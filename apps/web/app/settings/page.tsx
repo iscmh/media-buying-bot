@@ -5,7 +5,9 @@ import {
   checkActiveSubscription,
   checkAdAccountSlotQuota,
   getDb,
+  getLatestPauseReason,
   getUserSettings,
+  isMetaConnected,
   schema,
 } from '@mbb/db';
 import {
@@ -17,6 +19,7 @@ import {
 import { AppShell } from '@/components/shell/app-shell';
 import { PageHeader } from '@/components/shell/page-header';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
+import { PauseBanner } from '../dashboard/_components/pause-banner';
 import { AutomationAcks } from './automation-acks';
 import { BillingSection } from './billing-section';
 import { HeygenAvatarSection } from './heygen-avatar-section';
@@ -53,10 +56,20 @@ export default async function SettingsPage() {
   });
 
   // Phase 8 billing snapshot (subscription status + ad-account slot quota).
-  const [sub, quota] = await Promise.all([
+  // Polish-25.7 Commit 43: also fetch pause state + Meta connection so the
+  // /settings header can render the same pause banner as /dashboard.
+  // Operators land on /settings to fix disconnects and need the same
+  // unpause path visible here.
+  const [sub, quota, userRow, metaConnected] = await Promise.all([
     checkActiveSubscription(userId),
     checkAdAccountSlotQuota({ userId }),
+    db.query.users.findFirst({
+      where: eq(schema.users.id, userId),
+      columns: { isPaused: true },
+    }),
+    isMetaConnected(userId),
   ]);
+  const pauseReason = userRow?.isPaused ? await getLatestPauseReason(userId) : null;
 
   // Server-render the three non-form panels and hand them into the
   // client form. Allows the client SettingsForm to slot them into the
@@ -96,6 +109,17 @@ export default async function SettingsPage() {
 
   return (
     <AppShell crumbs={[{ label: 'Settings' }]} contentClass="max-w-4xl">
+      {pauseReason && (
+        <PauseBanner
+          reason={pauseReason.reason}
+          pausedAt={pauseReason.pausedAt}
+          openPauseCount={pauseReason.openPauseCount}
+          openReasons={pauseReason.openReasons}
+          pausedBy={pauseReason.pausedBy}
+          metaStillDisconnected={!metaConnected}
+        />
+      )}
+
       <PageHeader
         title="Settings"
         subtitle="Bot configuration. Changes apply on the next launch / poll cycle."

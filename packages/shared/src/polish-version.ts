@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.7.3';
+export const POLISH_VERSION = '25.7.4';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.7.3';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.7 Commit 42 \u2014 killed the 'Show test ads' toggle from /launched and /dashboard. Real: it was UI noise with zero value for beta+ operators. Two toggle Links + the `?show_test=1` query param + the TEST_STATUSES conditional filter all removed. /launched still silently hides `archived` rows (user-initiated hide action; they explicitly killed those from the UI); everything else \u2014 dry_run, rejected_by_meta, launch_failed, active, paused, killed \u2014 surfaces by default. Empty-state copy and pagination hrefs cleaned up. Old ?show_test=1 URLs become no-ops (Next.js drops unknown query params silently). Backend dry_run capability untouched \u2014 only the UI filter surface is gone.";
+  "Polish-25.7 Commit 43 \u2014 safety-layer error UI + unpause visibility across surfaces. Real: operator's paused user was hitting 'Meta call denied by safety layer (user_paused): user is paused' on every launch attempt, and /launched rendered it as a generic Meta rejection banner \u2014 misleading, because Meta never received the call. interpretMetaError() now detects the internal safety-layer prefix, extracts the parenthetical code (user_paused / global_emergency_stop / token_expired / token_missing / rate_limited / user_ceiling_exceeded / platform_ceiling_exceeded / suspicious_activity_pause), and returns a per-code guidance card in a new 'safety_layer' category. Rate-limiter denials get the rate_limited card via a second prefix branch. MetaRejectionGuidance renders safety_layer in a blue/info tone (Info icon, not AlertTriangle) so buyers can see at a glance it's the bot's own safety net, not Meta enforcement. PauseBanner is now also rendered at the top of /settings (previously only on /dashboard), so operators landing on /settings to fix a disconnect see the unpause path immediately. UnpauseButton dialog gained an auto-repause warning: when one of the open pause reasons is meta_disconnected AND Meta is still disconnected, a red warning strip explains the next launch will just cascade-pause again. getLatestPauseReason returns the full openReasons list now (not just the latest one). New isMetaConnected(userId) helper for the reconnect-check. Unpause action revalidates both /dashboard and /settings.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

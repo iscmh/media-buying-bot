@@ -23,7 +23,7 @@ export {
   type SettingsRow,
   type SettingsChange,
 } from './settings';
-export { cascadePauseUser, getLatestPauseReason, unpauseUser } from './pause';
+export { cascadePauseUser, getLatestPauseReason, isMetaConnected, unpauseUser } from './pause';
 export { assertDailyCostCap, type DailyCostCapResult } from './cost-cap';
 export {
   assertDailyLaunchBudgetCap,

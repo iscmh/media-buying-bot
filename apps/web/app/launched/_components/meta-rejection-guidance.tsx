@@ -1,4 +1,4 @@
-import { AlertTriangle, ExternalLink } from 'lucide-react';
+import { AlertTriangle, ExternalLink, Info } from 'lucide-react';
 import { interpretMetaError, type MetaErrorCategory } from '@mbb/shared';
 
 /**
@@ -19,7 +19,12 @@ interface Props {
   errorMessage: string | null | undefined;
 }
 
-const CATEGORY_TONE: Record<MetaErrorCategory, 'warning' | 'destructive' | 'neutral'> = {
+// Polish-25.7 Commit 43: `safety_layer` is user-actionable (the launch
+// never reached Meta — the bot's own safety net stopped it), not Meta
+// enforcement. Renders in blue / info tone to distinguish it from a
+// real Meta rejection (amber) or auth loss (red).
+const CATEGORY_TONE: Record<MetaErrorCategory, 'warning' | 'destructive' | 'neutral' | 'info'> = {
+  safety_layer: 'info',
   special_ad_category: 'warning',
   policy_creative: 'warning',
   policy_landing: 'warning',
@@ -38,21 +43,27 @@ export function MetaRejectionGuidance({ errorMessage }: Props) {
       ? 'border-[color:var(--accent-negative)]/50 bg-[color:var(--accent-negative)]/5'
       : tone === 'warning'
         ? 'border-[color:var(--accent-warning)]/40 bg-[color:var(--accent-warning)]/5'
-        : 'border-border bg-bg-inset';
+        : tone === 'info'
+          ? 'border-[color:var(--accent-info,#3b82f6)]/50 bg-[color:var(--accent-info,#3b82f6)]/5'
+          : 'border-border bg-bg-inset';
 
   const iconClass =
     tone === 'destructive'
       ? 'text-[color:var(--accent-negative)]'
       : tone === 'warning'
         ? 'text-[color:var(--accent-warning)]'
-        : 'text-fg-muted';
+        : tone === 'info'
+          ? 'text-[color:var(--accent-info,#3b82f6)]'
+          : 'text-fg-muted';
+
+  const IconComponent = tone === 'info' ? Info : AlertTriangle;
 
   return (
     <div
       className={`mt-2 flex gap-2 rounded-sm border p-2 text-xs leading-snug ${borderClass}`}
       role="note"
     >
-      <AlertTriangle className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${iconClass}`} aria-hidden />
+      <IconComponent className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${iconClass}`} aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="text-fg font-medium">{guidance.title}</p>
         <p className="text-fg-muted mt-0.5">{guidance.diagnosis}</p>

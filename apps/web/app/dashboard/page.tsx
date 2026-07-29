@@ -7,6 +7,7 @@ import {
   getLatestPauseReason,
   getPerAdBreakdown,
   getUserTimezone,
+  isMetaConnected,
   schema,
   type TimeRange,
 } from '@mbb/db';
@@ -58,9 +59,13 @@ export default async function DashboardPage({ searchParams }: Props) {
     ? Number(userSettingsRow.assumedConversionValueUsd)
     : undefined;
 
-  const [pauseReason, userTimezone] = await Promise.all([
+  const [pauseReason, userTimezone, metaConnected] = await Promise.all([
     userRow?.isPaused ? getLatestPauseReason(user.userId) : Promise.resolve(null),
     getUserTimezone(user.userId),
+    // Polish-25.7 Commit 43: needed for auto-repause warning in the
+    // Unpause dialog. Cheap query, always run — pauseReason may be null
+    // (user unpaused) but the flag is a no-op in that case.
+    isMetaConnected(user.userId),
   ]);
 
   const [metrics, perAdRaw, toolRows, conceptRow, generatedRow, launchedRow] = await Promise.all([
@@ -155,7 +160,9 @@ export default async function DashboardPage({ searchParams }: Props) {
           reason={pauseReason.reason}
           pausedAt={pauseReason.pausedAt}
           openPauseCount={pauseReason.openPauseCount}
+          openReasons={pauseReason.openReasons}
           pausedBy={pauseReason.pausedBy}
+          metaStillDisconnected={!metaConnected}
         />
       )}
 

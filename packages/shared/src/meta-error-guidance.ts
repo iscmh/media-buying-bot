@@ -36,6 +36,7 @@
  */
 
 export type MetaErrorCategory =
+  | 'safety_layer'
   | 'special_ad_category'
   | 'policy_creative'
   | 'policy_landing'
@@ -61,7 +62,9 @@ interface Pattern {
 }
 
 // Order matters — first match wins. Put narrower patterns first.
-const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other'>, Pattern[]> = {
+// `safety_layer` is dispatched by prefix in interpretMetaError() rather
+// than needle-matched here, so it's excluded from this map.
+const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other' | 'safety_layer'>, Pattern[]> = {
   special_ad_category: [
     {
       // English + Romanian + Spanish + Portuguese + French + German
@@ -249,13 +252,134 @@ const FALLBACK: MetaErrorGuidance = {
 };
 
 /**
- * Pattern-match an error message against known Meta failure classes.
+ * Polish-25.7 Commit 43: pattern-match our own internal safety-layer
+ * denials before the generic Meta-side patterns fire. The launcher
+ * writes `MetaSafetyDeniedError`'s message straight into
+ * `launched_ads.error_message`, so /launched sees strings like
+ * `"Meta call denied by safety layer (user_paused): user is paused"`.
+ * These are NOT Meta rejections — the call never reached Meta — so
+ * rendering them as "Meta rejected the launch" was misleading. Extract
+ * the parenthetical code and dispatch to a per-code guidance card.
+ *
+ * The rate-limiter path (`MetaRateLimitedError`) surfaces as
+ * `"Meta call denied by rate limiter; retry after <ISO>"`. Handled in
+ * the same branch since it's the same safety-layer family.
+ */
+const SAFETY_LAYER_PREFIX = 'meta call denied by safety layer';
+const RATE_LIMITER_PREFIX = 'meta call denied by rate limiter';
+
+type SafetyGuidance = Omit<MetaErrorGuidance, 'category'>;
+
+function safetyGuidanceForCode(code: string, rawMessage: string): SafetyGuidance {
+  switch (code) {
+    case 'user_paused':
+      return {
+        title: 'Your bot is paused',
+        diagnosis:
+          'The launch never reached Meta — the bot is paused. Every launch attempt while paused fails immediately so nothing spends money without you seeing this first.',
+        fixes: [
+          'Open the dashboard and read the pause banner to see WHY the bot is paused.',
+          'Resolve the underlying issue (reconnect Meta / AI provider / etc.) BEFORE unpausing.',
+          'Click Unpause in the banner to resume — new launches will go through immediately.',
+        ],
+      };
+    case 'global_emergency_stop':
+      return {
+        title: 'Platform is in emergency stop',
+        diagnosis:
+          "Platform-wide safety pause is active. Every user's launches are blocked, not just yours. This is triggered when a global spend anomaly or an outage is detected.",
+        fixes: [
+          'Wait for the emergency stop to clear (usually minutes, not hours).',
+          'If this persists beyond an hour, contact support with the timestamp of this error.',
+        ],
+      };
+    case 'token_expired':
+    case 'token_missing':
+      return {
+        title: 'Meta token expired or missing',
+        diagnosis:
+          "The stored Meta access token is expired or was never set. Meta's launcher can't call the Graph API without a valid token.",
+        fixes: [
+          'Reconnect Meta from Settings → Connections → Meta.',
+          'Confirm the reconnect surfaces the ad account you want to launch on.',
+        ],
+      };
+    case 'rate_limited':
+      return {
+        title: 'Meta rate limit hit — cooling down',
+        diagnosis:
+          'Meta throttled our recent calls on this ad account. The safety layer stops sending until the cooldown clears — this prevents Meta from escalating to an account-level block.',
+        fixes: [
+          'Wait for the cooldown to lift (usually 5–15 minutes).',
+          'Reduce launch batch size if you routinely hit this — split large batches across sessions.',
+        ],
+      };
+    case 'user_ceiling_exceeded':
+      return {
+        title: 'Personal spend cap reached',
+        diagnosis:
+          'Your configured per-day / per-week spend cap has been reached across all launched ads. The safety layer blocks new launches until the window rolls over or you raise the cap.',
+        fixes: [
+          'Adjust your spend cap in Settings → General → Spend caps.',
+          'Wait for the daily / weekly window to reset if you want the cap to keep enforcing.',
+        ],
+      };
+    case 'platform_ceiling_exceeded':
+      return {
+        title: 'Platform hard cap reached',
+        diagnosis:
+          "The platform-wide hard spend ceiling has been reached — this is above your personal cap and is set by the operators. Every user's launches are affected once this fires.",
+        fixes: [
+          'This is a global safety floor. Contact support if it persists beyond a rollover window.',
+        ],
+      };
+    case 'suspicious_activity_pause':
+      return {
+        title: 'Bot auto-paused for review',
+        diagnosis:
+          'The safety layer detected a spend / performance pattern outside your normal baseline and paused the bot to prevent runaway spend. This is a precaution, not an accusation.',
+        fixes: [
+          'Open the dashboard — the pause banner explains the trigger.',
+          'Confirm recent launches look right, then Unpause to resume.',
+        ],
+      };
+    default:
+      // Unknown code — surface the raw message so the operator has SOMETHING to
+      // grep for even when a new safety code ships without a card here.
+      return {
+        title: 'Safety layer denied the launch',
+        diagnosis: `The safety layer blocked this launch (code: ${code}). The call never reached Meta.`,
+        fixes: [`Raw error: ${rawMessage}`, 'Contact support with the code above if this recurs.'],
+      };
+  }
+}
+
+/**
+ * Pattern-match an error message against known failure classes.
  * Case-insensitive substring match. Returns FALLBACK when no pattern
  * fires so callers always render SOMETHING actionable.
+ *
+ * Order:
+ *   1. Our own safety-layer / rate-limiter prefixes (call never reached
+ *      Meta). These MUST run first — otherwise a stray substring in the
+ *      wrapped reason could match a Meta-side pattern like "special ad
+ *      category" and misclassify the diagnosis.
+ *   2. The Meta-side CATEGORY_PATTERNS map (needle substring match).
+ *   3. FALLBACK.
  */
 export function interpretMetaError(errorMessage: string | null | undefined): MetaErrorGuidance {
   if (!errorMessage || errorMessage.trim().length === 0) return FALLBACK;
   const hay = errorMessage.toLowerCase();
+
+  if (hay.startsWith(SAFETY_LAYER_PREFIX)) {
+    const match = errorMessage.match(/safety layer \(([a-z0-9_]+)\)/i);
+    const code = match?.[1] ?? 'unknown';
+    return { category: 'safety_layer', ...safetyGuidanceForCode(code, errorMessage) };
+  }
+  if (hay.startsWith(RATE_LIMITER_PREFIX)) {
+    return { category: 'safety_layer', ...safetyGuidanceForCode('rate_limited', errorMessage) };
+  }
+
   for (const [category, patterns] of Object.entries(CATEGORY_PATTERNS)) {
     for (const p of patterns) {
       if (p.needles.some((needle) => hay.includes(needle.toLowerCase()))) {

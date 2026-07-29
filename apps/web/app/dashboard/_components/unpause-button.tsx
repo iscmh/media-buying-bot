@@ -16,6 +16,13 @@ import { unpauseUserAction } from './pause-banner-actions';
 
 interface Props {
   openPauseCount: number;
+  /**
+   * Polish-25.7 Commit 43: threaded through so the dialog can warn on
+   * "you're about to unpause with meta_disconnected still active — the
+   * next launch will just cascade-pause you again."
+   */
+  openReasons: string[];
+  metaStillDisconnected: boolean;
 }
 
 function ConfirmButton() {
@@ -32,7 +39,7 @@ function ConfirmButton() {
  * intentionally NOT supported — operators have been burned enough that
  * "Unpause" deserves a deliberate moment.
  */
-export function UnpauseButton({ openPauseCount }: Props) {
+export function UnpauseButton({ openPauseCount, openReasons, metaStillDisconnected }: Props) {
   const [error, setError] = React.useState<string | null>(null);
 
   async function handleSubmit() {
@@ -46,6 +53,11 @@ export function UnpauseButton({ openPauseCount }: Props) {
   }
 
   const pluralLabel = `${openPauseCount} pause${openPauseCount === 1 ? '' : 's'}`;
+  // Polish-25.7 Commit 43: auto-repause protection. If one of the open
+  // reasons is meta_disconnected AND Meta is still disconnected, the
+  // very next launch will cascade-pause the user again. Warn loudly so
+  // the operator reconnects first.
+  const willAutoRepause = openReasons.includes('meta_disconnected') && metaStillDisconnected;
 
   return (
     <Dialog>
@@ -64,6 +76,18 @@ export function UnpauseButton({ openPauseCount }: Props) {
         <p className="text-muted-foreground text-sm">
           {pluralLabel} open since the bot was last running. Resuming closes them all.
         </p>
+        {willAutoRepause && (
+          <div
+            className="border-destructive/50 bg-destructive/10 text-destructive rounded-md border p-3 text-sm"
+            role="alert"
+          >
+            <p className="font-semibold">Meta is still disconnected.</p>
+            <p className="mt-1 text-xs">
+              Unpausing now will auto-pause the bot again on the next launch attempt. Reconnect Meta
+              first at Settings → Connections → Meta, then come back and unpause.
+            </p>
+          </div>
+        )}
         {error && (
           <p className="text-destructive text-sm" role="alert">
             {error}

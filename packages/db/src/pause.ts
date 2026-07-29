@@ -1,6 +1,7 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { logAuditEvent } from './audit';
 import { getDb } from './client';
+import { metaConnections } from './schema/connections';
 import { userPauseLog } from './schema/ops';
 import { users } from './schema/users';
 
@@ -43,12 +44,18 @@ export async function cascadePauseUser(input: {
  * For the dashboard banner: surface the active (unresolved) pause reason
  * + count of open pause-log rows. "Active" = pause log rows whose
  * unpaused_at is NULL. Returns null if the user has no open pauses.
+ *
+ * Polish-25.7 Commit 43: also returns `openReasons: string[]` (all
+ * distinct open reasons, most-recent first) so the unpause UI can
+ * detect "meta_disconnected still open" and warn the operator before
+ * they resume onto a bot that will just auto-pause again.
  */
 export async function getLatestPauseReason(userId: string): Promise<{
   reason: string;
   pausedAt: Date;
   pausedBy: 'user' | 'admin' | 'auto';
   openPauseCount: number;
+  openReasons: string[];
 } | null> {
   const db = getDb();
   const openRows = await db.query.userPauseLog.findMany({
@@ -58,7 +65,28 @@ export async function getLatestPauseReason(userId: string): Promise<{
   });
   if (openRows.length === 0) return null;
   const latest = openRows[0]!;
-  return { ...latest, openPauseCount: openRows.length };
+  return { ...latest, openPauseCount: openRows.length, openReasons: openRows.map((r) => r.reason) };
+}
+
+/**
+ * Polish-25.7 Commit 43: cheap "is there an active Meta connection?" check
+ * for the unpause-warning path. Returns true iff at least one row exists
+ * with status='active' and deleted_at IS NULL. Does NOT verify the token
+ * against Graph API — a stale-but-present token is still "connected" from
+ * the safety layer's perspective (a launch would hit token_expired, not
+ * meta_disconnected auto-pause).
+ */
+export async function isMetaConnected(userId: string): Promise<boolean> {
+  const db = getDb();
+  const row = await db.query.metaConnections.findFirst({
+    where: and(
+      eq(metaConnections.userId, userId),
+      eq(metaConnections.status, 'active'),
+      isNull(metaConnections.deletedAt),
+    ),
+    columns: { id: true },
+  });
+  return !!row;
 }
 
 /**
