@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { BetaBanner } from '@/components/shell/beta-banner';
 import { MetaRejectionGuidance } from '@/app/launched/_components/meta-rejection-guidance';
 import {
   acknowledgeLaunchAction,
@@ -522,6 +523,10 @@ export function JobReviewClient({
               Manager.
             </DialogDescription>
           </DialogHeader>
+
+          {/* Polish-25.7 Commit 44: BETA marker up top so the tester
+              knows this is a live-fire path we're still hardening. */}
+          <BetaBanner className="mb-0" />
 
           {/* Polish-25.6 Commit 38: reinforce the PAUSED-on-launch
               behavior with a persistent amber-warning banner. Operator

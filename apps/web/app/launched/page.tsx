@@ -13,6 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { AppShell } from '@/components/shell/app-shell';
+import { BetaBanner } from '@/components/shell/beta-banner';
 import { EmptyState } from '@/components/shell/empty-state';
 import { PageHeader } from '@/components/shell/page-header';
 import { roiTone, roiRowClass, roiTextClass } from '@/components/ui/roi-tone';
@@ -179,6 +180,7 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
 
   return (
     <AppShell crumbs={[{ label: 'Launched ads' }]}>
+      <BetaBanner />
       <PageHeader title="Launched ads" subtitle="Every ad the bot has pushed to Meta." />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">

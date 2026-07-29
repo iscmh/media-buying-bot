@@ -2,6 +2,7 @@ import 'server-only';
 import { eq } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { getDb, schema } from '@mbb/db';
+import { setSentryUser } from '@/lib/sentry-user';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
 /**
@@ -31,5 +32,8 @@ export async function requireAdmin(): Promise<{ userId: string; email: string }>
   if (row?.role !== 'admin') {
     redirect('/dashboard');
   }
+  // Polish-25.7 Commit 44: tag the current Sentry scope with the
+  // authed admin so any admin-surface error is attributable.
+  setSentryUser({ userId: user.id, email: user.email ?? '', isAdmin: true });
   return { userId: user.id, email: user.email ?? '' };
 }

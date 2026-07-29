@@ -146,6 +146,7 @@ export function SecondaryNavSheet({ email, isAdmin }: Props) {
                 Admin
               </div>
               <div className="space-y-0.5">
+                <AdminNavLink href="/admin/activity" pathname={pathname} label="Beta activity" />
                 <AdminNavLink href="/admin/applications" pathname={pathname} label="Applications" />
                 <AdminNavLink href="/admin/raw-ugc" pathname={pathname} label="Raw UGC generator" />
               </div>

@@ -9,6 +9,7 @@ import {
   type ToolProviderName,
 } from '@mbb/shared';
 import { AppShell } from '@/components/shell/app-shell';
+import { BetaBanner } from '@/components/shell/beta-banner';
 import { PageHeader } from '@/components/shell/page-header';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/format/date';
@@ -77,7 +78,12 @@ export default async function SettingsConnectionsPage({ searchParams }: Props) {
       </nav>
 
       {tab === 'providers' && <ProvidersTab userId={userId} />}
-      {tab === 'meta' && <MetaTab userId={userId} />}
+      {tab === 'meta' && (
+        <>
+          <BetaBanner />
+          <MetaTab userId={userId} />
+        </>
+      )}
     </AppShell>
   );
 }

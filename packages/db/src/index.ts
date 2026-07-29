@@ -24,6 +24,7 @@ export {
   type SettingsChange,
 } from './settings';
 export { cascadePauseUser, getLatestPauseReason, isMetaConnected, unpauseUser } from './pause';
+export { getAdminActivityRows, type AdminActivityRow } from './admin-activity';
 export { assertDailyCostCap, type DailyCostCapResult } from './cost-cap';
 export {
   assertDailyLaunchBudgetCap,

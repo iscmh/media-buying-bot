@@ -2,6 +2,7 @@ import 'server-only';
 import { redirect } from 'next/navigation';
 import { checkActiveSubscription, getOnboardingState } from '@mbb/db';
 import { ONBOARDING_STEPS, ONBOARDING_STEP_PATHS, type OnboardingStep } from '@mbb/shared';
+import { setSentryUser } from '@/lib/sentry-user';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
 /**
@@ -82,5 +83,9 @@ export async function requireOnboardingComplete(): Promise<{
   if (!sub.hasAccess) {
     redirect(`/billing-required?reason=${encodeURIComponent(sub.reason)}`);
   }
+  // Polish-25.7 Commit 44: tag the current Sentry scope with the
+  // authed user so any error captured while rendering downstream is
+  // attributable in triage.
+  setSentryUser({ userId: user.id, email: user.email ?? '' });
   return { userId: user.id, email: user.email ?? '' };
 }
