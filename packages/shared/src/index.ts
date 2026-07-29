@@ -3,6 +3,7 @@ export * from './schemas/index';
 export * from './onboarding';
 export * from './tos';
 export * from './privacy';
+export * from './meta-error-guidance';
 export * from './safety';
 export * from './settings-form';
 export * from './ai-provider-form';

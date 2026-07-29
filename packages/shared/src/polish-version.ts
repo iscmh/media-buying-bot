@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.6.3';
+export const POLISH_VERSION = '25.6.4';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.6.3';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.6 Commit 37 — Polish-25 worker poll timeout + Recheck. Same fix pattern as Commit 36 admin tool but on the real user pipeline. Production job (videoId cms5ldpz000082mdt62fre1ng) hit the 30-min poll cap during MakeUGC queue backup while video was still processing → user saw "generation failed" even though credit was already charged. Worker cap bumped 180 → 360 attempts (60 min at 10s each). On cap-hit, worker now stamps metadata.polish25_processing_timeout=true + metadata.polish25_stuck_video_id=<id>; run detail spots the flag and renders a Recheck card (not the red error UI). Server action recheckPolish25MakeugcAction rehits MakeUGC status: completed → creates generated_creatives row + flips job to completed (mirrors worker Step J/K, no double charge); failed → clears flag + surfaces real error; still processing → no-op with "check back later" reply. resolveMakeugcKey exposed from @mbb/jobs so the recheck uses the same env-first/BYOK-fallback resolution the worker does.';
+  "Polish-25.6 Commit 38 — Meta rejection guidance + PAUSED launch banner (scoped subset of the operator's Commit 38 spec). New shared helper interpretMetaError() pattern-matches Meta's cryptic rejection messages (esp. Special Ad Category — \"add a higher minimum age\" in the BM's language is Meta's tell-tale phrase) and returns {title, diagnosis, fixes[], docsUrl}. New MetaRejectionGuidance client component renders below the raw error on any /launched row and inside the launch-problems banner on /runs/[id]; buyers see actionable next steps (reduce max age to 55, country-only targeting, remove interests, All-gender) instead of a translated shrug. Launch dialog gains a persistent amber PAUSED banner: \"ALL ads launch PAUSED. Zero spend until you activate them in Meta Ads Manager.\" DEFERRED to Commit 39: expanded launch dialog dropdowns (gender/interests/placements/attribution/bid/objective/audience) + real ROAS via Meta insights action_values + user-configurable assumed conversion value — those need schema migrations + worker changes + preset backward-compat that don't fit this session's remaining context.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

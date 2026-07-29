@@ -20,6 +20,7 @@ import { formatDateTime } from '@/lib/format/date';
 import { requireOnboardingComplete } from '@/lib/onboarding-gate';
 import { cn } from '@/lib/utils';
 import { ApprovalButtons } from './_components/approval-buttons';
+import { MetaRejectionGuidance } from './_components/meta-rejection-guidance';
 
 export const metadata = { title: 'Launched ads' };
 export const dynamic = 'force-dynamic';
@@ -349,9 +350,17 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                         {(displayStatus === 'rejected_by_meta' ||
                           displayStatus === 'launch_failed') &&
                           row.errorMessage && (
-                            <p className="text-fg-muted mt-1 font-mono text-xs leading-snug">
-                              {row.errorMessage}
-                            </p>
+                            <>
+                              <p className="text-fg-muted mt-1 font-mono text-xs leading-snug">
+                                {row.errorMessage}
+                              </p>
+                              {/* Polish-25.6 Commit 38: pattern-match the raw Meta
+                                  error and render actionable guidance. Turns
+                                  cryptic Special Ad Category messages ("add a
+                                  higher minimum age") into a real fix list +
+                                  Meta docs link. */}
+                              <MetaRejectionGuidance errorMessage={row.errorMessage} />
+                            </>
                           )}
                         {(isKillReco || isScaleReco) && (
                           <ApprovalButtons

@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { MetaRejectionGuidance } from '@/app/launched/_components/meta-rejection-guidance';
 import {
   acknowledgeLaunchAction,
   acknowledgeLiveLaunchAction,
@@ -357,14 +358,19 @@ export function JobReviewClient({
             {launchProblems.map((p) => (
               <li
                 key={p.id}
-                className="border-border-subtle bg-bg-inset/40 rounded-sm border p-3 font-mono text-xs leading-snug"
+                className="border-border-subtle bg-bg-inset/40 rounded-sm border p-3 text-xs leading-snug"
               >
-                <div className="text-fg-subtle mb-1 uppercase tracking-wider">
+                <div className="text-fg-subtle mb-1 font-mono uppercase tracking-wider">
                   {p.status.replace(/_/g, ' ')}
                 </div>
-                <div className="text-fg whitespace-pre-wrap break-words">
+                <div className="text-fg whitespace-pre-wrap break-words font-mono">
                   {p.errorMessage ?? '(no error message from Meta — check /launched for detail)'}
                 </div>
+                {/* Polish-25.6 Commit 38: inline guidance banner. Turns
+                    Meta's opaque rejection (esp. Special Ad Category
+                    "add a higher minimum age" messages) into concrete
+                    fix steps + docs link. */}
+                <MetaRejectionGuidance errorMessage={p.errorMessage} />
               </li>
             ))}
           </ul>
@@ -517,10 +523,23 @@ export function JobReviewClient({
             </DialogDescription>
           </DialogHeader>
 
-          <p className="text-fg-muted text-xs">
-            Ads are created PAUSED. They do not spend money until you activate them in Meta Ads
-            Manager.
-          </p>
+          {/* Polish-25.6 Commit 38: reinforce the PAUSED-on-launch
+              behavior with a persistent amber-warning banner. Operator
+              feedback: buyers were nervous that "hit Launch" would
+              start spending immediately; explicit banner up front
+              removes the doubt. */}
+          <div
+            className="border-[color:var(--accent-warning)]/40 bg-[color:var(--accent-warning)]/5 rounded-sm border p-2.5 text-xs"
+            role="note"
+          >
+            <p className="text-fg font-semibold">
+              ALL ads launch <span className="uppercase">PAUSED</span>.
+            </p>
+            <p className="text-fg-muted mt-0.5 leading-snug">
+              You activate them manually in Meta Ads Manager. Zero spend until you do — regardless
+              of budget, targeting, or optimization settings below.
+            </p>
+          </div>
 
           {/* Polish-25.2 Commit 16b: preset dropdown. Only renders
               when the user has ≥1 saved preset. Applies the
