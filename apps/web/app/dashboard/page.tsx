@@ -28,24 +28,17 @@ export const metadata = { title: 'Dashboard' };
 export const dynamic = 'force-dynamic';
 
 const VALID_RANGES: TimeRange[] = ['24h', '7d', '30d', 'all'];
-// Polish-25.7 Commit 41: same fix as /launched — mock-mode rows are
-// "test", but rejected_by_meta + launch_failed are REAL live launches
-// that failed and belong on the operator's radar. Only dry_run stays
-// hidden by default here (dashboard has no `archived` filter of its
-// own).
-const TEST_STATUSES = new Set(['dry_run']);
 
 interface Props {
-  searchParams: Promise<{ range?: string; show_test?: string }>;
+  searchParams: Promise<{ range?: string }>;
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
   const user = await requireOnboardingComplete();
-  const { range: rangeParam, show_test: showTestParam } = await searchParams;
+  const { range: rangeParam } = await searchParams;
   const range: TimeRange = VALID_RANGES.includes(rangeParam as TimeRange)
     ? (rangeParam as TimeRange)
     : '7d';
-  const showTest = showTestParam === '1';
 
   const db = getDb();
   const userRow = await db.query.users.findFirst({
@@ -106,7 +99,10 @@ export default async function DashboardPage({ searchParams }: Props) {
     }),
   ]);
 
-  const perAd = showTest ? perAdRaw : perAdRaw.filter((r) => !TEST_STATUSES.has(r.status));
+  // Polish-25.7 Commit 42: dashboard shows every ad the user has
+  // launched (or attempted to launch). `dry_run` mock-mode rows are
+  // rare and if they exist they belong on the operator's radar.
+  const perAd = perAdRaw;
 
   const toolProviders = new Set(toolRows.map((r) => r.provider));
   const checklistState = {
@@ -151,8 +147,6 @@ export default async function DashboardPage({ searchParams }: Props) {
   }));
   const spendSpark = metrics.timeSeries.map((p) => ({ v: p.spendUsd }));
   const convSpark = metrics.timeSeries.map((p) => ({ v: p.conversions }));
-
-  const toggleHref = `/dashboard?range=${range}&show_test=${showTest ? '0' : '1'}`;
 
   return (
     <AppShell crumbs={[{ label: 'Dashboard' }]} action={<TimeRangePicker current={range} />}>
@@ -270,12 +264,6 @@ export default async function DashboardPage({ searchParams }: Props) {
               </h2>
               <div className="text-fg-muted flex items-center gap-3 text-xs">
                 <Link
-                  href={toggleHref}
-                  className="hover:text-fg underline-offset-4 transition-colors hover:underline"
-                >
-                  {showTest ? 'Hide test ads' : 'Show test ads'}
-                </Link>
-                <Link
                   href="/launched"
                   className="hover:text-fg underline-offset-4 transition-colors hover:underline"
                 >
@@ -286,12 +274,8 @@ export default async function DashboardPage({ searchParams }: Props) {
             {perAd.length === 0 ? (
               <EmptyState
                 icon={BarChart3}
-                title={showTest ? 'No ads in this window yet.' : 'No live ads in this window yet.'}
-                description={
-                  showTest
-                    ? 'Generate variants and launch them to see performance numbers here.'
-                    : 'Toggle "Show test ads" to include dry-run and rejected rows.'
-                }
+                title="No ads in this window yet."
+                description="Generate variants and launch them to see performance numbers here."
               />
             ) : (
               <PerAdTable rows={perAd} />

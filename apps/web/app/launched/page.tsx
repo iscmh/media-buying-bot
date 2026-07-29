@@ -27,17 +27,13 @@ export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 20;
 
-// Polish-25.7 Commit 41: pared this down to ACTUAL test / stale rows —
-// `dry_run` (mock-mode launches) and `archived` (stale rows killed by
-// the cron). Previously included `rejected_by_meta` + `launch_failed`,
-// which are REAL live-launch attempts that failed on Meta's side.
-// Hiding them by default meant operators didn't see their own rejected
-// ads without toggling — the operator's beta live-fire test surfaced
-// two rejected_by_meta rows that /launched hid, so the fix status +
-// the MetaRejectionGuidance banner never surfaced. Failed launches
-// are the whole point of the page; keep them visible by default.
-// `?show_test=1` still reveals dry_run + archived when ops want them.
-const TEST_STATUSES = ['dry_run', 'archived'] satisfies Array<
+// Polish-25.7 Commit 42: `archived` is a user-initiated hide action
+// (operator explicitly killed the row from the UI), so it stays out of
+// the default view. Everything else — dry_run, rejected_by_meta,
+// launch_failed, active, paused, killed — surfaces by default. No
+// user-facing toggle: the "Show test ads" flow was UI noise with zero
+// value for beta operators.
+const HIDDEN_STATUSES = ['archived'] satisfies Array<
   'dry_run' | 'rejected_by_meta' | 'launch_failed' | 'archived' | 'active' | 'killed' | 'paused'
 >;
 
@@ -64,7 +60,6 @@ const VALID_STATUS: readonly StatusFilter[] = [
 interface Props {
   searchParams: Promise<{
     page?: string;
-    show_test?: string;
     sort?: string;
     dir?: string;
     status?: string;
@@ -98,10 +93,9 @@ interface Props {
  */
 export default async function LaunchedAdsPage({ searchParams }: Props) {
   const { userId } = await requireOnboardingComplete();
-  const { page: pageParam, show_test, sort, dir, status } = await searchParams;
+  const { page: pageParam, sort, dir, status } = await searchParams;
   const pageNum = Math.max(1, Number(pageParam ?? '1') || 1);
   const offset = (pageNum - 1) * PAGE_SIZE;
-  const showTest = show_test === '1';
   const sortKey: SortKey = VALID_SORTS.includes(sort as SortKey) ? (sort as SortKey) : 'launched';
   const sortDir: SortDir = dir === 'asc' ? 'asc' : 'desc';
   const statusFilter: StatusFilter = VALID_STATUS.includes(status as StatusFilter)
@@ -122,14 +116,12 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
     ? Number(settingsRow.assumedConversionValueUsd)
     : ASSUMED_CONVERSION_VALUE_USD;
 
-  // Base where: user's own ads. Test-status exclusion still applies
-  // unless show_test is on. Status filter narrows further.
-  const baseWhere = showTest
-    ? eq(schema.launchedAds.userId, userId)
-    : and(
-        eq(schema.launchedAds.userId, userId),
-        not(inArray(schema.launchedAds.status, TEST_STATUSES)),
-      );
+  // Base where: user's own ads, minus silently-hidden statuses
+  // (archived rows the operator killed from the UI).
+  const baseWhere = and(
+    eq(schema.launchedAds.userId, userId),
+    not(inArray(schema.launchedAds.status, HIDDEN_STATUSES)),
+  );
 
   const rowsUnfiltered = await db.query.launchedAds.findMany({
     where: baseWhere,
@@ -189,49 +181,11 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
     <AppShell crumbs={[{ label: 'Launched ads' }]}>
       <PageHeader title="Launched ads" subtitle="Every ad the bot has pushed to Meta." />
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 text-xs">
           <span className="text-fg-subtle font-mono uppercase tracking-wider">Status</span>
-          <StatusFilterDropdown
-            current={statusFilter}
-            sortKey={sortKey}
-            sortDir={sortDir}
-            showTest={showTest}
-          />
+          <StatusFilterDropdown current={statusFilter} sortKey={sortKey} sortDir={sortDir} />
         </div>
-        <p className="text-fg-muted text-xs">
-          {!showTest ? (
-            <>
-              Test rows hidden.{' '}
-              <Link
-                href={buildHref({
-                  status: statusFilter,
-                  sort: sortKey,
-                  dir: sortDir,
-                  showTest: true,
-                })}
-                className="text-fg underline-offset-4 hover:underline"
-              >
-                Show
-              </Link>
-            </>
-          ) : (
-            <>
-              Showing test rows.{' '}
-              <Link
-                href={buildHref({
-                  status: statusFilter,
-                  sort: sortKey,
-                  dir: sortDir,
-                  showTest: false,
-                })}
-                className="text-fg underline-offset-4 hover:underline"
-              >
-                Hide
-              </Link>
-            </>
-          )}
-        </p>
       </div>
 
       {visible.length === 0 ? (
@@ -239,16 +193,12 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
           icon={Rocket}
           title={
             statusFilter === 'all'
-              ? showTest
-                ? 'No launches yet.'
-                : 'No live ads launched yet.'
+              ? 'No launches yet.'
               : `No ads matching "${statusFilter.replace(/_/g, ' ')}".`
           }
           description={
             statusFilter === 'all'
-              ? showTest
-                ? 'Approve variants on a generation job, then launch them to see rows here.'
-                : 'Approve and launch variants to see them here. Test rows hidden — toggle "Show" above.'
+              ? 'Approve variants on a generation job, then launch them to see rows here.'
               : 'Try clearing the status filter above.'
           }
         />
@@ -267,7 +217,6 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                   currentSort={sortKey}
                   currentDir={sortDir}
                   statusFilter={statusFilter}
-                  showTest={showTest}
                 />
                 <TableHead>Impr / CTR</TableHead>
                 <TableHead>Clicks / CPC</TableHead>
@@ -277,7 +226,6 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                   currentSort={sortKey}
                   currentDir={sortDir}
                   statusFilter={statusFilter}
-                  showTest={showTest}
                 />
                 <SortableHead
                   label="ROAS"
@@ -285,7 +233,6 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                   currentSort={sortKey}
                   currentDir={sortDir}
                   statusFilter={statusFilter}
-                  showTest={showTest}
                 />
                 <SortableHead
                   label="Launched"
@@ -293,7 +240,6 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                   currentSort={sortKey}
                   currentDir={sortDir}
                   statusFilter={statusFilter}
-                  showTest={showTest}
                 />
               </TableRow>
             </TableHeader>
@@ -454,7 +400,6 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                 status: statusFilter,
                 sort: sortKey,
                 dir: sortDir,
-                showTest,
                 page: pageNum - 1,
               })}
               className="text-fg-muted hover:text-fg underline-offset-4 transition-colors hover:underline"
@@ -471,7 +416,6 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                 status: statusFilter,
                 sort: sortKey,
                 dir: sortDir,
-                showTest,
                 page: pageNum + 1,
               })}
               className="text-fg-muted hover:text-fg underline-offset-4 transition-colors hover:underline"
@@ -569,14 +513,12 @@ function buildHref(input: {
   status: StatusFilter;
   sort: SortKey;
   dir: SortDir;
-  showTest: boolean;
   page?: number;
 }): string {
   const params = new URLSearchParams();
   if (input.status !== 'all') params.set('status', input.status);
   if (input.sort !== 'launched') params.set('sort', input.sort);
   if (input.dir !== 'desc') params.set('dir', input.dir);
-  if (input.showTest) params.set('show_test', '1');
   if (input.page && input.page > 1) params.set('page', String(input.page));
   const qs = params.toString();
   return qs ? `/launched?${qs}` : '/launched';
@@ -586,12 +528,10 @@ function StatusFilterDropdown({
   current,
   sortKey,
   sortDir,
-  showTest,
 }: {
   current: StatusFilter;
   sortKey: SortKey;
   sortDir: SortDir;
-  showTest: boolean;
 }) {
   const options: Array<{ value: StatusFilter; label: string }> = [
     { value: 'all', label: 'All' },
@@ -608,7 +548,7 @@ function StatusFilterDropdown({
         return (
           <Link
             key={o.value}
-            href={buildHref({ status: o.value, sort: sortKey, dir: sortDir, showTest })}
+            href={buildHref({ status: o.value, sort: sortKey, dir: sortDir })}
             className={cn(
               'inline-flex h-7 items-center rounded-sm border px-2 text-xs transition-colors',
               isActive
@@ -630,18 +570,16 @@ function SortableHead({
   currentSort,
   currentDir,
   statusFilter,
-  showTest,
 }: {
   label: string;
   columnKey: SortKey;
   currentSort: SortKey;
   currentDir: SortDir;
   statusFilter: StatusFilter;
-  showTest: boolean;
 }) {
   const isActive = currentSort === columnKey;
   const nextDir: SortDir = isActive && currentDir === 'desc' ? 'asc' : 'desc';
-  const href = buildHref({ status: statusFilter, sort: columnKey, dir: nextDir, showTest });
+  const href = buildHref({ status: statusFilter, sort: columnKey, dir: nextDir });
   return (
     <TableHead className="text-right">
       <Link
