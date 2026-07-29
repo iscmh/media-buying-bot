@@ -40,6 +40,20 @@ export interface DashboardMetrics {
   avgCpcUsd: number | null;
   avgCtrPct: number | null;
   impliedRoas: number | null;
+  /**
+   * Polish-25.7 Commit 39: sum of `launched_ads.conversion_value_usd`
+   * — real revenue from Meta's action_values. Zero when the pixel
+   * isn't sending value data, in which case impliedRoas falls back to
+   * the caller's `assumedConversionValueUsd × totalConversions`.
+   */
+  totalConversionValueUsd: number;
+  /**
+   * Polish-25.7 Commit 39: whether `impliedRoas` was computed from
+   * real Meta action_values (`true`) or the assumed-value heuristic
+   * fallback (`false`). Dashboard renders a tooltip on the estimated
+   * variant so buyers know it's a fallback, not a Meta-reported number.
+   */
+  impliedRoasIsEstimate: boolean;
   adsActiveCount: number;
   adsKilledCount: number;
   adsScaledCount: number;
@@ -62,6 +76,15 @@ export interface PerAdRow {
   ctrPct: number;
   cpcUsd: number;
   impliedRoas: number;
+  /**
+   * Polish-25.7 Commit 39: whether `impliedRoas` for this row was
+   * computed from Meta's action_values (real) or from the assumed-
+   * value heuristic fallback. Used by /launched + /dashboard row
+   * renderers to italicize / tooltip-flag the estimated variant.
+   */
+  impliedRoasIsEstimate: boolean;
+  /** Real conversion value from Meta insights action_values. Zero when unavailable. */
+  conversionValueUsd: number;
   launchedAtIso: string;
   generationJobId: string | null;
 }
@@ -71,9 +94,19 @@ export async function getDashboardMetrics(input: {
   range: TimeRange;
   /** IANA tz from users.timezone — used to compute day boundaries. */
   userTimezone: string;
+  /**
+   * Polish-25.7 Commit 39: per-user override for the assumed dollar
+   * value of one conversion. Used only when Meta's action_values
+   * aggregate is 0 (pixel not sending values). Callers pass
+   * `user_settings.assumed_conversion_value_usd`; helper defaults to
+   * the hardcoded `ASSUMED_CONVERSION_VALUE_USD` for pre-Commit-39
+   * call sites that haven't been updated yet.
+   */
+  assumedConversionValueUsd?: number;
 }): Promise<DashboardMetrics> {
   const db = getDb();
   const since = rangeToCutoff(input.range, input.userTimezone);
+  const assumedValue = input.assumedConversionValueUsd ?? ASSUMED_CONVERSION_VALUE_USD;
 
   // 1. Lifetime aggregates over the ads launched in the window.
   const whereLifetime = since
@@ -86,6 +119,10 @@ export async function getDashboardMetrics(input: {
       conversions: sql<string>`coalesce(sum(${launchedAds.metaConversions}), 0)`,
       clicks: sql<string>`coalesce(sum(${launchedAds.metaClicks}), 0)`,
       impressions: sql<string>`coalesce(sum(${launchedAds.metaImpressions}), 0)`,
+      // Polish-25.7 Commit 39: sum real conversion values from Meta
+      // insights. Zero when the pixel isn't sending value data — we
+      // fall back to `conversions × assumedValue` below.
+      conversionValue: sql<string>`coalesce(sum(${launchedAds.conversionValueUsd}), 0)`,
     })
     .from(launchedAds)
     .where(whereLifetime);
@@ -94,10 +131,23 @@ export async function getDashboardMetrics(input: {
   const totalConversions = Number(agg?.conversions ?? 0);
   const totalClicks = Number(agg?.clicks ?? 0);
   const totalImpressions = Number(agg?.impressions ?? 0);
+  const totalConversionValueUsd = Number(agg?.conversionValue ?? 0);
   const avgCpcUsd = totalClicks > 0 ? totalSpendUsd / totalClicks : null;
   const avgCtrPct = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : null;
-  const impliedRoas =
-    totalSpendUsd > 0 ? (totalConversions * ASSUMED_CONVERSION_VALUE_USD) / totalSpendUsd : null;
+  // Polish-25.7 Commit 39: prefer real revenue when Meta returned any.
+  // Fall back to `conversions × assumedValue` when the pixel isn't
+  // populating action_values yet.
+  let impliedRoas: number | null = null;
+  let impliedRoasIsEstimate = false;
+  if (totalSpendUsd > 0) {
+    if (totalConversionValueUsd > 0) {
+      impliedRoas = totalConversionValueUsd / totalSpendUsd;
+      impliedRoasIsEstimate = false;
+    } else if (totalConversions > 0) {
+      impliedRoas = (totalConversions * assumedValue) / totalSpendUsd;
+      impliedRoasIsEstimate = true;
+    }
+  }
 
   // 2. Lifecycle counters — distinct statuses + scale_count > 0.
   const statusRows = await db
@@ -147,6 +197,8 @@ export async function getDashboardMetrics(input: {
     avgCpcUsd: avgCpcUsd != null ? round2(avgCpcUsd) : null,
     avgCtrPct: avgCtrPct != null ? round2(avgCtrPct) : null,
     impliedRoas: impliedRoas != null ? round2(impliedRoas) : null,
+    totalConversionValueUsd: round2(totalConversionValueUsd),
+    impliedRoasIsEstimate,
     adsActiveCount: byStatus.get('active') ?? 0,
     adsKilledCount: byStatus.get('killed') ?? 0,
     adsScaledCount: Number(scaled ?? 0),
@@ -164,9 +216,12 @@ export async function getPerAdBreakdown(input: {
   userTimezone: string;
   sortBy?: 'spend' | 'roas' | 'launched_at';
   limit?: number;
+  /** Polish-25.7 Commit 39: see `getDashboardMetrics.assumedConversionValueUsd` — same semantics. */
+  assumedConversionValueUsd?: number;
 }): Promise<PerAdRow[]> {
   const db = getDb();
   const since = rangeToCutoff(input.range, input.userTimezone);
+  const assumedValue = input.assumedConversionValueUsd ?? ASSUMED_CONVERSION_VALUE_USD;
   const rows = await db
     .select({
       id: launchedAds.id,
@@ -176,6 +231,8 @@ export async function getPerAdBreakdown(input: {
       clicks: launchedAds.metaClicks,
       conversions: launchedAds.metaConversions,
       impressions: launchedAds.metaImpressions,
+      // Polish-25.7 Commit 39: real conversion value from Meta insights.
+      conversionValue: launchedAds.conversionValueUsd,
       launchedAt: launchedAds.launchedAt,
       generationJobId: launchedAds.generationJobId,
       generatedCreativeId: launchedAds.generatedCreativeId,
@@ -208,9 +265,22 @@ export async function getPerAdBreakdown(input: {
     const clicks = Number(r.clicks ?? 0);
     const conversions = Number(r.conversions ?? 0);
     const impressions = Number(r.impressions ?? 0);
+    const conversionValueUsd = Number(r.conversionValue ?? 0);
     const ctrPct = impressions > 0 ? (clicks / impressions) * 100 : 0;
     const cpcUsd = clicks > 0 ? spend / clicks : 0;
-    const impliedRoas = spend > 0 ? (conversions * ASSUMED_CONVERSION_VALUE_USD) / spend : 0;
+    // Polish-25.7 Commit 39: prefer real revenue when Meta returned
+    // action_values. Fallback to `conversions × assumedValue` when
+    // it's zero (pixel not sending values yet).
+    let impliedRoas = 0;
+    let impliedRoasIsEstimate = false;
+    if (spend > 0) {
+      if (conversionValueUsd > 0) {
+        impliedRoas = conversionValueUsd / spend;
+      } else if (conversions > 0) {
+        impliedRoas = (conversions * assumedValue) / spend;
+        impliedRoasIsEstimate = true;
+      }
+    }
     const creative = creativeMap.get(r.generatedCreativeId);
     return {
       launchedAdId: r.id,
@@ -224,6 +294,8 @@ export async function getPerAdBreakdown(input: {
       ctrPct: round2(ctrPct),
       cpcUsd: round2(cpcUsd),
       impliedRoas: round2(impliedRoas),
+      impliedRoasIsEstimate,
+      conversionValueUsd: round2(conversionValueUsd),
       launchedAtIso: r.launchedAt.toISOString(),
       generationJobId: r.generationJobId,
     };

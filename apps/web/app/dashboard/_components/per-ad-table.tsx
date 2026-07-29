@@ -43,6 +43,8 @@ export interface PerAdRow {
   ctrPct: number;
   cpcUsd: number;
   impliedRoas: number;
+  /** Polish-25.7 Commit 39: true when impliedRoas came from the assumed-value fallback (Meta pixel not sending purchase values). */
+  impliedRoasIsEstimate: boolean;
   launchedAtIso: string;
   generationJobId: string | null;
 }
@@ -197,8 +199,26 @@ function AdRow({ r }: { r: PerAdRow }) {
       <TableCell className="text-right font-mono text-xs">{r.totalConversions}</TableCell>
       <TableCell className="text-right font-mono text-xs">{r.ctrPct.toFixed(2)}%</TableCell>
       <TableCell className="text-right font-mono text-xs">${r.cpcUsd.toFixed(2)}</TableCell>
-      <TableCell className={cn('text-right font-mono text-xs', roiTextClass(tone))}>
+      <TableCell
+        className={cn(
+          'text-right font-mono text-xs',
+          roiTextClass(tone),
+          r.impliedRoasIsEstimate && 'italic',
+        )}
+        title={
+          r.totalSpendUsd > 0 && r.impliedRoasIsEstimate
+            ? 'Estimated — Meta pixel not sending purchase values. Change assumed value in Settings.'
+            : r.totalSpendUsd > 0
+              ? 'From Meta insights (real purchase values).'
+              : undefined
+        }
+      >
         {r.totalSpendUsd > 0 ? `${r.impliedRoas.toFixed(2)}x` : '—'}
+        {r.totalSpendUsd > 0 && r.impliedRoasIsEstimate && (
+          <span className="text-fg-subtle ml-0.5" aria-hidden>
+            *
+          </span>
+        )}
       </TableCell>
       <TableCell className="text-fg-muted font-mono text-xs">
         {formatDateTime(new Date(r.launchedAtIso))}

@@ -17,6 +17,8 @@ const baseInsights: AdInsights = {
   ctrPct: 2,
   cpcUsd: 0.225,
   frequency: 1.85,
+  // Polish-25.7 Commit 39: real conversion value from Meta insights.
+  conversionValueUsd: 120.0,
 };
 
 describe('Polish-5: buildSnapshotUpdate', () => {
@@ -49,6 +51,7 @@ describe('Polish-5: buildSnapshotUpdate', () => {
         ctrPct: 0,
         cpcUsd: 0,
         frequency: 0,
+        conversionValueUsd: 0,
       },
       'last_7d',
     );

@@ -268,6 +268,16 @@ const FIELDS: FieldConfig[] = [
     type: 'currency',
     section: 'scale',
   },
+  // === roas heuristic ===
+  {
+    name: 'assumedConversionValueUsd',
+    label: 'Assumed conversion value',
+    help: "USD per conversion, used only when Meta pixel isn't sending real values.",
+    tooltip:
+      "Your average revenue per conversion. ROAS math prefers Meta's real action_values when your pixel sends them; when it doesn't, the platform falls back to `conversions × this value / spend`. Match this to your offer's AOV so the fallback reads meaningfully (default $20).",
+    type: 'currency',
+    section: 'scale',
+  },
   // === summary ===
   {
     name: 'dailySummaryEnabled',

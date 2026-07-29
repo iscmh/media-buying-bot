@@ -22,6 +22,15 @@ export interface AdInsights {
   ctrPct: number; // (clicks / impressions) × 100, 0 when impressions == 0
   cpcUsd: number; // spend / clicks, 0 when clicks == 0
   frequency: number; // Polish-5: average impressions per unique user, 0 when impressions == 0
+  /**
+   * Polish-25.7 Commit 39: sum of `action_values` for conversion-flavored
+   * action_types (purchase, omni_purchase, offsite_conversion.*). USD.
+   * Zero when Meta returned no value data (pixel not sending values, or
+   * only non-purchase conversions like leads without a value column).
+   * Dashboard falls back to `user_settings.assumed_conversion_value_usd
+   * × conversions` when this is zero.
+   */
+  conversionValueUsd: number;
 }
 
 export interface GetAdInsightsInput {
@@ -46,7 +55,11 @@ export async function getAdInsights(input: GetAdInsightsInput): Promise<GetAdIns
   const effective = effectiveLaunchMode(input.mode);
   const t0 = Date.now();
   const datePreset = dateRangeToPreset(input.dateRangeDays);
-  const endpoint = `/${input.adId}/insights?fields=spend,impressions,clicks,actions,frequency&date_preset=${datePreset}`;
+  // Polish-25.7 Commit 39: added `action_values` to the field list so
+  // we can compute real ROAS instead of a $20/conversion heuristic.
+  // Meta returns action_values with the same action_type keys as
+  // `actions` but with `value` = USD amount for that conversion type.
+  const endpoint = `/${input.adId}/insights?fields=spend,impressions,clicks,actions,action_values,frequency&date_preset=${datePreset}`;
 
   if (effective === 'mock') {
     const insights = mockInsightsFor(input.adId);
@@ -113,6 +126,7 @@ function parseInsights(body: unknown): AdInsights {
     ctrPct: 0,
     cpcUsd: 0,
     frequency: 0,
+    conversionValueUsd: 0,
   };
   if (!body || typeof body !== 'object') return empty;
   const data = (body as { data?: unknown }).data;
@@ -123,12 +137,22 @@ function parseInsights(body: unknown): AdInsights {
   const impressions = Math.round(numFrom(row.impressions));
   const clicks = Math.round(numFrom(row.clicks));
   const conversions = sumConversionActions(row.actions);
+  const conversionValueUsd = sumConversionActionValues(row.action_values);
   const frequency = numFrom(row.frequency);
 
   const ctrPct = impressions > 0 ? (clicks / impressions) * 100 : 0;
   const cpcUsd = clicks > 0 ? spendUsd / clicks : 0;
 
-  return { spendUsd, impressions, clicks, conversions, ctrPct, cpcUsd, frequency };
+  return {
+    spendUsd,
+    impressions,
+    clicks,
+    conversions,
+    ctrPct,
+    cpcUsd,
+    frequency,
+    conversionValueUsd,
+  };
 }
 
 /**
@@ -157,16 +181,48 @@ function sumConversionActions(actions: unknown): number {
     const a = action as Record<string, unknown>;
     const type = typeof a.action_type === 'string' ? a.action_type : '';
     const value = numFrom(a.value);
-    if (
-      type === 'purchase' ||
-      type === 'lead' ||
-      type === 'complete_registration' ||
-      type.includes('offsite_conversion')
-    ) {
+    if (isConversionActionType(type)) {
       total += Math.round(value);
     }
   }
   return total;
+}
+
+/**
+ * Polish-25.7 Commit 39: sum action_values (USD) for the same
+ * conversion-flavored action_types `sumConversionActions` counts.
+ * Meta returns `action_values` as an array with the same shape as
+ * `actions` — `{ action_type, value }` — but `value` is the dollar
+ * amount tracked for that conversion event (typically populated when
+ * the pixel sends `value` on Purchase events).
+ *
+ * Zero when Meta returned no value data (pixel not configured to send
+ * values, or only non-value conversion events like Leads without a
+ * value column). Callers layer their own fallback in that case.
+ */
+function sumConversionActionValues(actionValues: unknown): number {
+  if (!Array.isArray(actionValues)) return 0;
+  let total = 0;
+  for (const av of actionValues) {
+    if (!av || typeof av !== 'object') continue;
+    const row = av as Record<string, unknown>;
+    const type = typeof row.action_type === 'string' ? row.action_type : '';
+    const value = numFrom(row.value);
+    if (isConversionActionType(type) && value > 0) {
+      total += value;
+    }
+  }
+  return round2(total);
+}
+
+function isConversionActionType(type: string): boolean {
+  return (
+    type === 'purchase' ||
+    type === 'omni_purchase' ||
+    type === 'lead' ||
+    type === 'complete_registration' ||
+    type.includes('offsite_conversion')
+  );
 }
 
 function extractMetaError(body: unknown): string | undefined {
@@ -201,7 +257,19 @@ function mockInsightsFor(adId: string): AdInsights {
   const cpcUsd = clicks > 0 ? spendUsd / clicks : 0;
   // Mock frequency: 1.0..3.5 range, derived from seed for stability across runs.
   const frequency = round2(1 + r2 * 2.5);
-  return { spendUsd, impressions, clicks, conversions, ctrPct, cpcUsd, frequency };
+  // Polish-25.7 Commit 39: mock conversion_value ≈ $30 per conversion
+  // for dev, seeded so the same adId always renders the same value.
+  const conversionValueUsd = conversions > 0 ? round2(conversions * (25 + r2 * 10)) : 0;
+  return {
+    spendUsd,
+    impressions,
+    clicks,
+    conversions,
+    ctrPct,
+    cpcUsd,
+    frequency,
+    conversionValueUsd,
+  };
 }
 
 function round2(n: number): number {

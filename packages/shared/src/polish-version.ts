@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.6.4';
+export const POLISH_VERSION = '25.7.0';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.6.4';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.6 Commit 38 — Meta rejection guidance + PAUSED launch banner (scoped subset of the operator's Commit 38 spec). New shared helper interpretMetaError() pattern-matches Meta's cryptic rejection messages (esp. Special Ad Category — \"add a higher minimum age\" in the BM's language is Meta's tell-tale phrase) and returns {title, diagnosis, fixes[], docsUrl}. New MetaRejectionGuidance client component renders below the raw error on any /launched row and inside the launch-problems banner on /runs/[id]; buyers see actionable next steps (reduce max age to 55, country-only targeting, remove interests, All-gender) instead of a translated shrug. Launch dialog gains a persistent amber PAUSED banner: \"ALL ads launch PAUSED. Zero spend until you activate them in Meta Ads Manager.\" DEFERRED to Commit 39: expanded launch dialog dropdowns (gender/interests/placements/attribution/bid/objective/audience) + real ROAS via Meta insights action_values + user-configurable assumed conversion value — those need schema migrations + worker changes + preset backward-compat that don't fit this session's remaining context.";
+  "Polish-25.7 Commit 39 (Part B) \u2014 real ROAS from Meta insights + user-configurable assumed conversion value fallback. Insights fetch now pulls `action_values` in addition to `actions`; poll-ad-performance persists the sum as launched_ads.conversion_value_usd. Dashboard + /launched prefer the real value when > 0 and fall back to `conversions \u00d7 user_settings.assumed_conversion_value_usd` (default $20, user-editable in Settings) when Meta returned no value data. Estimated ROAS is italicized + carries a tooltip explaining the pixel isn't sending purchase values. Migration 0040 adds both columns. Part A (expanded launch dialog with gender/interests/placements/attribution/bid/objective/audience) is DEFERRED to Commit 41 (Commit 40 = internal-terminology jargon sweep per operator direction).";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

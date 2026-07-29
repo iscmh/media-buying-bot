@@ -102,6 +102,18 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
 
   const db = getDb();
 
+  // Polish-25.7 Commit 39: fetch the user's per-conversion assumed
+  // value so the ROAS fallback uses their configured $/conv rather
+  // than the hardcoded default. Real conversion_value_usd from Meta
+  // insights is preferred when present (see computeRoas below).
+  const settingsRow = await db.query.userSettings.findFirst({
+    where: eq(schema.userSettings.userId, userId),
+    columns: { assumedConversionValueUsd: true },
+  });
+  const assumedValue = settingsRow?.assumedConversionValueUsd
+    ? Number(settingsRow.assumedConversionValueUsd)
+    : ASSUMED_CONVERSION_VALUE_USD;
+
   // Base where: user's own ads. Test-status exclusion still applies
   // unless show_test is on. Status filter narrows further.
   const baseWhere = showTest
@@ -135,8 +147,8 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
       case 'spend':
         return sortMultiplier * (Number(a.metaSpendUsd ?? 0) - Number(b.metaSpendUsd ?? 0));
       case 'roas': {
-        const roasA = computeRoas(a);
-        const roasB = computeRoas(b);
+        const roasA = computeRoas(a, assumedValue).value;
+        const roasB = computeRoas(b, assumedValue).value;
         return sortMultiplier * (roasA - roasB);
       }
       case 'conv':
@@ -289,7 +301,9 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                     ? (clicks / impressions) * 100
                     : null;
                 const cpc = clicks && clicks > 0 && spend != null ? spend / clicks : null;
-                const roas = computeRoas(row);
+                const roasResult = computeRoas(row, assumedValue);
+                const roas = roasResult.value;
+                const roasIsEstimate = roasResult.isEstimate;
                 const tone = roiTone({ spendUsd: spend ?? 0, roas });
                 const displayStatus = computeDisplayStatus(row);
                 const isKillReco = row.killRecommendedAt != null && row.status !== 'killed';
@@ -392,8 +406,26 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                     <TableCell className="text-right font-mono text-xs">
                       {conversions ?? '—'}
                     </TableCell>
-                    <TableCell className={cn('text-right font-mono text-xs', roiTextClass(tone))}>
+                    <TableCell
+                      className={cn(
+                        'text-right font-mono text-xs',
+                        roiTextClass(tone),
+                        roasIsEstimate && 'italic',
+                      )}
+                      title={
+                        spend != null && spend > 0
+                          ? roasIsEstimate
+                            ? `Estimated at $${assumedValue.toFixed(0)}/conv. Meta pixel not sending purchase values.`
+                            : 'From Meta insights (real purchase values).'
+                          : undefined
+                      }
+                    >
                       {spend != null && spend > 0 ? `${roas.toFixed(2)}x` : '—'}
+                      {spend != null && spend > 0 && roasIsEstimate && (
+                        <span className="text-fg-subtle ml-0.5" aria-hidden>
+                          *
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell className="text-fg-muted font-mono text-xs">
                       {formatDateTime(row.launchedAt)}
@@ -445,18 +477,46 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
       )}
 
       <p className="text-fg-subtle mt-6 text-xs">
-        ROAS uses ${ASSUMED_CONVERSION_VALUE_USD} assumed value per conversion (heuristic). Real
-        conversion values land in a future update.
+        ROAS marked with <span aria-hidden>*</span> (italic) is estimated at $
+        {assumedValue.toFixed(0)}
+        /conversion — Meta pixel isn&apos;t sending purchase values for those ads. Non-italic ROAS
+        comes from Meta&apos;s real action_values. Change your assumed value in{' '}
+        <a
+          href="/settings"
+          className="text-fg-muted hover:text-fg underline-offset-4 hover:underline"
+        >
+          Settings
+        </a>
+        .
       </p>
     </AppShell>
   );
 }
 
-function computeRoas(row: { metaSpendUsd: string | null; metaConversions: number | null }): number {
+/**
+ * Polish-25.7 Commit 39: prefer real conversion_value_usd from Meta
+ * insights (populated by poll-ad-performance from action_values).
+ * Fall back to `conversions × assumedValue` when Meta returned zero
+ * value data (pixel not configured to send purchase values yet).
+ * `isEstimate` flag lets the row renderer italicize + tooltip-flag
+ * the fallback variant so buyers know it's a heuristic, not
+ * Meta-reported revenue.
+ */
+function computeRoas(
+  row: {
+    metaSpendUsd: string | null;
+    metaConversions: number | null;
+    conversionValueUsd: string | null;
+  },
+  assumedValue: number,
+): { value: number; isEstimate: boolean } {
   const spend = row.metaSpendUsd != null ? Number(row.metaSpendUsd) : 0;
   const conv = row.metaConversions ?? 0;
-  if (spend <= 0) return 0;
-  return (conv * ASSUMED_CONVERSION_VALUE_USD) / spend;
+  const value = row.conversionValueUsd != null ? Number(row.conversionValueUsd) : 0;
+  if (spend <= 0) return { value: 0, isEstimate: false };
+  if (value > 0) return { value: value / spend, isEstimate: false };
+  if (conv > 0) return { value: (conv * assumedValue) / spend, isEstimate: true };
+  return { value: 0, isEstimate: false };
 }
 
 function computeDisplayStatus(row: {

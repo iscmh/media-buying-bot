@@ -49,9 +49,16 @@ export default async function DashboardPage({ searchParams }: Props) {
   });
   const userSettingsRow = await db.query.userSettings.findFirst({
     where: eq(schema.userSettings.userId, user.userId),
-    columns: { isFoundingMember: true },
+    columns: { isFoundingMember: true, assumedConversionValueUsd: true },
   });
   const isFoundingMember = !!userSettingsRow?.isFoundingMember;
+  // Polish-25.7 Commit 39: pass the user's per-conversion assumed
+  // value into the ROAS heuristic. Falls back to the hardcoded
+  // ASSUMED_CONVERSION_VALUE_USD ($20) only if the settings row is
+  // missing entirely (should never happen post-signup).
+  const assumedConversionValueUsd = userSettingsRow?.assumedConversionValueUsd
+    ? Number(userSettingsRow.assumedConversionValueUsd)
+    : undefined;
 
   const [pauseReason, userTimezone] = await Promise.all([
     userRow?.isPaused ? getLatestPauseReason(user.userId) : Promise.resolve(null),
@@ -59,8 +66,15 @@ export default async function DashboardPage({ searchParams }: Props) {
   ]);
 
   const [metrics, perAdRaw, toolRows, conceptRow, generatedRow, launchedRow] = await Promise.all([
-    getDashboardMetrics({ userId: user.userId, range, userTimezone }),
-    getPerAdBreakdown({ userId: user.userId, range, userTimezone, sortBy: 'spend', limit: 50 }),
+    getDashboardMetrics({ userId: user.userId, range, userTimezone, assumedConversionValueUsd }),
+    getPerAdBreakdown({
+      userId: user.userId,
+      range,
+      userTimezone,
+      sortBy: 'spend',
+      limit: 50,
+      assumedConversionValueUsd,
+    }),
     db.query.toolConnections.findMany({
       where: and(
         eq(schema.toolConnections.userId, user.userId),
@@ -206,7 +220,11 @@ export default async function DashboardPage({ searchParams }: Props) {
               numericValue={metrics.impliedRoas}
               icon={TrendingUp}
               tone={roasTone}
-              hint="Heuristic — $20 assumed / conv"
+              hint={
+                metrics.impliedRoasIsEstimate
+                  ? `Estimated at $${(assumedConversionValueUsd ?? 20).toFixed(0)}/conv. Meta pixel not sending purchase values.`
+                  : 'From Meta insights (real purchase values).'
+              }
             />
             <KpiTile
               label="Active ads"

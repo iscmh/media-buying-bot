@@ -16,6 +16,11 @@ export function buildSnapshotUpdate(m: AdInsights, windowKind: string) {
     metaImpressions: m.impressions,
     metaClicks: m.clicks,
     metaConversions: m.conversions,
+    // Polish-25.7 Commit 39: persist real conversion value from Meta
+    // insights action_values. Zero when Meta didn't return value data;
+    // dashboard + /launched fall back to user_settings.
+    // assumed_conversion_value_usd × conversions in that case.
+    conversionValueUsd: m.conversionValueUsd.toFixed(2),
     currentSpend: m.spendUsd.toFixed(2),
     currentImpressions: m.impressions,
     currentClicks: m.clicks,

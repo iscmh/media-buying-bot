@@ -56,6 +56,17 @@ export const userSettings = pgTable('user_settings', {
     .notNull()
     .default('50.00'),
 
+  // Polish-25.7 Commit 39: per-user override for the assumed dollar
+  // value of one conversion. Used when Meta insights returns conversions
+  // but no action_values (i.e. the Meta pixel isn't sending purchase
+  // values yet). Default $20 matches the pre-Commit-39 hardcoded
+  // ASSUMED_CONVERSION_VALUE_USD in @mbb/shared/safety.ts so no
+  // behavioral change for users who don't touch this setting. See
+  // migration 0040.
+  assumedConversionValueUsd: numeric('assumed_conversion_value_usd', { precision: 10, scale: 2 })
+    .notNull()
+    .default('20.00'),
+
   // Phase 3b: timestamp of the user's first acknowledgment of the
   // "live generation will spend real money" dialog. NULL = first-time
   // confirmation still required. Set the moment they click Proceed.

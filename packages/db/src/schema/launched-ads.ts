@@ -58,6 +58,13 @@ export const launchedAds = pgTable('launched_ads', {
   metaImpressions: integer('meta_impressions'),
   metaClicks: integer('meta_clicks'),
   metaConversions: integer('meta_conversions'),
+  // Polish-25.7 Commit 39: sum of Meta insights action_values in USD.
+  // Zero (default) when Meta didn't return value data — dashboard +
+  // /launched fall back to user_settings.assumed_conversion_value_usd
+  // × meta_conversions for the ROAS calc. See migration 0040.
+  conversionValueUsd: numeric('conversion_value_usd', { precision: 10, scale: 2 })
+    .notNull()
+    .default('0.00'),
 
   // Polish-5: stable current-snapshot surface populated by poll-ad-
   // performance on every tick. /launched + kill/scale evaluator read

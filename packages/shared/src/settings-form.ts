@@ -126,6 +126,13 @@ export const SettingsFormSchema = z.object({
   scaleIncrementPct: z.coerce.number().min(10).max(200),
   scaleMaxDailyBudgetUsd: z.coerce.number().min(10).max(1000),
 
+  // Polish-25.7 Commit 39: per-user assumed conversion value. Used as
+  // the ROAS heuristic denominator when Meta insights returns
+  // conversions but no action_values (pixel not sending values yet).
+  // Range = $1 to $10,000 — the low bound keeps ROAS math sane, the
+  // high bound accommodates high-AOV offers (info products, coaching).
+  assumedConversionValueUsd: z.coerce.number().min(1).max(10000),
+
   // Phase 6 — daily Telegram digest. Hour is 0–23 in the user's tz.
   dailySummaryEnabled: z.coerce.boolean(),
   dailySummaryHourLocal: z.coerce.number().int().min(0).max(23),
@@ -177,6 +184,7 @@ export const SETTINGS_FIELD_KEYS = [
   'scaleMinSpendUsd',
   'scaleIncrementPct',
   'scaleMaxDailyBudgetUsd',
+  'assumedConversionValueUsd',
   'dailySummaryEnabled',
   'dailySummaryHourLocal',
   'timezone',
