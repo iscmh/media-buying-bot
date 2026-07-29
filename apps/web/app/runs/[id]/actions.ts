@@ -515,7 +515,7 @@ export async function recheckPolish25MakeugcAction(jobId: string): Promise<Reche
     return {
       ok: false,
       status: 'failed',
-      message: 'No MakeUGC videoId on the job — nothing to recheck.',
+      message: 'No Instant UGC videoId on the job — nothing to recheck.',
     };
   }
 
@@ -530,7 +530,7 @@ export async function recheckPolish25MakeugcAction(jobId: string): Promise<Reche
       message:
         err instanceof Error
           ? err.message
-          : 'MakeUGC key resolution failed (env + BYOK both missing).',
+          : 'Instant UGC key resolution failed (env + BYOK both missing).',
     };
   }
 
@@ -543,7 +543,8 @@ export async function recheckPolish25MakeugcAction(jobId: string): Promise<Reche
 
   // MakeUGC's own status=failed OR our call failed non-transiently.
   if (!poll.ok || poll.status === 'failed') {
-    const errMsg = poll.reason ?? poll.errorMessage ?? 'MakeUGC returned failed with no reason.';
+    const errMsg =
+      poll.reason ?? poll.errorMessage ?? 'Instant UGC returned failed with no reason.';
     // Clear the timeout flag so the UI stops offering Recheck; stamp
     // the real reason so translateGenerationError can surface it.
     await db
@@ -567,7 +568,7 @@ export async function recheckPolish25MakeugcAction(jobId: string): Promise<Reche
     return {
       ok: true,
       status: 'still_processing',
-      message: 'MakeUGC still reports the video as processing. Come back in a few minutes.',
+      message: 'Instant UGC still reports the video as processing. Come back in a few minutes.',
     };
   }
 

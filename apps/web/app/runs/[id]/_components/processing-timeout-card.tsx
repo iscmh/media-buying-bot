@@ -58,11 +58,11 @@ export function ProcessingTimeoutCard({ jobId, stuckVideoId, timeoutAt }: Props)
 
   return (
     <div className="bg-bg-surface rounded-md border p-5 text-sm">
-      <p className="text-fg mb-1 text-base font-semibold">Still generating on MakeUGC.</p>
+      <p className="text-fg mb-1 text-base font-semibold">Still generating on Instant UGC.</p>
       <p className="text-fg-muted leading-relaxed">
-        The video hit the worker&apos;s 60-minute poll cap but MakeUGC still reports it as
-        processing. Credit is already charged — the render lands eventually. Come back in a few
-        minutes and click Recheck, or open the MakeUGC dashboard to watch it directly.
+        The video hit the worker&apos;s 60-minute poll cap but the render provider still reports it
+        as processing. Credit is already charged — the render lands eventually. Come back in a few
+        minutes and click Recheck to poll for completion.
       </p>
       <dl className="text-fg-subtle mt-3 grid grid-cols-[auto,1fr] gap-x-3 gap-y-0.5 font-mono text-[11px]">
         <dt>videoId:</dt>

@@ -79,7 +79,8 @@ export async function submitRawUgcAction(input: SubmitRawUgcInput): Promise<Subm
     if (!result.ok) {
       return {
         ok: false,
-        errorMessage: result.errorMessage ?? 'MakeUGC submit returned not-ok without a message.',
+        errorMessage:
+          result.errorMessage ?? 'Instant UGC submit returned not-ok without a message.',
       };
     }
     return { ok: true, videoId: result.videoId };
@@ -121,7 +122,8 @@ export async function checkRawUgcStatusAction(videoId: string): Promise<CheckRaw
       return {
         ok: false,
         status: 'failed',
-        errorMessage: result.errorMessage ?? 'MakeUGC status returned not-ok without a message.',
+        errorMessage:
+          result.errorMessage ?? 'Instant UGC status returned not-ok without a message.',
       };
     }
     return { ok: true, status: result.status, url: result.url };
@@ -182,7 +184,7 @@ export async function listRawUgcVoicesAction(gender?: string): Promise<ListRawUg
       return {
         ok: false,
         voices: [],
-        errorMessage: result.errorMessage ?? 'MakeUGC voices returned not-ok.',
+        errorMessage: result.errorMessage ?? 'Instant UGC voices returned not-ok.',
       };
     }
     return {

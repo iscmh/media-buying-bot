@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.7.0';
+export const POLISH_VERSION = '25.7.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.7.0';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.7 Commit 39 (Part B) \u2014 real ROAS from Meta insights + user-configurable assumed conversion value fallback. Insights fetch now pulls `action_values` in addition to `actions`; poll-ad-performance persists the sum as launched_ads.conversion_value_usd. Dashboard + /launched prefer the real value when > 0 and fall back to `conversions \u00d7 user_settings.assumed_conversion_value_usd` (default $20, user-editable in Settings) when Meta returned no value data. Estimated ROAS is italicized + carries a tooltip explaining the pixel isn't sending purchase values. Migration 0040 adds both columns. Part A (expanded launch dialog with gender/interests/placements/attribution/bid/objective/audience) is DEFERRED to Commit 41 (Commit 40 = internal-terminology jargon sweep per operator direction).";
+  "Polish-25.7 Commit 40 \u2014 internal-terminology jargon sweep before beta launch. Every user-facing string literal + JSX text scrubbed of `Polish-XX`, `POLISH25`, and `MakeUGC` leaks: (a) POLISH23_DISPLAY_NAME const value changed from 'Polish-23 UGC (Higgsfield Soul + Veo Lite)' to 'Cinematic UGC (character consistency)'; (b) admin /admin/raw-ugc subtitle no longer says 'Polish-25 pipeline'; (c) all admin raw-UGC user-visible strings (submit / poll / recheck panels + error messages) say 'Instant UGC' or 'the render provider' instead of 'MakeUGC'; (d) /runs/[id] processing_timeout card + server-action error messages same. Comments + internal identifiers (POLISH25_PIPELINE_ID, makeugcAvatarIndex table, MAKEUGC_MANAGED_KEY env var name in operator-facing error) stay \u2014 operator spec. POLISH_VERSION still surfaces at /api/health + /api/version (monitoring/operator, not user).";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

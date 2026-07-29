@@ -60,7 +60,7 @@ export default async function AdminRawUgcPage() {
     <AppShell crumbs={[{ label: 'Admin' }, { label: 'Raw UGC' }]}>
       <PageHeader
         title="Raw UGC generator"
-        subtitle={`Admin-only. ${avatars.length} avatars available. Bypasses the Polish-25 pipeline — pick, paste, generate, download.`}
+        subtitle={`Admin-only. ${avatars.length} avatars available. Bypasses the standard Instant UGC pipeline — pick, paste, generate, download.`}
       />
       <RawUgcClient avatars={avatars} />
     </AppShell>

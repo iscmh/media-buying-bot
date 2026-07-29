@@ -90,7 +90,12 @@ export function isRecommendedTier(modelId: VideoModelId): boolean {
  * analyze-concept dispatch → generation/polish23-veo-lite.requested).
  */
 export const POLISH23_PIPELINE_ID = 'polish23_higgsfield_veo_lite' as const;
-export const POLISH23_DISPLAY_NAME = 'Polish-23 UGC (Higgsfield Soul + Veo Lite)';
+// Polish-25.7 Commit 40: internal-terminology jargon sweep. Value stripped
+// of "Polish-23" so any surface that imports this const (none today, but
+// keeping the export stable) renders a user-friendly name. Character
+// consistency is the operator-facing feature name for the Higgsfield
+// Soul + Veo Lite pipeline.
+export const POLISH23_DISPLAY_NAME = 'Cinematic UGC (character consistency)';
 export const POLISH23_DESCRIPTION =
   'Higgsfield Soul reference PNG threaded into a Veo 3.1 Lite 8-clip chain. ' +
   'Best character consistency at ~$1.65 per 60s ad. Recommended default.';

@@ -139,7 +139,7 @@ export function RawUgcClient({ avatars }: Props) {
       if (!r.ok || r.status === 'failed') {
         setStatus({
           kind: 'error',
-          message: r.errorMessage ?? 'MakeUGC returned status=failed with no reason.',
+          message: r.errorMessage ?? 'Instant UGC returned status=failed with no reason.',
         });
         return;
       }
@@ -173,7 +173,7 @@ export function RawUgcClient({ avatars }: Props) {
     if (!r.ok || r.status === 'failed') {
       setStatus({
         kind: 'error',
-        message: r.errorMessage ?? 'MakeUGC returned status=failed with no reason.',
+        message: r.errorMessage ?? 'Instant UGC returned status=failed with no reason.',
       });
       return;
     }
@@ -321,7 +321,7 @@ export function RawUgcClient({ avatars }: Props) {
             value={script}
             onChange={(e) => setScript(e.target.value)}
             rows={10}
-            placeholder="Paste the voice script. Max ~1500 chars per MakeUGC limit."
+            placeholder="Paste the voice script. Max ~1500 chars per Instant UGC limit."
             className="bg-bg-inset text-fg placeholder:text-fg-subtle w-full rounded-sm border px-2 py-1.5 text-xs leading-snug"
             disabled={busy}
           />
@@ -368,12 +368,12 @@ export function RawUgcClient({ avatars }: Props) {
             : status.kind === 'polling'
               ? `Generating (${status.attempts + 1}/${MAX_POLL_ATTEMPTS})…`
               : status.kind === 'processing_timeout'
-                ? 'Still generating on MakeUGC…'
+                ? 'Still generating on Instant UGC…'
                 : 'Generate video'}
         </Button>
         <p className="text-fg-subtle text-[10px]">
-          Uses MAKEUGC_MANAGED_KEY. Video URL comes back from MakeUGC&apos;s CDN — download + use
-          externally. Nothing persisted to the app database.
+          Uses MAKEUGC_MANAGED_KEY. Video URL comes back from the render provider&apos;s CDN —
+          download + use externally. Nothing persisted to the app database.
         </p>
       </section>
 
@@ -386,12 +386,12 @@ export function RawUgcClient({ avatars }: Props) {
           </p>
         )}
         {status.kind === 'submitting' && (
-          <p className="text-fg-muted text-xs">Submitting to MakeUGC…</p>
+          <p className="text-fg-muted text-xs">Submitting to Instant UGC…</p>
         )}
         {status.kind === 'polling' && (
           <div className="space-y-2 text-xs">
             <p className="text-fg">
-              Processing on MakeUGC. Poll {status.attempts + 1} / {MAX_POLL_ATTEMPTS}.
+              Processing on Instant UGC. Poll {status.attempts + 1} / {MAX_POLL_ATTEMPTS}.
             </p>
             <p className="text-fg-subtle font-mono text-[10px]">videoId: {status.videoId}</p>
             <div className="bg-bg-inset relative h-1 w-full overflow-hidden rounded-sm">
@@ -401,22 +401,22 @@ export function RawUgcClient({ avatars }: Props) {
               />
             </div>
             <p className="text-fg-subtle text-[10px]">
-              Videos usually complete in 30-90s. If MakeUGC&apos;s queue is backed up they can take
-              up to ~10 min. If this hits the poll cap you&apos;ll see a &ldquo;still
-              generating&rdquo; panel with a Recheck button — credit is already charged and the
-              video finishes eventually.
+              Videos usually complete in 30-90s. If the render queue is backed up they can take up
+              to ~10 min. If this hits the poll cap you&apos;ll see a &ldquo;still generating&rdquo;
+              panel with a Recheck button — credit is already charged and the video finishes
+              eventually.
             </p>
           </div>
         )}
         {status.kind === 'processing_timeout' && (
           <div className="space-y-2 text-xs">
-            <p className="text-fg font-medium">Still generating on MakeUGC.</p>
+            <p className="text-fg font-medium">Still generating on Instant UGC.</p>
             <p className="text-fg-muted leading-snug">
               We polled {MAX_POLL_ATTEMPTS} times (
               {Math.round((MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 60_000)} min) and the video is
-              still processing. Credit is already charged — the render will land on MakeUGC
-              eventually. Come back in a few minutes and hit Recheck, or open the MakeUGC dashboard
-              to watch it directly.
+              still processing. Credit is already charged — the render will land on Instant UGC
+              eventually. Come back in a few minutes and hit Recheck, or open the render provider
+              dashboard to watch it directly.
             </p>
             <p className="text-fg-subtle font-mono text-[10px]">videoId: {status.videoId}</p>
             <div className="flex flex-wrap gap-2">
