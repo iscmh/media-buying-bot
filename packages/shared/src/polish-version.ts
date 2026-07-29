@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.7.1';
+export const POLISH_VERSION = '25.7.2';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.7.1';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.7 Commit 40 \u2014 internal-terminology jargon sweep before beta launch. Every user-facing string literal + JSX text scrubbed of `Polish-XX`, `POLISH25`, and `MakeUGC` leaks: (a) POLISH23_DISPLAY_NAME const value changed from 'Polish-23 UGC (Higgsfield Soul + Veo Lite)' to 'Cinematic UGC (character consistency)'; (b) admin /admin/raw-ugc subtitle no longer says 'Polish-25 pipeline'; (c) all admin raw-UGC user-visible strings (submit / poll / recheck panels + error messages) say 'Instant UGC' or 'the render provider' instead of 'MakeUGC'; (d) /runs/[id] processing_timeout card + server-action error messages same. Comments + internal identifiers (POLISH25_PIPELINE_ID, makeugcAvatarIndex table, MAKEUGC_MANAGED_KEY env var name in operator-facing error) stay \u2014 operator spec. POLISH_VERSION still surfaces at /api/health + /api/version (monitoring/operator, not user).";
+  "Polish-25.7 Commit 41 \u2014 two bugs from operator's beta live-fire test. (1) /launched + /dashboard TEST_STATUSES filter incorrectly hid rejected_by_meta + launch_failed rows by default, so operator's REAL failed launches (2 rows on first live-fire) never surfaced without a manual ?show_test=1 toggle. Fix: TEST_STATUSES now contains only dry_run + archived \u2014 genuine mock/stale rows. Rejected + failed launches always show since they're the whole point of the page. (2) interpretMetaError() Special Ad Category needle list expanded from EN + one RO variant to full min+max coverage across EN / RO / ES / PT / FR / DE. Trigger: operator's second rejected ad said 'v\u00e2rst\u0103 maxim\u0103 mai mic\u0103' (RO max-age variant), not caught by the pre-Commit-41 needle list. Both age boundaries + all 6 supported Meta locales now catch the Special Ad Category diagnosis. Broad 'v\u00e2rst\u0103' fallback added for any Romanian age-related error since every RO age-restriction error on a flagged account traces to this root.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

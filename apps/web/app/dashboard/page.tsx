@@ -28,7 +28,12 @@ export const metadata = { title: 'Dashboard' };
 export const dynamic = 'force-dynamic';
 
 const VALID_RANGES: TimeRange[] = ['24h', '7d', '30d', 'all'];
-const TEST_STATUSES = new Set(['dry_run', 'rejected_by_meta', 'launch_failed']);
+// Polish-25.7 Commit 41: same fix as /launched — mock-mode rows are
+// "test", but rejected_by_meta + launch_failed are REAL live launches
+// that failed and belong on the operator's radar. Only dry_run stays
+// hidden by default here (dashboard has no `archived` filter of its
+// own).
+const TEST_STATUSES = new Set(['dry_run']);
 
 interface Props {
   searchParams: Promise<{ range?: string; show_test?: string }>;

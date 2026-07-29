@@ -27,9 +27,17 @@ export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE = 20;
 
-// Polish-5: 'archived' joins the hidden-by-default set. Stale rows
-// get archived by the cron; ops can still see them via ?show_test=1.
-const TEST_STATUSES = ['dry_run', 'rejected_by_meta', 'launch_failed', 'archived'] satisfies Array<
+// Polish-25.7 Commit 41: pared this down to ACTUAL test / stale rows —
+// `dry_run` (mock-mode launches) and `archived` (stale rows killed by
+// the cron). Previously included `rejected_by_meta` + `launch_failed`,
+// which are REAL live-launch attempts that failed on Meta's side.
+// Hiding them by default meant operators didn't see their own rejected
+// ads without toggling — the operator's beta live-fire test surfaced
+// two rejected_by_meta rows that /launched hid, so the fix status +
+// the MetaRejectionGuidance banner never surfaced. Failed launches
+// are the whole point of the page; keep them visible by default.
+// `?show_test=1` still reveals dry_run + archived when ops want them.
+const TEST_STATUSES = ['dry_run', 'archived'] satisfies Array<
   'dry_run' | 'rejected_by_meta' | 'launch_failed' | 'archived' | 'active' | 'killed' | 'paused'
 >;
 

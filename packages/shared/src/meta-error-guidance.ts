@@ -64,23 +64,66 @@ interface Pattern {
 const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other'>, Pattern[]> = {
   special_ad_category: [
     {
-      // English + Romanian variants seen in operator's live test. Add
-      // more localized fragments here as they surface — Meta translates
-      // rejection messages to the BM's locale.
+      // English + Romanian + Spanish + Portuguese + French + German
+      // variants surfaced from operator's live tests. Meta translates
+      // rejection messages to the BM's locale — nearly every Special
+      // Ad Category error surfaces as "adjust minimum age" or "adjust
+      // maximum age" in the operator's language. Add more localized
+      // fragments here as they surface.
+      //
+      // Polish-25.7 Commit 41: bug — first live-fire test had TWO
+      // rejected ads, one with "vârstă minimă mai mare" (recognized)
+      // and one with "vârstă maximă mai mică" (NOT recognized before
+      // this commit). Both are the same Special Ad Category root
+      // cause; Meta phrases them differently based on which age
+      // boundary it wants adjusted. Full min+max coverage in each
+      // supported language now.
       needles: [
+        // Category name — English + underscore variants.
         'special ad category',
         'special_ad_category',
         'special ad categories',
+        // Explicit category enumerations Meta sometimes returns.
         'credit, employment',
         'credit / employment',
         'housing, employment',
         'employment, housing',
-        'vârstă minimă', // Romanian: "minimum age" — the tell-tale phrase
-        'vârstă minimă mai mare',
+        // English age-boundary phrases.
         'minimum age',
+        'maximum age',
+        'higher minimum age',
+        'lower maximum age',
         'age suggestion',
         'age recommendation',
-        'higher minimum age',
+        'adjust the minimum age',
+        'adjust the maximum age',
+        // Romanian (RO) — operator's account.
+        //   "vârstă" = "age", "minimă" = "minimum", "maximă" = "maximum",
+        //   "mai mare" = "higher", "mai mică" = "lower".
+        'vârstă',
+        'vârstă minimă',
+        'vârstă maximă',
+        'vârstă minimă mai mare',
+        'vârstă maximă mai mică',
+        // Spanish (ES).
+        'edad mínima',
+        'edad máxima',
+        'edad minima', // unaccented variant sometimes returned
+        'edad maxima',
+        // Portuguese (PT / BR).
+        'idade mínima',
+        'idade máxima',
+        'idade minima',
+        'idade maxima',
+        // French (FR).
+        'âge minimum',
+        'âge maximum',
+        'age minimum',
+        'age maximum',
+        // German (DE).
+        'mindestalter',
+        'höchstalter',
+        'maximalalter',
       ],
       guidance: {
         title: 'Ad account flagged for Special Ad Categories',
