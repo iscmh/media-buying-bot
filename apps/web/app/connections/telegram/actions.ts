@@ -1,11 +1,62 @@
 'use server';
 
+import { randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { cascadePauseUser, getDb, logAuditEvent, schema } from '@mbb/db';
 import { sendBotMessage } from '@/lib/telegram/bot-api';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+
+/**
+ * Polish-25.8 Commit 47: mint a fresh 8-character alphanumeric link
+ * code, upsert into telegram_connections (pending status), return the
+ * code so the UI can render `/link <code>` for the user to send in
+ * Telegram. Codes are single-use + expire after 15 minutes (enforced
+ * in packages/db/src/telegram-link.ts on redemption).
+ */
+export async function generateTelegramLinkCodeAction(): Promise<{
+  ok: boolean;
+  code?: string;
+  error?: string;
+}> {
+  const user = await requireUser();
+  const db = getDb();
+  const code = randomBytes(6).toString('base64url').slice(0, 8).toUpperCase();
+
+  const existing = await db.query.telegramConnections.findFirst({
+    where: eq(schema.telegramConnections.userId, user.id),
+    columns: { id: true },
+  });
+  const now = new Date();
+  if (existing) {
+    await db
+      .update(schema.telegramConnections)
+      .set({
+        linkCode: code,
+        linkCodeGeneratedAt: now,
+        status: 'pending',
+        tgChatId: null,
+        linkedAt: null,
+        metadata: null,
+      })
+      .where(eq(schema.telegramConnections.id, existing.id));
+  } else {
+    await db.insert(schema.telegramConnections).values({
+      userId: user.id,
+      linkCode: code,
+      linkCodeGeneratedAt: now,
+      status: 'pending',
+    });
+  }
+  await logAuditEvent({
+    userId: user.id,
+    eventType: 'telegram_link_code_generated',
+    eventData: {},
+  });
+  revalidatePath('/settings/connections');
+  return { ok: true, code };
+}
 
 async function requireUser() {
   const supabase = await getSupabaseServerClient();

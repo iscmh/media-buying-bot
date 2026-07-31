@@ -20,12 +20,13 @@ import { MetaConnectedSummary } from '@/app/connections/meta/connected-summary';
 import { MetaTokenPasteForm } from './_meta/token-form';
 import { MetaSelectionForm } from './_meta/selection-form';
 import { listMetaResources } from './_meta/actions';
+import { TelegramPanel } from './_telegram/telegram-panel';
 
 export const metadata = { title: 'Connections' };
 export const dynamic = 'force-dynamic';
 
-type Tab = 'providers' | 'meta';
-const VALID_TABS: readonly Tab[] = ['providers', 'meta'];
+type Tab = 'providers' | 'meta' | 'telegram';
+const VALID_TABS: readonly Tab[] = ['providers', 'meta', 'telegram'];
 
 interface Props {
   searchParams: Promise<{ tab?: string }>;
@@ -75,6 +76,7 @@ export default async function SettingsConnectionsPage({ searchParams }: Props) {
       >
         <TabLink current={tab} target="providers" label="Providers" />
         <TabLink current={tab} target="meta" label="Meta" />
+        <TabLink current={tab} target="telegram" label="Telegram" />
       </nav>
 
       {tab === 'providers' && <ProvidersTab userId={userId} />}
@@ -84,6 +86,7 @@ export default async function SettingsConnectionsPage({ searchParams }: Props) {
           <MetaTab userId={userId} />
         </>
       )}
+      {tab === 'telegram' && <TelegramTab userId={userId} />}
     </AppShell>
   );
 }
@@ -314,5 +317,28 @@ async function MetaTab({ userId }: { userId: string }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Polish-25.8 Commit 47: Telegram tab restored. Renders TelegramPanel
+ * (client component) with the current connection state so the
+ * generate-link-code + disconnect flows have server-fetched data.
+ */
+async function TelegramTab({ userId }: { userId: string }) {
+  const db = getDb();
+  const conn = await db.query.telegramConnections.findFirst({
+    where: eq(schema.telegramConnections.userId, userId),
+    columns: { status: true, tgChatId: true, linkedAt: true, metadata: true },
+  });
+  const connected = conn?.status === 'active' && !!conn.tgChatId;
+  const meta = conn?.metadata as { tgUsername?: string } | null;
+  return (
+    <TelegramPanel
+      connected={connected}
+      tgUsername={meta?.tgUsername ?? null}
+      linkedAtIso={conn?.linkedAt?.toISOString() ?? null}
+      botUsername={process.env['NEXT_PUBLIC_TELEGRAM_BOT_USERNAME'] ?? null}
+    />
   );
 }
