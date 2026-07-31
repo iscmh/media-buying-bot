@@ -418,7 +418,7 @@ function estimateByPipeline(
         cost: round4(variantCount * CLAUDE_CONDENSER_USD),
       });
       breakdown.push({
-        item: `MakeUGC pre-cast avatar video (${variantCount} × $${MAKEUGC_STARTER_USD_PER_VIDEO.toFixed(4)})`,
+        item: `Instant UGC pre-cast avatar video (${variantCount} × $${MAKEUGC_STARTER_USD_PER_VIDEO.toFixed(4)})`,
         cost: round4(variantCount * MAKEUGC_STARTER_USD_PER_VIDEO),
       });
       break;

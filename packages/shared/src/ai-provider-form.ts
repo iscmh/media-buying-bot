@@ -110,7 +110,7 @@ export const AiProviderKeyInputSchema = z
         break;
       case 'makeugc':
         pattern = MAKEUGC_KEY_PATTERN;
-        hint = 'MakeUGC keys are 20+ chars from your API Starter dashboard at makeugc.com/api.';
+        hint = 'Instant UGC keys are 20+ chars from your API Starter dashboard at makeugc.com/api.';
         break;
     }
     if (!pattern.test(value.apiKey)) {
@@ -202,7 +202,7 @@ export const AI_PROVIDER_META: Record<
   elevenlabs: {
     label: 'ElevenLabs',
     description:
-      'TTS for the Hedra pipeline. Voice diversity across variants; source-voice cloning path in Polish-22.',
+      'TTS for the Hedra pipeline. Voice diversity across variants; source-voice cloning path shipping soon.',
     pricingUrl: 'https://elevenlabs.io/pricing',
     apiDocsUrl: 'https://elevenlabs.io/docs',
     verificationMethod: 'api',
@@ -210,15 +210,15 @@ export const AI_PROVIDER_META: Record<
   wavespeed_ai: {
     label: 'WaveSpeedAI',
     description:
-      'Higgsfield Soul reference-image generation ($0.09-0.23/run) for the Polish-23 kie.ai Veo 3.1 Lite pipeline. Pay-per-run, no subscription.',
+      'Higgsfield Soul reference-image generation ($0.09-0.23/run) for the character-locked Veo 3.1 Lite pipeline. Pay-per-run, no subscription.',
     pricingUrl: 'https://wavespeed.ai/pricing',
     apiDocsUrl: 'https://wavespeed.ai/docs/docs-api/higgsfield/higgsfield-soul-image-to-image',
     verificationMethod: 'api',
   },
   makeugc: {
-    label: 'MakeUGC',
+    label: 'Instant UGC',
     description:
-      'Pay-per-video UGC ad generator. $99/mo API Starter = 2,000 credits/mo = $0.0495/video (20-50x cheaper than HeyGen/Veo). Polish-25 pivot after Polish-24 HeyGen avatar-quality rejection.',
+      'Pay-per-video UGC ad generator. $99/mo API Starter = 2,000 credits/mo = $0.0495/video (20-50x cheaper than HeyGen/Veo). Character consistency guaranteed via pre-cast avatar library.',
     pricingUrl: 'https://makeugc.com/pricing',
     apiDocsUrl: 'https://makeugc.com/api',
     verificationMethod: 'api',

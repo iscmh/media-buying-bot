@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.8.4';
+export const POLISH_VERSION = '25.8.5';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.8.4';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.8 Commit 51 (part 2 of 2) - AI voice tell sweep across user-facing strings. Mechanical em-dash + AI-phrasing pass across ~50 files: admin surfaces (activity/applications/errors/invites/raw-ugc/test-actions/waitlist), concepts + generate flow, runs/[id] job-review-client (12 sites), /launched page + actions, dashboard + tiles, settings (main + form + rules + acks + billing + heygen + presets + connections), onboarding (agency-bm/keys/risk), meta connection cards, metadata titles, error boundary, pending page, beta banner, command palette, pipeline label formatter. Telegram bot: bot.ts + commands-pause.ts + commands-settings.ts message text. Jobs: telegram-format.ts summary templates. Shared modules: onboarding.ts (dropped 'Please'), settings-form.ts labels, error-translation.ts (kept 'regenerating' string that a test greps for). Empty-cell placeholder swap: typographic '\u2014' \u2192 '-' across ~30 sites in table cells + KPI tiles. One 'We recommend' \u2192 direct imperative. Zero hits on Leverage/Utilize/Facilitate/Prior to and other listed AI-tell phrases (codebase already reads operator-y). Test-dependency accommodations: error-translation PROMINENT_PEOPLE_FILTER 'Try regenerating' kept because packages/shared/tests/error-translation.test.ts:17 asserts /regenerating/i. Did NOT touch: legal content (Commit 50 handled TOS + Privacy), tests, worker pipeline prompts, packages/shared/src/prompts/**, video-models, ai-provider-form, character-lock or omni prompt files, comments, log messages, needles arrays in meta-error-guidance, migrations. Full workspace typecheck green.";
+  "Polish-25.8 Commit 52 - jargon leak sweep + regression tripwire. Operator flagged 'Polish-XX' + 'MakeUGC' still surfacing on provider cards + cost line-items despite Commit 40's sweep. Fixed 5 user-visible leaks in shared/src: ai-provider-form.ts (elevenlabs description dropped 'Polish-22' reference, wavespeed_ai description dropped 'Polish-23' reference, makeugc card label 'MakeUGC' -> 'Instant UGC', makeugc description dropped 'Polish-25 pivot after Polish-24' history, key-hint text 'MakeUGC keys' -> 'Instant UGC keys') + cost-estimation.ts (line-item label 'MakeUGC pre-cast avatar video' -> 'Instant UGC pre-cast avatar video'). New regression tripwire packages/shared/tests/no-jargon-leaks.test.ts walks every packages/shared/src/**/*.ts, extracts string literals (double / single / template), strips ${} interpolations + code comments, matches against jargon patterns (Polish-XX version markers, Commit XX references, MakeUGC brand, polish25_/polish23_ enum leaks, raw makeugc/wavespeed_ai/gemini_nano_banana enum leaks). Zero-tolerance: any hit fails CI with the file + string snippet + fix guidance. Allowlist covers internal-identifier files (polish-version, pipeline-descriptors, types, prompt fragments, kie-omni-prompt, video-models, cost-estimation switch cases, index.ts barrel, ai-provider-form enum keys). Future edit that reintroduces jargon in a user-facing string fails the build before it can ship. Zero remaining leaks in in-scope files.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
