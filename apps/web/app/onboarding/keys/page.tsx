@@ -84,8 +84,8 @@ export default async function OnboardingKeysPage() {
         <h1 className="text-fg text-3xl font-bold tracking-tight">Connect your keys</h1>
         <p className="text-fg-muted mt-2 max-w-prose text-sm leading-relaxed">
           Ads Bot is bring-your-own-key for Claude and Gemini. Paste an API key for each and
-          we&apos;ll verify it on the spot. Instant UGC video generation is included on the platform
-          — no extra key needed.
+          we&apos;ll verify it on the spot. Instant UGC video generation is included on the
+          platform. No extra key needed.
         </p>
       </header>
 

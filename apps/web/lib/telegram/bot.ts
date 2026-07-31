@@ -162,15 +162,15 @@ function registerHelp(bot: Bot): void {
       [
         'Ads Bot commands:',
         '',
-        '/start [code] — link this chat, or check status',
-        '/link <code> — link this chat to your web account',
-        '/status — connection + pause snapshot',
-        '/stats [24h|7d|30d|all] — spend + conversions + ROAS',
-        '/launch — interactively launch approved variants',
-        '/pause — freeze all bot auto-actions',
-        '/unpause — resume bot',
-        '/settings — notification preferences (toggles + subcommands)',
-        '/help — this message',
+        '/start [code] - link this chat, or check status',
+        '/link <code> - link this chat to your web account',
+        '/status - connection + pause snapshot',
+        '/stats [24h|7d|30d|all] - spend + conversions + ROAS',
+        '/launch - interactively launch approved variants',
+        '/pause - freeze all bot auto-actions',
+        '/unpause - resume bot',
+        '/settings - notification preferences (toggles + subcommands)',
+        '/help - this message',
         '',
         'Kill / scale approvals arrive as inline buttons on this chat when the bot recommends action.',
       ].join('\n'),
@@ -248,11 +248,11 @@ function registerStats(bot: Bot): void {
     const roas =
       metrics.impliedRoas != null
         ? `${metrics.impliedRoas.toFixed(2)}x${metrics.impliedRoasIsEstimate ? '*' : ''}`
-        : '—';
-    const ctr = metrics.avgCtrPct != null ? `${metrics.avgCtrPct.toFixed(2)}%` : '—';
-    const cpc = metrics.avgCpcUsd != null ? `$${metrics.avgCpcUsd.toFixed(2)}` : '—';
+        : '-';
+    const ctr = metrics.avgCtrPct != null ? `${metrics.avgCtrPct.toFixed(2)}%` : '-';
+    const cpc = metrics.avgCpcUsd != null ? `$${metrics.avgCpcUsd.toFixed(2)}` : '-';
     const lines = [
-      `Stats — last ${range}`,
+      `Stats - last ${range}`,
       `Spend       $${metrics.totalSpendUsd.toFixed(2)}`,
       `Impressions ${metrics.totalImpressions.toLocaleString()}`,
       `Clicks      ${metrics.totalClicks.toLocaleString()} (CTR ${ctr}, CPC ${cpc})`,
@@ -299,7 +299,7 @@ function registerApprovalCallback(bot: Bot): void {
     const link = await getActiveLinkByChatId(tgChatId);
     if (!link) {
       await ctx.answerCallbackQuery({
-        text: 'This chat is not linked — re-link via the web app.',
+        text: 'This chat is not linked. Re-link via the web app.',
         show_alert: true,
       });
       return;

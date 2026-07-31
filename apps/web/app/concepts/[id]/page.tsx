@@ -131,11 +131,11 @@ export default async function ConceptDetailPage({ params }: Props) {
           <span className="ml-2 text-[10px] normal-case tracking-normal">(click to expand)</span>
         </summary>
         <div className="border-border-subtle space-y-3 border-t p-4 text-sm">
-          <Row label="File" value={concept.fileUrl ?? '—'} mono />
+          <Row label="File" value={concept.fileUrl ?? '-'} mono />
           {concept.contentType === 'static' && (
             <>
-              <Row label="Headline" value={concept.staticHeadline ?? '—'} />
-              <Row label="Primary text" value={concept.staticPrimaryText ?? '—'} />
+              <Row label="Headline" value={concept.staticHeadline ?? '-'} />
+              <Row label="Primary text" value={concept.staticPrimaryText ?? '-'} />
               {concept.staticDescription && (
                 <Row label="Description" value={concept.staticDescription} />
               )}

@@ -112,7 +112,7 @@ export async function HeygenAvatarSection({ userId }: { userId: string }) {
         <CardDescription>
           By default the bot asks Claude to match a different HeyGen avatar to your source persona
           for each variant in a generation. Set one here only if you want every variant in every
-          generation to use the same avatar — useful for consistent branding, but you lose the
+          generation to use the same avatar. Useful for consistent branding, but you lose the
           diversity that beats ad fatigue.
         </CardDescription>
       </CardHeader>

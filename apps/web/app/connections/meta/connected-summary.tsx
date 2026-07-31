@@ -72,7 +72,7 @@ export function MetaConnectedSummary({
             accountCurrency ? (
               <span className="font-mono">{accountCurrency}</span>
             ) : (
-              <span className="text-fg-muted text-xs">not set — reconnect Meta to capture</span>
+              <span className="text-fg-muted text-xs">not set. Reconnect Meta to capture</span>
             )
           }
         />

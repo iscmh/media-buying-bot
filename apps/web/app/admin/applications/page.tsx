@@ -5,7 +5,7 @@ import { formatDateTime } from '@/lib/format/date';
 import { requireAdmin } from '@/lib/admin-gate';
 import { ApplicationsClient } from './applications-client';
 
-export const metadata = { title: 'Applications — Admin' };
+export const metadata = { title: 'Applications - Admin' };
 export const dynamic = 'force-dynamic';
 
 export default async function AdminApplicationsPage() {

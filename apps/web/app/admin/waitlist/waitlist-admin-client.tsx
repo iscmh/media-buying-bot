@@ -52,11 +52,11 @@ export function WaitlistAdminClient({ unapproved: initial, approved }: Props) {
     }
     setUnapproved((prev) => prev.filter((e) => e.id !== id));
     const where = result.emailStubbed
-      ? '(stub mode — check server logs for the email body)'
+      ? '(stub mode - check server logs for the email body)'
       : result.emailSent
         ? 'email sent'
         : 'but email send failed';
-    setToast(`Approved. Code ${result.code} — ${where}.`);
+    setToast(`Approved. Code ${result.code} - ${where}.`);
     // Auto-clear toast after a few seconds.
     setTimeout(() => setToast(null), 6000);
   }
@@ -90,10 +90,10 @@ export function WaitlistAdminClient({ unapproved: initial, approved }: Props) {
                 unapproved.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell className="text-sm">{e.email}</TableCell>
-                    <TableCell className="text-xs">{e.name ?? '—'}</TableCell>
-                    <TableCell className="text-xs">{e.source ?? '—'}</TableCell>
+                    <TableCell className="text-xs">{e.name ?? '-'}</TableCell>
+                    <TableCell className="text-xs">{e.source ?? '-'}</TableCell>
                     <TableCell className="max-w-[24ch] text-xs">
-                      {e.message ? <span title={e.message}>{e.message}</span> : '—'}
+                      {e.message ? <span title={e.message}>{e.message}</span> : '-'}
                     </TableCell>
                     <TableCell className="text-xs">
                       {formatDateTime(new Date(e.createdAtIso))}
@@ -150,8 +150,8 @@ export function WaitlistAdminClient({ unapproved: initial, approved }: Props) {
                   approved.map((e) => (
                     <TableRow key={e.id}>
                       <TableCell className="text-sm">{e.email}</TableCell>
-                      <TableCell className="text-xs">{e.name ?? '—'}</TableCell>
-                      <TableCell className="text-xs">{e.source ?? '—'}</TableCell>
+                      <TableCell className="text-xs">{e.name ?? '-'}</TableCell>
+                      <TableCell className="text-xs">{e.source ?? '-'}</TableCell>
                       <TableCell className="text-xs">
                         {formatDateTime(new Date(e.createdAtIso))}
                       </TableCell>

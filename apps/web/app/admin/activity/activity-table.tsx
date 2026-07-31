@@ -61,7 +61,7 @@ function withinSevenDays(iso: string | null): boolean {
 }
 
 function fmtDate(iso: string | null): string {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const d = new Date(iso);
   const now = Date.now();
   const delta = now - d.getTime();

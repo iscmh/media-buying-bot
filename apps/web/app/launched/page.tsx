@@ -298,13 +298,13 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                         <p>
                           <span className="text-fg-subtle">camp:</span>{' '}
                           <span className="text-fg-muted">
-                            {truncateMiddle(row.metaCampaignId ?? '—', 14)}
+                            {truncateMiddle(row.metaCampaignId ?? '-', 14)}
                           </span>
                         </p>
                         <p>
                           <span className="text-fg-subtle">ad:</span>{' '}
                           <span className="text-fg-muted">
-                            {truncateMiddle(row.metaAdId ?? '—', 14)}
+                            {truncateMiddle(row.metaAdId ?? '-', 14)}
                           </span>
                         </p>
                       </div>
@@ -347,20 +347,20 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                       </div>
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">
-                      {spend != null ? `$${spend.toFixed(2)}` : '—'}
+                      {spend != null ? `$${spend.toFixed(2)}` : '-'}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {impressions != null
-                        ? `${impressions.toLocaleString()} / ${ctrPct != null ? `${ctrPct.toFixed(2)}%` : '—'}`
-                        : '—'}
+                        ? `${impressions.toLocaleString()} / ${ctrPct != null ? `${ctrPct.toFixed(2)}%` : '-'}`
+                        : '-'}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {clicks != null
-                        ? `${clicks.toLocaleString()} / ${cpc != null ? `$${cpc.toFixed(2)}` : '—'}`
-                        : '—'}
+                        ? `${clicks.toLocaleString()} / ${cpc != null ? `$${cpc.toFixed(2)}` : '-'}`
+                        : '-'}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">
-                      {conversions ?? '—'}
+                      {conversions ?? '-'}
                     </TableCell>
                     <TableCell
                       className={cn(
@@ -376,7 +376,7 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                           : undefined
                       }
                     >
-                      {spend != null && spend > 0 ? `${roas.toFixed(2)}x` : '—'}
+                      {spend != null && spend > 0 ? `${roas.toFixed(2)}x` : '-'}
                       {spend != null && spend > 0 && roasIsEstimate && (
                         <span className="text-fg-subtle ml-0.5" aria-hidden>
                           *
@@ -433,7 +433,7 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
       <p className="text-fg-subtle mt-6 text-xs">
         ROAS marked with <span aria-hidden>*</span> (italic) is estimated at $
         {assumedValue.toFixed(0)}
-        /conversion — Meta pixel isn&apos;t sending purchase values for those ads. Non-italic ROAS
+        /conversion. Meta pixel isn&apos;t sending purchase values for those ads. Non-italic ROAS
         comes from Meta&apos;s real action_values. Change your assumed value in{' '}
         <a
           href="/settings"

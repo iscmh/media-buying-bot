@@ -24,7 +24,7 @@ export function SpendChart({ data }: Props) {
       <EmptyState
         icon={LineChart}
         title="No daily summary history yet."
-        description="Your first chart shows up after 24h of bot activity — the recap cron writes one row per day per user."
+        description="Your first chart shows up after 24h of bot activity. The recap cron writes one row per day per user."
       />
     );
   }

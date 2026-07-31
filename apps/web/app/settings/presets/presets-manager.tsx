@@ -105,7 +105,7 @@ export function PresetsManager({ initial, optimizationGoals, placementTypes }: P
                   <div>
                     <CardTitle className="text-base">{p.name}</CardTitle>
                     <p className="text-fg-muted mt-1 text-xs">
-                      {p.targetingCountries.join(', ')} · Age {p.ageMin}–{p.ageMax} ·{' '}
+                      {p.targetingCountries.join(', ')} · Age {p.ageMin}-{p.ageMax} ·{' '}
                       {p.optimizationGoal} · {p.placementType} · ${p.perAdDailyBudgetUsd.toFixed(2)}
                       /day
                     </p>
@@ -267,7 +267,7 @@ function PresetDialog({
               id="preset-name"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
-              placeholder="US cold — $20/day"
+              placeholder="US cold - $20/day"
               maxLength={60}
               autoFocus
             />

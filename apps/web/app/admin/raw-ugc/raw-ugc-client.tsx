@@ -213,7 +213,7 @@ export function RawUgcClient({ avatars }: Props) {
       <section className="bg-bg-surface flex flex-col rounded-sm border">
         <div className="border-b px-3 py-2">
           <p className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
-            Avatars — {filteredAvatars.length} / {avatars.length}
+            Avatars: {filteredAvatars.length} / {avatars.length}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
             <FilterChip
@@ -372,7 +372,7 @@ export function RawUgcClient({ avatars }: Props) {
                 : 'Generate video'}
         </Button>
         <p className="text-fg-subtle text-[10px]">
-          Uses MAKEUGC_MANAGED_KEY. Video URL comes back from the render provider&apos;s CDN —
+          Uses MAKEUGC_MANAGED_KEY. Video URL comes back from the render provider&apos;s CDN.
           download + use externally. Nothing persisted to the app database.
         </p>
       </section>
@@ -403,7 +403,7 @@ export function RawUgcClient({ avatars }: Props) {
             <p className="text-fg-subtle text-[10px]">
               Videos usually complete in 30-90s. If the render queue is backed up they can take up
               to ~10 min. If this hits the poll cap you&apos;ll see a &ldquo;still generating&rdquo;
-              panel with a Recheck button — credit is already charged and the video finishes
+              panel with a Recheck button. Credit is already charged and the video finishes
               eventually.
             </p>
           </div>
@@ -414,7 +414,7 @@ export function RawUgcClient({ avatars }: Props) {
             <p className="text-fg-muted leading-snug">
               We polled {MAX_POLL_ATTEMPTS} times (
               {Math.round((MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS) / 60_000)} min) and the video is
-              still processing. Credit is already charged — the render will land on Instant UGC
+              still processing. Credit is already charged. The render will land on Instant UGC
               eventually. Come back in a few minutes and hit Recheck, or open the render provider
               dashboard to watch it directly.
             </p>

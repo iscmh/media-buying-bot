@@ -6,7 +6,7 @@ import { formatDateTime } from '@/lib/format/date';
 import { requireAdmin } from '@/lib/admin-gate';
 import { InvitesClient } from './invites-client';
 
-export const metadata = { title: 'Invite codes — Admin' };
+export const metadata = { title: 'Invite codes - Admin' };
 export const dynamic = 'force-dynamic';
 
 export default async function AdminInvitesPage() {
@@ -33,7 +33,7 @@ export default async function AdminInvitesPage() {
             claimed.{' '}
             {foundingCount >= FOUNDING_MEMBER_CAP ? (
               <span className="text-muted-foreground">
-                Cap reached — new signups are regular users.
+                Cap reached. New signups are regular users.
               </span>
             ) : (
               <span className="text-muted-foreground">

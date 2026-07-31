@@ -17,7 +17,7 @@ import { describePipeline, pipelineFromString } from '@mbb/shared';
  *      raw `snake_case` in the UI.
  */
 export function friendlyPipeline(raw: string | null | undefined): string {
-  if (!raw) return '—';
+  if (!raw) return '-';
   const pipeline = pipelineFromString(raw);
   if (pipeline) return describePipeline(pipeline).label;
   if (raw === 'makeugc' || raw === 'polish25_makeugc') return 'Instant UGC';

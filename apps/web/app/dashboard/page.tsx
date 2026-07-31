@@ -179,7 +179,7 @@ export default async function DashboardPage({ searchParams }: Props) {
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs text-xs">
-                  You&apos;re one of the first 50 users. Ads Bot access stays free forever — no
+                  You&apos;re one of the first 50 users. Ads Bot access stays free forever, no
                   subscription required.
                 </TooltipContent>
               </Tooltip>
@@ -222,7 +222,7 @@ export default async function DashboardPage({ searchParams }: Props) {
             />
             <KpiTile
               label="Implied ROAS"
-              value={metrics.impliedRoas != null ? `${metrics.impliedRoas.toFixed(2)}x` : '—'}
+              value={metrics.impliedRoas != null ? `${metrics.impliedRoas.toFixed(2)}x` : '-'}
               numericValue={metrics.impliedRoas}
               icon={TrendingUp}
               tone={roasTone}

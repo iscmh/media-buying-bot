@@ -9,7 +9,7 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { loadConnectedProviders } from '../actions';
 import { GenerationRequestForm } from '../generation-request-form';
 
-export const metadata = { title: 'Generate variants (advanced) — Ads Bot' };
+export const metadata = { title: 'Generate variants (advanced) - Ads Bot' };
 
 interface Props {
   params: Promise<{ id: string }>;

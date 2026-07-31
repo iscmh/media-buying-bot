@@ -12,7 +12,7 @@ export default async function OnboardingRiskPage() {
       <header className="mb-6">
         <h1 className="text-3xl font-bold">Read this before connecting Meta</h1>
         <p className="text-muted-foreground mt-1 text-sm">
-          Five sections. Scroll to the bottom — the acknowledgment unlocks once you have.
+          Five sections. Scroll to the bottom. The acknowledgment unlocks once you have.
         </p>
       </header>
 

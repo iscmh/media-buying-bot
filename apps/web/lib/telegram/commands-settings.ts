@@ -73,7 +73,7 @@ export function registerSettingsCallback(bot: Bot): void {
     const link = await getActiveLinkByChatId(tgChatId);
     if (!link) {
       await ctx.answerCallbackQuery({
-        text: 'Not linked — re-link via the web app.',
+        text: 'Not linked. Re-link via the web app.',
         show_alert: true,
       });
       return;
@@ -133,7 +133,7 @@ function renderPrefsSummary(p: TelegramNotificationPreferences): string {
     `Scale alerts      ${onOff(p.scale_alerts_enabled)}`,
     `Rejection alerts  ${onOff(p.rejection_alerts_enabled)}`,
     `Threshold alerts  ${onOff(p.threshold_breach_alerts_enabled)}`,
-    `Quiet hours       ${onOff(p.quiet_hours_enabled)}  (${String(p.quiet_hours_start_local).padStart(2, '0')}:00–${String(p.quiet_hours_end_local).padStart(2, '0')}:00 local)`,
+    `Quiet hours       ${onOff(p.quiet_hours_enabled)}  (${String(p.quiet_hours_start_local).padStart(2, '0')}:00-${String(p.quiet_hours_end_local).padStart(2, '0')}:00 local)`,
     `Summary format    ${p.summary_format}`,
     '',
     'Tap a button below to toggle. Or send:',

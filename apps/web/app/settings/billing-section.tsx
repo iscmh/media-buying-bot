@@ -49,7 +49,7 @@ export function BillingSection({
     );
   }
 
-  const planLabel = plan ?? '—';
+  const planLabel = plan ?? '-';
   const statusLabel = status ?? 'none';
 
   return (

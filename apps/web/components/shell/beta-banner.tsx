@@ -38,7 +38,7 @@ export function BetaBanner({ className }: Props) {
       <div className="min-w-0 flex-1">
         <p className="text-fg font-medium">Meta launch flow is in BETA.</p>
         <p className="text-fg-muted mt-0.5">
-          Test with small budgets ($5–20/day) while we harden the flow. Hit a bug? Drop it in the
+          Test with small budgets ($5-20/day) while we harden the flow. Hit a bug? Drop it in the
           beta feedback channel so we can chase it fast.
         </p>
         <a

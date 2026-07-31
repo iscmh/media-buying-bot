@@ -71,7 +71,7 @@ async function dispatchApproval({
       metaAdSetId: true,
     },
   });
-  if (!ad) return { ok: false, message: 'Ad not found — refresh and try again.' };
+  if (!ad) return { ok: false, message: 'Ad not found. Refresh and try again.' };
 
   if (action === 'kill' && !ad.killRecommendedAt) {
     return { ok: false, message: 'No open kill recommendation for this ad.' };
@@ -82,7 +82,7 @@ async function dispatchApproval({
   if (action === 'scale' && !ad.metaAdSetId) {
     return {
       ok: false,
-      message: "Ad has no meta_ad_set_id — Meta didn't return one at launch. Can't scale.",
+      message: "Ad has no meta_ad_set_id. Meta didn't return one at launch. Can't scale.",
     };
   }
 
@@ -135,7 +135,7 @@ async function dispatchApproval({
   const verb = decision === 'confirm' ? 'approved' : 'skipped';
   return {
     ok: true,
-    message: `${action === 'kill' ? 'Kill' : 'Scale'} ${verb}. Meta call runs in the background — refresh in a few seconds to see the status change.`,
+    message: `${action === 'kill' ? 'Kill' : 'Scale'} ${verb}. Meta call runs in the background. Refresh in a few seconds to see the status change.`,
   };
 }
 

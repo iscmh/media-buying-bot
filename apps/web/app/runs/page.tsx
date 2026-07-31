@@ -63,7 +63,7 @@ export default async function RunsPage() {
         <EmptyState
           icon={Workflow}
           title="No runs yet."
-          description="Upload a concept and generate variants — every run lands here."
+          description="Upload a concept and generate variants. Every run lands here."
         />
       ) : (
         <div className="overflow-x-auto rounded-sm border">
@@ -104,16 +104,16 @@ export default async function RunsPage() {
                     ) : null}
                   </TableCell>
                   <TableCell className="text-fg-muted text-right font-mono text-xs">
-                    {j.estimatedCostUsd != null ? `$${Number(j.estimatedCostUsd).toFixed(3)}` : '—'}
+                    {j.estimatedCostUsd != null ? `$${Number(j.estimatedCostUsd).toFixed(3)}` : '-'}
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs">
-                    {j.actualCostUsd != null ? `$${Number(j.actualCostUsd).toFixed(3)}` : '—'}
+                    {j.actualCostUsd != null ? `$${Number(j.actualCostUsd).toFixed(3)}` : '-'}
                   </TableCell>
                   <TableCell className="text-fg-muted font-mono text-xs">
                     {formatDateTime(j.requestedAt)}
                   </TableCell>
                   <TableCell className="text-fg-muted font-mono text-xs">
-                    {j.completedAt ? formatDateTime(j.completedAt) : '—'}
+                    {j.completedAt ? formatDateTime(j.completedAt) : '-'}
                   </TableCell>
                 </TableRow>
               ))}

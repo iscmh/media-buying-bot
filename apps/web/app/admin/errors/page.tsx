@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/shell/page-header';
 import { requireAdmin } from '@/lib/admin-gate';
 import { ErrorsClient, type SerializedGroupedRow, type SerializedRecentRow } from './errors-client';
 
-export const metadata = { title: 'Errors — Admin' };
+export const metadata = { title: 'Errors - Admin' };
 export const dynamic = 'force-dynamic';
 
 const VALID_RANGES: ErrorRangeKey[] = ['1h', '24h', '7d', '30d', 'all'];

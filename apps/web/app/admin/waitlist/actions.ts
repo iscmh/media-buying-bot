@@ -57,7 +57,7 @@ export async function approveWaitlistEntryAction(entryId: string): Promise<Appro
 
   const send = await sendEmail({
     to: email,
-    subject: "You're off the waitlist — your Media Buying Bot invite",
+    subject: "You're off the waitlist - your Media Buying Bot invite",
     text: [
       'Hey,',
       '',
@@ -69,7 +69,7 @@ export async function approveWaitlistEntryAction(entryId: string): Promise<Appro
       '',
       `Sign up at: ${process.env.NEXT_PUBLIC_SITE_URL ?? 'https://app.example.com'}/signup`,
       '',
-      '— Media Buying Bot',
+      '- Media Buying Bot',
     ].join('\n'),
   });
 

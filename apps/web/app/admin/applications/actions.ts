@@ -65,7 +65,7 @@ export async function approveApplicationAction(input: {
   });
   if (!app) return { ok: false, errorMessage: 'Application not found.' };
   if (app.status === 'paid') {
-    return { ok: false, errorMessage: 'Already paid — leave it alone.' };
+    return { ok: false, errorMessage: 'Already paid. Leave it alone.' };
   }
 
   // 1. Invite code.
@@ -79,7 +79,7 @@ export async function approveApplicationAction(input: {
   if (!productId) {
     return {
       ok: false,
-      errorMessage: `${TIER_TO_ENV[input.tier]} env var is not set — configure it on the host before approving.`,
+      errorMessage: `${TIER_TO_ENV[input.tier]} env var is not set. Configure it on the host before approving.`,
     };
   }
   const link = await createPaymentLink({
@@ -119,7 +119,7 @@ export async function approveApplicationAction(input: {
   // 4. Email.
   const send = await sendEmail({
     to: app.email,
-    subject: "You're approved — your Media Buying Bot checkout link",
+    subject: "You're approved - your Media Buying Bot checkout link",
     text: [
       `Hey${app.name ? ` ${app.name}` : ''},`,
       '',
@@ -131,7 +131,7 @@ export async function approveApplicationAction(input: {
       '',
       `Code expires ${inviteCode.expiresAt.toISOString().slice(0, 10)}. Single-use.`,
       '',
-      '— Media Buying Bot',
+      '- Media Buying Bot',
     ].join('\n'),
   });
 

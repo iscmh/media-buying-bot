@@ -3,7 +3,7 @@ import { requireAdmin } from '@/lib/admin-gate';
 import { loadTestableAds } from './actions';
 import { TestActionsClient } from './test-actions-client';
 
-export const metadata = { title: 'Test actions — Admin' };
+export const metadata = { title: 'Test actions - Admin' };
 
 export default async function TestActionsPage() {
   await requireAdmin();

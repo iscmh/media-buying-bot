@@ -70,7 +70,7 @@ export async function testScaleAction(
     columns: { id: true, userId: true, metaAdSetId: true, dailyBudgetUsd: true },
   });
   if (!ad) return { ok: false, message: 'Ad not found.' };
-  if (!ad.metaAdSetId) return { ok: false, message: 'Ad has no meta_ad_set_id — cannot scale.' };
+  if (!ad.metaAdSetId) return { ok: false, message: 'Ad has no meta_ad_set_id. Cannot scale.' };
 
   const [approval] = await db
     .insert(schema.pendingApprovals)

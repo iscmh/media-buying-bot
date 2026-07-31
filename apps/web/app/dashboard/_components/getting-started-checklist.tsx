@@ -69,7 +69,7 @@ export function GettingStartedChecklist({ state }: Props) {
     {
       done: state.hasConcept,
       title: 'Upload a winning ad',
-      description: 'UGC video or static image — the ad you want to iterate off of.',
+      description: 'UGC video or static image. The ad you want to iterate off of.',
       cta: { href: '/concepts', label: 'Upload' },
     },
     {

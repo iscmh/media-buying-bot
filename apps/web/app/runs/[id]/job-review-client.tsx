@@ -365,7 +365,7 @@ export function JobReviewClient({
                   {p.status.replace(/_/g, ' ')}
                 </div>
                 <div className="text-fg whitespace-pre-wrap break-words font-mono">
-                  {p.errorMessage ?? '(no error message from Meta — check /launched for detail)'}
+                  {p.errorMessage ?? '(no error message from Meta. Check /launched for detail)'}
                 </div>
                 {/* Polish-25.6 Commit 38: inline guidance banner. Turns
                     Meta's opaque rejection (esp. Special Ad Category
@@ -458,7 +458,7 @@ export function JobReviewClient({
         <div className="border-[color:var(--accent-positive)]/30 bg-[color:var(--accent-positive)]/10 mb-6 rounded-sm border p-4 text-sm">
           <strong>Ready for launch.</strong>{' '}
           <span className="text-fg-muted">
-            {approvedCount} approved variant{approvedCount === 1 ? '' : 's'} — hit Launch approved
+            {approvedCount} approved variant{approvedCount === 1 ? '' : 's'}. Hit Launch approved
             above to push them to Meta as paused ads.
           </span>
         </div>
@@ -484,7 +484,7 @@ export function JobReviewClient({
       {variants.some((v) => v.isClipPart) && (
         <details className="border-border bg-bg-elevated mt-6 rounded-sm border p-4">
           <summary className="cursor-pointer text-sm font-medium">
-            Source clips ({variants.filter((v) => v.isClipPart).length}) — transparency / individual
+            Source clips ({variants.filter((v) => v.isClipPart).length}). Transparency / individual
             download
           </summary>
           <div className="mt-4 grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
@@ -541,8 +541,8 @@ export function JobReviewClient({
               ALL ads launch <span className="uppercase">PAUSED</span>.
             </p>
             <p className="text-fg-muted mt-0.5 leading-snug">
-              You activate them manually in Meta Ads Manager. Zero spend until you do — regardless
-              of budget, targeting, or optimization settings below.
+              You activate them manually in Meta Ads Manager. Zero spend until you do, regardless of
+              budget, targeting, or optimization settings below.
             </p>
           </div>
 
@@ -602,7 +602,7 @@ export function JobReviewClient({
                   onChange={(e) => setPageId(e.target.value)}
                   className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
                 >
-                  <option value="">— Select a page —</option>
+                  <option value="">Select a page</option>
                   {pages.map((p) => (
                     <option key={p.pageId} value={p.pageId}>
                       {p.pageName} ({p.pageId})
@@ -650,7 +650,7 @@ export function JobReviewClient({
                 </button>
               </div>
               <p className="text-fg-muted text-xs">
-                {countries.join(', ')} · Age {ageMin}–{ageMax} · {launchSnapshot.optimizationGoal} ·{' '}
+                {countries.join(', ')} · Age {ageMin}-{ageMax} · {launchSnapshot.optimizationGoal} ·{' '}
                 {launchSnapshot.placementType}
               </p>
               {showCustomizeTargeting && (
@@ -720,7 +720,7 @@ export function JobReviewClient({
             </p>
             {isFirstLiveLaunch && (
               <p className="text-fg-muted text-xs">
-                First live launch — capped at ${launchSnapshot.firstLaunchCapUsd.toFixed(2)} total
+                First live launch. Capped at ${launchSnapshot.firstLaunchCapUsd.toFixed(2)} total
                 daily exposure.
               </p>
             )}
@@ -771,7 +771,7 @@ export function JobReviewClient({
                 countries.length === 0
               }
             >
-              {launchPending ? 'Launching…' : 'Launch (paused in Meta — activate manually)'}
+              {launchPending ? 'Launching…' : 'Launch (paused in Meta, activate manually)'}
             </Button>
           </div>
         </DialogContent>
@@ -782,10 +782,10 @@ export function JobReviewClient({
       <Dialog open={showTripleAck} onOpenChange={setShowTripleAck}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>First-time live launch — read carefully</DialogTitle>
+            <DialogTitle>First-time live launch. Read carefully</DialogTitle>
             <DialogDescription>
               Live launches push real ads to your Meta ad account. They are created PAUSED, so no
-              money moves until you activate them. Still — confirm you understand each statement
+              money moves until you activate them. Still, confirm you understand each statement
               below before continuing.
             </DialogDescription>
           </DialogHeader>
@@ -818,7 +818,7 @@ export function JobReviewClient({
                 className="mt-0.5 h-4 w-4"
               />
               <span>
-                I will manually activate ads in Meta Ads Manager — they always start PAUSED.
+                I will manually activate ads in Meta Ads Manager. They always start PAUSED.
               </span>
             </label>
           </div>
@@ -976,7 +976,7 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
         <Dialog open={expandOpen} onOpenChange={setExpandOpen}>
           <DialogContent className="max-h-[95vh] max-w-4xl overflow-y-auto p-0 sm:p-0">
             <DialogTitle className="sr-only">
-              {variant.headline ?? 'Generated variant'} — full size view
+              {variant.headline ?? 'Generated variant'} - full size view
             </DialogTitle>
             <div className="flex flex-col">
               <div className="bg-muted flex items-center justify-center">

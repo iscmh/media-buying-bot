@@ -147,7 +147,7 @@ export function MetaSelectionForm({ businesses, adAccounts }: Props) {
                             {!selectable && (
                               <span className="ml-auto inline-flex items-center gap-1 text-xs text-[color:var(--destructive-color)]">
                                 <AlertTriangle className="h-3.5 w-3.5" />
-                                {AD_ACCOUNT_STATUS_LABELS[aa.account_status] ?? 'unavailable'} —
+                                {AD_ACCOUNT_STATUS_LABELS[aa.account_status] ?? 'unavailable'} -
                                 reactivate before selecting
                               </span>
                             )}

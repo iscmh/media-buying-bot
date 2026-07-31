@@ -65,7 +65,7 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
     }
     setPending((prev) => prev.filter((a) => a.id !== applicationId));
     const emailState = result.emailStubbed
-      ? '(email stubbed — check server logs)'
+      ? '(email stubbed - check server logs)'
       : result.emailSent
         ? 'email sent'
         : 'email FAILED';
@@ -122,11 +122,11 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
                   const rows = [
                     <TableRow key={a.id}>
                       <TableCell className="text-sm">{a.email}</TableCell>
-                      <TableCell className="text-xs">{a.name ?? '—'}</TableCell>
-                      <TableCell className="text-xs">{a.agencyName ?? '—'}</TableCell>
-                      <TableCell className="text-xs">{a.monthlyAdSpendUsd ?? '—'}</TableCell>
+                      <TableCell className="text-xs">{a.name ?? '-'}</TableCell>
+                      <TableCell className="text-xs">{a.agencyName ?? '-'}</TableCell>
+                      <TableCell className="text-xs">{a.monthlyAdSpendUsd ?? '-'}</TableCell>
                       <TableCell className="text-xs">
-                        {a.verticals ? a.verticals.split(',').slice(0, 3).join(', ') : '—'}
+                        {a.verticals ? a.verticals.split(',').slice(0, 3).join(', ') : '-'}
                       </TableCell>
                       <TableCell className="text-xs">{a.createdAtLabel}</TableCell>
                       <TableCell>
@@ -162,15 +162,15 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
                           <dl className="space-y-1">
                             <div>
                               <dt className="text-muted-foreground inline">Why apply:</dt>{' '}
-                              <dd className="inline whitespace-pre-wrap">{a.whyApply ?? '—'}</dd>
+                              <dd className="inline whitespace-pre-wrap">{a.whyApply ?? '-'}</dd>
                             </div>
                             <div>
                               <dt className="text-muted-foreground inline">Heard from:</dt>{' '}
-                              <dd className="inline">{a.heardFrom ?? '—'}</dd>
+                              <dd className="inline">{a.heardFrom ?? '-'}</dd>
                             </div>
                             <div>
                               <dt className="text-muted-foreground inline">All verticals:</dt>{' '}
-                              <dd className="inline">{a.verticals ?? '—'}</dd>
+                              <dd className="inline">{a.verticals ?? '-'}</dd>
                             </div>
                           </dl>
                         </TableCell>
@@ -214,8 +214,8 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
                       <StatusBadge status={a.status} />
                     </TableCell>
                     <TableCell className="text-xs">{a.createdAtLabel}</TableCell>
-                    <TableCell className="text-xs">{a.approvedAtLabel ?? '—'}</TableCell>
-                    <TableCell className="text-xs">{a.paidAtLabel ?? '—'}</TableCell>
+                    <TableCell className="text-xs">{a.approvedAtLabel ?? '-'}</TableCell>
+                    <TableCell className="text-xs">{a.paidAtLabel ?? '-'}</TableCell>
                     <TableCell className="text-xs">
                       {a.whopCheckoutUrl ? (
                         <a
@@ -227,7 +227,7 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
                           link
                         </a>
                       ) : (
-                        '—'
+                        '-'
                       )}
                     </TableCell>
                   </TableRow>
@@ -254,9 +254,9 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
               onChange={(e) => setTier(e.target.value as 'monthly' | 'annual' | 'lifetime')}
               className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
             >
-              <option value="monthly">Monthly — $499/mo</option>
-              <option value="annual">Annual — $2,997/year</option>
-              <option value="lifetime">Lifetime — $6,667 once</option>
+              <option value="monthly">Monthly - $499/mo</option>
+              <option value="annual">Annual - $2,997/year</option>
+              <option value="lifetime">Lifetime - $6,667 once</option>
             </select>
           </div>
           <div className="flex justify-end gap-2">
@@ -284,7 +284,7 @@ export function ApplicationsClient({ pending: initialPending, processed }: Props
           <DialogHeader>
             <DialogTitle>Reject application</DialogTitle>
             <DialogDescription>
-              Optional internal reason — not shown to the applicant.
+              Optional internal reason. Not shown to the applicant.
             </DialogDescription>
           </DialogHeader>
           <textarea

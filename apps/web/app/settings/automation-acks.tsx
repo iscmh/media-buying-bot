@@ -76,7 +76,7 @@ export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Prop
           <p className="text-muted-foreground text-xs">
             {killAt
               ? `Acknowledged ${formatDateTime(new Date(killAt))}`
-              : 'Kill pauses the ad on Meta — it stops spending. Reversible from Ads Manager.'}
+              : 'Kill pauses the ad on Meta and stops spending. Reversible from Ads Manager.'}
           </p>
         </div>
         {killAt ? (
@@ -94,7 +94,7 @@ export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Prop
           <p className="text-muted-foreground text-xs">
             {scaleAt
               ? `Acknowledged ${formatDateTime(new Date(scaleAt))}`
-              : 'Scaling raises the ad set’s daily budget — irreversible spend until you pause.'}
+              : "Scaling raises the ad set's daily budget. Irreversible spend until you pause."}
           </p>
         </div>
         {scaleAt ? (
@@ -117,7 +117,7 @@ export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Prop
             </DialogDescription>
           </DialogHeader>
           <p className="text-muted-foreground text-xs">
-            One-time ack — subsequent kills don&apos;t prompt this dialog.
+            One-time ack. Subsequent kills don&apos;t prompt this dialog.
           </p>
           <div className="flex justify-end gap-2">
             <Button
@@ -143,11 +143,11 @@ export function AutomationAcks({ killAcknowledgedAt, scaleAcknowledgedAt }: Prop
               When the bot recommends scaling an ad and you tap Approve on the /launched page, the
               ad set&rsquo;s daily_budget is raised on Meta. Spend goes up immediately. The bot
               enforces hard ceilings (2× per scale event, your settings max, daily launch cap; +25%
-              for your first 5 scales) but the increase itself can&apos;t be reversed — only paused.
+              for your first 5 scales) but the increase itself can&apos;t be reversed, only paused.
             </DialogDescription>
           </DialogHeader>
           <p className="text-muted-foreground text-xs">
-            One-time ack — subsequent scales don&apos;t prompt this dialog.
+            One-time ack. Subsequent scales don&apos;t prompt this dialog.
           </p>
           <div className="flex justify-end gap-2">
             <Button

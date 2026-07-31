@@ -70,7 +70,7 @@ export function registerPauseCommands(bot: Bot): void {
       columns: { isPaused: true },
     });
     if (!user?.isPaused) {
-      await ctx.reply('Bot was not paused — nothing to do.');
+      await ctx.reply('Bot was not paused. Nothing to do.');
       return;
     }
 

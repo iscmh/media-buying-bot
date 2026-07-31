@@ -35,7 +35,7 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
       userMessage:
         "Google's content filter flagged the generated character as resembling a public figure.",
       suggestion:
-        'Regenerate. Each attempt produces a different face. If it keeps happening on this source, the source character may be too distinctive.',
+        'Try regenerating. Each attempt produces a different face. If it keeps happening on this source, the source character may be too distinctive.',
       retryable: true,
     },
   },

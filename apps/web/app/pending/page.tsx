@@ -114,7 +114,7 @@ export default async function PendingPage() {
                     {v.headline ?? '(no headline)'}
                   </TableCell>
                   <TableCell className="text-fg-muted line-clamp-2 max-w-[40ch] text-xs">
-                    {v.primaryText ?? '—'}
+                    {v.primaryText ?? '-'}
                   </TableCell>
                   <TableCell className="font-mono text-xs">
                     <Link

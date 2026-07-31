@@ -79,7 +79,7 @@ function ConnectedBody({
     ? formatDateTime(connected.lastVerifiedAt)
     : connected.apiKeyVerifiedAt
       ? formatDateTime(connected.apiKeyVerifiedAt)
-      : '—';
+      : '-';
 
   const [reverifyPending, startReverify] = React.useTransition();
   const [reverifyMsg, setReverifyMsg] = React.useState<{ ok: boolean; text: string } | null>(null);
@@ -104,7 +104,7 @@ function ConnectedBody({
               setReverifyMsg({
                 ok: r.ok,
                 text: r.ok
-                  ? `Refreshed${r.tier ? ` — tier: ${r.tier}` : ''}`
+                  ? `Refreshed${r.tier ? ` (tier: ${r.tier})` : ''}`
                   : (r.errorMessage ?? 'Re-verify failed.'),
               });
             })

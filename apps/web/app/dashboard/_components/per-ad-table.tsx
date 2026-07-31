@@ -207,13 +207,13 @@ function AdRow({ r }: { r: PerAdRow }) {
         )}
         title={
           r.totalSpendUsd > 0 && r.impliedRoasIsEstimate
-            ? 'Estimated — Meta pixel not sending purchase values. Change assumed value in Settings.'
+            ? 'Estimated. Meta pixel not sending purchase values. Change assumed value in Settings.'
             : r.totalSpendUsd > 0
               ? 'From Meta insights (real purchase values).'
               : undefined
         }
       >
-        {r.totalSpendUsd > 0 ? `${r.impliedRoas.toFixed(2)}x` : '—'}
+        {r.totalSpendUsd > 0 ? `${r.impliedRoas.toFixed(2)}x` : '-'}
         {r.totalSpendUsd > 0 && r.impliedRoasIsEstimate && (
           <span className="text-fg-subtle ml-0.5" aria-hidden>
             *

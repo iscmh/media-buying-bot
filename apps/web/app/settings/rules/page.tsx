@@ -87,7 +87,7 @@ export default async function RulesPage() {
               Auto-kill
             </CardTitle>
             <CardDescription>
-              The bot pauses an ad (recoverable — pause, not delete) when any rule below fires.
+              The bot pauses an ad (recoverable: pause, not delete) when any rule below fires.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -199,7 +199,7 @@ export default async function RulesPage() {
               Platform hard ceilings
             </CardTitle>
             <CardDescription>
-              Absolute clamps — the bot can never exceed these no matter what you set in Settings.
+              Absolute clamps. The bot can never exceed these no matter what you set in Settings.
             </CardDescription>
           </CardHeader>
           <CardContent>

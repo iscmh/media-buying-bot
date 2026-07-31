@@ -148,7 +148,7 @@ export default async function SettingsPage() {
           <div>
             <p className="text-fg font-medium">Automation rules</p>
             <p className="text-fg-muted mt-0.5 text-xs">
-              What the bot does automatically once ads are live — kill / scale / pause thresholds.
+              What the bot does automatically once ads are live: kill / scale / pause thresholds.
             </p>
           </div>
         </Link>

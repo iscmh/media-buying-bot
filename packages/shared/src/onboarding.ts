@@ -62,7 +62,7 @@ export type TosAcceptInput = z.infer<typeof TosAcceptSchema>;
 export const RiskAcknowledgmentSchema = z.object({
   scrolled: z.literal(true, {
     errorMap: () => ({
-      message: 'Please scroll through the entire risk education before acknowledging.',
+      message: 'Scroll through the entire risk education before acknowledging.',
     }),
   }),
   ack1: z.literal(true, {

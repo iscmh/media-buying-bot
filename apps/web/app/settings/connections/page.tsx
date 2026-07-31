@@ -67,7 +67,7 @@ export default async function SettingsConnectionsPage({ searchParams }: Props) {
     <AppShell crumbs={[{ label: 'Settings' }, { label: 'Connections' }]} contentClass="max-w-3xl">
       <PageHeader
         title="Connections"
-        subtitle="AI providers and your Meta ad account — all in one place."
+        subtitle="AI providers and your Meta ad account, all in one place."
       />
 
       <nav
@@ -148,7 +148,7 @@ async function ProvidersTab({ userId }: { userId: string }) {
           Required
         </h2>
         <p className="text-fg-subtle mb-3 text-xs">
-          Instant UGC video generation is included on the platform — no key needed.
+          Instant UGC video generation is included on the platform. No key needed.
         </p>
         <div className="space-y-4">
           {REQUIRED_TOOLS.map((provider) => {
@@ -177,7 +177,7 @@ async function ProvidersTab({ userId }: { userId: string }) {
             <span>
               Alternate pipelines{' '}
               <span className="text-fg-subtle normal-case tracking-normal">
-                (optional — only if you want to run a specific model)
+                (optional, only if you want to run a specific model)
               </span>
             </span>
             <span
@@ -190,7 +190,7 @@ async function ProvidersTab({ userId }: { userId: string }) {
           <p className="text-fg-muted mb-4 text-xs">
             Add these only if you want to swap the default UGC video pipeline for a specific model
             (HeyGen avatars, Hedra Character 3, Higgsfield Soul, OpenAI Sora, or a Replicate-hosted
-            model). Leave collapsed if you&apos;re not sure — the default works.
+            model). Leave collapsed if you&apos;re not sure. The default works.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {OPTIONAL_AI_PROVIDERS.map((provider) => {

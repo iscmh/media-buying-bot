@@ -148,7 +148,7 @@ export function InvitesClient({ codes: initial }: Props) {
             {codes.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-muted-foreground py-6 text-center text-sm">
-                  No invite codes yet — click Generate above.
+                  No invite codes yet. Click Generate above.
                 </TableCell>
               </TableRow>
             ) : (

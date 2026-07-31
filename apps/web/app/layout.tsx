@@ -9,7 +9,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: {
     default: 'Ads Bot',
-    template: '%s — Ads Bot',
+    template: '%s - Ads Bot',
   },
   description:
     'Auto-generate, launch, kill, and scale Meta ad creative on autopilot. For performance marketers running aggressive verticals.',

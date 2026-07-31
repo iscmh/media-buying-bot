@@ -341,7 +341,7 @@ async function launchApprovedActionImpl(input: LaunchApprovedInput): Promise<Lau
       return {
         ok: false,
         errorMessage:
-          'No Facebook Pages on your Meta connection. Reconnect Meta in /connections/meta — the bot needs at least one Page you admin to create ads.',
+          'No Facebook Pages on your Meta connection. Reconnect Meta in /connections/meta. The bot needs at least one Page you admin to create ads.',
       };
     }
     const match = pages.find((p) => p.id === input.pageId);
@@ -523,7 +523,7 @@ export async function recheckPolish25MakeugcAction(jobId: string): Promise<Reche
     return {
       ok: false,
       status: 'failed',
-      message: 'No Instant UGC videoId on the job — nothing to recheck.',
+      message: 'No Instant UGC videoId on the job. Nothing to recheck.',
     };
   }
 
@@ -650,6 +650,6 @@ export async function recheckPolish25MakeugcAction(jobId: string): Promise<Reche
   return {
     ok: true,
     status: 'completed',
-    message: 'Recovered — the variant landed. Refresh to review + launch.',
+    message: 'Recovered. The variant landed. Refresh to review + launch.',
   };
 }

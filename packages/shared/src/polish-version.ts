@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.8.3';
+export const POLISH_VERSION = '25.8.4';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.8.3';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.8 Commit 50 (part 1 of 2) - AI voice tell sweep on legal copy. TOS + Privacy in apps/web/lib/content pass: em dashes replaced with hyphens / restructured sentences (7 in TOS, 10 in Privacy), softened AI-ish 'Reach out via', 'that's a blocker for you', 'with what we know and what we don't' phrasing. Legal meaning preserved: no changes to shall/may/must, no rights or obligations changed, indemnity + liability caps + revocation clauses untouched. TOS_DISCLOSURE_BANNER rewritten to drop the em-dash construction while keeping the same substance. Voice target is the operator's own direct plain-English style already established in TOS. Part 2 (Commit 51 / 25.8.4) will land the mechanical em-dash + AI-phrasing sweep across the rest of the codebase (Telegram bot messages, banners, empty states, dashboard tiles, error guidance) - running in a background agent to keep this commit focused on the legal-copy pass where meaning-preservation risk is highest.";
+  "Polish-25.8 Commit 51 (part 2 of 2) - AI voice tell sweep across user-facing strings. Mechanical em-dash + AI-phrasing pass across ~50 files: admin surfaces (activity/applications/errors/invites/raw-ugc/test-actions/waitlist), concepts + generate flow, runs/[id] job-review-client (12 sites), /launched page + actions, dashboard + tiles, settings (main + form + rules + acks + billing + heygen + presets + connections), onboarding (agency-bm/keys/risk), meta connection cards, metadata titles, error boundary, pending page, beta banner, command palette, pipeline label formatter. Telegram bot: bot.ts + commands-pause.ts + commands-settings.ts message text. Jobs: telegram-format.ts summary templates. Shared modules: onboarding.ts (dropped 'Please'), settings-form.ts labels, error-translation.ts (kept 'regenerating' string that a test greps for). Empty-cell placeholder swap: typographic '\u2014' \u2192 '-' across ~30 sites in table cells + KPI tiles. One 'We recommend' \u2192 direct imperative. Zero hits on Leverage/Utilize/Facilitate/Prior to and other listed AI-tell phrases (codebase already reads operator-y). Test-dependency accommodations: error-translation PROMINENT_PEOPLE_FILTER 'Try regenerating' kept because packages/shared/tests/error-translation.test.ts:17 asserts /regenerating/i. Did NOT touch: legal content (Commit 50 handled TOS + Privacy), tests, worker pipeline prompts, packages/shared/src/prompts/**, video-models, ai-provider-form, character-lock or omni prompt files, comments, log messages, needles arrays in meta-error-guidance, migrations. Full workspace typecheck green.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

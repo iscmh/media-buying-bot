@@ -70,7 +70,7 @@ const INTENSITIES: Array<{
   {
     value: 'small',
     label: 'Small',
-    description: 'Same persona, same script, 1–2 word swaps. Cheapest, lowest variance.',
+    description: 'Same persona, same script, 1-2 word swaps. Cheapest, lowest variance.',
   },
   {
     value: 'medium',
@@ -333,7 +333,7 @@ export function GenerationRequestForm({
           className="font-mono"
         />
         <p className="text-fg-muted text-xs">
-          1–{MAX_VARIANTS_PER_JOB} per job. More variants = more cost; cost scales linearly.
+          1-{MAX_VARIANTS_PER_JOB} per job. More variants = more cost; cost scales linearly.
         </p>
         {overVariantCap && (
           <p className="text-xs text-[color:var(--destructive-color)]">
@@ -381,7 +381,7 @@ export function GenerationRequestForm({
                   </span>{' '}
                   {overridePipeline ? (
                     <span className="text-fg-muted text-xs">
-                      (manual override —{' '}
+                      (manual override -{' '}
                       <button
                         type="button"
                         className="hover:text-fg underline"
@@ -480,7 +480,7 @@ export function GenerationRequestForm({
         {kieBalance && !kieBalance.ok && kieBalance.errorMessage !== 'kie_ai not connected' && (
           <p className="border-border border-t pt-2 text-xs text-amber-600 dark:text-amber-500">
             Couldn&apos;t verify kie.ai balance ({kieBalance.errorMessage}). Confirm you have
-            credits before generating — the job may fail mid-flow if you run out.
+            credits before generating. The job may fail mid-flow if you run out.
           </p>
         )}
       </div>

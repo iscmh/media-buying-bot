@@ -276,7 +276,7 @@ export function CommandPalette({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Type to search — routes, concepts, runs, ads…"
+              placeholder="Type to search: routes, concepts, runs, ads…"
               className="text-fg placeholder:text-fg-subtle flex-1 bg-transparent text-sm outline-none"
             />
             <button

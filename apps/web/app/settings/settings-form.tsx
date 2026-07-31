@@ -91,7 +91,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Variants generated per day',
     help: 'Total AI variants across all concepts.',
     tooltip:
-      'Caps your daily AI generation throughput. Most operators run 20-40 — high enough to keep new creative in market, low enough to actually review the outputs.',
+      'Caps your daily AI generation throughput. Most operators run 20-40. High enough to keep new creative in market, low enough to actually review the outputs.',
     type: 'integer',
     section: 'caps',
   },
@@ -134,7 +134,7 @@ const FIELDS: FieldConfig[] = [
   {
     name: 'pollingIntervalMinutes',
     label: 'How often to check ads',
-    help: 'Polling cadence in minutes (15–240).',
+    help: 'Polling cadence in minutes (15-240).',
     tooltip:
       'How often the bot pulls performance numbers from Meta for each active ad. Lower = faster kill/scale decisions but more Meta API calls (rate-limit risk). 30 min is a sane default.',
     type: 'integer',
@@ -155,7 +155,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Minimum click-through rate (kill below this)',
     help: 'Percent. Triggers when CPC is also high.',
     tooltip:
-      'The other half of the two-signal kill. Set this to your floor for "this creative is dead" — typically 1-2% for cold traffic, higher for warm.',
+      'The other half of the two-signal kill. Set this to your floor for "this creative is dead". Typically 1-2% for cold traffic, higher for warm.',
     type: 'percent',
     section: 'kill',
   },
@@ -200,7 +200,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Kill if CTR drops below (after 1k impressions)',
     help: 'Percent. Single-signal CTR kill once warm.',
     tooltip:
-      'Once an ad has 1000+ impressions, this single-signal CTR floor fires kill recommendations. Different from the two-signal rule above — this catches low-CTR ads that have a workable CPC.',
+      'Once an ad has 1000+ impressions, this single-signal CTR floor fires kill recommendations. Different from the two-signal rule above. This one catches low-CTR ads that have a workable CPC.',
     type: 'percent',
     section: 'kill',
   },
@@ -208,7 +208,7 @@ const FIELDS: FieldConfig[] = [
   {
     name: 'scaleTier1Cap',
     label: 'Tier 1 daily budget cap (first scale)',
-    help: 'First scale step — auto-applied to survivors. USD.',
+    help: 'First scale step, auto-applied to survivors. USD.',
     tooltip:
       'When a test-budget ad survives kill rules and clears the min-ROAS bar, the bot scales it to this daily budget. Tier 1 is "I trust this, but not too much yet".',
     type: 'currency',
@@ -217,9 +217,9 @@ const FIELDS: FieldConfig[] = [
   {
     name: 'scaleTier2Cap',
     label: 'Tier 2 daily budget cap (second scale)',
-    help: 'Second scale step — for ads that survived tier 1. USD.',
+    help: 'Second scale step, for ads that survived tier 1. USD.',
     tooltip:
-      'After an ad performs well at Tier 1, it gets promoted to Tier 2. This is the "I\'m confident — push it" cap. Past Tier 2, the bot queues an approval prompt on /launched before going further.',
+      'After an ad performs well at Tier 1, it gets promoted to Tier 2. This is the "I\'m confident, push it" cap. Past Tier 2, the bot queues an approval prompt on /launched before going further.',
     type: 'currency',
     section: 'scale',
   },
@@ -237,7 +237,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Minimum ROAS to consider scaling',
     help: 'Implied ROAS = conversions × $20 / spend.',
     tooltip:
-      'The bar an ad has to clear before the bot will propose scaling it. Until per-conversion value tracking lands, this uses a $20-per-conv heuristic — tune up if your AOV is higher.',
+      'The bar an ad has to clear before the bot will propose scaling it. Until per-conversion value tracking lands, this uses a $20-per-conv heuristic. Tune up if your AOV is higher.',
     type: 'number',
     section: 'scale',
   },
@@ -291,16 +291,16 @@ const FIELDS: FieldConfig[] = [
   {
     name: 'dailySummaryHourLocal',
     label: 'Send time (local hour)',
-    help: 'Hour 0–23 in your timezone.',
+    help: 'Hour 0-23 in your timezone.',
     tooltip:
-      'When the daily summary fires, using the timezone below. Most operators pick 8-9am — right before you sit down to look at ad performance.',
+      'When the daily summary fires, using the timezone below. Most operators pick 8-9am, right before you sit down to look at ad performance.',
     type: 'enum-hour',
     section: 'summary',
   },
   {
     name: 'timezone',
     label: 'Your timezone',
-    help: 'IANA zone — used for summaries + daily caps.',
+    help: 'IANA zone. Used for summaries + daily caps.',
     tooltip:
       'Drives both when the daily summary fires AND when your daily spend caps reset (midnight in this zone). The detected zone from your browser is usually right.',
     type: 'timezone',
@@ -312,7 +312,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Ad sets per launch batch',
     help: 'How many ad sets to spin up when you launch a generation.',
     tooltip:
-      "Each ad set runs a subset of your variants. 5 is the sweet spot — enough variance for Meta's algo to find a winner, not so many that any one gets starved of spend.",
+      "Each ad set runs a subset of your variants. 5 is the sweet spot: enough variance for Meta's algo to find a winner, not so many that any one gets starved of spend.",
     type: 'integer',
     section: 'launch',
   },
@@ -321,7 +321,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Campaign budget structure',
     help: 'CBO lets Meta allocate; ABO gives each ad set its own budget.',
     tooltip:
-      'CBO (campaign budget optimization) hands Meta the total daily budget and lets it shift spend toward the best ad set. ABO (ad set budget) gives each its own — tighter control, less algo learning.',
+      'CBO (campaign budget optimization) hands Meta the total daily budget and lets it shift spend toward the best ad set. ABO (ad set budget) gives each its own. Tighter control, less algo learning.',
     type: 'enum-cbo-abo',
     section: 'launch',
   },
@@ -339,7 +339,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Placement type',
     help: 'Advantage+ = auto. Manual = you pick.',
     tooltip:
-      'Advantage+ lets Meta choose placements (FB feed, IG feed, Stories, Reels, etc.) for best results — usually the right call. Manual restricts to a specific placement; use sparingly.',
+      'Advantage+ lets Meta choose placements (FB feed, IG feed, Stories, Reels, etc.) for best results. Usually the right call. Manual restricts to a specific placement; use sparingly.',
     type: 'enum-placement-type',
     section: 'launch',
   },
@@ -348,7 +348,7 @@ const FIELDS: FieldConfig[] = [
     label: 'Facebook Page',
     help: 'The Page your ads run from.',
     tooltip:
-      'Required by Meta — every ad has a Page identity. Refresh the list by reconnecting Meta if your Page is missing.',
+      'Required by Meta. Every ad has a Page identity. Refresh the list by reconnecting Meta if your Page is missing.',
     type: 'enum-page',
     section: 'launch',
   },
@@ -619,8 +619,8 @@ function FieldRow({
 
       {field.type === 'enum-cbo-abo' && (
         <NativeSelect id={field.name} {...form.register(field.name)}>
-          <option value="CBO">CBO — campaign-budget optimization</option>
-          <option value="ABO">ABO — ad-set budget optimization</option>
+          <option value="CBO">CBO - campaign-budget optimization</option>
+          <option value="ABO">ABO - ad-set budget optimization</option>
         </NativeSelect>
       )}
 
@@ -647,12 +647,12 @@ function FieldRow({
       {field.type === 'enum-page' &&
         (metaPages.length === 0 ? (
           <p className="text-fg-muted text-xs">
-            No Facebook Pages cached yet. Reconnect Meta or run a live launch — pages refresh on
+            No Facebook Pages cached yet. Reconnect Meta or run a live launch. Pages refresh on
             demand.
           </p>
         ) : (
           <NativeSelect id={field.name} {...form.register(field.name)}>
-            <option value="">— Select a page —</option>
+            <option value="">Select a page</option>
             {metaPages.map((p) => (
               <option key={p.pageId} value={p.pageId}>
                 {p.pageName} ({p.pageId})
@@ -854,7 +854,7 @@ function CountryMultiSelect({ value, onChange }: CountryMultiSelectProps) {
           <Checkbox checked={value.includes(c.code)} onCheckedChange={() => toggle(c.code)} />
           <span>
             <span className="font-mono">{c.code}</span>{' '}
-            <span className="text-fg-muted">— {c.name}</span>
+            <span className="text-fg-muted">- {c.name}</span>
           </span>
         </label>
       ))}

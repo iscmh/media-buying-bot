@@ -98,7 +98,7 @@ export default async function ConceptsPage() {
           <div className="border-b px-4 py-3">
             <h2 className="text-fg text-sm font-semibold">New concept</h2>
             <p className="text-fg-muted mt-0.5 text-xs">
-              Pick the path that matches the source — image with copy (Static) or video (UGC).
+              Pick the path that matches the source: image with copy (Static) or video (UGC).
             </p>
           </div>
           <div className="px-4 py-4">

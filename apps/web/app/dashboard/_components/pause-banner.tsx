@@ -19,7 +19,7 @@ interface Props {
 const REASON_LABELS: Record<string, string> = {
   meta_disconnected: 'You disconnected Meta. Reconnect from Connections → Meta to resume.',
   telegram_disconnected:
-    "Telegram integration is offline. Approve kill/scale recommendations on the /launched page instead — Ads Bot doesn't auto-pause for this reason anymore.",
+    "Telegram integration is offline. Approve kill/scale recommendations on the /launched page instead. Ads Bot doesn't auto-pause for this reason anymore.",
   ai_provider_disconnected:
     'You disconnected your AI UGC provider. Reconnect from Connections → AI provider to resume.',
 };

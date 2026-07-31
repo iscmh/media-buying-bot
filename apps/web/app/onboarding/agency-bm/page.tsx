@@ -45,7 +45,7 @@ export default async function AgencyBMPage() {
           <CardTitle>What an agency ad account gets you</CardTitle>
           <CardDescription>
             You rent an ad account from a partner agency that has a higher trust score with Meta. If
-            Meta bans the account, it&apos;s the agency&apos;s — not your personal Facebook.
+            Meta bans the account, it&apos;s the agency&apos;s, not your personal Facebook.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4 text-sm">

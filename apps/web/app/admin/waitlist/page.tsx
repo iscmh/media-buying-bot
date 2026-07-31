@@ -4,7 +4,7 @@ import { formatDateTime } from '@/lib/format/date';
 import { requireAdmin } from '@/lib/admin-gate';
 import { WaitlistAdminClient } from './waitlist-admin-client';
 
-export const metadata = { title: 'Waitlist — Admin' };
+export const metadata = { title: 'Waitlist - Admin' };
 export const dynamic = 'force-dynamic';
 
 export default async function AdminWaitlistPage() {

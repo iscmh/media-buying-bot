@@ -20,7 +20,7 @@ export function formatSummary(input: {
   const roas =
     metrics.impliedRoas != null
       ? `${metrics.impliedRoas.toFixed(2)}x${metrics.impliedRoasIsEstimate ? '*' : ''}`
-      : '—';
+      : '-';
   const spend = `$${metrics.totalSpendUsd.toFixed(2)}`;
   const conv = metrics.totalConversions.toLocaleString();
 
@@ -28,8 +28,8 @@ export function formatSummary(input: {
     return `${label}: ${spend} spend · ${conv} conv · ROAS ${roas} · ${metrics.adsKilledCount} killed · ${metrics.adsScaledCount} scaled`;
   }
 
-  const ctr = metrics.avgCtrPct != null ? `${metrics.avgCtrPct.toFixed(2)}%` : '—';
-  const cpc = metrics.avgCpcUsd != null ? `$${metrics.avgCpcUsd.toFixed(2)}` : '—';
+  const ctr = metrics.avgCtrPct != null ? `${metrics.avgCtrPct.toFixed(2)}%` : '-';
+  const cpc = metrics.avgCpcUsd != null ? `$${metrics.avgCpcUsd.toFixed(2)}` : '-';
   const lines: string[] = [
     `📊 ${label}`,
     '',
@@ -54,7 +54,7 @@ export function formatSummary(input: {
   }
 
   if (metrics.impliedRoasIsEstimate) {
-    lines.push('', '* ROAS estimated — Meta pixel not sending purchase values.');
+    lines.push('', '* ROAS estimated. Meta pixel not sending purchase values.');
   }
 
   return lines.join('\n');

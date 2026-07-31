@@ -116,7 +116,7 @@ export const POLISH25_PIPELINE_ID = 'polish25_makeugc' as const;
 export const POLISH25_DISPLAY_NAME = 'Instant UGC ad';
 export const POLISH25_DESCRIPTION =
   'Pre-cast avatar picked to match your source persona. Character consistency ' +
-  'guaranteed. Fastest option — included on the platform, you only pay Claude ' +
+  'guaranteed. Fastest option, included on the platform. You only pay Claude ' +
   '+ Gemini token usage.';
 
 /**

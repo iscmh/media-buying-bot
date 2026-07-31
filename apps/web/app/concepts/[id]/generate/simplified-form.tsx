@@ -355,7 +355,7 @@ export function SimplifiedGenerationForm({
           proper picker + BYOK prompts. */}
 
       {/* Polish-25.2 Commit 12: variant-count only. Length section
-          removed — duration always auto-detected from the source
+          removed - duration always auto-detected from the source
           video (client detection → worker fallback chain). Advanced-
           form link removed too. */}
       <div>
@@ -404,7 +404,7 @@ export function SimplifiedGenerationForm({
               estimate && !overCap ? 'text-[color:var(--accent-positive)]' : 'text-fg',
             )}
           >
-            {estimate ? `$${estimate.estimateUsd.toFixed(2)}` : '—'}
+            {estimate ? `$${estimate.estimateUsd.toFixed(2)}` : '-'}
           </span>
         </div>
         {estimate != null && (
@@ -490,7 +490,7 @@ export function SimplifiedGenerationForm({
             <DialogTitle>Confirm live generation</DialogTitle>
             <DialogDescription>
               This will spend real money on your connected provider keys. Estimated cost:{' '}
-              {estimate ? `$${estimate.estimateUsd.toFixed(2)}` : '—'}. You only see this dialog
+              {estimate ? `$${estimate.estimateUsd.toFixed(2)}` : '-'}. You only see this dialog
               once.
             </DialogDescription>
           </DialogHeader>
@@ -542,7 +542,7 @@ function Polish25PickerCard({ picked, disabled, onPick }: Polish25PickerCardProp
           'bg-[color:var(--accent-positive)]/15 text-[color:var(--accent-positive)]',
         )}
       >
-        Primary — Recommended
+        Primary - Recommended
       </span>
       {picked && (
         <CheckCircle2 className="text-fg absolute right-24 top-3 h-4 w-4" aria-hidden="true" />
@@ -626,7 +626,7 @@ function StaticOpenaiPickerCard({
         <div className="text-fg text-sm font-semibold">{STATIC_OPENAI_DISPLAY_NAME}</div>
         <div className="text-fg-muted text-xs leading-relaxed">{STATIC_OPENAI_DESCRIPTION}</div>
         <div className="text-fg-subtle mt-1 text-[11px] italic leading-relaxed">
-          Copy quality varies. We recommend editing outputs before launching.
+          Copy quality varies. Edit outputs before launching.
         </div>
       </button>
 
@@ -662,7 +662,7 @@ function StaticOpenaiPickerCard({
             })}
           </div>
           <p className="text-fg-subtle mt-2 text-[11px]">
-            Medium is the recommended default — matches Instant UGC per-variant cost.
+            Medium is the recommended default. Matches Instant UGC per-variant cost.
           </p>
         </div>
       )}

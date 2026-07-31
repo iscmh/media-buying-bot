@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/shell/page-header';
 import { requireAdmin } from '@/lib/admin-gate';
 import { RawUgcClient, type AvatarOption } from './raw-ugc-client';
 
-export const metadata = { title: 'Raw UGC — Admin' };
+export const metadata = { title: 'Raw UGC - Admin' };
 export const dynamic = 'force-dynamic';
 
 /**
@@ -60,7 +60,7 @@ export default async function AdminRawUgcPage() {
     <AppShell crumbs={[{ label: 'Admin' }, { label: 'Raw UGC' }]}>
       <PageHeader
         title="Raw UGC generator"
-        subtitle={`Admin-only. ${avatars.length} avatars available. Bypasses the standard Instant UGC pipeline — pick, paste, generate, download.`}
+        subtitle={`Admin-only. ${avatars.length} avatars available. Bypasses the standard Instant UGC pipeline: pick, paste, generate, download.`}
       />
       <RawUgcClient avatars={avatars} />
     </AppShell>

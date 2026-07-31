@@ -34,7 +34,7 @@ export default function ErrorPage({
     <div className="mx-auto max-w-lg space-y-4 p-6">
       <h1 className="text-fg text-lg font-semibold">Something went wrong on this page.</h1>
       <p className="text-fg-muted text-sm">
-        The error has been logged. Try again — if it keeps happening, drop a note in the beta
+        The error has been logged. Try again. If it keeps happening, drop a note in the beta
         feedback channel.
       </p>
       {error.digest && <p className="text-fg-subtle font-mono text-xs">Ref: {error.digest}</p>}

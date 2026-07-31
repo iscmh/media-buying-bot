@@ -4,7 +4,7 @@ import { PageHeader } from '@/components/shell/page-header';
 import { requireAdmin } from '@/lib/admin-gate';
 import { ActivityTable } from './activity-table';
 
-export const metadata = { title: 'Activity — Admin' };
+export const metadata = { title: 'Activity - Admin' };
 export const dynamic = 'force-dynamic';
 
 /**

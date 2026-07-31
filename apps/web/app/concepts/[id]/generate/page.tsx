@@ -8,7 +8,7 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { loadConnectedProviders } from './actions';
 import { SimplifiedGenerationForm } from './simplified-form';
 
-export const metadata = { title: 'Generate variants — Ads Bot' };
+export const metadata = { title: 'Generate variants - Ads Bot' };
 
 interface Props {
   params: Promise<{ id: string }>;
