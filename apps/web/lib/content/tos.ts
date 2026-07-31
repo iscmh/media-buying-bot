@@ -30,7 +30,7 @@ export const TOS_SECTIONS: TosSection[] = [
     heading: 'Meta enforcement risk is real and the risk is yours',
     body: [
       'Meta aggressively enforces its Unacceptable Business Practices (UBP) policy in MMO, biz-opp, finance, crypto, supplements, and other "high-risk" verticals. Enforcement is not consistent, not transparent, and not appealable in any meaningful way for most operators. Cascading suspensions are real: a flagged ad on one ad account can lead to BM-level restrictions, payment method bans, and personal Facebook account holds.',
-      "We build the platform with anti-ban guardrails (sequential API calls, conservative rate limits, suspicious-activity auto-pause, dry-run mode, pre-launch compliance checks). These reduce risk. They do not eliminate it. If you run aggressive verticals on a personal-tied Business Manager, your personal Facebook account is on the line — that is true with or without our platform, but it's especially worth saying out loud here.",
+      "We build the platform with anti-ban guardrails (sequential API calls, conservative rate limits, suspicious-activity auto-pause, dry-run mode, pre-launch compliance checks). These reduce risk. They do not eliminate it. If you run aggressive verticals on a personal-tied Business Manager, your personal Facebook account is on the line - that is true with or without our platform, but it's especially worth saying out loud here.",
       'Our recommendation, particularly for MMO/biz-opp/finance: use a fresh agency Business Manager with separation from your personal accounts. We are not currently affiliated with any agency BM provider; we expect to add a referral integration in a future phase and will disclose any compensation we receive from those referrals.',
     ],
   },
@@ -55,7 +55,7 @@ export const TOS_SECTIONS: TosSection[] = [
   {
     heading: 'Our right to suspend your account',
     body: [
-      "We may suspend your access to the platform — temporarily or permanently — if your usage causes Meta API rate limit violations, appears to violate Meta's policies in ways that put other customers at risk, or otherwise indicates the platform is being used for purposes other than legitimate paid acquisition automation. We will notify you over Telegram and email if we do this and explain why.",
+      "We may suspend your access to the platform (temporarily or permanently) if your usage causes Meta API rate limit violations, appears to violate Meta's policies in ways that put other customers at risk, or otherwise indicates the platform is being used for purposes other than legitimate paid acquisition automation. We will notify you over Telegram and email if we do this and explain why.",
     ],
   },
   {
@@ -67,10 +67,10 @@ export const TOS_SECTIONS: TosSection[] = [
   {
     heading: 'Changes to these terms',
     body: [
-      'These terms are platform v1. They will be reviewed by counsel before paid tiers launch. We will bump the version date at the top when meaningful changes are made and require re-acceptance from existing users — you will see this re-acceptance flow on your next login after a bump. If you find a problem with these terms or have a question, message the platform operator on Telegram.',
+      'These terms are platform v1. They will be reviewed by counsel before paid tiers launch. We will bump the version date at the top when meaningful changes are made and require re-acceptance from existing users. You will see this re-acceptance flow on your next login after a bump. If you find a problem with these terms or have a question, message the platform operator on Telegram.',
     ],
   },
 ];
 
 export const TOS_DISCLOSURE_BANNER =
-  'These terms are platform v1 — they’ll be reviewed by counsel before paid tiers launch. Found a problem? Message the platform operator on Telegram.';
+  'These terms are platform v1. Counsel review comes before paid tiers launch. Found a problem? Message the platform operator on Telegram.';

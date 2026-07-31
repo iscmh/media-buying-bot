@@ -38,7 +38,7 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
     body: [
       "We don't ask for your Meta password. We don't ask for your Google password. We don't require access to your personal Facebook profile beyond the scopes you granted your own Meta Developer App.",
       "We don't run third-party analytics trackers (no Google Analytics, no Segment, no Mixpanel, no Facebook Pixel) on the authenticated part of the app. We do run first-party error-monitoring via Sentry so we can debug crashes; Sentry receives error stack traces and the URL you were on, not the contents of your ads.",
-      "We don't sell any data. We don't share data with advertisers. Bring-your-own-key is the model — your data reaches OpenAI/Anthropic/Google/Meta because you paid those companies directly and told us to route calls to them.",
+      "We don't sell any data. We don't share data with advertisers. Bring-your-own-key is the model. Your data reaches OpenAI/Anthropic/Google/Meta because you paid those companies directly and told us to route calls to them.",
     ],
   },
   {
@@ -46,8 +46,8 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
     body: [
       'To orchestrate API calls to the providers you connected (Claude for copy, Gemini for vision, Meta for launches). Every call is initiated by an action you took or by a rule you configured.',
       'To render your dashboard, run summaries, launched-ad tables, and pending-approval queues.',
-      "To evaluate the kill/scale rules you configured and — when the platform detects a rule condition — to either auto-execute (if you've opted in for a given rule) or to record a pending approval you can act on from the web UI.",
-      'To send transactional email (login links, security notices, and — if you enable it — daily P&L summaries) via the email provider that ships with your Supabase project.',
+      "To evaluate the kill/scale rules you configured. When the platform detects a rule condition, it either auto-executes (if you've opted in for a given rule) or records a pending approval you can act on from the web UI.",
+      'To send transactional email (login links, security notices, and (if you enable it) daily P&L summaries) via the email provider that ships with your Supabase project.',
       'To audit-log actions so both you and we can reconstruct what happened if something goes wrong.',
     ],
   },
@@ -61,10 +61,10 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
   {
     heading: 'Your rights',
     body: [
-      "Export: you can request a machine-readable dump of every row keyed to your user_id. Reach out via the contact channel below and we'll ship it within 14 days.",
+      'Export: you can request a machine-readable dump of every row keyed to your user_id. Ask via the contact channel below. Response within 14 days.',
       'Delete account: request account deletion via the contact channel below or via /settings once we ship the in-app version. Hard delete within 30 days as described above.',
-      "Revoke Meta access: revoke the OAuth grant from your Meta Business Manager or from the Meta Developer Console — that instantly breaks our ability to call Meta on your behalf, regardless of whether you've deleted the account here.",
-      'Revoke provider keys: rotate any API key on the provider side (Anthropic, Google AI Studio, OpenAI, etc.) — that instantly breaks our ability to spend on your behalf. Then remove the key from the app via Settings → Connections.',
+      "Revoke Meta access: revoke the OAuth grant from your Meta Business Manager or from the Meta Developer Console. That instantly breaks our ability to call Meta on your behalf, regardless of whether you've deleted the account here.",
+      'Revoke provider keys: rotate any API key on the provider side (Anthropic, Google AI Studio, OpenAI, etc.). That instantly breaks our ability to spend on your behalf. Then remove the key from the app via Settings → Connections.',
     ],
   },
   {
@@ -79,7 +79,7 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
     body: [
       'The application database is Postgres hosted on Supabase (US region). The object store for concepts + generated variants is Supabase Storage (US region). Application code runs on Vercel (US region). Long-running jobs run on Inngest (US region).',
       'When you make an ad-related request, the payload is sent to Meta (whatever region Meta serves that BM from) and to whichever AI provider you configured (Claude and Gemini currently, both US-hosted; optional providers may be elsewhere per their documentation).',
-      "If you're accessing the app from outside the US, your data is processed in the US by the systems above. If that's a blocker for you, don't sign up.",
+      "If you're accessing the app from outside the US, your data is processed in the US by the systems above. If that's a blocker, don't sign up.",
     ],
   },
   {
@@ -104,13 +104,13 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
   {
     heading: 'Security incidents',
     body: [
-      "If we experience a security incident that materially affects data keyed to your user_id, we notify you at the email on file within 72 hours of confirmation, with what we know and what we don't. We publish incident post-mortems at the contact channel below.",
+      "If we experience a security incident that materially affects data keyed to your user_id, we notify you at the email on file within 72 hours of confirmation, with what we know and what we don't yet know. We publish incident post-mortems at the contact channel below.",
     ],
   },
   {
     heading: 'Changes to this policy',
     body: [
-      'When we materially change this policy we bump the version at the top of the page, notify signed-up users by email, and — for material changes — surface an in-app banner until you acknowledge the update.',
+      'When we materially change this policy we bump the version at the top of the page, notify signed-up users by email, and (for material changes) surface an in-app banner until you acknowledge the update.',
     ],
   },
   {
@@ -122,4 +122,4 @@ export const PRIVACY_SECTIONS: PrivacySection[] = [
 ];
 
 export const PRIVACY_DISCLOSURE_BANNER =
-  "This is the operator-drafted policy. It reflects how the platform actually works today. Formal legal review is scheduled before we open paid tiers; substance won't change but wording may.";
+  "This is the operator-drafted policy. It reflects how the platform actually works today. Formal legal review is scheduled before we open paid tiers; substance won't change, wording may.";

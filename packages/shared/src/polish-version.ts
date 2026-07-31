@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.8.2';
+export const POLISH_VERSION = '25.8.3';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.8.2';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.8 Commit 49 \u2014 fix Telegram webhook 307 redirect. Root cause: middleware.ts PUBLIC_PREFIXES didn't include /api/telegram/*, so unauthed POSTs from api.telegram.org (which carry no Supabase session cookie) got redirected to /login?next=/api/telegram/webhook \u2014 and Telegram's setWebhook validator rejects any 307 with 'Wrong response from the webhook: 307 Temporary Redirect'. Added /api/telegram + /api/log-error to PUBLIC_PREFIXES. /api/log-error had the same latent bug \u2014 client error boundary hits before any session cookie exists would also 307 and drop the batch. No other config changes needed: no trailingSlash, no vercel.json redirects, route file structure was correct (app/api/telegram/webhook/route.ts exporting POST + GET).";
+  "Polish-25.8 Commit 50 (part 1 of 2) - AI voice tell sweep on legal copy. TOS + Privacy in apps/web/lib/content pass: em dashes replaced with hyphens / restructured sentences (7 in TOS, 10 in Privacy), softened AI-ish 'Reach out via', 'that's a blocker for you', 'with what we know and what we don't' phrasing. Legal meaning preserved: no changes to shall/may/must, no rights or obligations changed, indemnity + liability caps + revocation clauses untouched. TOS_DISCLOSURE_BANNER rewritten to drop the em-dash construction while keeping the same substance. Voice target is the operator's own direct plain-English style already established in TOS. Part 2 (Commit 51 / 25.8.4) will land the mechanical em-dash + AI-phrasing sweep across the rest of the codebase (Telegram bot messages, banners, empty states, dashboard tiles, error guidance) - running in a background agent to keep this commit focused on the legal-copy pass where meaning-preservation risk is highest.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

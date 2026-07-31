@@ -131,13 +131,13 @@ const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other' | 'safety_lay
       guidance: {
         title: 'Ad account flagged for Special Ad Categories',
         diagnosis:
-          'Meta is telling you this ad account is enrolled in a Special Ad Category (Credit, Employment, Housing, or Social Issues/Politics). That flag restricts your targeting — the error message about "minimum age" is Meta\'s cryptic way of saying it, not the literal fix.',
+          'Meta is telling you this ad account is enrolled in a Special Ad Category (Credit, Employment, Housing, or Social Issues/Politics). That flag restricts your targeting. The error message about "minimum age" is Meta\'s cryptic way of saying it, not the literal fix.',
         fixes: [
           'Reduce max age to 55 or lower (Meta enforces this on Special Ad Category accounts).',
           'Use country-level targeting only. Remove any city, ZIP code, or region-level location.',
           'Remove all detailed interest + behavior targeting. Advantage+ audience only.',
           'Set gender to All (Special Ad Categories disallow gender targeting).',
-          'If none of your offers fall under Special Ad Categories, contact Meta support to have the account’s flag reviewed.',
+          "If none of your offers fall under Special Ad Categories, contact Meta support to have the account's flag reviewed.",
         ],
         docsUrl: 'https://www.facebook.com/business/help/298000447747885',
       },
@@ -158,11 +158,11 @@ const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other' | 'safety_lay
       guidance: {
         title: 'Creative rejected on Meta policy',
         diagnosis:
-          'Meta flagged the ad creative itself (image / video / headline / body copy). No amount of targeting tweaks will unblock this — the creative needs to change.',
+          'Meta flagged the ad creative itself (image / video / headline / body copy). No amount of targeting tweaks will unblock this. The creative needs to change.',
         fixes: [
           'Regenerate the variant with softer / less sensational hooks.',
           'Remove specific income claims ("$10k/month"), medical claims, or before/after imagery.',
-          'Check the ad in Meta Ads Manager → the rejection detail there is usually more specific than the API response.',
+          'Check the ad in Meta Ads Manager. The rejection detail there is usually more specific than the API response.',
           'If you believe the rejection was in error, request a review from Ads Manager → Account Quality.',
         ],
         docsUrl: 'https://transparency.meta.com/policies/ad-standards/',
@@ -207,9 +207,9 @@ const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other' | 'safety_lay
       guidance: {
         title: 'Budget below Meta minimum',
         diagnosis:
-          'Meta requires a minimum daily budget in the ad account’s currency. USD accounts start at $1/day; higher for other currencies (RON ≈ 5, GBP ≈ 1, INR ≈ 40).',
+          "Meta requires a minimum daily budget in the ad account's currency. USD accounts start at $1/day; higher for other currencies (RON ~5, GBP ~1, INR ~40).",
         fixes: [
-          'Raise the per-ad daily budget above your account currency’s Meta minimum.',
+          "Raise the per-ad daily budget above your account currency's Meta minimum.",
           'Confirm the ad account currency in Settings → Connections → Meta.',
         ],
       },
@@ -244,7 +244,7 @@ const FALLBACK: MetaErrorGuidance = {
   category: 'other',
   title: 'Meta rejected the launch',
   diagnosis:
-    'This error doesn’t match any known pattern. Open the ad in Meta Ads Manager → the rejection detail there is usually more specific than the API response we get back.',
+    "This error doesn't match any known pattern. Open the ad in Meta Ads Manager. The rejection detail there is usually more specific than the API response we get back.",
   fixes: [
     'Copy the error message + open a Meta Business Support case if the phrasing is opaque.',
     'If the ad account is new, some accounts hit a spend-history threshold before certain features unlock.',
@@ -276,11 +276,11 @@ function safetyGuidanceForCode(code: string, rawMessage: string): SafetyGuidance
       return {
         title: 'Your bot is paused',
         diagnosis:
-          'The launch never reached Meta — the bot is paused. Every launch attempt while paused fails immediately so nothing spends money without you seeing this first.',
+          'The launch never reached Meta. The bot is paused. Every launch attempt while paused fails immediately so nothing spends money without you seeing this first.',
         fixes: [
           'Open the dashboard and read the pause banner to see WHY the bot is paused.',
           'Resolve the underlying issue (reconnect Meta / AI provider / etc.) BEFORE unpausing.',
-          'Click Unpause in the banner to resume — new launches will go through immediately.',
+          'Click Unpause in the banner to resume. New launches will go through immediately.',
         ],
       };
     case 'global_emergency_stop':
@@ -306,12 +306,12 @@ function safetyGuidanceForCode(code: string, rawMessage: string): SafetyGuidance
       };
     case 'rate_limited':
       return {
-        title: 'Meta rate limit hit — cooling down',
+        title: 'Meta rate limit hit, cooling down',
         diagnosis:
-          'Meta throttled our recent calls on this ad account. The safety layer stops sending until the cooldown clears — this prevents Meta from escalating to an account-level block.',
+          'Meta throttled our recent calls on this ad account. The safety layer stops sending until the cooldown clears. This prevents Meta from escalating to an account-level block.',
         fixes: [
-          'Wait for the cooldown to lift (usually 5–15 minutes).',
-          'Reduce launch batch size if you routinely hit this — split large batches across sessions.',
+          'Wait for the cooldown to lift (usually 5-15 minutes).',
+          'Reduce launch batch size if you routinely hit this. Split large batches across sessions.',
         ],
       };
     case 'user_ceiling_exceeded':
@@ -328,7 +328,7 @@ function safetyGuidanceForCode(code: string, rawMessage: string): SafetyGuidance
       return {
         title: 'Platform hard cap reached',
         diagnosis:
-          "The platform-wide hard spend ceiling has been reached — this is above your personal cap and is set by the operators. Every user's launches are affected once this fires.",
+          "The platform-wide hard spend ceiling has been reached. This is above your personal cap and is set by the operators. Every user's launches are affected once this fires.",
         fixes: [
           'This is a global safety floor. Contact support if it persists beyond a rollover window.',
         ],
@@ -339,7 +339,7 @@ function safetyGuidanceForCode(code: string, rawMessage: string): SafetyGuidance
         diagnosis:
           'The safety layer detected a spend / performance pattern outside your normal baseline and paused the bot to prevent runaway spend. This is a precaution, not an accusation.',
         fixes: [
-          'Open the dashboard — the pause banner explains the trigger.',
+          'Open the dashboard. The pause banner explains the trigger.',
           'Confirm recent launches look right, then Unpause to resume.',
         ],
       };

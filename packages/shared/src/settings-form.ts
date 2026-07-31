@@ -23,12 +23,12 @@ export const SettingsFormSchema = z.object({
   defaultTestCap: z.coerce
     .number()
     .min(5, 'Test cap must be at least $5.')
-    .max(200, 'Test cap should not exceed $200 — that defeats the point of testing.'),
+    .max(200, 'Test cap over $200 defeats the point of testing.'),
   adSetsPerLaunch: z.coerce
     .number()
     .int('Whole numbers only.')
     .min(1, 'At least one ad set per launch.')
-    .max(20, 'No more than 20 ad sets per launch — Meta starts treating you like a bot.'),
+    .max(20, 'More than 20 ad sets per launch and Meta starts treating you like a bot.'),
   dailyGenerationVolume: z.coerce
     .number()
     .int('Whole numbers only.')
@@ -47,18 +47,18 @@ export const SettingsFormSchema = z.object({
   gracePeriodMinutes: z.coerce
     .number()
     .int('Whole minutes only.')
-    .min(15, 'At least 15 minutes — you need a real signal.')
+    .min(15, 'At least 15 minutes. You need a real signal.')
     .max(120, 'More than 120 minutes wastes test budget.'),
   hour6CutoffEnabled: z.coerce.boolean(),
 
   scaleTier1Cap: z.coerce
     .number()
     .min(50, 'Tier 1 cap must be at least $50.')
-    .max(2000, 'Tier 1 cap above $2000 — handle that with manual approvals.'),
+    .max(2000, 'Tier 1 cap above $2000. Handle that with manual approvals.'),
   scaleTier2Cap: z.coerce
     .number()
     .min(100, 'Tier 2 cap must be at least $100.')
-    .max(5000, 'Tier 2 cap above $5000 — handle that with manual approvals.'),
+    .max(5000, 'Tier 2 cap above $5000. Handle that with manual approvals.'),
   manualApprovalThreshold: z.coerce
     .number()
     .min(100, 'Approval threshold must be at least $100.')

@@ -35,7 +35,7 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
       userMessage:
         "Google's content filter flagged the generated character as resembling a public figure.",
       suggestion:
-        'Try regenerating — each attempt produces a different face. If it keeps happening on this source, the source character may be too distinctive.',
+        'Regenerate. Each attempt produces a different face. If it keeps happening on this source, the source character may be too distinctive.',
       retryable: true,
     },
   },
@@ -106,7 +106,7 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
       /backend\s+error/i.test(raw),
     translate: {
       userMessage: 'Backend service hiccup during generation.',
-      suggestion: 'Retry now — these usually clear on the next attempt.',
+      suggestion: 'Retry now. These usually clear on the next attempt.',
       retryable: true,
     },
   },
@@ -116,7 +116,7 @@ const PATTERNS: ReadonlyArray<ErrorPattern> = [
     translate: {
       userMessage: 'One of the providers rejected the request as malformed.',
       suggestion:
-        'Check the Technical details below — if the issue is in the source script, re-uploading the source may help.',
+        'Check the Technical details below. If the issue is in the source script, re-uploading the source may help.',
       retryable: false,
     },
   },
