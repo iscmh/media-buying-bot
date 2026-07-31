@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.8.1';
+export const POLISH_VERSION = '25.8.2';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.8.1';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.8 Commit 48 \u2014 Telegram bot full feature set (deferred from Commit 47). Migration 0042 adds telegram_connections.notification_preferences jsonb + telegram_conversation_state table for multi-turn bot state (15-min TTL). New @mbb/db helpers: getTelegramUserByChatId, listTelegramUsers, getTelegramPreferences, updateTelegramPreferences, isInQuietHours, isDailySummaryHour, localHourInZone, getConversationState + set + clear + prune. Bot commands added: /pause (cascade-pauses user), /unpause (mirrors web UnpauseButton including meta-still-disconnected warning), /settings (renders inline toggle keyboard for kill/scale/rejection/threshold/weekly/daily/quiet_hours enable flags + summary_format cycle; subcommands 'daily HH:MM', 'quiet H H', 'format compact|detailed|verbose', 'kill|scale|rejection|threshold on|off'), /launch (interactive multi-turn \u2014 pick approved-variant job, pick per-ad daily budget from $5/$10/$20/$50/$100, confirm; dispatches same meta/launch.requested event as web launch dialog; state stored in telegram_conversation_state with 15-min TTL; refuses if bot is paused or Meta disconnected). Two new Inngest crons: dailyTelegramSummary (hourly dispatcher, fires per user when local hour matches daily_summary_hour_local, respects quiet hours + enable flag), weeklyTelegramRollup (Sunday 20:00 local per user timezone). Alerts wired: kill + scale via alertCategory field on the existing telegram/notify.requested event; telegramNotifier now honors category-enabled + quiet-hours prefs before send. Rejection alerts via direct sendTelegramAlert call from meta-ad-launcher on rejected_by_meta path. Threshold-breach alert infrastructure ready (category exists, notifier honors it) but no worker fires it today \u2014 suspicious-activity-monitor is stubbed pre-Phase 5. Web settings UI: TelegramPanel gained PreferencesEditor with instant-apply toggles + numeric inputs for daily hour + quiet hours + summary format dropdown. Mirrors bot /settings; both surfaces write through updateTelegramPreferences so they stay in sync. Summary formatters (compact/detailed/verbose) in packages/jobs/src/telegram-format.ts.";
+  "Polish-25.8 Commit 49 \u2014 fix Telegram webhook 307 redirect. Root cause: middleware.ts PUBLIC_PREFIXES didn't include /api/telegram/*, so unauthed POSTs from api.telegram.org (which carry no Supabase session cookie) got redirected to /login?next=/api/telegram/webhook \u2014 and Telegram's setWebhook validator rejects any 307 with 'Wrong response from the webhook: 307 Temporary Redirect'. Added /api/telegram + /api/log-error to PUBLIC_PREFIXES. /api/log-error had the same latent bug \u2014 client error boundary hits before any session cookie exists would also 307 and drop the batch. No other config changes needed: no trailingSlash, no vercel.json redirects, route file structure was correct (app/api/telegram/webhook/route.ts exporting POST + GET).";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

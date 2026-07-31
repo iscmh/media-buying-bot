@@ -12,6 +12,13 @@ const PUBLIC_PREFIXES = [
   '/api/inngest',
   '/api/health',
   '/api/webhooks',
+  // Polish-25.8 Commit 49: Telegram POSTs come from api.telegram.org
+  // with no Supabase cookie — middleware was 307-redirecting to
+  // /login and Telegram was rejecting "Wrong response from the
+  // webhook: 307". Same for the client error sink, which the
+  // pre-auth error boundary may hit before any session cookie exists.
+  '/api/telegram',
+  '/api/log-error',
   '/_next',
   '/favicon',
 ];
