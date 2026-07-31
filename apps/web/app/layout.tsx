@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { GeistMono } from 'geist/font/mono';
 import { GeistSans } from 'geist/font/sans';
+import { BreadcrumbTracker } from '@/components/error-tracking/breadcrumb-tracker';
 import { NavProgress } from '@/components/shell/nav-progress';
 import './globals.css';
 
@@ -33,6 +34,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Suspense fallback={null}>
           <NavProgress />
         </Suspense>
+        {/* Polish-25.7 Commit 46: mounts client-error-logger's
+            global handlers + tracks nav/click breadcrumbs. */}
+        <BreadcrumbTracker />
         {children}
       </body>
     </html>

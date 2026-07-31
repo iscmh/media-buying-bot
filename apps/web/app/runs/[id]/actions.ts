@@ -23,6 +23,7 @@ import {
 import { auditMetaFromHeaders } from '@/lib/audit/request-meta';
 import { sendMetaLaunchEvent } from '@/lib/inngest/send';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { withErrorLogging } from '@/lib/with-error-logging';
 
 type Decision = 'approved' | 'rejected';
 
@@ -255,9 +256,11 @@ export interface LaunchApprovedInput {
   perAdBudgetUsd?: number;
 }
 
-export async function launchApprovedAction(
-  input: LaunchApprovedInput,
-): Promise<LaunchApprovedResult> {
+// Polish-25.7 Commit 46: wrapped below via withErrorLogging so any
+// unexpected throw lands in error_log with source='server_action' +
+// sourceName='launchApprovedAction'. Expected user-facing failures
+// return `{ ok: false, errorMessage }` and are NOT logged.
+async function launchApprovedActionImpl(input: LaunchApprovedInput): Promise<LaunchApprovedResult> {
   const user = await requireUser();
   const db = getDb();
   // Polish-3.5: UI no longer surfaces a mode toggle on launch. Default
@@ -449,6 +452,11 @@ export async function launchApprovedAction(
     plannedBudgetUsd,
   };
 }
+
+export const launchApprovedAction = withErrorLogging(
+  'launchApprovedAction',
+  launchApprovedActionImpl,
+);
 
 // ============================================================================
 // Polish-25.6 Commit 37: recover Polish-25 jobs stuck in the

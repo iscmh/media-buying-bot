@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.7.6';
+export const POLISH_VERSION = '25.7.7';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.7.6';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-25.7 Commit 45 \u2014 pre-beta cleanup: deleted the throwaway /api/sentry-test probe route (08d473c). Sentry verification will happen against real error signal from beta testers instead of a synthetic probe. No other functional changes \u2014 Sentry pipeline (client + server init, beforeSend credential redaction, setSentryUser scoping) from Commit 44 stays wired and ready for the operator to add NEXT_PUBLIC_SENTRY_DSN + SENTRY_DSN in Vercel.';
+  "Polish-25.7 Commit 46 \u2014 comprehensive first-party error tracking. New error_log table (migration 0041) mirrored by Drizzle schema, admin-only RLS select, service-role insert. packages/db/src/error-log.ts logError() helper: extracts message + stack, runs @mbb/shared/redact scrub over message + stack + context + breadcrumbs (same rules as Sentry beforeSend so no split brain), computes SHA-1 fingerprint over normalized message for grouping, truncates fields to bounded lengths, NEVER throws. packages/db/src/error-log-queries.ts listRecentErrors + listGroupedErrors power the /admin/errors two-view page. Server-side capture: withErrorLogging server-action wrapper + withApiErrorLogging route-handler wrapper (both grab auth'd user_id + call logError with source='server_action'/'api_route'); ExpectedActionError marker skips logging for validation/permission throws. Applied to launchApprovedAction (Meta launch) + unpauseUserAction. Inngest onFailure hook logInngestFailure attached to metaAdLauncher \u2014 post-retry crashes land with source='worker' + eventName. Client-side capture: lib/client-error-logger.ts batches errors, 5s flush, sendBeacon on visibilitychange, rate-limited 10/min per tab, NEVER logs its own failures. BreadcrumbTracker mounted in root layout emits nav + click breadcrumbs (last 20). window.onerror + unhandledrejection attach on first log call. Two React error boundaries: app/error.tsx (per-route) + app/global-error.tsx (root-level, includes own <html>/<body>). /api/log-error POST route receives batched client events, redacts + writes via logError, silently swallows on failure to prevent client-retry loops. /admin/errors page: requireAdmin-gated, URL-driven state (range/sources/severity/user email/search/pagination), Recent view (flat list, expandable stack/context/breadcrumbs) + Grouped view (dedup by fingerprint with count + affected users + first/last seen). Filter chips: time range (1h/24h/7d/30d/all), source multi-select, user email, message text. Nav entry added to SecondaryNavSheet Admin section. Nightly cleanupErrorLog Inngest cron sweeps rows older than 90 days at 03:00 UTC. Sentry pipeline from Commit 44 stays wired unchanged \u2014 the two audit trails complement each other, not compete.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

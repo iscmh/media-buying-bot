@@ -29,6 +29,7 @@ import {
   type MetaPlacementType,
 } from '@mbb/shared';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 
 /**
  * Phase 4a → 4b: take approved generated_creatives for a generation_job
@@ -60,7 +61,13 @@ import { inngest } from '../client';
 const CONCURRENCY = 3;
 
 export const metaAdLauncher = inngest.createFunction(
-  { id: 'meta-ad-launcher', name: 'Meta ad launcher', retries: 1 },
+  {
+    id: 'meta-ad-launcher',
+    name: 'Meta ad launcher',
+    retries: 1,
+    // Polish-25.7 Commit 46: post-retry failures land in error_log.
+    onFailure: logInngestFailure,
+  },
   { event: 'meta/launch.requested' },
   async ({ event, step }) => {
     const { userId, generationJobId } = event.data;

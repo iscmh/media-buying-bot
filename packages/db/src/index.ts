@@ -25,6 +25,15 @@ export {
 } from './settings';
 export { cascadePauseUser, getLatestPauseReason, isMetaConnected, unpauseUser } from './pause';
 export { getAdminActivityRows, type AdminActivityRow } from './admin-activity';
+export { logError, computeFingerprint, type LogErrorInput } from './error-log';
+export {
+  listRecentErrors,
+  listGroupedErrors,
+  type ErrorFilters,
+  type ErrorRangeKey,
+  type RecentErrorRow,
+  type GroupedErrorRow,
+} from './error-log-queries';
 export { assertDailyCostCap, type DailyCostCapResult } from './cost-cap';
 export {
   assertDailyLaunchBudgetCap,

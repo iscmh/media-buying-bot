@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { unpauseUser } from '@mbb/db';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { withErrorLogging } from '@/lib/with-error-logging';
 
 export interface UnpauseResult {
   ok: boolean;
@@ -23,7 +24,7 @@ export interface UnpauseResult {
  * be visible in that state anyway, but stale POSTs from a tab the user
  * left open shouldn't pollute the log.
  */
-export async function unpauseUserAction(): Promise<UnpauseResult> {
+async function unpauseUserActionImpl(): Promise<UnpauseResult> {
   const supabase = await getSupabaseServerClient();
   const {
     data: { user },
@@ -47,3 +48,6 @@ export async function unpauseUserAction(): Promise<UnpauseResult> {
     closedReasons: result.previousReasons,
   };
 }
+
+// Polish-25.7 Commit 46: wrapped so unexpected throws land in error_log.
+export const unpauseUserAction = withErrorLogging('unpauseUserAction', unpauseUserActionImpl);

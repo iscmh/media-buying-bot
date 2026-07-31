@@ -23,3 +23,4 @@ export * from './ops';
 export * from './partners';
 export * from './makeugc-avatar-index';
 export * from './user-launch-presets';
+export * from './error-log';
