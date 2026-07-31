@@ -291,6 +291,10 @@ export const pollAdPerformance = inngest.createFunction(
                 data: {
                   userId,
                   message: summary,
+                  // Polish-25.8 Commit 48: gate on the user's per-
+                  // category enable + quiet-hours prefs.
+                  alertCategory:
+                    decision.action === 'kill' ? 'kill_alerts_enabled' : 'scale_alerts_enabled',
                   inlineButtons: [
                     [
                       {

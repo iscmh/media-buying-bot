@@ -24,6 +24,22 @@ export {
   type SettingsChange,
 } from './settings';
 export { cascadePauseUser, getLatestPauseReason, isMetaConnected, unpauseUser } from './pause';
+export {
+  getTelegramUserByChatId,
+  listTelegramUsers,
+  getTelegramPreferences,
+  updateTelegramPreferences,
+  isInQuietHours,
+  isDailySummaryHour,
+  localHourInZone,
+  getConversationState,
+  setConversationState,
+  clearConversationState,
+  pruneExpiredConversationState,
+  type TelegramUser,
+} from './telegram-prefs';
+export type { TelegramNotificationPreferences } from './schema/connections';
+export { DEFAULT_TELEGRAM_PREFS } from './schema/connections';
 export { getAdminActivityRows, type AdminActivityRow } from './admin-activity';
 export { logError, computeFingerprint, type LogErrorInput } from './error-log';
 export {

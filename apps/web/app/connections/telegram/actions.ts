@@ -4,7 +4,14 @@ import { randomBytes } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { cascadePauseUser, getDb, logAuditEvent, schema } from '@mbb/db';
+import {
+  cascadePauseUser,
+  getDb,
+  logAuditEvent,
+  schema,
+  updateTelegramPreferences,
+  type TelegramNotificationPreferences,
+} from '@mbb/db';
 import { sendBotMessage } from '@/lib/telegram/bot-api';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 
@@ -135,4 +142,18 @@ export async function disconnectTelegramAction(): Promise<void> {
 
   revalidatePath('/connections/telegram');
   redirect('/settings/connections?tab=telegram');
+}
+
+/**
+ * Polish-25.8 Commit 48: mirror of bot /settings command. Web UI
+ * calls this to patch any subset of notification preferences. Same
+ * @mbb/db helper as the bot so both surfaces stay in sync.
+ */
+export async function updateTelegramPreferencesAction(
+  patch: Partial<TelegramNotificationPreferences>,
+): Promise<{ ok: boolean; preferences: TelegramNotificationPreferences }> {
+  const user = await requireUser();
+  const next = await updateTelegramPreferences(user.id, patch);
+  revalidatePath('/settings/connections');
+  return { ok: true, preferences: next };
 }

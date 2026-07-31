@@ -10,6 +10,38 @@ import {
 import { users } from './users';
 
 /**
+ * Polish-25.8 Commit 48: hoisted above telegramConnections so the
+ * default-value expression can reference it.
+ */
+export interface TelegramNotificationPreferences {
+  daily_summary_enabled: boolean;
+  daily_summary_hour_local: number;
+  weekly_rollup_enabled: boolean;
+  kill_alerts_enabled: boolean;
+  scale_alerts_enabled: boolean;
+  rejection_alerts_enabled: boolean;
+  threshold_breach_alerts_enabled: boolean;
+  quiet_hours_enabled: boolean;
+  quiet_hours_start_local: number;
+  quiet_hours_end_local: number;
+  summary_format: 'compact' | 'detailed' | 'verbose';
+}
+
+export const DEFAULT_TELEGRAM_PREFS: TelegramNotificationPreferences = {
+  daily_summary_enabled: true,
+  daily_summary_hour_local: 9,
+  weekly_rollup_enabled: true,
+  kill_alerts_enabled: true,
+  scale_alerts_enabled: true,
+  rejection_alerts_enabled: true,
+  threshold_breach_alerts_enabled: true,
+  quiet_hours_enabled: false,
+  quiet_hours_start_local: 22,
+  quiet_hours_end_local: 8,
+  summary_format: 'compact',
+};
+
+/**
  * Meta Business Manager connection. One per user (we may relax this later).
  *
  * Tokens are stored encrypted via pgcrypto. The *_encrypted columns below
@@ -82,7 +114,29 @@ export const telegramConnections = pgTable('telegram_connections', {
 
   metadata: jsonb('metadata').$type<{ tgUsername?: string }>(),
 
+  // Polish-25.8 Commit 48: per-user notification preferences.
+  notificationPreferences: jsonb('notification_preferences')
+    .$type<TelegramNotificationPreferences>()
+    .notNull()
+    .default(DEFAULT_TELEGRAM_PREFS),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Polish-25.8 Commit 48: multi-turn bot conversation state.
+ * State column: 'launch:pick_variant', 'launch:pick_budget',
+ * 'settings:pick_field', etc. Cleared after 15 min TTL (enforced by
+ * @mbb/db read helpers).
+ */
+export const telegramConversationState = pgTable('telegram_conversation_state', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  tgChatId: text('tg_chat_id').notNull(),
+  state: text('state').notNull(),
+  data: jsonb('data').$type<Record<string, unknown>>().notNull().default({}),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -23,6 +23,8 @@ import { suspiciousActivityMonitor } from './suspicious-activity-monitor';
 import { telegramNotifier } from './telegram-notifier';
 import { tokenExpiryChecker } from './token-expiry-checker';
 import { cleanupErrorLog } from './cleanup-error-log';
+import { dailyTelegramSummary } from './daily-telegram-summary';
+import { weeklyTelegramRollup } from './weekly-telegram-rollup';
 
 /**
  * Polish-19.2.1: explicit registry of every Inngest worker-listener
@@ -117,4 +119,7 @@ export const functions = [
   suspiciousActivityMonitor,
   // Polish-25.7 Commit 46: nightly 90d retention sweep on error_log.
   cleanupErrorLog,
+  // Polish-25.8 Commit 48: Telegram daily / weekly summary crons.
+  dailyTelegramSummary,
+  weeklyTelegramRollup,
 ];

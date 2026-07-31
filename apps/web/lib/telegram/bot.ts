@@ -11,6 +11,9 @@ import {
   type TimeRange,
 } from '@mbb/db';
 import { inngest } from '@mbb/jobs';
+import { registerPauseCommands } from './commands-pause';
+import { registerLaunchCallback, registerLaunchCommand } from './commands-launch';
+import { registerSettingsCallback, registerSettingsCommand } from './commands-settings';
 
 /**
  * Polish-25.8 Commit 47: webhook-mode grammy Bot mounted at
@@ -43,7 +46,15 @@ export function getBot(): Bot {
   registerHelp(bot);
   registerStatus(bot);
   registerStats(bot);
+  // Polish-25.8 Commit 48: full command set.
+  registerPauseCommands(bot);
+  registerSettingsCommand(bot);
+  registerLaunchCommand(bot);
+  // Callback handlers — all three inspect data prefix and no-op on
+  // non-matching data, so registration order doesn't matter.
   registerApprovalCallback(bot);
+  registerSettingsCallback(bot);
+  registerLaunchCallback(bot);
 
   bot.catch((err) => {
     console.error('[telegram-bot] handler error', err);
@@ -154,7 +165,11 @@ function registerHelp(bot: Bot): void {
         '/start [code] — link this chat, or check status',
         '/link <code> — link this chat to your web account',
         '/status — connection + pause snapshot',
-        '/stats — today, 7d, 30d spend + conversions + ROAS',
+        '/stats [24h|7d|30d|all] — spend + conversions + ROAS',
+        '/launch — interactively launch approved variants',
+        '/pause — freeze all bot auto-actions',
+        '/unpause — resume bot',
+        '/settings — notification preferences (toggles + subcommands)',
         '/help — this message',
         '',
         'Kill / scale approvals arrive as inline buttons on this chat when the bot recommends action.',

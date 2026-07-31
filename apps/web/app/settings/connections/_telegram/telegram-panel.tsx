@@ -2,9 +2,14 @@
 
 import * as React from 'react';
 import { CheckCircle2, Copy, RefreshCcw, Unlink } from 'lucide-react';
+import type { TelegramNotificationPreferences } from '@mbb/db';
 import { Button } from '@/components/ui/button';
-import { disconnectTelegramAction } from '@/app/connections/telegram/actions';
-import { generateTelegramLinkCodeAction } from '@/app/connections/telegram/actions';
+import { Switch } from '@/components/ui/switch';
+import {
+  disconnectTelegramAction,
+  generateTelegramLinkCodeAction,
+  updateTelegramPreferencesAction,
+} from '@/app/connections/telegram/actions';
 
 /**
  * Polish-25.8 Commit 47: Telegram tab restored.
@@ -25,9 +30,16 @@ interface Props {
   tgUsername: string | null;
   linkedAtIso: string | null;
   botUsername: string | null;
+  preferences: TelegramNotificationPreferences;
 }
 
-export function TelegramPanel({ connected, tgUsername, linkedAtIso, botUsername }: Props) {
+export function TelegramPanel({
+  connected,
+  tgUsername,
+  linkedAtIso,
+  botUsername,
+  preferences,
+}: Props) {
   const [code, setCode] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -68,6 +80,9 @@ export function TelegramPanel({ connected, tgUsername, linkedAtIso, botUsername 
             </p>
           </div>
         </div>
+
+        <PreferencesEditor initial={preferences} />
+
         <form action={disconnectTelegramAction}>
           <Button type="submit" variant="outline" size="sm">
             <Unlink className="mr-1.5 h-3.5 w-3.5" aria-hidden />
@@ -155,6 +170,127 @@ export function TelegramPanel({ connected, tgUsername, linkedAtIso, botUsername 
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * Polish-25.8 Commit 48: notification preferences editor. Mirrors
+ * the bot /settings command. Auto-saves on every toggle change (no
+ * explicit Save button — matches the Trader Terminal "instant apply"
+ * pattern used by other settings).
+ */
+function PreferencesEditor({ initial }: { initial: TelegramNotificationPreferences }) {
+  const [prefs, setPrefs] = React.useState<TelegramNotificationPreferences>(initial);
+  const [saving, setSaving] = React.useState(false);
+
+  async function apply(patch: Partial<TelegramNotificationPreferences>) {
+    setSaving(true);
+    setPrefs((p) => ({ ...p, ...patch }));
+    try {
+      await updateTelegramPreferencesAction(patch);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const toggles: Array<{ key: keyof TelegramNotificationPreferences; label: string }> = [
+    { key: 'daily_summary_enabled', label: 'Daily summary' },
+    { key: 'weekly_rollup_enabled', label: 'Weekly rollup' },
+    { key: 'kill_alerts_enabled', label: 'Kill alerts' },
+    { key: 'scale_alerts_enabled', label: 'Scale alerts' },
+    { key: 'rejection_alerts_enabled', label: 'Rejection alerts' },
+    { key: 'threshold_breach_alerts_enabled', label: 'Threshold alerts' },
+    { key: 'quiet_hours_enabled', label: 'Quiet hours' },
+  ];
+
+  return (
+    <div className="border-border-subtle bg-bg-surface space-y-3 rounded-md border p-4">
+      <div className="flex items-baseline justify-between">
+        <p className="text-fg text-sm font-medium">Notification preferences</p>
+        {saving && <span className="text-fg-subtle text-xs">Saving…</span>}
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {toggles.map((t) => (
+          <label
+            key={t.key}
+            className="text-fg-muted flex items-center justify-between gap-2 text-xs"
+          >
+            <span>{t.label}</span>
+            <Switch
+              checked={!!prefs[t.key]}
+              onCheckedChange={(v) =>
+                void apply({ [t.key]: v } as Partial<TelegramNotificationPreferences>)
+              }
+            />
+          </label>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-3 pt-2 sm:grid-cols-3">
+        <label className="text-fg-muted text-xs">
+          Daily hour (local)
+          <input
+            type="number"
+            min={0}
+            max={23}
+            value={prefs.daily_summary_hour_local}
+            onChange={(e) =>
+              void apply({
+                daily_summary_hour_local: Math.max(0, Math.min(23, Number(e.target.value) || 0)),
+              })
+            }
+            className="border-border bg-bg text-fg mt-1 h-7 w-full rounded-sm border px-2 font-mono text-xs"
+          />
+        </label>
+        <label className="text-fg-muted text-xs">
+          Quiet start (local)
+          <input
+            type="number"
+            min={0}
+            max={23}
+            value={prefs.quiet_hours_start_local}
+            onChange={(e) =>
+              void apply({
+                quiet_hours_start_local: Math.max(0, Math.min(23, Number(e.target.value) || 0)),
+              })
+            }
+            className="border-border bg-bg text-fg mt-1 h-7 w-full rounded-sm border px-2 font-mono text-xs"
+          />
+        </label>
+        <label className="text-fg-muted text-xs">
+          Quiet end (local)
+          <input
+            type="number"
+            min={0}
+            max={23}
+            value={prefs.quiet_hours_end_local}
+            onChange={(e) =>
+              void apply({
+                quiet_hours_end_local: Math.max(0, Math.min(23, Number(e.target.value) || 0)),
+              })
+            }
+            className="border-border bg-bg text-fg mt-1 h-7 w-full rounded-sm border px-2 font-mono text-xs"
+          />
+        </label>
+      </div>
+      <div className="pt-2">
+        <label className="text-fg-muted text-xs">
+          Summary format
+          <select
+            value={prefs.summary_format}
+            onChange={(e) =>
+              void apply({
+                summary_format: e.target.value as TelegramNotificationPreferences['summary_format'],
+              })
+            }
+            className="border-border bg-bg text-fg ml-2 h-7 rounded-sm border px-2 text-xs"
+          >
+            <option value="compact">compact</option>
+            <option value="detailed">detailed</option>
+            <option value="verbose">verbose</option>
+          </select>
+        </label>
+      </div>
     </div>
   );
 }

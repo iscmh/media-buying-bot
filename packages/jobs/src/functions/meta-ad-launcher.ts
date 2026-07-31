@@ -30,6 +30,7 @@ import {
 } from '@mbb/shared';
 import { inngest } from '../client';
 import { logInngestFailure } from '../error-hook';
+import { sendTelegramAlert } from '../telegram-notify';
 
 /**
  * Phase 4a → 4b: take approved generated_creatives for a generation_job
@@ -600,6 +601,20 @@ export const metaAdLauncher = inngest.createFunction(
                   cleanup_attempted: cleanup.attempted,
                 },
               });
+              // Polish-25.8 Commit 48: fire Telegram rejection alert.
+              // sendTelegramAlert honors category-enabled + quiet
+              // hours + no-op if user isn't linked. Never throws.
+              if (rejectedByMeta) {
+                try {
+                  await sendTelegramAlert({
+                    userId,
+                    category: 'rejection_alerts_enabled',
+                    text: `❌ Ad rejected by Meta.\n\nVariant: ${variant.id.slice(0, 8)}\nError: ${errorMessage.slice(0, 400)}\n\nOpen /launched in the web app for guidance.`,
+                  });
+                } catch {
+                  // ignore
+                }
+              }
               return { variantId: variant.id, ok: false, rejectedByMeta, error: errorMessage };
             }
           });

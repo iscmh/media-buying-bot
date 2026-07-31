@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
-import { getDb, schema } from '@mbb/db';
+import { getDb, getTelegramPreferences, schema } from '@mbb/db';
 import {
   CONNECTABLE_AI_PROVIDERS,
   TOOL_PROVIDERS_ORDER,
@@ -327,10 +327,13 @@ async function MetaTab({ userId }: { userId: string }) {
  */
 async function TelegramTab({ userId }: { userId: string }) {
   const db = getDb();
-  const conn = await db.query.telegramConnections.findFirst({
-    where: eq(schema.telegramConnections.userId, userId),
-    columns: { status: true, tgChatId: true, linkedAt: true, metadata: true },
-  });
+  const [conn, preferences] = await Promise.all([
+    db.query.telegramConnections.findFirst({
+      where: eq(schema.telegramConnections.userId, userId),
+      columns: { status: true, tgChatId: true, linkedAt: true, metadata: true },
+    }),
+    getTelegramPreferences(userId),
+  ]);
   const connected = conn?.status === 'active' && !!conn.tgChatId;
   const meta = conn?.metadata as { tgUsername?: string } | null;
   return (
@@ -339,6 +342,7 @@ async function TelegramTab({ userId }: { userId: string }) {
       tgUsername={meta?.tgUsername ?? null}
       linkedAtIso={conn?.linkedAt?.toISOString() ?? null}
       botUsername={process.env['NEXT_PUBLIC_TELEGRAM_BOT_USERNAME'] ?? null}
+      preferences={preferences}
     />
   );
 }

@@ -1,5 +1,12 @@
 import { and, eq } from 'drizzle-orm';
-import { getDb, logAuditEvent, schema } from '@mbb/db';
+import {
+  DEFAULT_TELEGRAM_PREFS,
+  getDb,
+  isInQuietHours,
+  logAuditEvent,
+  schema,
+  type TelegramNotificationPreferences,
+} from '@mbb/db';
 import { inngest } from '../client';
 
 /**
@@ -31,19 +38,31 @@ export const telegramNotifier = inngest.createFunction(
           ? rawMessage.toISOString()
           : String(rawMessage ?? '');
 
-    const chatId = await step.run('lookup-chat-id', async () => {
+    const linkInfo = await step.run('lookup-chat-id', async () => {
       const db = getDb();
       const conn = await db.query.telegramConnections.findFirst({
         where: and(
           eq(schema.telegramConnections.userId, userId),
           eq(schema.telegramConnections.status, 'active'),
         ),
-        columns: { tgChatId: true },
+        columns: { tgChatId: true, notificationPreferences: true },
       });
-      return conn?.tgChatId ?? null;
+      if (!conn?.tgChatId) return null;
+      const user = await db.query.users.findFirst({
+        where: eq(schema.users.id, userId),
+        columns: { timezone: true },
+      });
+      return {
+        chatId: conn.tgChatId,
+        preferences: {
+          ...DEFAULT_TELEGRAM_PREFS,
+          ...(conn.notificationPreferences ?? {}),
+        } as TelegramNotificationPreferences,
+        timezone: user?.timezone ?? 'UTC',
+      };
     });
 
-    if (!chatId) {
+    if (!linkInfo) {
       // No active Telegram link — nothing we can do. Audit so missing
       // notifications are visible in case the user expected one.
       await logAuditEvent({
@@ -53,6 +72,33 @@ export const telegramNotifier = inngest.createFunction(
       });
       return { ok: false, reason: 'no active telegram connection' };
     }
+
+    // Polish-25.8 Commit 48: per-category enable + quiet-hours check.
+    // Event data may include alertCategory ('kill_alerts_enabled' etc.);
+    // if present + disabled, suppress. Quiet hours always apply unless
+    // the event sets bypassPrefs=true (used by /help direct replies).
+    const alertCategory = event.data.alertCategory as
+      | keyof TelegramNotificationPreferences
+      | undefined;
+    const bypassPrefs = event.data.bypassPrefs === true;
+    if (!bypassPrefs && alertCategory && linkInfo.preferences[alertCategory] === false) {
+      await logAuditEvent({
+        userId,
+        eventType: 'telegram_notify_suppressed_prefs',
+        eventData: { alert_category: alertCategory },
+      });
+      return { ok: false, reason: `category disabled: ${alertCategory}` };
+    }
+    if (!bypassPrefs && isInQuietHours(linkInfo.preferences, linkInfo.timezone)) {
+      await logAuditEvent({
+        userId,
+        eventType: 'telegram_notify_suppressed_quiet_hours',
+        eventData: { alert_category: alertCategory ?? null },
+      });
+      return { ok: false, reason: 'quiet hours' };
+    }
+
+    const chatId = linkInfo.chatId;
 
     const sendResult = await step.run('send-message', async () => {
       const token = process.env.TELEGRAM_BOT_TOKEN;
