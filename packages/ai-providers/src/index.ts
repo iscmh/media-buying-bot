@@ -21,6 +21,14 @@ export {
   OpenaiInvalidImageError,
   OpenaiTransientError,
   OpenaiTimeoutError,
+  // Polish-25.9 Commit 58: raw-string classifier + describe helper
+  // for user-actionable OpenAI error surface. Named ...Message to
+  // avoid collision with the internal classifyOpenaiError() that
+  // takes a structured HTTP response payload.
+  classifyOpenaiErrorMessage,
+  describeOpenaiError,
+  type OpenaiErrorCategory,
+  type OpenaiErrorClassification,
   OPENAI_IMAGE_DEFAULT_MODEL,
   OPENAI_IMAGE_MODELS,
   OPENAI_IMAGE_QUALITIES,

@@ -8,6 +8,7 @@ import {
   OpenaiTimeoutError,
   OpenaiTransientError,
   callClaude,
+  describeOpenaiError,
   redactOpenaiApiKey,
   submitOpenaiImageGeneration,
   type OpenaiImageQuality,
@@ -394,6 +395,12 @@ async function renderOneOpenaiVariant(input: {
       err instanceof OpenaiInsufficientFundsError ||
       err instanceof OpenaiInvalidImageError
     ) {
+      // Polish-25.9 Commit 58: wrap the raw OpenAI message with the
+      // actionable-hint classifier so the user sees a clickable next
+      // step (raise billing limit / add credit / regenerate key)
+      // instead of the raw string alone. `err.message` still lives
+      // inside the composite for grep + debugging.
+      const described = describeOpenaiError(err.message);
       await db.insert(schema.generatedCreatives).values({
         userId: input.userId,
         generationJobId: input.jobId,
@@ -410,13 +417,14 @@ async function renderOneOpenaiVariant(input: {
         format: 'static_openai_image',
         generationMetadata: {
           variant_index: input.variantIndex,
-          error: err.message,
+          error: described,
+          error_raw: err.message,
           error_kind: err.kind,
           status_code: err.statusCode,
           key_last4: redactOpenaiApiKey(apiKey),
         },
       });
-      throw new NonRetriableError(err.message);
+      throw new NonRetriableError(described);
     }
     // 18b-hotfix: rate-limit + transient 5xx bubble → step.run
     // retries. gpt-image-2 High routinely 504s during 15-30s

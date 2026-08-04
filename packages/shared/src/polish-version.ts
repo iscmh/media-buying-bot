@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.9.0';
+export const POLISH_VERSION = '25.9.1';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.9.0';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.9 Commit 57 - Static ad picker silent-disable fix. Tester reported: click Static ad card, Generate button stays disabled with no visible reason. Investigation: the click IS registering (staticOpenaiSelected flips to true, canSubmit returns true), and the card renders its selected state (border thicker, checkmark visible). But hasProviderKey returns false when the user hasn't connected OpenAI, so the disabled attribute stays on. Root cause: the inline 'Connect your <keys>' nudge at apps/web/app/concepts/[id]/generate/simplified-form.tsx:445 gated on (modelId != null || polish23Selected || polish25Selected) - it MISSED staticOpenaiSelected. So a Static-ad picker without an OpenAI key showed a disabled button with zero inline explanation (the hover title tooltip is invisible on mobile + operator's hardware). Commit 55's 'Pick a pipeline above' hint also didn't fire because canSubmit was true. The result was a dead-end. Fix: added staticOpenaiSelected to the condition. Now the OpenAI-key-missing case surfaces the same 'Connect your OpenAI key on Settings -> Connections' link the other three pipeline pickers already surface. Version bump: POLISH_VERSION 25.8.9 -> 25.9.0 (minor bump on the fifth silent-disable-adjacent fix this cycle - warrants a new minor to break the debug-noise pattern).";
+  "Polish-25.9 Commit 58 - OpenAI billing/quota/key error classifier. Tester hit 'NonRetriableError: Billing hard limit has been reached.' on static generation job e0d477ff; job sat 5 min before Commit 55's onFailure hook flipped it. Root cause: the worker's typed-error catch (OpenaiInsufficientFundsError etc.) stashed err.message unchanged into generation_metadata.error, then rethrew NonRetriableError(err.message). The tester saw the raw Google/OpenAI string with zero next-step guidance. Fix: new classifyOpenaiErrorMessage() + describeOpenaiError() helpers in packages/ai-providers/src/openai-image-client.ts. Eight buckets: billing_limit (Cloud Console limits URL), quota_exceeded (billing page URL), invalid_key (api-keys URL), rate_limit (wait + retry hint), content_policy (regenerate hint), invalid_image (format hint), timeout (retry hint), other (pass-through generic hint). Named 'Message' variant to avoid collision with the internal classifyOpenaiError() that takes a structured HTTP response payload. Applied at the single call site in generate-static-openai-image-variants.ts NonRetriable catch - now writes describeOpenaiError(err.message) to generation_metadata.error + keeps err.message under error_raw for grep, then throws NonRetriableError(described) so the operator sees the actionable string in the Inngest UI too. Regression pin: packages/ai-providers/tests/openai-error-classifier.test.ts (9 assertions) locks tester's exact 'Billing hard limit' string to billing_limit + asserts each bucket surfaces the right URL. Version bump: POLISH_VERSION 25.9.0 -> 25.9.1.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

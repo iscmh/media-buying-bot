@@ -511,6 +511,154 @@ function classifyOpenaiError(input: {
 }
 
 /**
+ * Polish-25.9 Commit 58: classify + describe raw OpenAI error text
+ * into user-actionable guidance. Complements the existing typed
+ * error classes above (OpenaiInsufficientFundsError etc.) - those
+ * cover the internal control flow, but their `.message` is still
+ * Google/OpenAI's raw string. The worker stashes that raw string
+ * into generation_metadata.error + surfaces it on /runs, so the
+ * user needs a clickable next step instead of "Billing hard limit
+ * has been reached." with no context.
+ *
+ * Buckets:
+ *   billing_limit   - "Billing hard limit has been reached" / hard
+ *                     cap set on the OpenAI org. Persistent until
+ *                     user raises the limit in Settings.
+ *   quota_exceeded  - "insufficient_quota" / "You exceeded your
+ *                     current quota". Account is out of paid credit.
+ *   invalid_key     - "Invalid API key" / "revoked" / 401 auth. Key
+ *                     is broken; needs a new one.
+ *   rate_limit      - 429 / "Rate limit reached". Transient; retry
+ *                     in a few minutes.
+ *   content_policy  - Moderation reject. Different creative needed.
+ *   invalid_image   - Reference image rejected (format / size).
+ *   timeout         - AbortSignal / socket timeout. Usually a retry
+ *                     will land on a healthy edge node.
+ *   other           - Pass-through generic hint.
+ */
+export type OpenaiErrorCategory =
+  | 'billing_limit'
+  | 'quota_exceeded'
+  | 'invalid_key'
+  | 'rate_limit'
+  | 'content_policy'
+  | 'invalid_image'
+  | 'timeout'
+  | 'other';
+
+export interface OpenaiErrorClassification {
+  category: OpenaiErrorCategory;
+  actionableHint: string;
+}
+
+export function classifyOpenaiErrorMessage(raw: string): OpenaiErrorClassification {
+  const s = raw.toLowerCase();
+
+  if (s.includes('billing hard limit') || s.includes('billing_hard_limit')) {
+    return {
+      category: 'billing_limit',
+      actionableHint:
+        'Your OpenAI organization hit the billing hard limit. Raise it at ' +
+        'https://platform.openai.com/settings/organization/limits then retry. ' +
+        'This is a spend cap, not a credit balance issue.',
+    };
+  }
+
+  if (s.includes('insufficient_quota') || s.includes('exceeded your current quota')) {
+    return {
+      category: 'quota_exceeded',
+      actionableHint:
+        'Your OpenAI account is out of paid credit. Add credit at ' +
+        'https://platform.openai.com/settings/organization/billing then retry.',
+    };
+  }
+
+  if (
+    s.includes('invalid api key') ||
+    s.includes('invalid_api_key') ||
+    s.includes('incorrect api key') ||
+    s.includes('revoked') ||
+    s.includes('401')
+  ) {
+    return {
+      category: 'invalid_key',
+      actionableHint:
+        'Your OpenAI API key is invalid or revoked. Generate a new one at ' +
+        'https://platform.openai.com/api-keys and paste it into Settings -> ' +
+        'Connections -> OpenAI.',
+    };
+  }
+
+  if (
+    s.includes('rate limit') ||
+    s.includes('rate_limit') ||
+    s.includes('too many requests') ||
+    s.includes('429')
+  ) {
+    return {
+      category: 'rate_limit',
+      actionableHint:
+        'OpenAI rate limit reached. Wait a few minutes and retry, or lower the ' +
+        'variant count on the next run.',
+    };
+  }
+
+  if (
+    s.includes('content policy') ||
+    s.includes('safety system') ||
+    s.includes('moderation') ||
+    s.includes('content_policy_violation')
+  ) {
+    return {
+      category: 'content_policy',
+      actionableHint:
+        "OpenAI's safety filter rejected this generation. Try a different source " +
+        'ad or soften the overlay copy angle. Regenerating with the same input ' +
+        'will fail the same way.',
+    };
+  }
+
+  if (
+    s.includes('invalid image') ||
+    s.includes('image format') ||
+    s.includes('unsupported image') ||
+    s.includes('corrupted')
+  ) {
+    return {
+      category: 'invalid_image',
+      actionableHint:
+        'OpenAI rejected the reference image. Confirm the source is a PNG or JPEG ' +
+        'under 4 MB with no transparency issues.',
+    };
+  }
+
+  if (s.includes('timeout') || s.includes('aborted') || s.includes('etimedout')) {
+    return {
+      category: 'timeout',
+      actionableHint:
+        'OpenAI took too long to respond. Retry - a fresh edge node usually clears ' +
+        'the hang. If it repeats on Low quality, contact support.',
+    };
+  }
+
+  return {
+    category: 'other',
+    actionableHint:
+      'If this recurs, screenshot the exact message and drop it in the beta feedback ' + 'channel.',
+  };
+}
+
+/**
+ * Composite: raw error (kept for greppability) + actionable hint,
+ * joined with " - ". Worker writes this to generation_metadata.error
+ * so the operator sees both the raw + the fix in the same string.
+ */
+export function describeOpenaiError(raw: string): string {
+  const { actionableHint } = classifyOpenaiErrorMessage(raw);
+  return `${raw} - ${actionableHint}`;
+}
+
+/**
  * Log-safe redaction — never leak the full key into structured
  * logs / audit rows. `sk-…abcd` shape.
  */
