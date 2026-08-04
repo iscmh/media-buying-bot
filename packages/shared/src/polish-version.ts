@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.8.5';
+export const POLISH_VERSION = '25.8.6';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.8.5';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.8 Commit 52 - jargon leak sweep + regression tripwire. Operator flagged 'Polish-XX' + 'MakeUGC' still surfacing on provider cards + cost line-items despite Commit 40's sweep. Fixed 5 user-visible leaks in shared/src: ai-provider-form.ts (elevenlabs description dropped 'Polish-22' reference, wavespeed_ai description dropped 'Polish-23' reference, makeugc card label 'MakeUGC' -> 'Instant UGC', makeugc description dropped 'Polish-25 pivot after Polish-24' history, key-hint text 'MakeUGC keys' -> 'Instant UGC keys') + cost-estimation.ts (line-item label 'MakeUGC pre-cast avatar video' -> 'Instant UGC pre-cast avatar video'). New regression tripwire packages/shared/tests/no-jargon-leaks.test.ts walks every packages/shared/src/**/*.ts, extracts string literals (double / single / template), strips ${} interpolations + code comments, matches against jargon patterns (Polish-XX version markers, Commit XX references, MakeUGC brand, polish25_/polish23_ enum leaks, raw makeugc/wavespeed_ai/gemini_nano_banana enum leaks). Zero-tolerance: any hit fails CI with the file + string snippet + fix guidance. Allowlist covers internal-identifier files (polish-version, pipeline-descriptors, types, prompt fragments, kie-omni-prompt, video-models, cost-estimation switch cases, index.ts barrel, ai-provider-form enum keys). Future edit that reintroduces jargon in a user-facing string fails the build before it can ship. Zero remaining leaks in in-scope files.";
+  "Polish-25.8 Commit 53 - Gemini vision model swap (hotfix). Tester Eric hit 'model not available' error against gemini-2.5-flash. Root cause: Google slid the 2.5 generation into deprecation while the -latest alias kept resolving to the current-gen Flash text/vision model. Fix: packages/ai-providers/src/gemini-client.ts hardcoded VISION_MODEL='gemini-2.5-flash' -> new DEFAULT_GEMINI_VISION_MODEL='gemini-flash-latest' with GEMINI_VISION_MODEL env override for A/B testing or hard-pinning. -latest alias is Google's public commitment to keep resolving to a supported model, so future rotations won't need a code change. All 5 call sites in gemini-client.ts (Vision analyze, detect frame image, similarity check, JSON extraction, prompt condensing) now read visionModel() at call time so env changes take effect without a bot restart. Image model (Nano Banana 2, gemini-3.1-flash-image) untouched - already on current generation. Version bump: POLISH_VERSION 25.8.5 -> 25.8.6.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

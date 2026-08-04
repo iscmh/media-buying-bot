@@ -25,7 +25,28 @@ import { callProvider, type CallProviderResult } from './chokepoint';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 const GEMINI_UPLOAD_BASE = 'https://generativelanguage.googleapis.com/upload/v1beta';
-const VISION_MODEL = 'gemini-2.5-flash';
+
+/**
+ * Polish-25.8 Commit 53: swapped default from `gemini-2.5-flash` to
+ * `gemini-flash-latest`. Beta tester Eric hit a "model not available"
+ * error on Feb 2026-ish traffic; Google's public roster kept the
+ * `-latest` alias pointing at the current-gen Flash text/vision model
+ * while `gemini-2.5-flash` slid into deprecation.
+ *
+ * `-latest` is the safest default because Google publicly commits to
+ * keeping the alias resolving to a supported model; when they cut a
+ * generation, `-latest` follows without a code change.
+ *
+ * Override via GEMINI_VISION_MODEL env for A/B testing or hard-pinning
+ * (e.g. `GEMINI_VISION_MODEL=gemini-2.5-flash` to force the old
+ * generation while it's still available).
+ */
+export const DEFAULT_GEMINI_VISION_MODEL = 'gemini-flash-latest';
+
+function visionModel(): string {
+  const override = process.env['GEMINI_VISION_MODEL']?.trim();
+  return override && override.length > 0 ? override : DEFAULT_GEMINI_VISION_MODEL;
+}
 
 /**
  * Polish-21.0.8 hotfix: default Nano Banana image model.
@@ -210,7 +231,7 @@ export function clampGeminiOutputTokens(raw: number): number {
 
 /** Path 1: inline base64 (≤ 20 MB). The original Phase 3b implementation. */
 async function callGeminiVisionInline(input: GeminiVisionInput): Promise<GeminiVisionResult> {
-  const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
+  const url = `${GEMINI_BASE}/models/${visionModel()}:generateContent`;
   const maxOutputTokens = input.maxOutputTokens ?? GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS;
   const body = buildVisionBody(
     input.systemPrompt,
@@ -238,7 +259,7 @@ async function callGeminiVisionInline(input: GeminiVisionInput): Promise<GeminiV
     timeoutMs: VISION_TIMEOUT_MS,
     // Don't log the base64 video; just shape + system prompt size for debug.
     requestBodyForLog: {
-      model: VISION_MODEL,
+      model: visionModel(),
       system_prompt_chars: input.systemPrompt.length,
       video_mime: input.videoMimeType,
       video_base64_size_chars: input.videoBase64.length,
@@ -294,7 +315,7 @@ async function callGeminiVisionViaFiles(input: GeminiVisionInput): Promise<Gemin
       };
     }
 
-    const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
+    const url = `${GEMINI_BASE}/models/${visionModel()}:generateContent`;
     const maxOutputTokens = input.maxOutputTokens ?? GEMINI_VISION_DEFAULT_MAX_OUTPUT_TOKENS;
     const body = buildVisionBody(
       input.systemPrompt,
@@ -313,7 +334,7 @@ async function callGeminiVisionViaFiles(input: GeminiVisionInput): Promise<Gemin
       body,
       timeoutMs: VISION_TIMEOUT_MS,
       requestBodyForLog: {
-        model: VISION_MODEL,
+        model: visionModel(),
         system_prompt_chars: input.systemPrompt.length,
         video_mime: input.videoMimeType,
         file_name: fileName,
@@ -965,7 +986,7 @@ export async function rateGeminiFaceSimilarity(
   }
 
   // 2. Call gemini-2.5-flash with the inlined image + similarity prompt.
-  const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
+  const url = `${GEMINI_BASE}/models/${visionModel()}:generateContent`;
   const body = {
     contents: [
       {
@@ -994,7 +1015,7 @@ export async function rateGeminiFaceSimilarity(
     body,
     timeoutMs: VISION_TIMEOUT_MS,
     requestBodyForLog: {
-      model: VISION_MODEL,
+      model: visionModel(),
       purpose: 'face_similarity_validation',
       image_mime: inlineData.mimeType,
       image_base64_chars: inlineData.data.length,
@@ -1106,7 +1127,7 @@ export async function analyzeMakeugcAvatarThumbnail(
     };
   }
 
-  const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
+  const url = `${GEMINI_BASE}/models/${visionModel()}:generateContent`;
   const body = {
     contents: [
       {
@@ -1139,7 +1160,7 @@ export async function analyzeMakeugcAvatarThumbnail(
     body,
     timeoutMs: VISION_TIMEOUT_MS,
     requestBodyForLog: {
-      model: VISION_MODEL,
+      model: visionModel(),
       purpose: 'makeugc_avatar_descriptor_vision',
       image_mime: inlineData.mimeType,
       image_base64_chars: inlineData.data.length,
@@ -1196,7 +1217,7 @@ export async function verifyGeminiKey(
   apiKey: string,
   userId: string,
 ): Promise<{ ok: boolean; errorMessage?: string }> {
-  const url = `${GEMINI_BASE}/models/${VISION_MODEL}:generateContent`;
+  const url = `${GEMINI_BASE}/models/${visionModel()}:generateContent`;
   const result = await callProvider<GeminiResponse>({
     userId,
     provider: 'gemini',
