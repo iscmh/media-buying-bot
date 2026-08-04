@@ -88,3 +88,21 @@ export {
   type JoinWaitlistResult,
   type ApproveWaitlistEntryResult,
 } from './beta-access';
+export {
+  generateApiKey,
+  hashApiKey,
+  createApiKey,
+  listApiKeys,
+  revokeApiKey,
+  findActiveApiKeyByPlaintext,
+  stampApiKeyLastUsed,
+  type ApiKeyRow,
+  type GeneratedApiKey,
+} from './api-keys';
+export {
+  checkApiRateLimit,
+  recordApiRequest,
+  RATE_LIMIT_MAX_REQUESTS,
+  RATE_LIMIT_WINDOW_SECONDS,
+  type RateLimitCheck,
+} from './api-rate-limit';

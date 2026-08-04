@@ -19,6 +19,12 @@ const PUBLIC_PREFIXES = [
   // pre-auth error boundary may hit before any session cookie exists.
   '/api/telegram',
   '/api/log-error',
+  // Polish-25.10 Commit 59: /api/v1/* is Bearer-token authenticated
+  // per-route. Middleware must NOT redirect these to /login — the
+  // 307 would kill any HTTP client that doesn't follow redirects
+  // (curl without -L, most Python requests configs). Same failure
+  // mode Telegram + Whop webhooks hit pre-Commit-49.
+  '/api/v1',
   '/_next',
   '/favicon',
 ];

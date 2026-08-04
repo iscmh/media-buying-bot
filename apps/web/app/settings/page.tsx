@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { BookOpen, LayoutList } from 'lucide-react';
+import { BookOpen, KeyRound, LayoutList } from 'lucide-react';
 import { eq } from 'drizzle-orm';
 import {
   checkActiveSubscription,
@@ -125,9 +125,10 @@ export default async function SettingsPage() {
         subtitle="Bot configuration. Changes apply on the next launch / poll cycle."
       />
 
-      {/* Polish-25.2 Commit 16b: quick-nav to the two new sub-pages
-          (Presets + Rules) so operators don't have to guess the URLs. */}
-      <div className="mb-6 grid gap-2 sm:grid-cols-2">
+      {/* Polish-25.2 Commit 16b: quick-nav to the sub-pages so operators
+          don't have to guess URLs. Polish-25.10 Commit 59 added the
+          third card for API keys (Scale-tier surface). */}
+      <div className="mb-6 grid gap-2 sm:grid-cols-3">
         <Link
           href="/settings/presets"
           className="border-border-subtle hover:bg-bg-surfaceHover group flex items-start gap-3 rounded-md border p-3 text-sm"
@@ -149,6 +150,19 @@ export default async function SettingsPage() {
             <p className="text-fg font-medium">Automation rules</p>
             <p className="text-fg-muted mt-0.5 text-xs">
               What the bot does automatically once ads are live: kill / scale / pause thresholds.
+            </p>
+          </div>
+        </Link>
+        <Link
+          href="/settings/api"
+          className="border-border-subtle hover:bg-bg-surfaceHover group flex items-start gap-3 rounded-md border p-3 text-sm"
+        >
+          <KeyRound className="text-fg-muted mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <div>
+            <p className="text-fg font-medium">API keys</p>
+            <p className="text-fg-muted mt-0.5 text-xs">
+              Bearer tokens for /api/v1. Drive uploads, generation, and Meta launch from your own
+              scripts.
             </p>
           </div>
         </Link>
