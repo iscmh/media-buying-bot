@@ -46,7 +46,7 @@
  * plumbing (Commits 1-9) is untouched; only the presentation +
  * information-architecture layer changes.
  */
-export const POLISH_VERSION = '25.8.6';
+export const POLISH_VERSION = '25.8.7';
 
 /**
  * Optional short human-readable slug that pairs with the version
@@ -55,7 +55,7 @@ export const POLISH_VERSION = '25.8.6';
  * different fix pattern.
  */
 export const POLISH_RELEASE_NAME =
-  "Polish-25.8 Commit 53 - Gemini vision model swap (hotfix). Tester Eric hit 'model not available' error against gemini-2.5-flash. Root cause: Google slid the 2.5 generation into deprecation while the -latest alias kept resolving to the current-gen Flash text/vision model. Fix: packages/ai-providers/src/gemini-client.ts hardcoded VISION_MODEL='gemini-2.5-flash' -> new DEFAULT_GEMINI_VISION_MODEL='gemini-flash-latest' with GEMINI_VISION_MODEL env override for A/B testing or hard-pinning. -latest alias is Google's public commitment to keep resolving to a supported model, so future rotations won't need a code change. All 5 call sites in gemini-client.ts (Vision analyze, detect frame image, similarity check, JSON extraction, prompt condensing) now read visionModel() at call time so env changes take effect without a bot restart. Image model (Nano Banana 2, gemini-3.1-flash-image) untouched - already on current generation. Version bump: POLISH_VERSION 25.8.5 -> 25.8.6.";
+  "Polish-25.8 Commit 54 - Gemini Files upload error classifier + actionable hints. Tester hit 'Gemini Files upload failed: Your project has been denied access. Please contact support.. Try compressing the video under 100 MB.' Root cause: the user's BYOK Gemini API key's Google Cloud project lacks the Generative Language API enabled. The 'try compressing' suffix from the pre-Commit-54 error message was actively misleading - it sent the tester chasing a file-size issue when the real fix is a one-click Cloud Console enablement on the project the API key belongs to. Fix: new classifyGeminiUploadError() + describeGeminiUploadError() helpers in packages/ai-providers/src/gemini-client.ts. Four buckets: denied_access (PERMISSION_DENIED / 'denied access' / 'please contact support' / 'not authorized' - surfaces the Cloud Console enablement URL), quota (429 / RESOURCE_EXHAUSTED / 'rate limit' / 'quota' - surfaces the quotas page URL), too_large (413 / 'too large' / 'exceeds' / 'payload too large' - the ONLY category where compressing helps), other (pass-through with generic 'contact Google support' hint). Preserves the raw Google error text for greppability. Applied at the single call site in callGeminiVisionViaFiles. Pin test packages/ai-providers/tests/gemini-upload-error.test.ts (6 assertions) locks the exact tester's error string to the denied_access bucket + asserts no 'compress' word appears in denied_access advice - a future regex tweak that misroutes it fails CI. Version bump: POLISH_VERSION 25.8.6 -> 25.8.7.";
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

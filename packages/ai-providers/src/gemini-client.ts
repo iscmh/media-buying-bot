@@ -292,7 +292,11 @@ async function callGeminiVisionViaFiles(input: GeminiVisionInput): Promise<Gemin
       ok: false,
       costUsd: 0,
       latencyMs: 0,
-      errorMessage: `Gemini Files upload failed: ${upload.errorMessage ?? 'unknown error'}. Try compressing the video under 100 MB.`,
+      // Polish-25.8 Commit 54: classify the upload failure before
+      // suggesting a fix. "compress the video" is only accurate when
+      // the failure is a size limit; on PERMISSION_DENIED / quota
+      // exhaustion it misleads the operator into the wrong action.
+      errorMessage: `Gemini Files upload failed: ${describeGeminiUploadError(upload.errorMessage ?? 'unknown error')}`,
     };
   }
 
@@ -548,6 +552,84 @@ export function tryParseGeminiJson(
 // =========================================================================
 // Phase 3h — Gemini Files API helpers (used internally + exported for tests).
 // =========================================================================
+
+/**
+ * Polish-25.8 Commit 54: turn Google's raw Files-API error into an
+ * actionable one-liner for the operator.
+ *
+ * Real cause classes we've seen:
+ *   1. "denied access" / PERMISSION_DENIED / "not authorized" — the
+ *      user's Google project isn't authorized for the Generative
+ *      Language API (Files sub-API). Fix is a one-click enable in the
+ *      Cloud Console for that project. Compressing the video does not
+ *      help.
+ *   2. "quota" / RESOURCE_EXHAUSTED / 429 — per-project rate limit or
+ *      daily-quota exhaustion. Fix is to wait (limits reset hourly /
+ *      daily) or upgrade the Cloud project's quota.
+ *   3. "too large" / "exceeds" / 413 — genuinely a size problem.
+ *      Compressing helps.
+ *   4. Anything else — pass through Google's message; operator
+ *      contacts support if it recurs.
+ *
+ * We keep the raw error text in the message so the tester can grep
+ * for it in Google's docs / support forums. We add the specific
+ * remediation suffix in front of it based on the classification.
+ */
+export function classifyGeminiUploadError(raw: string): {
+  category: 'denied_access' | 'quota' | 'too_large' | 'other';
+  actionableHint: string;
+} {
+  const s = raw.toLowerCase();
+  if (
+    s.includes('denied access') ||
+    s.includes('permission_denied') ||
+    s.includes('not authorized') ||
+    s.includes('please contact support')
+  ) {
+    return {
+      category: 'denied_access',
+      actionableHint:
+        "Your Gemini API key's Google Cloud project doesn't have the Generative Language API enabled. " +
+        'Enable it at https://console.cloud.google.com/apis/library/generativelanguage.googleapis.com ' +
+        'for the project the API key belongs to, then retry. This is a project config issue, not a file-size issue.',
+    };
+  }
+  if (
+    s.includes('quota') ||
+    s.includes('rate limit') ||
+    s.includes('resource_exhausted') ||
+    s.includes('429')
+  ) {
+    return {
+      category: 'quota',
+      actionableHint:
+        'Your Gemini API project hit a rate limit or daily quota. ' +
+        'Wait a few minutes and retry, or raise the quota at ' +
+        'https://console.cloud.google.com/apis/api/generativelanguage.googleapis.com/quotas.',
+    };
+  }
+  if (
+    s.includes('too large') ||
+    s.includes('exceeds') ||
+    s.includes('413') ||
+    s.includes('payload too large')
+  ) {
+    return {
+      category: 'too_large',
+      actionableHint:
+        'The source video exceeds Gemini Files-API limits. Compress under 100 MB and retry.',
+    };
+  }
+  return {
+    category: 'other',
+    actionableHint: 'If this recurs, contact Google support for your project with the error above.',
+  };
+}
+
+export function describeGeminiUploadError(raw: string): string {
+  const { actionableHint } = classifyGeminiUploadError(raw);
+  return `${raw} — ${actionableHint}`;
+}
 
 export interface UploadGeminiFileInput {
   userId: string;

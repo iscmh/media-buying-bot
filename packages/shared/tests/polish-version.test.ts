@@ -12,12 +12,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     expect(POLISH_VERSION).toMatch(/^2(1|3|4|5|6|7|8)\.\d+\.\d+$/);
   });
 
-  it('is currently 25.8.6 (Polish-25.8 Commit 53 — bump this pin deliberately on the next release)', () => {
+  it('is currently 25.8.7 (Polish-25.8 Commit 54 — bump this pin deliberately on the next release)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('25.8.6');
+    expect(POLISH_VERSION).toBe('25.8.7');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {
