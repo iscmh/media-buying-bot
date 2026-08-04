@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { callClaude, callGeminiImage } from '@mbb/ai-providers';
+import { callClaude, callGeminiImage, describeGeminiUploadError } from '@mbb/ai-providers';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import {
   NANO_BANANA_CLONING_PROMPT_TEMPLATE,
@@ -47,9 +47,49 @@ export const generateStaticVariants = inngest.createFunction(
           variantCount: true,
           intensity: true,
           conceptIds: true,
+          format: true,
+          pickedPipeline: true,
         },
       });
     });
+
+    // Polish-25.8 Commit 56: pipeline guard against wrong-worker
+    // dispatch. Real cause of the orphan-row bug: a legacy fan-out
+    // path fired generation/static.requested against a
+    // polish25_makeugc job, so this worker wrote a static_gemini_
+    // image creative + failure row onto a UGC video job. Guard
+    // refuses to run if the job's own format tag doesn't map to a
+    // static-gemini pipeline. Any bogus dispatch fails cleanly with
+    // an audit log entry instead of writing an orphan row.
+    if (job) {
+      const format = job.format ?? '';
+      const picked = job.pickedPipeline ?? '';
+      const looksStaticGemini =
+        format.startsWith('static_gemini') ||
+        format.startsWith('nano_banana') ||
+        picked.startsWith('static_gemini') ||
+        picked.startsWith('nano_banana') ||
+        // Legacy default when the form didn't stamp a format.
+        (!format && !picked);
+      if (!looksStaticGemini) {
+        console.log(
+          `[static-variants] refusing dispatch job=${jobId} format=${format} picked=${picked} — not a static-gemini pipeline`,
+        );
+        await logAuditEvent({
+          userId,
+          eventType: 'generation_job_dispatch_refused',
+          eventData: {
+            job_id: jobId,
+            worker: 'generate-static-variants',
+            reason: 'format_mismatch',
+            job_format: format,
+            job_picked_pipeline: picked,
+          },
+        });
+        return { jobId, mode, generated: 0, refused: true };
+      }
+    }
+
     const variantCount = job?.variantCount ?? 0;
     const intensity = (job?.intensity ?? 'medium') as 'small' | 'medium' | 'big';
     const conceptId = job?.conceptIds?.[0];
@@ -365,7 +405,13 @@ async function renderOneStaticVariant(input: {
       format: 'static_gemini_image',
       generationMetadata: {
         variant_index: input.variantIndex,
-        error: image.errorMessage ?? 'Gemini Image returned no data',
+        // Polish-25.8 Commit 56: run the Gemini error through the
+        // Commit 54 classifier so denied_access / quota / too_large
+        // surface the same actionable next-step guidance the Files
+        // upload path shows. Without this, a project missing the
+        // Generative Language API enablement just stored "Your
+        // project has been denied access" with no fix hint.
+        error: describeGeminiUploadError(image.errorMessage ?? 'Gemini Image returned no data'),
         claude_rationale: input.copy.rationale ?? null,
       },
     });
@@ -373,7 +419,7 @@ async function renderOneStaticVariant(input: {
       index: input.variantIndex,
       ok: false,
       costUsd: image.costUsd,
-      error: image.errorMessage ?? 'Gemini Image returned no data',
+      error: describeGeminiUploadError(image.errorMessage ?? 'Gemini Image returned no data'),
     };
   }
 

@@ -36,9 +36,30 @@ export default async function JobReviewPage({ params }: Props) {
   });
   if (!job) notFound();
 
-  const variants = await db.query.generatedCreatives.findMany({
+  const variantsRaw = await db.query.generatedCreatives.findMany({
     where: eq(schema.generatedCreatives.generationJobId, id),
     orderBy: asc(schema.generatedCreatives.createdAt),
+  });
+  // Polish-25.8 Commit 56: filter orphan-failure rows out of the
+  // approval view. Real cause: a legacy fan-out path fired both a
+  // static-variants event AND a UGC/polish25 event against the same
+  // generation_job_id, so the run detail rendered a rejected static
+  // row with no file alongside the real polish25 output. Orphans
+  // aren't approvable + confuse the copy/image match on the card.
+  // Definition of orphan: status='rejected' + no fileUrl + no image
+  // path AND (crucially) its format doesn't match the job's own
+  // pipeline. That last check keeps genuine per-variant rejection
+  // rows visible for jobs where the format matches.
+  const variants = variantsRaw.filter((v) => {
+    const isEmptyRejection =
+      v.status === 'rejected' && (!v.fileUrl || v.fileUrl.length === 0) && !v.imageStoragePath;
+    if (!isEmptyRejection) return true;
+    const jobFormatPrefix = (job.format ?? '').split('_')[0] ?? '';
+    const variantFormatPrefix = (v.format ?? '').split('_')[0] ?? '';
+    // Keep if formats broadly agree (per-variant rejection inside
+    // the same pipeline). Drop if they diverge (orphan from a
+    // wrong-pipeline dispatch).
+    return jobFormatPrefix === variantFormatPrefix;
   });
 
   // Polish-9.12 + Polish-11: a Kling multi-clip job emits up to three

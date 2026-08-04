@@ -87,6 +87,12 @@ export {
   // Polish-21.0.8: Nano Banana 2 model resolver + env override.
   DEFAULT_NANO_BANANA_MODEL_ID,
   getNanoBananaModelId,
+  // Polish-25.8 Commit 54: shared Gemini error classifier — used by
+  // Files upload path + Commit 56 static-variants image-gen path.
+  classifyGeminiUploadError,
+  describeGeminiUploadError,
+  // Polish-25.8 Commit 53: Gemini vision model resolver + env override.
+  DEFAULT_GEMINI_VISION_MODEL,
 } from './gemini-client';
 export {
   callClaude,
