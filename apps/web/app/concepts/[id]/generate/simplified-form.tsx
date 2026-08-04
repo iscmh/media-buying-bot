@@ -442,18 +442,25 @@ export function SimplifiedGenerationForm({
             or reduce variants.
           </p>
         )}
-        {!hasProviderKey && (modelId != null || polish23Selected || polish25Selected) && (
-          <p className="mt-3 text-xs text-[color:var(--accent-negative)]">
-            Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
-            <Link
-              href="/settings/connections"
-              className="hover:text-fg underline underline-offset-4"
-            >
-              Settings → Connections
-            </Link>{' '}
-            to generate.
-          </p>
-        )}
+        {/* Polish-25.9 Commit 57: added staticOpenaiSelected to the
+            condition. Pre-Commit-57 the Static ad pipeline silently
+            disabled Generate when OpenAI wasn't connected because
+            this inline nudge only checked the three other pickers.
+            User read "greyed-out button with no visible error" and
+            couldn't figure out the OpenAI-key requirement. */}
+        {!hasProviderKey &&
+          (modelId != null || polish23Selected || polish25Selected || staticOpenaiSelected) && (
+            <p className="mt-3 text-xs text-[color:var(--accent-negative)]">
+              Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
+              <Link
+                href="/settings/connections"
+                className="hover:text-fg underline underline-offset-4"
+              >
+                Settings → Connections
+              </Link>{' '}
+              to generate.
+            </p>
+          )}
         {/* Polish-25.8 Commit 55: silent-disable fix. Pre-Commit-55,
             when the user hadn't yet picked a model the Generate
             button greyed out with no inline reason (only a hover
