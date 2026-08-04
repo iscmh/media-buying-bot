@@ -7,6 +7,7 @@ import {
 } from '@mbb/ai-providers';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 
@@ -37,6 +38,7 @@ export const generateSoraVariants = inngest.createFunction(
     id: 'generate-sora-variants',
     name: 'Generate Sora 2 single-shot variants',
     retries: 1,
+    onFailure: logInngestFailure,
   },
   { event: 'generation/sora.requested' },
   async ({ event, step }) => {

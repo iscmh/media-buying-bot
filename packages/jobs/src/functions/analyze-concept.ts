@@ -8,6 +8,7 @@ import {
   pipelineFromString,
 } from '@mbb/shared';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { downloadAsBase64 } from '../lib/storage';
 
@@ -54,6 +55,7 @@ export const analyzeConcept = inngest.createFunction(
     id: 'analyze-concept',
     name: 'Analyze concept (UGC vision)',
     retries: 1,
+    onFailure: logInngestFailure,
   },
   { event: 'generation/analyze.requested' },
   async ({ event, step }) => {

@@ -60,6 +60,7 @@ import {
 import { getDb, schema } from '@mbb/db';
 import { POLISH_VERSION, parsePolish23VisionAdditions } from '@mbb/shared';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
@@ -221,6 +222,7 @@ export const generatePolish23VeoLite = inngest.createFunction(
     // Function-level retry ONE — segment-level manual retry lives
     // inside the loop below.
     retries: 1,
+    onFailure: logInngestFailure,
   },
   { event: 'generation/polish23-veo-lite.requested' },
   async ({ event, step }) => {

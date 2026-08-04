@@ -16,6 +16,7 @@ import {
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { SORA_PROMPT_OPTIMIZER_SYSTEM_PROMPT } from '@mbb/shared';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys, type ProviderKey } from '../lib/load-keys';
 // Polish-4: failover. The UGC worker calls into these on a 0-success
 // run to potentially route to the cinematic worker.
@@ -71,6 +72,7 @@ export const generateUgcVariants = inngest.createFunction(
     id: 'generate-ugc-variants',
     name: 'Generate UGC variants',
     retries: 1,
+    onFailure: logInngestFailure,
   },
   { event: 'generation/ugc.requested' },
   async ({ event, step }) => {

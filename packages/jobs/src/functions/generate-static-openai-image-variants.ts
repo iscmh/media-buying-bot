@@ -15,6 +15,7 @@ import {
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { STATIC_WINNER_IMPORT_SYSTEM_PROMPT } from '@mbb/shared';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { downloadAsBase64, uploadGeneratedImage } from '../lib/storage';
 import { parseVariantsArray, type ClaudeCopyVariant } from './generate-static-variants';
@@ -92,6 +93,10 @@ export const generateStaticOpenaiImageVariants = inngest.createFunction(
     id: 'generate-static-openai-image-variants',
     name: 'Polish-25.3: OpenAI gpt-image-2 static ad',
     retries: 1,
+    // Polish-25.8 Commit 55: after Inngest exhausts retries, flip
+    // generation_jobs.status='failed' so the job doesn't sit at
+    // 'processing' forever when the whole function crashes.
+    onFailure: logInngestFailure,
   },
   { event: 'generation/static-openai.requested' },
   async ({ event, step }) => {

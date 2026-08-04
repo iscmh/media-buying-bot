@@ -56,6 +56,7 @@ import {
 import { getDb, schema } from '@mbb/db';
 import { POLISH_VERSION, Polish23PersonaSchema } from '@mbb/shared';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { resolveMakeugcKey } from '../lib/resolve-makeugc-key';
@@ -119,6 +120,7 @@ export const generatePolish25Makeugc = inngest.createFunction(
     // Function-level retry ONE — internal auto-retry lives inside
     // submit + poll steps.
     retries: 1,
+    onFailure: logInngestFailure,
   },
   { event: 'generation/polish25-makeugc.requested' },
   async ({ event, step }) => {

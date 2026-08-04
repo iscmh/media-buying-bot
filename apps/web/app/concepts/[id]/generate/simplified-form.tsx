@@ -454,6 +454,16 @@ export function SimplifiedGenerationForm({
             to generate.
           </p>
         )}
+        {/* Polish-25.8 Commit 55: silent-disable fix. Pre-Commit-55,
+            when the user hadn't yet picked a model the Generate
+            button greyed out with no inline reason (only a hover
+            tooltip, invisible on mobile). This paragraph makes the
+            gate visible. */}
+        {!canSubmit && !overCap && (
+          <p className="text-fg-muted mt-3 text-xs">
+            Pick a pipeline above (Instant UGC, Static ad, or Higgsfield UGC ad) to enable Generate.
+          </p>
+        )}
       </div>
 
       {error && (

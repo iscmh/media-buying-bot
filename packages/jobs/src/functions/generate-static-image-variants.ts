@@ -7,6 +7,7 @@ import {
 } from '@mbb/ai-providers';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 
@@ -34,6 +35,7 @@ export const generateStaticImageVariants = inngest.createFunction(
     id: 'generate-static-image-variants',
     name: 'Generate Nano Banana static image variants',
     retries: 1,
+    onFailure: logInngestFailure,
   },
   { event: 'generation/nano-banana.requested' },
   async ({ event, step }) => {

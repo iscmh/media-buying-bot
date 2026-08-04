@@ -6,6 +6,7 @@ import {
   STATIC_WINNER_IMPORT_SYSTEM_PROMPT,
 } from '@mbb/shared';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { downloadAsBase64, uploadGeneratedImage } from '../lib/storage';
 
@@ -31,6 +32,7 @@ export const generateStaticVariants = inngest.createFunction(
     id: 'generate-static-variants',
     name: 'Generate static variants',
     retries: 1,
+    onFailure: logInngestFailure,
   },
   { event: 'generation/static.requested' },
   async ({ event, step }) => {

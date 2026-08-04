@@ -35,6 +35,7 @@ import {
 import { getDb, schema } from '@mbb/db';
 import { extractMetadataObject } from './analyze-concept';
 import { inngest } from '../client';
+import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
@@ -277,6 +278,7 @@ export const generateVideoVariant = inngest.createFunction(
     id: 'generate-video-variant',
     name: 'Generate video variant (unified worker — Seedance / Kling / etc.)',
     retries: 1,
+    onFailure: logInngestFailure,
   },
   { event: 'generation/video-variant.requested' },
   async ({ event, step }) => {
