@@ -50,5 +50,9 @@ async function decideVariant(
   });
   return apiOk({ id: variant.id, status: decision, changed: true });
 }
-
-export { decideVariant };
+// Polish-25.10 Commit 60 hotfix: `decideVariant` stays module-local.
+// Next.js 14 App Router only permits HTTP verbs + route-config exports
+// (runtime, dynamic, revalidate, ...) from route.ts; a helper export
+// fails the build with "not a valid Route export field." The reject
+// route already inlines its own body, so nothing else needed this
+// helper anyway.
