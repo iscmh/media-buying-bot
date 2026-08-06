@@ -39,6 +39,12 @@ import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { resolveHeygenManagedKey } from '../lib/resolve-heygen-managed-key';
 import { safeInngestStepReturn, stripUndefined, stripUndefinedDeep } from '../lib/strip-undefined';
 import {
+  assertArrayNoUndefinedForPostgres,
+  assertNoUndefinedForPostgres,
+  assertScalarDefinedForPostgres,
+  rethrowWithUndefinedContext,
+} from '../lib/assert-no-undefined-for-postgres';
+import {
   MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
   parseMakeugcAvatarVisionAnalysisWithDiagnostics,
   type MakeugcAvatarVisionAnalysis,
@@ -221,7 +227,25 @@ export interface HeygenRefreshCoreParams {
 export async function refreshHeygenAvatarIndexCore(
   params: HeygenRefreshCoreParams,
 ): Promise<Record<string, unknown>> {
-  const { step, userId, forceAll, startedAt, trigger } = params;
+  const { step, forceAll, startedAt, trigger } = params;
+  // Polish-26.0.13 Commit 62.3: guard userId at entry. Every WHERE
+  // clause in the sync worker + its dependencies (loadDecryptedKeys,
+  // resolveHeygenManagedKey) binds userId; a bare-undefined
+  // slip-through here trips postgres-js UNDEFINED_VALUE at the
+  // first eq(column, userId) call, which is exactly the failure
+  // class Commits 62.1 / 62.2 were misdiagnosed as (they patched
+  // Inngest's UNDEFINED_VALUE, not postgres-js's).
+  const userId = assertScalarDefinedForPostgres(
+    params.userId,
+    'params.userId',
+    'refreshHeygenAvatarIndexCore:entry',
+  );
+  if (typeof userId !== 'string' || userId.length === 0) {
+    throw new NonRetriableError(
+      `refresh-heygen-avatar-index: userId must be a non-empty string, got ` +
+        `${JSON.stringify(userId)} (typeof ${typeof userId}).`,
+    );
+  }
 
   // Step A: fetch live library.
   const liveAvatars = await step.run('fetch-avatar-list', async () => {
@@ -297,11 +321,22 @@ export async function refreshHeygenAvatarIndexCore(
   if (diff.toSoftDeleteIds.length > 0) {
     await step.run('mark-disappeared-deleted', async () => {
       const db = getDb();
+      // Polish-26.0.13 Commit 62.3: postgres-js UNDEFINED_VALUE guard.
+      // A single undefined element in the inArray list throws at the
+      // driver boundary. Filter to defined strings + assert as tripwire.
+      const ids = assertArrayNoUndefinedForPostgres(
+        diff.toSoftDeleteIds,
+        'refresh-heygen:mark-disappeared-deleted:inArray',
+      );
+      const setRecord = assertNoUndefinedForPostgres(
+        { deletedAt: new Date() },
+        'refresh-heygen:mark-disappeared-deleted:set',
+      );
       await db
         .update(schema.heygenAvatarIndex)
-        .set({ deletedAt: new Date() })
-        .where(inArray(schema.heygenAvatarIndex.avatarId, diff.toSoftDeleteIds));
-      return safeInngestStepReturn({ softDeleted: diff.toSoftDeleteIds.length });
+        .set(setRecord)
+        .where(inArray(schema.heygenAvatarIndex.avatarId, ids));
+      return safeInngestStepReturn({ softDeleted: ids.length });
     });
   }
 
@@ -530,33 +565,57 @@ export async function refreshHeygenAvatarIndexCore(
         const db = getDb();
         const now = new Date();
         let persistedInChunk = 0;
+        let skippedNoAvatarId = 0;
         for (const row of rows) {
           if (!row.analysis) continue;
           const a = row.analysis;
+          // Polish-26.0.13 Commit 62.3: guard the primary key at
+          // source. HeyGen's list API defines avatar_id as required
+          // but the wire response has been observed missing it for
+          // certain photo-avatar variants — a missing PK would
+          // silently drop through stripUndefined and then either
+          // trip postgres-js UNDEFINED_VALUE (on the ON CONFLICT
+          // target) or a NOT NULL constraint. Skip + log instead.
+          const avatarId = row.avatar.avatar_id;
+          if (typeof avatarId !== 'string' || avatarId.length === 0) {
+            skippedNoAvatarId++;
+            console.error(
+              `[refresh-heygen-avatar-index:${trigger}] chunk ${chunkNumber}: skipping avatar ` +
+                `with missing/empty avatar_id — name=${JSON.stringify(row.avatar.avatar_name).slice(0, 80)} ` +
+                `preview_url=${JSON.stringify(row.avatar.preview_image_url).slice(0, 200)}`,
+            );
+            continue;
+          }
           // Polish-26.0.11 Commit 62.1: build the record once with
           // explicit `?? null` on every nullable column, then strip
-          // any residual undefined keys before Drizzle. Belt-and-
-          // suspenders — the analysis object is Zod-validated so
-          // every field should be defined, but the raw jsonb blob
-          // gets `?? null` too so Postgres never sees `undefined`.
-          const record = stripUndefined({
-            avatarId: row.avatar.avatar_id,
-            avatarName: row.avatar.avatar_name ?? '',
-            thumbnailUrl: row.avatar.preview_image_url ?? '',
-            heygenGender: (row.avatar.gender ?? '').toLowerCase(),
-            ageBucket: a.age_bucket,
-            ethnicity: a.ethnicity,
-            hairColor: a.hair_color,
-            hairStyle: a.hair_style ?? null,
-            facialHair: a.facial_hair ?? null,
-            wardrobeStyle: a.wardrobe_style ?? null,
-            wardrobeSummary: a.wardrobe_summary ?? null,
-            backgroundSetting: a.background_setting ?? null,
-            visionAnalysisRaw: (row.r?.parsedJson ?? null) as Record<string, unknown> | null,
-            visionAnalyzedAt: now,
-            lastRefreshedAt: now,
-            deletedAt: null,
-          });
+          // any residual undefined keys before Drizzle.
+          //
+          // Polish-26.0.13 Commit 62.3: assertNoUndefinedForPostgres
+          // tripwire BEFORE the driver sees the record — throws with
+          // field name + full snapshot so an operator gets the actual
+          // failing row instead of postgres-js's opaque "Undefined
+          // values are not allowed".
+          const record = assertNoUndefinedForPostgres(
+            stripUndefined({
+              avatarId,
+              avatarName: row.avatar.avatar_name ?? '',
+              thumbnailUrl: row.avatar.preview_image_url ?? '',
+              heygenGender: (row.avatar.gender ?? '').toLowerCase(),
+              ageBucket: a.age_bucket,
+              ethnicity: a.ethnicity,
+              hairColor: a.hair_color,
+              hairStyle: a.hair_style ?? null,
+              facialHair: a.facial_hair ?? null,
+              wardrobeStyle: a.wardrobe_style ?? null,
+              wardrobeSummary: a.wardrobe_summary ?? null,
+              backgroundSetting: a.background_setting ?? null,
+              visionAnalysisRaw: (row.r?.parsedJson ?? null) as Record<string, unknown> | null,
+              visionAnalyzedAt: now,
+              lastRefreshedAt: now,
+              deletedAt: null,
+            }),
+            `refresh-heygen:persist-avatar:${avatarId}`,
+          );
           await db
             .insert(schema.heygenAvatarIndex)
             .values(record as typeof schema.heygenAvatarIndex.$inferInsert)
@@ -565,6 +624,12 @@ export async function refreshHeygenAvatarIndexCore(
               set: record,
             });
           persistedInChunk++;
+        }
+        if (skippedNoAvatarId > 0) {
+          console.warn(
+            `[refresh-heygen-avatar-index:${trigger}] chunk ${chunkNumber}: ` +
+              `skipped ${skippedNoAvatarId} avatar(s) with missing avatar_id`,
+          );
         }
 
         // Polish-26.0.10 Commit 62: split-signature failure capture.
@@ -750,16 +815,26 @@ export async function refreshHeygenAvatarIndexCore(
   if (diff.toTouchOnlyIds.length > 0) {
     await step.run('touch-fresh-rows', async () => {
       const db = getDb();
+      // Polish-26.0.13 Commit 62.3: same postgres-js UNDEFINED_VALUE
+      // guards as mark-disappeared-deleted.
+      const ids = assertArrayNoUndefinedForPostgres(
+        diff.toTouchOnlyIds,
+        'refresh-heygen:touch-fresh-rows:inArray',
+      );
+      const setRecord = assertNoUndefinedForPostgres(
+        { lastRefreshedAt: new Date() },
+        'refresh-heygen:touch-fresh-rows:set',
+      );
       await db
         .update(schema.heygenAvatarIndex)
-        .set({ lastRefreshedAt: new Date() })
+        .set(setRecord)
         .where(
           and(
-            inArray(schema.heygenAvatarIndex.avatarId, diff.toTouchOnlyIds),
+            inArray(schema.heygenAvatarIndex.avatarId, ids),
             isNull(schema.heygenAvatarIndex.deletedAt),
           ),
         );
-      return safeInngestStepReturn({ touched: diff.toTouchOnlyIds.length });
+      return safeInngestStepReturn({ touched: ids.length });
     });
   }
 
@@ -823,16 +898,25 @@ export const refreshHeygenAvatarIndexCron = inngest.createFunction(
   { cron: '0 4 * * *' }, // 1h after MakeUGC cron to stagger Gemini load
   async ({ step }) => {
     const startedAt = Date.now();
-    const userId = await step.run('resolve-refresh-user', async () => {
-      return resolveHeygenRefreshUserId(undefined);
-    });
-    return refreshHeygenAvatarIndexCore({
-      step,
-      userId,
-      forceAll: false,
-      startedAt,
-      trigger: 'cron',
-    });
+    try {
+      const userId = await step.run('resolve-refresh-user', async () => {
+        return resolveHeygenRefreshUserId(undefined);
+      });
+      return await refreshHeygenAvatarIndexCore({
+        step,
+        userId,
+        forceAll: false,
+        startedAt,
+        trigger: 'cron',
+      });
+    } catch (err) {
+      // Polish-26.0.13 Commit 62.3: top-level UNDEFINED_VALUE
+      // annotator. If postgres-js threw its opaque "Undefined values
+      // are not allowed", re-throw with the trigger context so the
+      // operator sees WHICH cron this was. Non-UNDEFINED errors are
+      // re-thrown unchanged.
+      rethrowWithUndefinedContext(err, 'refreshHeygenAvatarIndexCron');
+    }
   },
 );
 
@@ -845,17 +929,22 @@ export const refreshHeygenAvatarIndexManual = inngest.createFunction(
   { event: 'heygen/avatar-index.refresh.requested' },
   async ({ event, step }) => {
     const startedAt = Date.now();
-    const data = (event?.data ?? {}) as RefreshEventData;
-    const forceAll = data.forceAll === true;
-    const userId = await step.run('resolve-refresh-user', async () => {
-      return resolveHeygenRefreshUserId(data.userId);
-    });
-    return refreshHeygenAvatarIndexCore({
-      step,
-      userId,
-      forceAll,
-      startedAt,
-      trigger: 'manual',
-    });
+    try {
+      const data = (event?.data ?? {}) as RefreshEventData;
+      const forceAll = data.forceAll === true;
+      const userId = await step.run('resolve-refresh-user', async () => {
+        return resolveHeygenRefreshUserId(data.userId);
+      });
+      return await refreshHeygenAvatarIndexCore({
+        step,
+        userId,
+        forceAll,
+        startedAt,
+        trigger: 'manual',
+      });
+    } catch (err) {
+      // Polish-26.0.13 Commit 62.3: top-level UNDEFINED_VALUE annotator.
+      rethrowWithUndefinedContext(err, 'refreshHeygenAvatarIndexManual');
+    }
   },
 );
