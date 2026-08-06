@@ -435,29 +435,43 @@ function estimateByPipeline(
       break;
     }
     case 'polish26_heygen': {
-      // Polish-26 Commit 61: HeyGen v3 PAYG billed per-second on
-      // the Avatar V default engine. $0.05/sec = $3/min. Assume a
-      // 30-sec video per variant when the caller doesn't pass a
-      // targetSeconds hint (typical UGC hook length).
+      // Polish-26.0.1 Commit 61.1 hotfix: HeyGen retail rate.
+      //
+      // HeyGen retail rate. Real cost may vary based on avatar tier
+      // returned by API (Avatar IV standard vs V premium). Verify
+      // against first HeyGen billing invoice.
+      //
+      // Public-pricing-page rate (heygen.com/pricing):
+      //   Avatar video (standard): $0.50/min = $0.00833/sec
+      //   Avatar video (extended): $1.00/min                ← documented, not used
+      //   Effect video:            $1.30/video
+      //
+      // Commit 61 originally quoted $0.05/sec (Avatar IV Photo Avatar
+      // rate from HeyGen's developer help-center per-engine table) —
+      // 6× what the public pricing page shows. The operator flipped
+      // us to the public rate on Commit 61.1 pending a first-invoice
+      // true-up. See estimateHeygenVideoCostUsd()'s comment in
+      // packages/ai-providers/src/heygen-v3-client.ts for the full
+      // reconciliation plan.
       //
       //   Claude script condenser × variantCount   $0.02 × N
-      //   HeyGen Avatar V × variantCount            $1.50 × N (@ 30s)
+      //   HeyGen standard × variantCount           $0.25 × N (@ 30s)
       //
       // Duplicated constants (rather than imported from @mbb/ai-
       // providers) because @mbb/shared cannot depend on that package
       // without circling the dep graph — same rule the polish25 branch
       // above follows for MakeUGC constants.
       const CLAUDE_CONDENSER_USD = 0.02;
-      const HEYGEN_AVATAR_V_USD_PER_SECOND = 0.05;
+      const HEYGEN_STANDARD_USD_PER_SECOND = 0.5 / 60; // $0.00833/sec = $0.25/30s
       const targetSeconds = targetSecondsHint ?? 30;
-      const perVideoUsd = HEYGEN_AVATAR_V_USD_PER_SECOND * targetSeconds;
+      const perVideoUsd = HEYGEN_STANDARD_USD_PER_SECOND * targetSeconds;
       breakdown.push({
         item: `Claude script condenser (${variantCount} × $${CLAUDE_CONDENSER_USD.toFixed(2)})`,
         cost: round4(variantCount * CLAUDE_CONDENSER_USD),
       });
       breakdown.push({
         item:
-          `Instant UGC (HeyGen Avatar V, ${targetSeconds}s) ` +
+          `Instant UGC (HeyGen standard, ${targetSeconds}s) ` +
           `(${variantCount} × $${perVideoUsd.toFixed(2)})`,
         cost: round4(variantCount * perVideoUsd),
       });

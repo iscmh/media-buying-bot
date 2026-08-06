@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 // to worry about the barrel's V3-suffix aliases here.
 import {
   HEYGEN_DEFAULT_VIDEO_SECONDS,
-  HEYGEN_USD_PER_SECOND_AVATAR_V,
+  HEYGEN_USD_PER_SECOND_STANDARD,
   HEYGEN_VOICE_SCRIPT_MAX_CHARS,
   assertHeygenScriptLength,
   classifyHeygenError,
@@ -13,13 +13,18 @@ import {
 } from '../src/heygen-v3-client';
 
 /**
- * Polish-26.0 Commit 61 tripwires. The four things that would ship
- * a silent cost/economics bug if they drifted:
+ * Polish-26.0.1 Commit 61.1 hotfix tripwires. Four things that
+ * would ship a silent cost/economics bug if they drifted:
  *
- *   1. estimateHeygenVideoCostUsd must return $1.50 for a 30-sec
- *      Avatar V video (0.05 * 30). Any change here directly changes
- *      what /concepts/[id]/generate quotes the user, and what the
- *      worker stamps into generation_jobs.actualCostUsd.
+ *   1. estimateHeygenVideoCostUsd must return $0.25 for a 30-sec
+ *      video at the public-pricing-standard retail rate
+ *      ($0.00833/sec × 30). Any change directly changes what
+ *      /concepts/[id]/generate quotes the user AND what the worker
+ *      stamps into generation_jobs.actualCostUsd. Commit 61
+ *      originally quoted $1.50 (Avatar IV Photo Avatar rate from
+ *      the help-center per-engine table) which turned out to be
+ *      6× the public pricing page — Commit 61.1 pinned to the
+ *      public rate pending a first-invoice true-up.
  *   2. classifyHeygenError must route the exact HeyGen error shapes
  *      to the right bucket — a moderation rejection misclassified
  *      as transient would loop retries on a permanently-rejected
@@ -30,35 +35,38 @@ import {
  */
 
 describe('estimateHeygenVideoCostUsd', () => {
-  it('defaults to Avatar V at HEYGEN_DEFAULT_VIDEO_SECONDS', () => {
+  it('defaults to public-standard rate × HEYGEN_DEFAULT_VIDEO_SECONDS = $0.25 for 30s', () => {
     const cost = estimateHeygenVideoCostUsd();
-    expect(cost).toBeCloseTo(HEYGEN_USD_PER_SECOND_AVATAR_V * HEYGEN_DEFAULT_VIDEO_SECONDS, 5);
-    // Pinned expectation: 0.05 * 30 = $1.50
-    expect(cost).toBeCloseTo(1.5, 5);
+    expect(cost).toBeCloseTo(HEYGEN_USD_PER_SECOND_STANDARD * HEYGEN_DEFAULT_VIDEO_SECONDS, 5);
+    // Pinned expectation: $0.50/min × 0.5 min = $0.25 (retail).
+    expect(cost).toBeCloseTo(0.25, 5);
   });
 
-  it('scales linearly with seconds on Avatar V', () => {
-    // 60-sec hook = 2x the cost of a 30-sec hook.
-    expect(estimateHeygenVideoCostUsd({ seconds: 60 })).toBeCloseTo(3.0, 5);
-    expect(estimateHeygenVideoCostUsd({ seconds: 15 })).toBeCloseTo(0.75, 5);
+  it('scales linearly with seconds', () => {
+    expect(estimateHeygenVideoCostUsd({ seconds: 60 })).toBeCloseTo(0.5, 5);
+    expect(estimateHeygenVideoCostUsd({ seconds: 15 })).toBeCloseTo(0.125, 5);
+    expect(estimateHeygenVideoCostUsd({ seconds: 120 })).toBeCloseTo(1.0, 5);
   });
 
-  it('Avatar IV 1080p is ~33% more expensive than Avatar V per second', () => {
-    const v = estimateHeygenVideoCostUsd({ engine: 'avatar_v', seconds: 60 });
-    const iv1080 = estimateHeygenVideoCostUsd({
-      engine: 'avatar_iv',
-      seconds: 60,
-      resolution: '1080p',
-    });
-    // Avatar V: $3.00/min. Avatar IV 1080p: $4.00/min. Ratio 4/3.
-    expect(iv1080 / v).toBeCloseTo(4 / 3, 3);
-    expect(iv1080).toBeCloseTo(4.0, 5);
+  it('engine + resolution inputs are accepted but ignored (Polish-26.0.1 pin)', () => {
+    // The estimator flat-rates to the public standard for now —
+    // engine/resolution come back into play once we have a real
+    // HeyGen invoice to true-up against. Documented behavior;
+    // this test pins it so a future contributor doesn't
+    // silently re-enable per-tier math without doing the true-up.
+    const flat = estimateHeygenVideoCostUsd({ seconds: 30 });
+    expect(estimateHeygenVideoCostUsd({ seconds: 30, engine: 'avatar_v' })).toBe(flat);
+    expect(estimateHeygenVideoCostUsd({ seconds: 30, engine: 'avatar_iv' })).toBe(flat);
+    expect(estimateHeygenVideoCostUsd({ seconds: 30, engine: 'avatar_iv', resolution: '4k' })).toBe(
+      flat,
+    );
   });
 
-  it('Avatar IV 4K is $5/min', () => {
-    expect(
-      estimateHeygenVideoCostUsd({ engine: 'avatar_iv', seconds: 60, resolution: '4k' }),
-    ).toBeCloseTo(5.0, 5);
+  it('per-second constant matches the public $0.50/min retail rate', () => {
+    // Documented public pricing: Avatar video (standard) = $0.50/min.
+    // Anything else lands us on the extended ($1/min) or effect
+    // ($1.30/video) tiers, which we deliberately don't quote today.
+    expect(HEYGEN_USD_PER_SECOND_STANDARD).toBeCloseTo(0.5 / 60, 6);
   });
 });
 

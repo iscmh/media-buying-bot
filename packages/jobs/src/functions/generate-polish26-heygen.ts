@@ -676,22 +676,26 @@ export const generatePolish26Heygen = inngest.createFunction(
     }
 
     // -------- Step J: persist video URL + cost --------
-    // HeyGen bills per-second on Avatar V. If the poll returned a
-    // real duration, use it; otherwise fall back to the 30s default
-    // (typical UGC hook length) which matches our estimator.
+    // HeyGen retail rate. Real cost may vary based on avatar tier
+    // returned by API (Avatar IV standard vs V premium). Verify
+    // against first HeyGen billing invoice.
+    // Polish-26.0.1 hotfix pinned to the public pricing standard
+    // rate ($0.00833/sec = $0.25/30s). See
+    // estimateHeygenVideoCostUsd() for the invoice-true-up plan.
     const billableSeconds = actualDurationSeconds ?? 30;
-    const costUsd = estimateHeygenVideoCostUsd({
-      engine: 'avatar_v',
-      seconds: billableSeconds,
-    });
+    const costUsd = estimateHeygenVideoCostUsd({ seconds: billableSeconds });
+    const usdPerSecond = billableSeconds > 0 ? costUsd / billableSeconds : 0;
 
     await step.run('persist-video-url', async () => {
       await patchMetadata(jobId, {
         polish26_video_url: videoUrl,
         polish26_heygen_cost: {
-          engine: 'avatar_v',
+          // Polish-26.0.1: flat retail rate, engine irrelevant to the
+          // estimator today. Stamped verbatim so a future true-up
+          // against real invoices can spot the drift row-by-row.
+          rate_tier: 'public_pricing_standard',
           seconds: billableSeconds,
-          usdPerSecond: 0.05,
+          usdPerSecond,
           costUsd,
           at: nowIso(),
         },

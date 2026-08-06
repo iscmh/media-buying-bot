@@ -26,12 +26,25 @@
  * endpoints — one platform key, full account access, no per-key
  * scoping (a real ops concern documented in the pricing research).
  *
- * PAYG pricing (2026, from developer portal):
- *   - Avatar V (default engine): $0.05/sec = $3/min = $1.50/30-sec video
- *   - Avatar IV (photoreal 1080p): $4/min = $2.00/30-sec video
- *   - Avatar IV 4K: $5/min = $2.50/30-sec video
- * There is NO Avatar III API tier anymore — the $1/min figure quoted
- * pre-Feb 2026 was legacy Studio-plan credit pricing, not API dollars.
+ * PAYG pricing (verified 2026 against heygen.com public pricing page):
+ *   - Avatar video (standard): $0.50/min = $0.25/30-sec video      ← default rate
+ *   - Avatar video (extended): $1.00/min = $0.50/30-sec video
+ *   - Effect video: $1.30/video
+ *
+ * Third-party pricing summaries (G2, Anam, Arcade, eesel, PromptsRush)
+ * also cite a more granular per-second table sourced from HeyGen's
+ * help center (help.heygen.com/en/articles/10060327):
+ *   - Avatar III Digital Twin:   $0.0167/sec = ~$1/min  = ~$0.50/30s
+ *   - Avatar III Photo Avatar:   $0.0433/sec = ~$2.60/min
+ *   - Avatar IV Photo Avatar:    $0.05/sec  = $3/min   = $1.50/30s
+ *   - Avatar IV DT / Avatar V:   $0.0667/sec = ~$4/min = ~$2.00/30s
+ *   - Avatar IV / V @ 4K:        ~$5/min = ~$2.50/30s
+ * These two sources DO NOT AGREE. Polish-26 Commit 61 originally
+ * shipped with the higher help-center Avatar-IV-Photo rate ($1.50);
+ * Polish-26.0.1 Commit 61.1 hotfix pins to the lower public-pricing-
+ * page retail rate ($0.25) per operator call. See the LARGE COMMENT
+ * on estimateHeygenVideoCostUsd() below for the true-up plan once
+ * the first live billing invoice lands.
  */
 import { z } from 'zod';
 import { callProvider } from './chokepoint';
@@ -86,12 +99,31 @@ export type HeygenEngine = 'avatar_v' | 'avatar_iv';
 // Cost constants + estimator
 // =========================================================================
 
-/** Avatar V default engine — per-second billing. $3/min = $0.05/sec. */
-export const HEYGEN_USD_PER_SECOND_AVATAR_V = 0.05;
-/** Avatar IV photoreal 1080p. $4/min = ~$0.0667/sec. */
-export const HEYGEN_USD_PER_SECOND_AVATAR_IV_1080P = 4 / 60;
-/** Avatar IV photoreal 4K. $5/min = ~$0.0833/sec. */
-export const HEYGEN_USD_PER_SECOND_AVATAR_IV_4K = 5 / 60;
+/**
+ * Public-pricing-page retail rate for standard Avatar video.
+ * $0.50/min = $0.00833/sec = $0.25 per 30-sec video.
+ *
+ * This is what heygen.com/pricing shows a normal buyer, so it's
+ * what we quote users in the cost preview. See the LARGE COMMENT
+ * on estimateHeygenVideoCostUsd() below for the "reality may
+ * diverge" caveat.
+ */
+export const HEYGEN_USD_PER_SECOND_STANDARD = 0.5 / 60;
+/** Extended Avatar video (public pricing page). $1.00/min = $0.50/30s. */
+export const HEYGEN_USD_PER_SECOND_EXTENDED = 1.0 / 60;
+/** Effect video flat rate (public pricing page). */
+export const HEYGEN_USD_PER_EFFECT_VIDEO = 1.3;
+
+/**
+ * Third-party help-center per-second table figures — kept for
+ * reference but NOT used in the default estimator. Polish-26.0.1
+ * Commit 61.1 hotfix flipped away from these after the operator
+ * noticed the public pricing page shows lower retail rates.
+ * True-up once the first HeyGen invoice lands.
+ */
+export const HEYGEN_USD_PER_SECOND_AVATAR_V_HELPCENTER = 0.05;
+export const HEYGEN_USD_PER_SECOND_AVATAR_IV_1080P_HELPCENTER = 4 / 60;
+export const HEYGEN_USD_PER_SECOND_AVATAR_IV_4K_HELPCENTER = 5 / 60;
 
 /** Default video length assumption when caller doesn't know yet. */
 export const HEYGEN_DEFAULT_VIDEO_SECONDS = 30;
@@ -99,22 +131,55 @@ export const HEYGEN_DEFAULT_VIDEO_SECONDS = 30;
 export interface EstimateHeygenVideoCostInput {
   engine?: HeygenEngine;
   seconds?: number;
-  /** Only meaningful for engine='avatar_iv'. Default 1080p. */
+  /**
+   * Reserved — Polish-26.0.1 pins the estimator to the public-pricing
+   * standard rate regardless of engine/resolution. Once we have a
+   * real HeyGen invoice to true-up against, this param comes back
+   * into play. Left in the signature so existing call sites don't
+   * break when we re-enable per-tier pricing.
+   */
   resolution?: '1080p' | '4k';
 }
 
+/**
+ * HeyGen retail rate. Real cost may vary based on avatar tier
+ * returned by API (Avatar IV standard vs V premium). Verify
+ * against first HeyGen billing invoice.
+ *
+ * Why we can't be more precise today:
+ *   - HeyGen's public pricing page (heygen.com/pricing) and the
+ *     developer help-center article (help.heygen.com/en/articles/
+ *     10060327) publish DIFFERENT numbers. Public page shows
+ *     $0.50/min standard; help center shows a per-engine table
+ *     ranging $1-$5/min depending on Avatar III/IV/V × Photo/Digital
+ *     Twin × 1080p/4K.
+ *   - The `avatar_id` chosen determines which help-center row the
+ *     request actually bills at (see selectHeygenAvatarForPersonaFromIndex
+ *     for how we pick avatars — it does NOT gate on tier today).
+ *   - Until we see a real invoice, we quote the PUBLIC pricing rate
+ *     — that's the number a buyer expects to pay if they read the
+ *     marketing site.
+ *
+ * True-up protocol (owner: whoever runs Commit 61.2):
+ *   1. Fire ≥10 live 30-sec generations via the polish26-heygen
+ *      pipeline
+ *   2. Cross-reference actual credit consumption in the HeyGen
+ *      dashboard against our stamped generation_jobs.actualCostUsd
+ *   3. If actual > displayed by more than ~30%, flip to the
+ *      help-center per-engine table AND add tier-forcing to the
+ *      matcher so we lock cheap-tier avatars
+ *   4. If within ~30%, keep the public rate + document the observed
+ *      drift as the acceptable-variance band
+ */
 export function estimateHeygenVideoCostUsd(input: EstimateHeygenVideoCostInput = {}): number {
   const seconds = input.seconds ?? HEYGEN_DEFAULT_VIDEO_SECONDS;
-  const engine = input.engine ?? 'avatar_v';
-  if (engine === 'avatar_v') {
-    return HEYGEN_USD_PER_SECOND_AVATAR_V * seconds;
-  }
-  // avatar_iv
-  const perSec =
-    input.resolution === '4k'
-      ? HEYGEN_USD_PER_SECOND_AVATAR_IV_4K
-      : HEYGEN_USD_PER_SECOND_AVATAR_IV_1080P;
-  return perSec * seconds;
+  // Polish-26.0.1: single flat retail rate applied linearly by seconds.
+  // Engine + resolution inputs are accepted but currently ignored —
+  // see the LARGE COMMENT above for the invoice-true-up plan that
+  // reintroduces per-tier math.
+  void input.engine;
+  void input.resolution;
+  return HEYGEN_USD_PER_SECOND_STANDARD * seconds;
 }
 
 // =========================================================================
