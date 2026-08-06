@@ -1196,6 +1196,17 @@ export interface AnalyzeMakeugcAvatarThumbnailResult {
     geminiRawBodyExcerpt?: string;
     /** Which stage produced the failure: image-fetch | mime-filter | gemini | parse. */
     failedAt?: 'image-fetch' | 'mime-filter' | 'gemini' | 'parse';
+    /**
+     * Polish-26.0.3 Commit 61.3: true when the CDN-provided
+     * content-type was overridden via URL-extension or magic-byte
+     * inference. Present on both success and Gemini-failure paths
+     * so operator forensics can spot CDN mis-serving in the field.
+     */
+    mimeInferred?: boolean;
+    /** Which inference source picked the mime when mimeInferred=true. */
+    mimeInferredFrom?: 'url-extension' | 'magic-bytes';
+    /** The final MIME actually sent to Gemini (post-inference). */
+    mimeSentToGemini?: string;
   };
 }
 
@@ -1217,6 +1228,23 @@ const GEMINI_INLINE_SUPPORTED_MIMES = new Set([
   'image/heif',
 ]);
 
+/**
+ * Polish-26.0.3 Commit 61.3: generic / unhelpful content-types we
+ * treat as "no real answer, please infer." HeyGen's CDN serves
+ * every WebP preview_image_url as binary/octet-stream even though
+ * the bytes are a valid WebP — Commit-61.2's MIME allowlist
+ * correctly rejected these, but at 100% rejection rate the sync
+ * was still broken (1264 avatars misrouted). Inference recovers.
+ */
+const GENERIC_MIMES_NEEDING_INFERENCE = new Set([
+  'binary/octet-stream',
+  'application/octet-stream',
+  'application/binary',
+  'application/unknown',
+  'text/plain', // some CDNs default to this when they don't know
+  '',
+]);
+
 function normalizeMimeForFilter(raw: string): string {
   // Strip parameters ("image/webp; charset=binary" → "image/webp"),
   // lowercase, trim.
@@ -1228,6 +1256,133 @@ export function isGeminiInlineImageMimeSupported(rawMime: string | null | undefi
   return GEMINI_INLINE_SUPPORTED_MIMES.has(normalizeMimeForFilter(rawMime));
 }
 
+/**
+ * Polish-26.0.3 Commit 61.3: URL-extension → MIME lookup for the
+ * inference fallback path. Only maps to types Gemini's inline_data
+ * accepts; anything else stays null so the caller keeps rejecting.
+ */
+function mimeFromUrlExtension(url: string): string | null {
+  // Strip query + fragment before extracting the extension.
+  const cleaned = url.split('?')[0]?.split('#')[0] ?? '';
+  const lastDot = cleaned.lastIndexOf('.');
+  const lastSlash = cleaned.lastIndexOf('/');
+  if (lastDot < 0 || lastDot < lastSlash) return null;
+  const ext = cleaned.slice(lastDot + 1).toLowerCase();
+  switch (ext) {
+    case 'png':
+      return 'image/png';
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'webp':
+      return 'image/webp';
+    case 'heic':
+      return 'image/heic';
+    case 'heif':
+      return 'image/heif';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Polish-26.0.3 Commit 61.3: magic-byte MIME detector for images.
+ * Belt-and-suspenders against a URL that has no extension (e.g. a
+ * signed URL path like "/download/abc123") but genuinely serves a
+ * supported image body. Called only after the URL-extension path
+ * returns null.
+ */
+function mimeFromMagicBytes(bytes: Uint8Array): string | null {
+  if (bytes.length < 12) return null;
+  // PNG: 89 50 4E 47 0D 0A 1A 0A
+  if (
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return 'image/png';
+  }
+  // JPEG: FF D8 FF
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  // WebP: RIFF????WEBP → 52 49 46 46 __ __ __ __ 57 45 42 50
+  if (
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return 'image/webp';
+  }
+  // HEIC / HEIF: 00 00 00 __ 66 74 79 70 (ftyp) followed by brand
+  // "heic" (68 65 69 63) or "mif1" (6D 69 66 31) at offset 8.
+  if (
+    bytes[4] === 0x66 &&
+    bytes[5] === 0x74 &&
+    bytes[6] === 0x79 &&
+    bytes[7] === 0x70 &&
+    ((bytes[8] === 0x68 && bytes[9] === 0x65 && bytes[10] === 0x69 && bytes[11] === 0x63) ||
+      (bytes[8] === 0x6d && bytes[9] === 0x69 && bytes[10] === 0x66 && bytes[11] === 0x31))
+  ) {
+    return 'image/heic';
+  }
+  return null;
+}
+
+export interface MimeResolutionResult {
+  /** Final MIME to send to Gemini. Null when we can't identify one. */
+  mime: string | null;
+  /** True when we overrode the CDN-provided content-type. */
+  inferred: boolean;
+  /** Which source picked the mime. */
+  source: 'header' | 'url-extension' | 'magic-bytes' | 'none';
+}
+
+/**
+ * Polish-26.0.3 Commit 61.3: two-step MIME inference for CDN
+ * responses that lie about content-type.
+ *
+ *   1. If the header is ALREADY a supported image type, keep it.
+ *   2. If the header is generic (binary/octet-stream + friends),
+ *      try URL extension → MIME lookup, then magic bytes.
+ *   3. If the header is wrong-but-specific (e.g. "video/mp4"), we
+ *      DON'T fight it — return null so the caller rejects. Fighting
+ *      a specific-but-wrong header is likely to route real garbage
+ *      to Gemini.
+ */
+export function resolveInlineImageMime(
+  rawMime: string | null | undefined,
+  imageUrl: string,
+  bytes: Uint8Array,
+): MimeResolutionResult {
+  const normalized = normalizeMimeForFilter(rawMime ?? '');
+  if (GEMINI_INLINE_SUPPORTED_MIMES.has(normalized)) {
+    return { mime: normalized, inferred: false, source: 'header' };
+  }
+  if (!GENERIC_MIMES_NEEDING_INFERENCE.has(normalized)) {
+    return { mime: null, inferred: false, source: 'none' };
+  }
+  const fromExt = mimeFromUrlExtension(imageUrl);
+  if (fromExt) {
+    return { mime: fromExt, inferred: true, source: 'url-extension' };
+  }
+  const fromMagic = mimeFromMagicBytes(bytes);
+  if (fromMagic) {
+    return { mime: fromMagic, inferred: true, source: 'magic-bytes' };
+  }
+  return { mime: null, inferred: false, source: 'none' };
+}
+
 export async function analyzeMakeugcAvatarThumbnail(
   input: AnalyzeMakeugcAvatarThumbnailInput,
 ): Promise<AnalyzeMakeugcAvatarThumbnailResult> {
@@ -1237,6 +1392,10 @@ export async function analyzeMakeugcAvatarThumbnail(
   let inlineData: { mimeType: string; data: string };
   let fetchStatus = 0;
   let fetchedBytes = 0;
+  // Polish-26.0.3 Commit 61.3: hoisted so the post-Gemini success/
+  // failure branches can populate diagnostics.mimeInferred etc.
+  let rawMimeReceived = '';
+  let mimeInferenceSource: MimeResolutionResult['source'] | null = null;
   const fetchStart = Date.now();
   try {
     const response = await fetch(input.imageUrl);
@@ -1250,33 +1409,52 @@ export async function analyzeMakeugcAvatarThumbnail(
         diagnostics: { imageFetchStatus: response.status, failedAt: 'image-fetch' },
       };
     }
-    const mimeType = response.headers.get('content-type') ?? 'image/jpeg';
+    const rawMime = response.headers.get('content-type') ?? '';
+    rawMimeReceived = rawMime;
     const arrayBuffer = await response.arrayBuffer();
     fetchedBytes = arrayBuffer.byteLength;
+    const bodyBytes = new Uint8Array(arrayBuffer);
     // Polish-26.0.2 Commit 61.2: MIME filter — refuse to call Gemini
     // with a content-type it can't decode via inline_data. Without
     // this, HeyGen's animated-WebP / video-container preview URLs
     // returned an opaque "500 Internal error encountered" on every
     // single call (1264/1264 failures observed on run 01KZAPKYZ03W6DA9ZE8D918BHY).
-    if (!isGeminiInlineImageMimeSupported(mimeType)) {
+    //
+    // Polish-26.0.3 Commit 61.3: extended with URL-extension + magic-
+    // bytes inference for CDNs that mis-serve real images as
+    // binary/octet-stream. HeyGen's files2.heygen.ai CDN does exactly
+    // that for WebP previews — Commit-61.2 correctly rejected them
+    // but 100% of avatars looked like malformed content. See
+    // resolveInlineImageMime() above for the resolution ladder.
+    const resolution = resolveInlineImageMime(rawMime, input.imageUrl, bodyBytes);
+    if (!resolution.mime) {
       return {
         ok: false,
         costUsd: 0,
         latencyMs: Date.now() - fetchStart,
         errorMessage:
-          `Refusing to send unsupported MIME type "${mimeType}" to Gemini vision. ` +
+          `Refusing to send unsupported MIME type "${rawMime || '(empty)'}" to Gemini vision. ` +
           `Supported: PNG, JPEG, WebP (static), HEIC, HEIF. ` +
+          `URL-extension and magic-byte inference both failed. ` +
           `URL: ${input.imageUrl.slice(0, 200)} (${fetchedBytes} bytes).`,
         diagnostics: {
-          imageMime: mimeType,
+          imageMime: rawMime,
           imageBytes: fetchedBytes,
           imageFetchStatus: fetchStatus,
           failedAt: 'mime-filter',
         },
       };
     }
+    mimeInferenceSource = resolution.source;
+    if (resolution.inferred) {
+      console.log(
+        `[gemini-vision] MIME inferred via ${resolution.source}: ` +
+          `"${rawMime || '(empty)'}" → "${resolution.mime}" ` +
+          `for ${input.imageUrl.slice(0, 200)} (${fetchedBytes} bytes)`,
+      );
+    }
     inlineData = {
-      mimeType,
+      mimeType: resolution.mime,
       data: Buffer.from(arrayBuffer).toString('base64'),
     };
   } catch (err) {
@@ -1344,12 +1522,19 @@ export async function analyzeMakeugcAvatarThumbnail(
       latencyMs: result.latencyMs,
       errorMessage: result.errorMessage,
       diagnostics: {
-        imageMime: inlineData.mimeType,
+        imageMime: rawMimeReceived || '(empty)',
         imageBytes: fetchedBytes,
         imageFetchStatus: fetchStatus,
         geminiStatus: result.status,
         geminiRawBodyExcerpt: rawExcerpt,
         failedAt: 'gemini',
+        ...(mimeInferenceSource === 'url-extension' || mimeInferenceSource === 'magic-bytes'
+          ? {
+              mimeInferred: true,
+              mimeInferredFrom: mimeInferenceSource,
+              mimeSentToGemini: inlineData.mimeType,
+            }
+          : {}),
       },
     };
   }
@@ -1364,11 +1549,18 @@ export async function analyzeMakeugcAvatarThumbnail(
       latencyMs: result.latencyMs,
       errorMessage: 'Gemini returned an empty text response for avatar thumbnail analysis',
       diagnostics: {
-        imageMime: inlineData.mimeType,
+        imageMime: rawMimeReceived || '(empty)',
         imageBytes: fetchedBytes,
         imageFetchStatus: fetchStatus,
         geminiStatus: result.status,
         failedAt: 'parse',
+        ...(mimeInferenceSource === 'url-extension' || mimeInferenceSource === 'magic-bytes'
+          ? {
+              mimeInferred: true,
+              mimeInferredFrom: mimeInferenceSource,
+              mimeSentToGemini: inlineData.mimeType,
+            }
+          : {}),
       },
     };
   }

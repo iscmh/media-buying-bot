@@ -77,6 +77,8 @@ export {
   parseFaceSimilarityScore,
   analyzeMakeugcAvatarThumbnail,
   isGeminiInlineImageMimeSupported,
+  resolveInlineImageMime,
+  type MimeResolutionResult,
   type AnalyzeMakeugcAvatarThumbnailInput,
   type AnalyzeMakeugcAvatarThumbnailResult,
   verifyGeminiKey,
