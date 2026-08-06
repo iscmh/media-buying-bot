@@ -195,9 +195,21 @@ export const analyzeConcept = inngest.createFunction(
       // Polish-23 vision schema (persona + setting_details + emotional_arc
       // + hook + niche) since the Polish-25 Claude condenser reads the
       // same shape. Treat both pipelines as "needs Polish-23 vision".
+      //
+      // Polish-26.0.6 Commit 61.6 hotfix: polish26_heygen (Commit 61's
+      // new HeyGen backend) shares the same persona-driven avatar-match
+      // + Claude script-condense flow as polish25_makeugc — but Commit
+      // 61 never added it to this gate. Result: polish26 jobs got
+      // UGC_DECONSTRUCTOR (subject-only) output, missed the persona
+      // field, and the worker's persona-required check tripped 100% on
+      // concept ddca175b. Adding polish26_heygen here fixes FUTURE
+      // analyses; already-analyzed concepts get a fallback synthesizer
+      // in the worker (see synthesizePersonaFromSubject there).
       const picked = jobPipelineRow?.pickedPipeline ?? null;
       const usesPolish23Vision =
-        picked === 'polish23_higgsfield_veo_lite' || picked === 'polish25_makeugc';
+        picked === 'polish23_higgsfield_veo_lite' ||
+        picked === 'polish25_makeugc' ||
+        picked === 'polish26_heygen';
       const visionSystemPrompt = usesPolish23Vision
         ? POLISH23_VISION_SYSTEM_PROMPT
         : UGC_DECONSTRUCTOR_SYSTEM_PROMPT;

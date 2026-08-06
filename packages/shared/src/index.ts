@@ -27,5 +27,6 @@ export * from './polish-version';
 // every per-clip Veo 3.1 Lite prompt.
 export * from './polish23-character-lock';
 export * from './polish23-vision-analysis';
+export * from './persona-synthesizer';
 export * from './redact';
 export * as env from './env';

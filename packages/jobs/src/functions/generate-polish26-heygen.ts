@@ -53,7 +53,7 @@ import {
   type HeygenV3Persona as HeygenPersona,
 } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
-import { POLISH_VERSION, Polish23PersonaSchema } from '@mbb/shared';
+import { POLISH_VERSION, Polish23PersonaSchema, synthesizePersonaFromSubject } from '@mbb/shared';
 import { inngest } from '../client';
 import { logInngestFailure } from '../error-hook';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
@@ -158,11 +158,14 @@ export const generatePolish26Heygen = inngest.createFunction(
           emotional_arc: analysisObj['emotional_arc'] != null,
           hook_structure: analysisObj['hook_structure'] != null,
           niche_category: analysisObj['niche_category'] != null,
+          subject: analysisObj['subject'] != null,
         };
         console.log(
           `[polish-26-worker] source-context field presence for concept ${conceptId}: ` +
             JSON.stringify(fieldsPresent),
         );
+
+        // Preferred path: full Polish-23 vision output with a structured persona.
         const personaParse = Polish23PersonaSchema.safeParse(analysisObj['persona']);
         if (personaParse.success) {
           return {
@@ -173,6 +176,38 @@ export const generatePolish26Heygen = inngest.createFunction(
             personaParseError: null,
           };
         }
+
+        // Polish-26.0.6 Commit 61.6 fallback: concept was analyzed
+        // under UGC_DECONSTRUCTOR (subject-only shape) — this happens
+        // for anything analyzed BEFORE Commit 61.6 added polish26_heygen
+        // to analyze-concept's usesPolish23Vision gate, plus for
+        // concepts analyzed by non-polish25/26 jobs. Synthesize the
+        // minimum-viable HeyGen persona (gender + age_range are hard
+        // filters in the matcher; ethnicity + look are soft scores)
+        // from the UGC_DECONSTRUCTOR subject.appearance +
+        // audio_cues.dialogue_quality freeform strings. Loud-log the
+        // fallback so operators can spot which concepts are running
+        // on synthesized personas vs real Polish-23 vision output.
+        const synthesized = synthesizePersonaFromSubject(analysisObj);
+        if (synthesized) {
+          console.warn(
+            `[polish-26-worker] concept ${conceptId} has no structured persona field ` +
+              `— synthesized from subject.appearance / audio_cues.dialogue_quality. ` +
+              `Persona: ${JSON.stringify(synthesized.persona)}. ` +
+              `Sources used: ${synthesized.sources.join(', ')}. ` +
+              `Re-analyze via analyze-concept to get the structured Polish-23 shape.`,
+          );
+          return {
+            source: 'synthesized_from_subject' as const,
+            visionAnalysisJson: JSON.stringify(conceptAnalysis, null, 2),
+            persona: synthesized.persona,
+            fieldsPresent,
+            personaParseError: null,
+            synthesized: true,
+            synthesizedFrom: synthesized.sources,
+          };
+        }
+
         return {
           source: 'none' as const,
           visionAnalysisJson: null,
@@ -192,10 +227,11 @@ export const generatePolish26Heygen = inngest.createFunction(
       };
     });
 
-    if (sourceLookup.source !== 'vision_analysis_persona' || !sourceLookup.persona) {
+    if (sourceLookup.source === 'none' || !sourceLookup.persona) {
       const msg =
-        `Polish-26 requires concept ${conceptId} to have concepts.metadata.analysis.persona ` +
-        `populated + parseable. Field presence: ${JSON.stringify(sourceLookup.fieldsPresent)}. ` +
+        `Polish-26 requires concept ${conceptId} to have concepts.metadata.analysis with ` +
+        `either a structured persona (Polish-23 shape) OR a subject.appearance field the ` +
+        `fallback synthesizer can parse. Field presence: ${JSON.stringify(sourceLookup.fieldsPresent)}. ` +
         `Persona parse error: ${sourceLookup.personaParseError ?? 'n/a'}. Run analyze-concept first.`;
       console.error(`[polish-26-worker] ${msg}`);
       await markJobFailed(jobId, userId, msg, 0);
