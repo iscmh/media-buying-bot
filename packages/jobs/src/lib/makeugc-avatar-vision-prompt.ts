@@ -111,6 +111,451 @@ export function parseMakeugcAvatarVisionAnalysis(raw: unknown): MakeugcAvatarVis
 }
 
 // ---------------------------------------------------------------
+// Polish-26.0.10 Commit 62: coercion layer + diagnostic parser
+// ---------------------------------------------------------------
+//
+// WHY: HeyGen sync circuit-breaker tripped at chunk 44 after 20
+// consecutive "JSON did not match schema" failures. Two root
+// problems:
+//
+//   1. Strict Zod rejects any Gemini output that isn't EXACTLY in
+//      the enum. Real drift observed at other vision endpoints:
+//      "south_asian" for ethnicity, "grey" for hair_color, numeric
+//      age instead of bucket, "office" for background_setting.
+//      These are equivalent classifications the matcher would
+//      have accepted — Zod threw them away.
+//
+//   2. Failure signature was the CONSTANT string
+//      "JSON did not match schema" for all schema-fails. Twenty
+//      different drift patterns collapsed to one signature and
+//      tripped the circuit-breaker in 20 chunks, artificially
+//      capping the pool at 422 avatars.
+//
+// Fix: try strict-parse first; on fail, run coercion mapping table
+// (equivalent labels); on still-fail, return a DIAGNOSTIC with
+// per-field failure detail so the caller can emit a signature that
+// splits by drift pattern.
+//
+// Coercion is CONSERVATIVE — only maps values that are unambiguous
+// equivalents to enum members (spelling variants, plurals, common
+// synonyms). Never invents a bucket for genuinely unknown values —
+// those still fail, so the operator sees them in diagnostics.
+
+const AGE_BUCKET_ALIASES: Record<string, MakeugcAgeBucket> = {
+  '10s': '20s',
+  teen: '20s',
+  teens: '20s',
+  teenager: '20s',
+  young: '20s',
+  twenties: '20s',
+  thirties: '30s',
+  forties: '40s',
+  fifties: '50s',
+  sixties: '60s',
+  seventies: '70s',
+  eighties: '80s+',
+  'middle-aged': '40s',
+  middle_aged: '40s',
+  'middle aged': '40s',
+  senior: '70s',
+  elderly: '70s',
+  '70+': '70s',
+  '80+': '80s+',
+  '90+': '80s+',
+};
+
+const ETHNICITY_ALIASES: Record<string, MakeugcEthnicity> = {
+  caucasian: 'white',
+  european: 'white',
+  'south asian': 'asian',
+  south_asian: 'asian',
+  'south-asian': 'asian',
+  'east asian': 'asian',
+  east_asian: 'asian',
+  'east-asian': 'asian',
+  'southeast asian': 'asian',
+  southeast_asian: 'asian',
+  indian: 'asian',
+  chinese: 'asian',
+  japanese: 'asian',
+  korean: 'asian',
+  vietnamese: 'asian',
+  filipino: 'asian',
+  'african american': 'black',
+  african_american: 'black',
+  'african-american': 'black',
+  african: 'black',
+  'hispanic-latino': 'hispanic',
+  'hispanic/latino': 'hispanic',
+  latinx: 'latino',
+  latina: 'latino',
+  arab: 'middle_eastern',
+  'middle eastern': 'middle_eastern',
+  'middle-eastern': 'middle_eastern',
+  persian: 'middle_eastern',
+  jewish: 'middle_eastern',
+  multiracial: 'mixed',
+  biracial: 'mixed',
+  'mixed race': 'mixed',
+  mixed_race: 'mixed',
+  undetermined: 'other',
+  unknown: 'other',
+  ambiguous: 'other',
+};
+
+const HAIR_COLOR_ALIASES: Record<string, MakeugcHairColor> = {
+  grey: 'gray',
+  silver: 'gray',
+  'salt and pepper': 'gray',
+  'salt-and-pepper': 'gray',
+  salt_and_pepper: 'gray',
+  blond: 'blonde',
+  auburn: 'red',
+  ginger: 'red',
+  strawberry: 'red',
+  'strawberry blonde': 'blonde',
+  brunette: 'brown',
+  dark: 'brown',
+  'dark brown': 'brown',
+  'light brown': 'brown',
+  chestnut: 'brown',
+  none: 'bald',
+  hairless: 'bald',
+  shaved: 'bald',
+  unknown: 'other',
+};
+
+const FACIAL_HAIR_ALIASES: Record<string, MakeugcFacialHair> = {
+  none: 'clean_shaven',
+  no: 'clean_shaven',
+  'no facial hair': 'clean_shaven',
+  clean: 'clean_shaven',
+  'clean shaven': 'clean_shaven',
+  'clean-shaven': 'clean_shaven',
+  cleanshaven: 'clean_shaven',
+  shaven: 'clean_shaven',
+  moustache: 'mustache',
+  'full beard': 'beard',
+  'short beard': 'beard',
+  bearded: 'beard',
+  '5 o clock shadow': 'stubble',
+  "5 o'clock shadow": 'stubble',
+  five_o_clock_shadow: 'stubble',
+  scruff: 'stubble',
+  scruffy: 'stubble',
+  soul_patch: 'goatee',
+  'soul patch': 'goatee',
+  vandyke: 'goatee',
+};
+
+const WARDROBE_STYLE_ALIASES: Record<string, MakeugcWardrobeStyle> = {
+  'business casual': 'business_casual',
+  'business-casual': 'business_casual',
+  smart: 'business_casual',
+  'smart casual': 'business_casual',
+  'smart-casual': 'business_casual',
+  business: 'formal',
+  professional: 'formal',
+  suit: 'formal',
+  sporty: 'athletic',
+  sportswear: 'athletic',
+  activewear: 'athletic',
+  workout: 'athletic',
+  gym: 'athletic',
+  artistic: 'creative',
+  bohemian: 'creative',
+  eclectic: 'creative',
+  streetwear: 'casual',
+  everyday: 'casual',
+};
+
+const BACKGROUND_ALIASES: Record<string, MakeugcBackgroundSetting> = {
+  office: 'indoor_office',
+  workplace: 'indoor_office',
+  desk: 'indoor_office',
+  'indoor office': 'indoor_office',
+  home: 'indoor_home',
+  house: 'indoor_home',
+  apartment: 'indoor_home',
+  kitchen: 'indoor_home',
+  'living room': 'indoor_home',
+  living_room: 'indoor_home',
+  livingroom: 'indoor_home',
+  bedroom: 'indoor_home',
+  bathroom: 'indoor_home',
+  domestic: 'indoor_home',
+  interior: 'indoor_home',
+  indoor: 'indoor_home',
+  'indoor home': 'indoor_home',
+  outside: 'outdoor',
+  exterior: 'outdoor',
+  nature: 'outdoor',
+  street: 'outdoor',
+  park: 'outdoor',
+  garden: 'outdoor',
+  beach: 'outdoor',
+  plain: 'neutral',
+  solid_color: 'neutral',
+  'solid color': 'neutral',
+  blank: 'neutral',
+  'white background': 'neutral',
+  green_screen: 'studio',
+  greenscreen: 'studio',
+  'green screen': 'studio',
+  seamless: 'studio',
+};
+
+function normalizeKey(value: unknown): string {
+  return typeof value === 'string' ? value.toLowerCase().trim() : '';
+}
+
+function coerceAgeBucket(raw: unknown): { value: MakeugcAgeBucket | null; note: string | null } {
+  const key = normalizeKey(raw);
+  if (!key) return { value: null, note: 'age_bucket: missing/non-string' };
+  if ((MAKEUGC_AGE_BUCKETS as readonly string[]).includes(key)) {
+    return { value: key as MakeugcAgeBucket, note: null };
+  }
+  const alias = AGE_BUCKET_ALIASES[key];
+  if (alias) return { value: alias, note: `age_bucket: '${key}' -> '${alias}'` };
+  const numMatch = key.match(/^\d{1,3}$/);
+  if (numMatch) {
+    const n = Number(key);
+    if (n >= 15 && n < 90) {
+      const decade = Math.floor(n / 10) * 10;
+      const bucket: MakeugcAgeBucket = decade >= 80 ? '80s+' : (`${decade}s` as MakeugcAgeBucket);
+      if ((MAKEUGC_AGE_BUCKETS as readonly string[]).includes(bucket)) {
+        return { value: bucket, note: `age_bucket: numeric ${n} -> '${bucket}'` };
+      }
+    }
+  }
+  const rangeMatch = key.match(/^(\d{1,3})\s*[-\s]\s*(\d{1,3})$/);
+  if (rangeMatch) {
+    const lo = Number(rangeMatch[1]);
+    if (lo >= 15 && lo < 90) {
+      const decade = Math.floor(lo / 10) * 10;
+      const bucket: MakeugcAgeBucket = decade >= 80 ? '80s+' : (`${decade}s` as MakeugcAgeBucket);
+      if ((MAKEUGC_AGE_BUCKETS as readonly string[]).includes(bucket)) {
+        return { value: bucket, note: `age_bucket: range '${key}' -> '${bucket}'` };
+      }
+    }
+  }
+  return { value: null, note: `age_bucket: '${key}' not in enum + no alias` };
+}
+
+function coerceFromAliases<T extends string>(
+  raw: unknown,
+  enumMembers: readonly T[],
+  aliases: Record<string, T>,
+  fieldName: string,
+): { value: T | null; note: string | null } {
+  const key = normalizeKey(raw);
+  if (!key) return { value: null, note: `${fieldName}: missing/non-string` };
+  if ((enumMembers as readonly string[]).includes(key)) return { value: key as T, note: null };
+  const alias = aliases[key];
+  if (alias) return { value: alias, note: `${fieldName}: '${key}' -> '${alias}'` };
+  return { value: null, note: `${fieldName}: '${key}' not in enum + no alias` };
+}
+
+function coerceFreeformString(
+  raw: unknown,
+  fieldName: string,
+  minLen: number,
+  maxLen: number,
+  fallback: string | null,
+): { value: string | null; note: string | null } {
+  if (typeof raw !== 'string') {
+    if (fallback !== null)
+      return { value: fallback, note: `${fieldName}: non-string -> fallback '${fallback}'` };
+    return { value: null, note: `${fieldName}: non-string, no fallback` };
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    if (fallback !== null)
+      return { value: fallback, note: `${fieldName}: empty -> fallback '${fallback}'` };
+    return { value: null, note: `${fieldName}: empty, no fallback` };
+  }
+  if (trimmed.length < minLen)
+    return { value: null, note: `${fieldName}: too short (${trimmed.length} < ${minLen})` };
+  if (trimmed.length > maxLen) {
+    return {
+      value: trimmed.slice(0, maxLen),
+      note: `${fieldName}: truncated ${trimmed.length}->${maxLen}`,
+    };
+  }
+  return { value: trimmed, note: null };
+}
+
+export interface MakeugcAvatarVisionCoercionResult {
+  analysis: MakeugcAvatarVisionAnalysis;
+  coercionsApplied: string[];
+}
+
+export interface MakeugcAvatarVisionParseFailure {
+  /** Human-readable summary combining all field-level failures. */
+  reason: string;
+  /** Compact signature for circuit-breaker de-duplication. Splits
+   *  naturally by which field(s) drifted vs by identity. */
+  signature: string;
+  /** Every field-level issue (both coercions attempted and hard fails). */
+  fieldIssues: string[];
+  /** First ~400 chars of the raw JSON that failed, for the diagnostic log. */
+  rawSnapshot: string;
+}
+
+export type MakeugcAvatarVisionParseResult =
+  | { ok: true; analysis: MakeugcAvatarVisionAnalysis; coercionsApplied: string[] }
+  | { ok: false; failure: MakeugcAvatarVisionParseFailure };
+
+/**
+ * Diagnostic parser: strict-parse first, then coerce, then hard-fail
+ * with a per-field signature. Consumed by refresh-heygen-avatar-index
+ * so schema-fails split into distinct circuit-breaker signatures
+ * (one per drift pattern) instead of collapsing to one constant.
+ */
+export function parseMakeugcAvatarVisionAnalysisWithDiagnostics(
+  raw: unknown,
+): MakeugcAvatarVisionParseResult {
+  const strict = MakeugcAvatarVisionAnalysisSchema.safeParse(raw);
+  if (strict.success) {
+    return { ok: true, analysis: strict.data, coercionsApplied: [] };
+  }
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {
+      ok: false,
+      failure: {
+        reason: 'raw response is not a JSON object',
+        signature: 'schema:not-object',
+        fieldIssues: [`raw type: ${Array.isArray(raw) ? 'array' : typeof raw}`],
+        rawSnapshot: JSON.stringify(raw).slice(0, 400),
+      },
+    };
+  }
+  const r = raw as Record<string, unknown>;
+
+  const coercions: string[] = [];
+  const fieldIssues: string[] = [];
+  const hardFailFields: string[] = [];
+
+  const ageBucket = coerceAgeBucket(r['age_bucket']);
+  if (ageBucket.note) (ageBucket.value ? coercions : fieldIssues).push(ageBucket.note);
+  if (!ageBucket.value) hardFailFields.push('age_bucket');
+
+  const ethnicity = coerceFromAliases(
+    r['ethnicity'],
+    MAKEUGC_ETHNICITIES,
+    ETHNICITY_ALIASES,
+    'ethnicity',
+  );
+  if (ethnicity.note) (ethnicity.value ? coercions : fieldIssues).push(ethnicity.note);
+  if (!ethnicity.value) hardFailFields.push('ethnicity');
+
+  const hairColor = coerceFromAliases(
+    r['hair_color'],
+    MAKEUGC_HAIR_COLORS,
+    HAIR_COLOR_ALIASES,
+    'hair_color',
+  );
+  if (hairColor.note) (hairColor.value ? coercions : fieldIssues).push(hairColor.note);
+  if (!hairColor.value) hardFailFields.push('hair_color');
+
+  const hairStyle = coerceFreeformString(r['hair_style'], 'hair_style', 1, 80, 'unspecified');
+  if (hairStyle.note) (hairStyle.value ? coercions : fieldIssues).push(hairStyle.note);
+  if (!hairStyle.value) hardFailFields.push('hair_style');
+
+  const facialHair = coerceFromAliases(
+    r['facial_hair'],
+    MAKEUGC_FACIAL_HAIRS,
+    FACIAL_HAIR_ALIASES,
+    'facial_hair',
+  );
+  if (facialHair.note) (facialHair.value ? coercions : fieldIssues).push(facialHair.note);
+  if (!facialHair.value) hardFailFields.push('facial_hair');
+
+  const wardrobeStyle = coerceFromAliases(
+    r['wardrobe_style'],
+    MAKEUGC_WARDROBE_STYLES,
+    WARDROBE_STYLE_ALIASES,
+    'wardrobe_style',
+  );
+  if (wardrobeStyle.note) (wardrobeStyle.value ? coercions : fieldIssues).push(wardrobeStyle.note);
+  if (!wardrobeStyle.value) hardFailFields.push('wardrobe_style');
+
+  const wardrobeSummary = coerceFreeformString(
+    r['wardrobe_summary'],
+    'wardrobe_summary',
+    1,
+    200,
+    'unspecified',
+  );
+  if (wardrobeSummary.note)
+    (wardrobeSummary.value ? coercions : fieldIssues).push(wardrobeSummary.note);
+  if (!wardrobeSummary.value) hardFailFields.push('wardrobe_summary');
+
+  const backgroundSetting = coerceFromAliases(
+    r['background_setting'],
+    MAKEUGC_BACKGROUND_SETTINGS,
+    BACKGROUND_ALIASES,
+    'background_setting',
+  );
+  if (backgroundSetting.note)
+    (backgroundSetting.value ? coercions : fieldIssues).push(backgroundSetting.note);
+  if (!backgroundSetting.value) hardFailFields.push('background_setting');
+
+  // confidence_note: always coercible. Empty string when missing.
+  let confidenceNote = '';
+  if (typeof r['confidence_note'] === 'string') {
+    confidenceNote = (r['confidence_note'] as string).slice(0, 400);
+  } else if (r['confidence_note'] != null) {
+    coercions.push(`confidence_note: non-string coerced to ''`);
+  }
+
+  if (hardFailFields.length > 0) {
+    const sig = `schema:${hardFailFields.sort().join(',')}`;
+    return {
+      ok: false,
+      failure: {
+        reason: `cannot coerce required field(s): ${hardFailFields.join(', ')}`,
+        signature: sig,
+        fieldIssues,
+        rawSnapshot: JSON.stringify(raw).slice(0, 400),
+      },
+    };
+  }
+
+  const analysis: MakeugcAvatarVisionAnalysis = {
+    age_bucket: ageBucket.value!,
+    ethnicity: ethnicity.value!,
+    hair_color: hairColor.value!,
+    hair_style: hairStyle.value!,
+    facial_hair: facialHair.value!,
+    wardrobe_style: wardrobeStyle.value!,
+    wardrobe_summary: wardrobeSummary.value!,
+    background_setting: backgroundSetting.value!,
+    confidence_note: confidenceNote,
+  };
+  const final = MakeugcAvatarVisionAnalysisSchema.safeParse(analysis);
+  if (!final.success) {
+    return {
+      ok: false,
+      failure: {
+        reason: `post-coercion Zod re-parse failed: ${final.error.issues.map((i) => i.path.join('.')).join(',')}`,
+        signature: `schema:post-coerce-fail:${final.error.issues
+          .map((i) => i.path.join('.'))
+          .sort()
+          .join(',')}`,
+        fieldIssues: [
+          ...fieldIssues,
+          ...final.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+        ],
+        rawSnapshot: JSON.stringify(raw).slice(0, 400),
+      },
+    };
+  }
+  return { ok: true, analysis: final.data, coercionsApplied: coercions };
+}
+
+// ---------------------------------------------------------------
 // System prompt
 // ---------------------------------------------------------------
 

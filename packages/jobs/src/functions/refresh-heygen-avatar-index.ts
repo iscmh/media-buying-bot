@@ -39,7 +39,8 @@ import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { resolveHeygenManagedKey } from '../lib/resolve-heygen-managed-key';
 import {
   MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
-  parseMakeugcAvatarVisionAnalysis,
+  parseMakeugcAvatarVisionAnalysisWithDiagnostics,
+  type MakeugcAvatarVisionAnalysis,
 } from '../lib/makeugc-avatar-vision-prompt';
 
 console.log(`[jobs.refresh-heygen-avatar-index] cold start — POLISH_VERSION=${POLISH_VERSION}`);
@@ -91,7 +92,30 @@ export function errorSignature(msg: string): string {
   return msg.slice(0, 120).replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-const CROSS_CHUNK_CONSECUTIVE_FAILURE_THRESHOLD = 20;
+/**
+ * Polish-26.0.10 Commit 62: bumped 20 → 40 alongside the failure-
+ * signature split. Two mitigations acting together:
+ *
+ *   1. parseMakeugcAvatarVisionAnalysisWithDiagnostics emits a
+ *      per-drift-pattern signature (schema:ethnicity vs
+ *      schema:background_setting vs mime-filter etc.) instead of
+ *      collapsing all schema-fails to one constant "JSON did not
+ *      match schema" string, so 20 different Gemini drifts no longer
+ *      accumulate under one bucket.
+ *   2. The coercion layer accepts common enum-drift equivalents
+ *      (south_asian -> asian, grey -> gray, numeric age, etc.),
+ *      cutting the RAW schema-fail rate before it reaches this
+ *      counter.
+ *
+ * 40 gives enough headroom that a genuinely-repeating same-
+ * signature streak (e.g. HeyGen re-serving broken images for one
+ * shard) still short-circuits — but a mix of ordinary drift
+ * patterns doesn't trip.
+ */
+const CROSS_CHUNK_CONSECUTIVE_FAILURE_THRESHOLD = 40;
+
+/** How many distinct-signature failure samples to keep on the summary. */
+const DISTINCT_FAILURE_SAMPLE_CAP = 5;
 
 interface RefreshEventData {
   userId?: string;
@@ -319,27 +343,40 @@ export async function refreshHeygenAvatarIndexCore(
     });
   }
 
+  type FailureSample = {
+    avatarId: string;
+    avatarName: string;
+    previewUrl: string;
+    errorMessage: string;
+    signature: string;
+    /** Diagnostics from the analyzer (mime info, gemini raw body) when the
+     *  failure happened before/during the Gemini call. */
+    diagnostics: NonNullable<
+      Awaited<ReturnType<typeof analyzeMakeugcAvatarThumbnail>>['diagnostics']
+    > | null;
+    /** Polish-26.0.10 Commit 62: field-level Zod issues when the failure
+     *  was schema-side (parser could not coerce). Null for non-schema
+     *  failures (mime, fetch, gemini-500). */
+    schemaFieldIssues: string[] | null;
+    /** First ~400 chars of the raw Gemini JSON that failed, when the
+     *  failure was schema-side. Null otherwise. */
+    schemaRawSnapshot: string | null;
+  };
+
   type ChunkResult = {
     attempted: number;
     successful: number;
     failed: number;
+    coerced: number;
     persisted: number;
     costUsd: number;
     /** Per-avatar error signature (null on success). Compact enough to
      *  cross the step.run serialization boundary for cross-chunk
      *  circuit-breaker continuity. */
     resultSigs: (string | null)[];
-    /** First failure this chunk saw (null if none / not this chunk's
-     *  turn to capture). Outer loop keeps only the FIRST non-null. */
-    chunkFirstFailure: {
-      avatarId: string;
-      avatarName: string;
-      previewUrl: string;
-      errorMessage: string;
-      diagnostics: NonNullable<
-        Awaited<ReturnType<typeof analyzeMakeugcAvatarThumbnail>>['diagnostics']
-      > | null;
-    } | null;
+    /** Distinct-signature failure samples from this chunk (max one per
+     *  signature). Outer loop merges + caps to DISTINCT_FAILURE_SAMPLE_CAP. */
+    chunkFailureSamples: FailureSample[];
   };
 
   // Cumulative state — deterministic-across-replays because
@@ -348,9 +385,10 @@ export async function refreshHeygenAvatarIndexCore(
   let cumAttempted = 0;
   let cumSuccessful = 0;
   let cumFailed = 0;
+  let cumCoerced = 0;
   let cumPersisted = 0;
   let cumCostUsd = 0;
-  let cumFirstFailure: ChunkResult['chunkFirstFailure'] = null;
+  const cumFailureSamplesBySig = new Map<string, FailureSample>();
   let cumConsecutiveFailures = 0;
   let cumLastSignature: string | null = null;
   let cumEarlyExitAtChunk: number | null = null;
@@ -371,7 +409,21 @@ export async function refreshHeygenAvatarIndexCore(
         type ChunkRowOutcome = {
           avatar: (typeof chunk)[number];
           r: Awaited<ReturnType<typeof analyzeMakeugcAvatarThumbnail>> | null;
-          analysis: ReturnType<typeof parseMakeugcAvatarVisionAnalysis>;
+          /** Post-diagnostic-parser result: coerced-or-strict analysis, or null on hard fail. */
+          analysis: MakeugcAvatarVisionAnalysis | null;
+          /** Polish-26.0.10 Commit 62: coercion notes when the strict
+           *  Zod parse failed but the coercion layer recovered a
+           *  usable analysis. Empty array on strict success. */
+          coercionsApplied: string[];
+          /** Polish-26.0.10 Commit 62: split-signature failure detail
+           *  when the diagnostic parser could not coerce. Null on
+           *  success and on non-schema failures. */
+          schemaFailure: {
+            signature: string;
+            reason: string;
+            fieldIssues: string[];
+            rawSnapshot: string;
+          } | null;
           skipReason: string | null;
         };
 
@@ -380,7 +432,14 @@ export async function refreshHeygenAvatarIndexCore(
           VISION_CONCURRENCY,
           async (avatar): Promise<ChunkRowOutcome> => {
             if (!avatar.preview_image_url || avatar.preview_image_url.length === 0) {
-              return { avatar, r: null, analysis: null, skipReason: 'no preview_image_url' };
+              return {
+                avatar,
+                r: null,
+                analysis: null,
+                coercionsApplied: [],
+                schemaFailure: null,
+                skipReason: 'no preview_image_url',
+              };
             }
             const r = await analyzeMakeugcAvatarThumbnail({
               userId,
@@ -388,8 +447,35 @@ export async function refreshHeygenAvatarIndexCore(
               imageUrl: avatar.preview_image_url,
               systemPrompt: MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
             });
-            const analysis = r.ok ? parseMakeugcAvatarVisionAnalysis(r.parsedJson) : null;
-            return { avatar, r, analysis, skipReason: null };
+            if (!r.ok) {
+              return {
+                avatar,
+                r,
+                analysis: null,
+                coercionsApplied: [],
+                schemaFailure: null,
+                skipReason: null,
+              };
+            }
+            const parsed = parseMakeugcAvatarVisionAnalysisWithDiagnostics(r.parsedJson);
+            if (parsed.ok) {
+              return {
+                avatar,
+                r,
+                analysis: parsed.analysis,
+                coercionsApplied: parsed.coercionsApplied,
+                schemaFailure: null,
+                skipReason: null,
+              };
+            }
+            return {
+              avatar,
+              r,
+              analysis: null,
+              coercionsApplied: [],
+              schemaFailure: parsed.failure,
+              skipReason: null,
+            };
           },
         );
 
@@ -406,6 +492,8 @@ export async function refreshHeygenAvatarIndexCore(
                 } as (typeof chunk)[number],
                 r: null,
                 analysis: null,
+                coercionsApplied: [],
+                schemaFailure: null,
                 skipReason: `concurrency-runner-error: ${o.error}`,
               } as ChunkRowOutcome),
         );
@@ -463,52 +551,90 @@ export async function refreshHeygenAvatarIndexCore(
           persistedInChunk++;
         }
 
-        // Build the compact chunk result. resultSigs feeds cross-chunk
-        // circuit-breaker continuity in the outer loop.
-        let chunkFirstFailure: ChunkResult['chunkFirstFailure'] = null;
+        // Polish-26.0.10 Commit 62: split-signature failure capture.
+        // Distinct-signature samples let the outer summary carry one
+        // exemplar per drift pattern (up to DISTINCT_FAILURE_SAMPLE_CAP
+        // total) instead of only the first-ever failure — giving the
+        // operator visibility into every root cause in one run.
+        const chunkFailureSamplesBySig = new Map<string, FailureSample>();
         const resultSigs: (string | null)[] = [];
         let successful = 0;
         let failed = 0;
+        let coerced = 0;
         let costUsd = 0;
         for (const row of rows) {
           const isFailure = !row.analysis;
           if (isFailure) failed++;
-          else successful++;
+          else {
+            successful++;
+            if (row.coercionsApplied.length > 0) coerced++;
+          }
           costUsd += row.r?.costUsd ?? 0;
-          if (isFailure) {
-            const rawMsg = row.skipReason
-              ? row.skipReason
-              : row.r?.ok === false
-                ? (row.r.errorMessage ?? 'unknown')
-                : 'JSON did not match schema';
-            resultSigs.push(errorSignature(rawMsg));
-            if (chunkFirstFailure === null && row.avatar.preview_image_url) {
-              chunkFirstFailure = {
-                avatarId: row.avatar.avatar_id,
-                avatarName: row.avatar.avatar_name,
-                previewUrl: row.avatar.preview_image_url,
-                errorMessage: rawMsg,
-                diagnostics: row.r?.diagnostics ?? null,
-              };
-            }
-          } else {
+          if (!isFailure) {
             resultSigs.push(null);
+            continue;
+          }
+          // Signature classification, split by root cause:
+          //   - skip:<reason>          — preview-URL missing etc.
+          //   - concurrency-runner-error:...
+          //   - mime-filter:<mime>     — image rejected pre-Gemini
+          //   - image-fetch:<status>   — CDN HTTP failure
+          //   - gemini:<status>        — Gemini API non-200
+          //   - schema:<fields>        — from diagnostic parser
+          //   - unknown                — should not happen; catch-all
+          let signature: string;
+          let errorMessage: string;
+          if (row.skipReason) {
+            signature = `skip:${errorSignature(row.skipReason)}`;
+            errorMessage = row.skipReason;
+          } else if (row.schemaFailure) {
+            signature = row.schemaFailure.signature;
+            errorMessage = `schema-fail: ${row.schemaFailure.reason}. issues=${row.schemaFailure.fieldIssues.slice(0, 3).join(' | ')}`;
+          } else if (row.r && !row.r.ok) {
+            const failedAt = row.r.diagnostics?.failedAt ?? 'gemini';
+            const detail =
+              failedAt === 'mime-filter'
+                ? `mime-filter:${row.r.diagnostics?.imageMime ?? '?'}`
+                : failedAt === 'image-fetch'
+                  ? `image-fetch:${row.r.diagnostics?.imageFetchStatus ?? '?'}`
+                  : failedAt === 'parse'
+                    ? 'gemini:empty-response'
+                    : `gemini:${row.r.diagnostics?.geminiStatus ?? '?'}`;
+            signature = detail;
+            errorMessage = row.r.errorMessage ?? 'unknown';
+          } else {
+            signature = 'unknown';
+            errorMessage = 'unknown';
+          }
+          resultSigs.push(signature);
+          if (row.avatar.preview_image_url && !chunkFailureSamplesBySig.has(signature)) {
+            chunkFailureSamplesBySig.set(signature, {
+              avatarId: row.avatar.avatar_id,
+              avatarName: row.avatar.avatar_name,
+              previewUrl: row.avatar.preview_image_url,
+              errorMessage,
+              signature,
+              diagnostics: row.r?.diagnostics ?? null,
+              schemaFieldIssues: row.schemaFailure?.fieldIssues ?? null,
+              schemaRawSnapshot: row.schemaFailure?.rawSnapshot ?? null,
+            });
           }
         }
         const attempted = rows.length;
         console.log(
           `[refresh-heygen-avatar-index:${trigger}] chunk ${chunkNumber}/${chunks.length}: ` +
-            `attempted=${attempted} successful=${successful} failed=${failed} ` +
+            `attempted=${attempted} successful=${successful} coerced=${coerced} failed=${failed} ` +
             `persisted=${persistedInChunk} costUsd=${costUsd.toFixed(4)}`,
         );
         return {
           attempted,
           successful,
           failed,
+          coerced,
           persisted: persistedInChunk,
           costUsd,
           resultSigs,
-          chunkFirstFailure,
+          chunkFailureSamples: Array.from(chunkFailureSamplesBySig.values()),
         };
       },
     );
@@ -517,16 +643,25 @@ export async function refreshHeygenAvatarIndexCore(
     cumAttempted += chunkResult.attempted;
     cumSuccessful += chunkResult.successful;
     cumFailed += chunkResult.failed;
+    cumCoerced += chunkResult.coerced;
     cumPersisted += chunkResult.persisted;
     cumCostUsd += chunkResult.costUsd;
-    if (cumFirstFailure === null && chunkResult.chunkFirstFailure) {
-      cumFirstFailure = chunkResult.chunkFirstFailure;
+    // Polish-26.0.10 Commit 62: merge per-signature failure samples.
+    // First occurrence of each signature wins; cap at
+    // DISTINCT_FAILURE_SAMPLE_CAP so the summary payload stays small.
+    for (const sample of chunkResult.chunkFailureSamples) {
+      if (cumFailureSamplesBySig.size >= DISTINCT_FAILURE_SAMPLE_CAP) break;
+      if (cumFailureSamplesBySig.has(sample.signature)) continue;
+      cumFailureSamplesBySig.set(sample.signature, sample);
       console.error(
-        `[refresh-heygen-avatar-index:${trigger}] FIRST FAILURE ` +
-          `avatar_id=${cumFirstFailure.avatarId} ` +
-          `preview_url=${cumFirstFailure.previewUrl.slice(0, 250)} ` +
-          `error=${JSON.stringify(cumFirstFailure.errorMessage).slice(0, 500)} ` +
-          `diagnostics=${JSON.stringify(cumFirstFailure.diagnostics)}`,
+        `[refresh-heygen-avatar-index:${trigger}] FAILURE-SAMPLE ` +
+          `signature=${sample.signature} ` +
+          `avatar_id=${sample.avatarId} ` +
+          `preview_url=${sample.previewUrl.slice(0, 250)} ` +
+          `error=${JSON.stringify(sample.errorMessage).slice(0, 500)} ` +
+          `diagnostics=${JSON.stringify(sample.diagnostics)} ` +
+          `schema_field_issues=${JSON.stringify(sample.schemaFieldIssues)} ` +
+          `schema_raw_snapshot=${JSON.stringify(sample.schemaRawSnapshot)}`,
       );
     }
 
@@ -561,12 +696,18 @@ export async function refreshHeygenAvatarIndexCore(
 
   // Convenience alias so the summary + touch step read consistently
   // regardless of whether Step D+E was chunked or not.
+  const failureSamples = Array.from(cumFailureSamplesBySig.values());
   const analyzed = {
     attempted: cumAttempted,
     successful: cumSuccessful,
     failed: cumFailed,
+    coerced: cumCoerced,
     earlyExit: cumEarlyExitAtChunk !== null,
-    firstFailure: cumFirstFailure,
+    // Polish-26.0.10 Commit 62: `firstFailure` retained for back-compat
+    // with any log parsers keyed on that field. It's just the first of
+    // the distinct-signature samples now.
+    firstFailure: failureSamples[0] ?? null,
+    failureSamples,
   };
   const persistedCount = cumPersisted;
 
@@ -593,6 +734,10 @@ export async function refreshHeygenAvatarIndexCore(
     counts: diff.counts,
     analyzeAttempted: analyzed.attempted,
     analyzeSuccessful: analyzed.successful,
+    // Polish-26.0.10 Commit 62: subset of successful — how many needed
+    // the coercion layer to normalize Gemini output before Zod
+    // acceptance. Elevated coerced count => refine strict prompts.
+    analyzeCoerced: analyzed.coerced,
     analyzeFailed: analyzed.failed,
     persistedCount,
     totalGeminiCostUsd: Number(cumCostUsd.toFixed(6)),
@@ -612,6 +757,12 @@ export async function refreshHeygenAvatarIndexCore(
     // that identifies the root cause.
     earlyExit: analyzed.earlyExit,
     firstFailure: analyzed.firstFailure,
+    // Polish-26.0.10 Commit 62: distinct-signature failure samples
+    // (up to DISTINCT_FAILURE_SAMPLE_CAP) so an operator sees every
+    // root cause in one run instead of only the first-ever failure.
+    // Signatures now split by drift pattern (schema:ethnicity vs
+    // schema:background_setting vs mime-filter:image/gif, etc.).
+    failureSamples: analyzed.failureSamples,
   };
   console.log(`[refresh-heygen-avatar-index:${trigger}] cycle complete ${JSON.stringify(summary)}`);
   return summary;
