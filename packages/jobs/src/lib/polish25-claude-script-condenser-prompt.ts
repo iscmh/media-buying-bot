@@ -106,7 +106,34 @@ export interface Polish25ScriptViolation {
 
 export type Polish25ScriptCheckResult = { ok: true; chars: number } | Polish25ScriptViolation;
 
-export function checkPolish25CondensedScript(script: unknown): Polish25ScriptCheckResult {
+/**
+ * Polish-26.0.9 Commit 61.9: per-caller check gates. Different
+ * downstream video providers have different constraints — this lets
+ * a caller opt out of checks that don't apply to their backend
+ * without weakening the checks for callers that DO need them.
+ *
+ * Current gates:
+ *   - skipNestedQuotes: Polish-23 Commit 3.0.23's TTS defense was
+ *     built for Google Veo, whose TTS model rejects clips with
+ *     nested-quote patterns ("he said 'yes'"). HeyGen's TTS
+ *     tolerates them fine — real evidence: a fresh HeyGen
+ *     generation on concept ddca175b tripped this gate on the
+ *     natural "we'll see" pattern in the Claude-condensed script.
+ *     Polish-26 workers pass skipNestedQuotes:true.
+ *
+ * All other checks (empty, too-long, appearance-leak) apply to
+ * EVERY pre-cast-avatar pipeline — the avatar visualizes
+ * appearance so the script must never describe it, regardless of
+ * which vendor renders the video.
+ */
+export interface Polish25ScriptCheckOptions {
+  skipNestedQuotes?: boolean;
+}
+
+export function checkPolish25CondensedScript(
+  script: unknown,
+  options: Polish25ScriptCheckOptions = {},
+): Polish25ScriptCheckResult {
   if (typeof script !== 'string' || script.trim().length === 0) {
     return { ok: false, reason: 'empty', detail: 'script is empty or non-string' };
   }
@@ -117,7 +144,7 @@ export function checkPolish25CondensedScript(script: unknown): Polish25ScriptChe
       detail: `script is ${script.length} chars — cap is ${POLISH25_CONDENSED_SCRIPT_MAX_CHARS}`,
     };
   }
-  if (containsQuotedThirdPartySpeech(script)) {
+  if (!options.skipNestedQuotes && containsQuotedThirdPartySpeech(script)) {
     return {
       ok: false,
       reason: 'nested-quotes',

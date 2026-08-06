@@ -351,7 +351,11 @@ export const generatePolish26Heygen = inngest.createFunction(
         await markJobFailed(jobId, userId, msg, 0);
         throw new NonRetriableError(msg);
       }
-      const check = checkPolish25CondensedScript(rawText);
+      // Polish-26.0.9 Commit 61.9: HeyGen's TTS tolerates nested-quote
+      // patterns fine, unlike Google Veo (Polish-23 Commit 3.0.23's
+      // original constraint). Skip the nested-quote gate here — all
+      // other checks (empty, too-long, appearance-leak) still apply.
+      const check = checkPolish25CondensedScript(rawText, { skipNestedQuotes: true });
       if (!check.ok) {
         const msg =
           `Polish-26 condensed-script validation failed [${check.reason}]: ${check.detail}. ` +
