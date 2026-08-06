@@ -37,7 +37,7 @@ import { POLISH_VERSION } from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { resolveHeygenManagedKey } from '../lib/resolve-heygen-managed-key';
-import { stripUndefined, stripUndefinedDeep } from '../lib/strip-undefined';
+import { safeInngestStepReturn, stripUndefined, stripUndefinedDeep } from '../lib/strip-undefined';
 import {
   MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
   parseMakeugcAvatarVisionAnalysisWithDiagnostics,
@@ -244,7 +244,13 @@ export async function refreshHeygenAvatarIndexCore(
         `refresh-heygen-avatar-index: listHeygenAvatars failed — ${r.errorMessage ?? 'unknown'}`,
       );
     }
-    return r.avatars;
+    // Polish-26.0.12 Commit 62.2: deep-strip the avatar array before
+    // it crosses the Inngest step boundary. HeyGen v3 avatars have
+    // optional fields (preview_video_url, premium, type, tags) — while
+    // JSON.parse itself doesn't produce undefined keys, defense-in-
+    // depth is cheap here and covers any future mapping/serialization
+    // path that might inject one.
+    return safeInngestStepReturn(r.avatars);
   });
 
   // Step B: diff against existing index.
@@ -260,7 +266,11 @@ export async function refreshHeygenAvatarIndexCore(
         `toTouchOnly=${buckets.toTouchOnly.length} ` +
         `toSoftDelete=${buckets.toSoftDelete.length} forceAll=${forceAll}`,
     );
-    return {
+    // Polish-26.0.12 Commit 62.2: deep-strip the diff return.
+    // toAnalyzeAvatars carries HeygenAvatarV3 records with optional
+    // fields — same reasoning as fetch-avatar-list. Everything
+    // crossing an Inngest step boundary goes through the sanitizer.
+    return safeInngestStepReturn({
       toAnalyzeIds: buckets.toAnalyze.map((a) => a.avatar_id),
       toAnalyzeAvatars: buckets.toAnalyze,
       toTouchOnlyIds: buckets.toTouchOnly.map((a) => a.avatar_id),
@@ -272,10 +282,18 @@ export async function refreshHeygenAvatarIndexCore(
         toTouchOnly: buckets.toTouchOnly.length,
         toSoftDelete: buckets.toSoftDelete.length,
       },
-    };
+    });
   });
 
   // Step C: soft-delete disappeared.
+  //
+  // Polish-26.0.12 Commit 62.2: explicit return value. Pre-fix this
+  // step was `async () => { await db.update(...); }` — void callback
+  // → promise resolves to undefined → JSON.stringify(undefined)
+  // returns undefined → Inngest v3 flags UNDEFINED_VALUE at the
+  // step-result boundary. safeInngestStepReturn maps a bare
+  // undefined to { _void: true } but returning an actual summary
+  // is both diagnostic-friendly and free.
   if (diff.toSoftDeleteIds.length > 0) {
     await step.run('mark-disappeared-deleted', async () => {
       const db = getDb();
@@ -283,6 +301,7 @@ export async function refreshHeygenAvatarIndexCore(
         .update(schema.heygenAvatarIndex)
         .set({ deletedAt: new Date() })
         .where(inArray(schema.heygenAvatarIndex.avatarId, diff.toSoftDeleteIds));
+      return safeInngestStepReturn({ softDeleted: diff.toSoftDeleteIds.length });
     });
   }
 
@@ -331,7 +350,12 @@ export async function refreshHeygenAvatarIndexCore(
     await step.run('preflight-gemini-key', async () => {
       try {
         await loadDecryptedKeys(userId, ['gemini']);
-        return { ok: true };
+        // Polish-26.0.12 Commit 62.2: safeInngestStepReturn even
+        // for well-formed returns — the sync worker's convention
+        // is every step return goes through the sanitizer, so a
+        // future edit that inadvertently returns undefined is
+        // caught at the boundary rather than at UNDEFINED_VALUE.
+        return safeInngestStepReturn({ ok: true });
       } catch (err) {
         if (err instanceof MissingProviderKeyError) {
           throw new NonRetriableError(
@@ -628,14 +652,12 @@ export async function refreshHeygenAvatarIndexCore(
             `attempted=${attempted} successful=${successful} coerced=${coerced} failed=${failed} ` +
             `persisted=${persistedInChunk} costUsd=${costUsd.toFixed(4)}`,
         );
-        // Polish-26.0.11 Commit 62.1: deep-strip the chunk return
-        // before Inngest serializes it. FailureSample.diagnostics is
-        // one level deep from this object; a shallow strip on the
-        // outer would still leave undefined keys nested inside
-        // diagnostics and trip UNDEFINED_VALUE. Deep-strip walks
-        // recursively — cycle-safe, preserves null/0/false, arrays
-        // pass through with per-element recursion.
-        return stripUndefinedDeep({
+        // Polish-26.0.11/12 Commit 62.1/62.2: safeInngestStepReturn
+        // combines the deep-strip (Commit 62.1) with the void→
+        // sentinel coercion (Commit 62.2). Belt-and-suspenders — even
+        // if a future refactor makes this branch return undefined,
+        // the sanitizer covers it before Inngest sees it.
+        return safeInngestStepReturn({
           attempted,
           successful,
           failed,
@@ -721,6 +743,10 @@ export async function refreshHeygenAvatarIndexCore(
   const persistedCount = cumPersisted;
 
   // Step F: touch unchanged fresh rows.
+  //
+  // Polish-26.0.12 Commit 62.2: explicit return value — same
+  // reasoning as mark-disappeared-deleted above. This is the SECOND
+  // void step Inngest was tripping UNDEFINED_VALUE on post-26.0.11.
   if (diff.toTouchOnlyIds.length > 0) {
     await step.run('touch-fresh-rows', async () => {
       const db = getDb();
@@ -733,6 +759,7 @@ export async function refreshHeygenAvatarIndexCore(
             isNull(schema.heygenAvatarIndex.deletedAt),
           ),
         );
+      return safeInngestStepReturn({ touched: diff.toTouchOnlyIds.length });
     });
   }
 
@@ -778,11 +805,9 @@ export async function refreshHeygenAvatarIndexCore(
     // schema:background_setting vs mime-filter:image/gif, etc.).
     failureSamples: analyzed.failureSamples,
   };
-  // Polish-26.0.11 Commit 62.1: deep-strip before Inngest serializes
-  // the function return. Same rationale as the per-chunk return:
-  // failureSamples[i].diagnostics carries nested keys that can be
-  // undefined and trip Inngest UNDEFINED_VALUE.
-  const cleanSummary = stripUndefinedDeep(summary);
+  // Polish-26.0.11/12 Commit 62.1/62.2: safeInngestStepReturn is
+  // deep-strip + void-coerce. Same rationale as per-chunk return.
+  const cleanSummary = safeInngestStepReturn(summary);
   console.log(
     `[refresh-heygen-avatar-index:${trigger}] cycle complete ${JSON.stringify(cleanSummary)}`,
   );

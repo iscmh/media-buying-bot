@@ -90,3 +90,44 @@ export function stripUndefinedDeep<T>(value: T): DeepStripped<T> {
   }
   return walk(value) as DeepStripped<T>;
 }
+
+/**
+ * Polish-26.0.12 Commit 62.2: sanitize a value for Inngest's
+ * step-result serializer. Two failure modes both surface as
+ * UNDEFINED_VALUE at the step boundary:
+ *
+ *   1. The overall result is `undefined` — void async callbacks
+ *      trip this because `JSON.stringify(undefined)` returns
+ *      undefined, not a JSON scalar. Commit 62.1's deep-strip
+ *      doesn't help here; the input was never an object.
+ *      Real evidence: sync worker's `mark-disappeared-deleted`
+ *      and `touch-fresh-rows` steps ran void callbacks (no
+ *      explicit return) — post-26.0.11, still UNDEFINED_VALUE.
+ *
+ *   2. Any nested undefined-valued key inside a returned object
+ *      (the 62.1 vector).
+ *
+ * safeInngestStepReturn maps undefined → { _void: true } (an
+ * inert sentinel that JSON.stringify serializes fine) and runs
+ * everything else through stripUndefinedDeep. Wrap every
+ * step.run() callback return in the sync worker with this.
+ *
+ * The `_void: true` sentinel is intentional shape — grep-friendly
+ * if a downstream consumer ever tries to read the result of a
+ * void step. Reading it as a summary is fine (it just says "this
+ * step didn't produce a value").
+ */
+export const INNGEST_VOID_STEP_RESULT = { _void: true } as const;
+
+export function safeInngestStepReturn<T>(
+  value: T,
+): T extends undefined ? typeof INNGEST_VOID_STEP_RESULT : DeepStripped<T> {
+  if (value === undefined) {
+    return INNGEST_VOID_STEP_RESULT as T extends undefined
+      ? typeof INNGEST_VOID_STEP_RESULT
+      : DeepStripped<T>;
+  }
+  return stripUndefinedDeep(value) as T extends undefined
+    ? typeof INNGEST_VOID_STEP_RESULT
+    : DeepStripped<T>;
+}
