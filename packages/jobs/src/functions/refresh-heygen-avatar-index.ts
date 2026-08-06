@@ -47,6 +47,52 @@ console.log(`[jobs.refresh-heygen-avatar-index] cold start — POLISH_VERSION=${
 const VISION_CONCURRENCY = 5;
 const STALE_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Polish-26.0.4 Commit 61.4: chunk size for the analyze + persist
+ * loop. Vercel Hobby caps each function invocation at 60 seconds.
+ * At Gemini-vision ~2-5s per thumbnail × VISION_CONCURRENCY=5,
+ * a chunk of 12 avatars runs in ~5-15s wall-clock — safely under
+ * the 60s ceiling with plenty of margin for cold-start + DB
+ * round-trips.
+ *
+ * Each chunk is its own step.run(), so Inngest schedules it as a
+ * fresh 60s HTTP invocation. Total sync completes across MANY
+ * invocations (1264 avatars ÷ 12 = ~106 chunks) but no single
+ * invocation ever risks timeout. Bump this via env when moving to
+ * Vercel Pro (300s ceiling) — 100 becomes comfortable.
+ */
+const DEFAULT_ANALYZE_CHUNK_SIZE = 12;
+
+export function resolveHeygenAnalyzeChunkSize(): number {
+  const raw = process.env['HEYGEN_ANALYZE_CHUNK_SIZE']?.trim();
+  if (!raw) return DEFAULT_ANALYZE_CHUNK_SIZE;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) return DEFAULT_ANALYZE_CHUNK_SIZE;
+  return Math.floor(parsed);
+}
+
+/** Split `items` into chunks of at most `size`. Preserves order. */
+export function chunkArray<T>(items: readonly T[], size: number): T[][] {
+  if (size < 1) throw new Error(`chunkArray size must be >= 1, got ${size}`);
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    out.push(items.slice(i, i + size));
+  }
+  return out;
+}
+
+/**
+ * Fingerprint the first 120 chars of an error message with digits
+ * normalized so "Gemini 500 Internal (req 123)" and
+ * "Gemini 500 Internal (req 456)" hash identically. Used by the
+ * consecutive-same-signature circuit breaker.
+ */
+export function errorSignature(msg: string): string {
+  return msg.slice(0, 120).replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+const CROSS_CHUNK_CONSECUTIVE_FAILURE_THRESHOLD = 20;
+
 interface RefreshEventData {
   userId?: string;
   forceAll?: boolean;
@@ -215,59 +261,77 @@ export async function refreshHeygenAvatarIndexCore(
     });
   }
 
-  // Step D: analyze thumbnails via Gemini (shared MakeUGC prompt).
+  // Step D + E (combined): chunked analyze + persist.
   //
-  // Polish-26.0.2 Commit 61.2: added first-failure diagnostic dump
-  // + consecutive-same-error early-exit after run 01KZAPKYZ03W6DA9ZE8D918BHY
+  // Polish-26.0.2 Commit 61.2 added first-failure diagnostic dump +
+  // consecutive-same-error early-exit after run 01KZAPKYZ03W6DA9ZE8D918BHY
   // hit 1264/1264 Gemini failures with an opaque "500 Internal error
-  // encountered" — burned 20 minutes and left the operator blind to
-  // whether the root cause was a bad MIME, unreachable URL, or real
-  // Gemini outage. Diagnostics + circuit-breaker fix both:
-  //   - captures the first failure's full details (URL, HTTP status,
-  //     content-type, byte size, Gemini raw body excerpt)
-  //   - halts the batch after N consecutive same-error-signature
-  //     failures so we don't waste 20 minutes proving 1000 more will
-  //     also fail
-  const analyzed = await step.run('analyze-batch', async () => {
-    if (diff.toAnalyzeAvatars.length === 0) {
-      return {
-        attempted: 0,
-        successful: 0,
-        failed: 0,
-        results: [],
-        earlyExit: false,
-        firstFailure: null,
-      } as const;
-    }
-    let keys;
-    try {
-      keys = await loadDecryptedKeys(userId, ['gemini']);
-    } catch (err) {
-      if (err instanceof MissingProviderKeyError) {
-        throw new NonRetriableError(
-          `refresh-heygen-avatar-index: Gemini BYOK missing for refresh user ${userId}. ` +
-            `${err.message}. Vision analysis needs Gemini.`,
-        );
-      }
-      throw err;
-    }
-    type AnalyzedRow = {
-      avatarId: string;
-      avatarName: string;
-      thumbnailUrl: string;
-      heygenGender: string;
-      analysis: ReturnType<typeof parseMakeugcAvatarVisionAnalysis>;
-      rawJson: unknown;
-      costUsd: number;
-      errorMessage: string | undefined;
-    };
+  // encountered" — burned 20 minutes and left the operator blind.
+  //
+  // Polish-26.0.3 Commit 61.3 added URL-extension + magic-bytes
+  // MIME inference to recover from HeyGen's CDN mis-serving WebP as
+  // binary/octet-stream.
+  //
+  // Polish-26.0.4 Commit 61.4 CHUNKED this step. Pre-61.4 all 1264
+  // avatars ran under ONE step.run('analyze-batch') that took
+  // ~8-10 min wall-clock at concurrency 5. Vercel Hobby caps each
+  // HTTP invocation at 60 seconds → FUNCTION_INVOCATION_TIMEOUT
+  // before any output. Fix: split into N chunks of
+  // HEYGEN_ANALYZE_CHUNK_SIZE avatars (default 12), each processed
+  // by its own step.run('analyze-persist-chunk-K'). Inngest
+  // schedules each chunk as a fresh 60s HTTP invocation, so total
+  // sync runs ~30-45 min across many invocations but no single one
+  // risks the ceiling.
+  //
+  // Persistence is INSIDE each chunk (not a separate persist-batch
+  // step) so partial progress survives — if the sync fails mid-way,
+  // already-analyzed avatars are already in heygen_avatar_index and
+  // the next cycle's stale-scan skips them.
+  //
+  // Circuit-breaker (>=20 consecutive same-signature failures) is
+  // enforced ACROSS chunks in the outer loop below, using
+  // deterministic cumulative state reconstructed from cached
+  // step.run results on Inngest replay.
+  const chunkSize = resolveHeygenAnalyzeChunkSize();
+  const chunks = chunkArray(diff.toAnalyzeAvatars, chunkSize);
+  console.log(
+    `[refresh-heygen-avatar-index:${trigger}] splitting ${diff.toAnalyzeAvatars.length} ` +
+      `avatars into ${chunks.length} chunks of ${chunkSize} for Vercel Hobby 60s ceiling`,
+  );
 
-    // Circuit-breaker + first-failure capture. The runWithConcurrency
-    // loop reads earlyExitTriggered — once set, remaining workers
-    // return an "aborted" row without hitting the network.
-    let earlyExitTriggered = false;
-    let consecutiveFailures = 0;
-    let firstFailure: {
+  // Ensure the Gemini BYOK check fails LOUDLY in a tiny step.run
+  // before we start scheduling per-chunk work — otherwise a bad-key
+  // failure would only surface on chunk 0's much larger invocation.
+  if (diff.toAnalyzeAvatars.length > 0) {
+    await step.run('preflight-gemini-key', async () => {
+      try {
+        await loadDecryptedKeys(userId, ['gemini']);
+        return { ok: true };
+      } catch (err) {
+        if (err instanceof MissingProviderKeyError) {
+          throw new NonRetriableError(
+            `refresh-heygen-avatar-index: Gemini BYOK missing for refresh user ${userId}. ` +
+              `${err.message}. Vision analysis needs Gemini.`,
+          );
+        }
+        throw err;
+      }
+    });
+  }
+
+  type ChunkResult = {
+    attempted: number;
+    successful: number;
+    failed: number;
+    persisted: number;
+    costUsd: number;
+    /** Per-avatar error signature (null on success). Compact enough to
+     *  cross the step.run serialization boundary for cross-chunk
+     *  circuit-breaker continuity. */
+    resultSigs: (string | null)[];
+    /** First failure this chunk saw (null if none / not this chunk's
+     *  turn to capture). Outer loop keeps only the FIRST non-null. */
+    chunkFirstFailure: {
       avatarId: string;
       avatarName: string;
       previewUrl: string;
@@ -275,196 +339,236 @@ export async function refreshHeygenAvatarIndexCore(
       diagnostics: NonNullable<
         Awaited<ReturnType<typeof analyzeMakeugcAvatarThumbnail>>['diagnostics']
       > | null;
-    } | null = null;
-    const EARLY_EXIT_THRESHOLD = 20;
+    } | null;
+  };
 
-    function errorSignature(msg: string): string {
-      // Fingerprint the first 120 chars of the error, uppercase + digits
-      // and identifiers removed, so "Gemini 500 Internal (req 123)" and
-      // "Gemini 500 Internal (req 456)" hash identically.
-      return msg.slice(0, 120).replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().toLowerCase();
-    }
-    let lastSignature: string | null = null;
+  // Cumulative state — deterministic-across-replays because
+  // step.run() results are cached and this outer loop just reads
+  // them back in fixed order.
+  let cumAttempted = 0;
+  let cumSuccessful = 0;
+  let cumFailed = 0;
+  let cumPersisted = 0;
+  let cumCostUsd = 0;
+  let cumFirstFailure: ChunkResult['chunkFirstFailure'] = null;
+  let cumConsecutiveFailures = 0;
+  let cumLastSignature: string | null = null;
+  let cumEarlyExitAtChunk: number | null = null;
 
-    const outcomes = await runWithConcurrency(
-      diff.toAnalyzeAvatars,
-      VISION_CONCURRENCY,
-      async (avatar): Promise<AnalyzedRow> => {
-        if (earlyExitTriggered) {
-          return {
-            avatarId: avatar.avatar_id,
-            avatarName: avatar.avatar_name,
-            thumbnailUrl: avatar.preview_image_url ?? '',
-            heygenGender: (avatar.gender ?? '').toLowerCase(),
-            analysis: null,
-            rawJson: undefined,
-            costUsd: 0,
-            errorMessage: 'skipped — batch early-exit triggered',
-          };
+  for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+    if (cumEarlyExitAtChunk !== null) break;
+    const chunk = chunks[chunkIdx]!;
+    const chunkNumber = chunkIdx + 1;
+    const chunkResult: ChunkResult = await step.run(
+      `analyze-persist-chunk-${chunkIdx}`,
+      async () => {
+        // Preflight already ran a Gemini-key check (see above the
+        // loop), so loadDecryptedKeys here should not surprise us —
+        // but keep the guard: an ops-side revoke between chunks
+        // still needs to fail loud.
+        const keys = await loadDecryptedKeys(userId, ['gemini']);
+
+        type ChunkRowOutcome = {
+          avatar: (typeof chunk)[number];
+          r: Awaited<ReturnType<typeof analyzeMakeugcAvatarThumbnail>> | null;
+          analysis: ReturnType<typeof parseMakeugcAvatarVisionAnalysis>;
+          skipReason: string | null;
+        };
+
+        const outcomes = await runWithConcurrency(
+          chunk,
+          VISION_CONCURRENCY,
+          async (avatar): Promise<ChunkRowOutcome> => {
+            if (!avatar.preview_image_url || avatar.preview_image_url.length === 0) {
+              return { avatar, r: null, analysis: null, skipReason: 'no preview_image_url' };
+            }
+            const r = await analyzeMakeugcAvatarThumbnail({
+              userId,
+              apiKey: keys.gemini!,
+              imageUrl: avatar.preview_image_url,
+              systemPrompt: MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
+            });
+            const analysis = r.ok ? parseMakeugcAvatarVisionAnalysis(r.parsedJson) : null;
+            return { avatar, r, analysis, skipReason: null };
+          },
+        );
+
+        // Fold concurrency-runner errors into ChunkRowOutcome shape.
+        const rows: ChunkRowOutcome[] = outcomes.map((o) =>
+          o.ok
+            ? o.result
+            : ({
+                avatar: {
+                  avatar_id: '(unknown)',
+                  avatar_name: '',
+                  gender: '',
+                  preview_image_url: '',
+                } as (typeof chunk)[number],
+                r: null,
+                analysis: null,
+                skipReason: `concurrency-runner-error: ${o.error}`,
+              } as ChunkRowOutcome),
+        );
+
+        // Persist successful analyses IMMEDIATELY inside this step so
+        // partial progress survives a mid-sync failure. Batch as one
+        // per-row upsert (Postgres handles ~12 tiny upserts well
+        // within the 60s window even sequentially).
+        const db = getDb();
+        const now = new Date();
+        let persistedInChunk = 0;
+        for (const row of rows) {
+          if (!row.analysis) continue;
+          const a = row.analysis;
+          await db
+            .insert(schema.heygenAvatarIndex)
+            .values({
+              avatarId: row.avatar.avatar_id,
+              avatarName: row.avatar.avatar_name,
+              thumbnailUrl: row.avatar.preview_image_url ?? '',
+              heygenGender: (row.avatar.gender ?? '').toLowerCase(),
+              ageBucket: a.age_bucket,
+              ethnicity: a.ethnicity,
+              hairColor: a.hair_color,
+              hairStyle: a.hair_style,
+              facialHair: a.facial_hair,
+              wardrobeStyle: a.wardrobe_style,
+              wardrobeSummary: a.wardrobe_summary,
+              backgroundSetting: a.background_setting,
+              visionAnalysisRaw: (row.r?.parsedJson ?? null) as Record<string, unknown> | null,
+              visionAnalyzedAt: now,
+              lastRefreshedAt: now,
+              deletedAt: null,
+            })
+            .onConflictDoUpdate({
+              target: schema.heygenAvatarIndex.avatarId,
+              set: {
+                avatarName: row.avatar.avatar_name,
+                thumbnailUrl: row.avatar.preview_image_url ?? '',
+                heygenGender: (row.avatar.gender ?? '').toLowerCase(),
+                ageBucket: a.age_bucket,
+                ethnicity: a.ethnicity,
+                hairColor: a.hair_color,
+                hairStyle: a.hair_style,
+                facialHair: a.facial_hair,
+                wardrobeStyle: a.wardrobe_style,
+                wardrobeSummary: a.wardrobe_summary,
+                backgroundSetting: a.background_setting,
+                visionAnalysisRaw: (row.r?.parsedJson ?? null) as Record<string, unknown> | null,
+                visionAnalyzedAt: now,
+                lastRefreshedAt: now,
+                deletedAt: null,
+              },
+            });
+          persistedInChunk++;
         }
-        if (!avatar.preview_image_url || avatar.preview_image_url.length === 0) {
-          return {
-            avatarId: avatar.avatar_id,
-            avatarName: avatar.avatar_name,
-            thumbnailUrl: '',
-            heygenGender: avatar.gender ?? '',
-            analysis: null,
-            rawJson: undefined,
-            costUsd: 0,
-            errorMessage: 'no preview_image_url — skipped',
-          };
-        }
-        const r = await analyzeMakeugcAvatarThumbnail({
-          userId,
-          apiKey: keys.gemini!,
-          imageUrl: avatar.preview_image_url,
-          systemPrompt: MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
-        });
-        const analysis = r.ok ? parseMakeugcAvatarVisionAnalysis(r.parsedJson) : null;
-        const failed = !r.ok || analysis === null;
 
-        if (failed) {
-          const msg = r.ok ? 'JSON did not match schema' : (r.errorMessage ?? 'unknown');
-          const sig = errorSignature(msg);
-          if (firstFailure === null) {
-            firstFailure = {
-              avatarId: avatar.avatar_id,
-              avatarName: avatar.avatar_name,
-              previewUrl: avatar.preview_image_url,
-              errorMessage: msg,
-              diagnostics: r.diagnostics ?? null,
-            };
-            // Log the first failure PROMINENTLY so it lands in Inngest
-            // Runtime Logs on the first cycle. Post-Commit-61.2 the
-            // operator has one place to read the actual cause instead
-            // of grepping 1264 identical error strings.
-            console.error(
-              `[refresh-heygen-avatar-index:${trigger}] FIRST FAILURE ` +
-                `avatar_id=${avatar.avatar_id} ` +
-                `preview_url=${avatar.preview_image_url.slice(0, 250)} ` +
-                `error=${JSON.stringify(msg).slice(0, 500)} ` +
-                `diagnostics=${JSON.stringify(r.diagnostics ?? null)}`,
-            );
-          }
-          if (sig === lastSignature) {
-            consecutiveFailures++;
+        // Build the compact chunk result. resultSigs feeds cross-chunk
+        // circuit-breaker continuity in the outer loop.
+        let chunkFirstFailure: ChunkResult['chunkFirstFailure'] = null;
+        const resultSigs: (string | null)[] = [];
+        let successful = 0;
+        let failed = 0;
+        let costUsd = 0;
+        for (const row of rows) {
+          const isFailure = !row.analysis;
+          if (isFailure) failed++;
+          else successful++;
+          costUsd += row.r?.costUsd ?? 0;
+          if (isFailure) {
+            const rawMsg = row.skipReason
+              ? row.skipReason
+              : row.r?.ok === false
+                ? (row.r.errorMessage ?? 'unknown')
+                : 'JSON did not match schema';
+            resultSigs.push(errorSignature(rawMsg));
+            if (chunkFirstFailure === null && row.avatar.preview_image_url) {
+              chunkFirstFailure = {
+                avatarId: row.avatar.avatar_id,
+                avatarName: row.avatar.avatar_name,
+                previewUrl: row.avatar.preview_image_url,
+                errorMessage: rawMsg,
+                diagnostics: row.r?.diagnostics ?? null,
+              };
+            }
           } else {
-            consecutiveFailures = 1;
-            lastSignature = sig;
+            resultSigs.push(null);
           }
-          if (consecutiveFailures >= EARLY_EXIT_THRESHOLD) {
-            earlyExitTriggered = true;
-            console.error(
-              `[refresh-heygen-avatar-index:${trigger}] EARLY-EXIT ` +
-                `${EARLY_EXIT_THRESHOLD} consecutive same-signature failures — ` +
-                `aborting batch. Signature: ${JSON.stringify(sig).slice(0, 300)}. ` +
-                `See FIRST FAILURE log above for the actionable diagnostics.`,
-            );
-          }
-        } else {
-          consecutiveFailures = 0;
-          lastSignature = null;
         }
-
+        const attempted = rows.length;
+        console.log(
+          `[refresh-heygen-avatar-index:${trigger}] chunk ${chunkNumber}/${chunks.length}: ` +
+            `attempted=${attempted} successful=${successful} failed=${failed} ` +
+            `persisted=${persistedInChunk} costUsd=${costUsd.toFixed(4)}`,
+        );
         return {
-          avatarId: avatar.avatar_id,
-          avatarName: avatar.avatar_name,
-          thumbnailUrl: avatar.preview_image_url,
-          heygenGender: (avatar.gender ?? '').toLowerCase(),
-          analysis,
-          rawJson: r.parsedJson,
-          costUsd: r.costUsd,
-          errorMessage: r.ok
-            ? analysis
-              ? undefined
-              : 'JSON did not match schema'
-            : r.errorMessage,
+          attempted,
+          successful,
+          failed,
+          persisted: persistedInChunk,
+          costUsd,
+          resultSigs,
+          chunkFirstFailure,
         };
       },
     );
-    const results = outcomes.map((o) =>
-      o.ok
-        ? o.result
-        : ({
-            avatarId: '(unknown)',
-            avatarName: '',
-            thumbnailUrl: '',
-            heygenGender: '',
-            analysis: null,
-            rawJson: undefined,
-            costUsd: 0,
-            errorMessage: o.error,
-          } as AnalyzedRow),
-    );
-    const successful = results.filter((r) => r.analysis !== null).length;
-    const failed = results.length - successful;
-    const totalCostUsd = results.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
-    console.log(
-      `[refresh-heygen-avatar-index:${trigger}] vision batch attempted=${results.length} ` +
-        `successful=${successful} failed=${failed} totalCostUsd=${totalCostUsd.toFixed(4)} ` +
-        `earlyExit=${earlyExitTriggered}`,
-    );
-    return {
-      attempted: results.length,
-      successful,
-      failed,
-      results,
-      earlyExit: earlyExitTriggered,
-      firstFailure,
-    };
-  });
 
-  // Step E: upsert successful analyses.
-  const persistedCount = await step.run('persist-batch', async () => {
-    let count = 0;
-    const db = getDb();
-    const now = new Date();
-    for (const r of analyzed.results) {
-      if (r.analysis === null) continue;
-      await db
-        .insert(schema.heygenAvatarIndex)
-        .values({
-          avatarId: r.avatarId,
-          avatarName: r.avatarName,
-          thumbnailUrl: r.thumbnailUrl,
-          heygenGender: r.heygenGender,
-          ageBucket: r.analysis.age_bucket,
-          ethnicity: r.analysis.ethnicity,
-          hairColor: r.analysis.hair_color,
-          hairStyle: r.analysis.hair_style,
-          facialHair: r.analysis.facial_hair,
-          wardrobeStyle: r.analysis.wardrobe_style,
-          wardrobeSummary: r.analysis.wardrobe_summary,
-          backgroundSetting: r.analysis.background_setting,
-          visionAnalysisRaw: r.rawJson as Record<string, unknown> | null,
-          visionAnalyzedAt: now,
-          lastRefreshedAt: now,
-          deletedAt: null,
-        })
-        .onConflictDoUpdate({
-          target: schema.heygenAvatarIndex.avatarId,
-          set: {
-            avatarName: r.avatarName,
-            thumbnailUrl: r.thumbnailUrl,
-            heygenGender: r.heygenGender,
-            ageBucket: r.analysis.age_bucket,
-            ethnicity: r.analysis.ethnicity,
-            hairColor: r.analysis.hair_color,
-            hairStyle: r.analysis.hair_style,
-            facialHair: r.analysis.facial_hair,
-            wardrobeStyle: r.analysis.wardrobe_style,
-            wardrobeSummary: r.analysis.wardrobe_summary,
-            backgroundSetting: r.analysis.background_setting,
-            visionAnalysisRaw: r.rawJson as Record<string, unknown> | null,
-            visionAnalyzedAt: now,
-            lastRefreshedAt: now,
-            deletedAt: null,
-          },
-        });
-      count++;
+    // Outer-loop cumulative-state update.
+    cumAttempted += chunkResult.attempted;
+    cumSuccessful += chunkResult.successful;
+    cumFailed += chunkResult.failed;
+    cumPersisted += chunkResult.persisted;
+    cumCostUsd += chunkResult.costUsd;
+    if (cumFirstFailure === null && chunkResult.chunkFirstFailure) {
+      cumFirstFailure = chunkResult.chunkFirstFailure;
+      console.error(
+        `[refresh-heygen-avatar-index:${trigger}] FIRST FAILURE ` +
+          `avatar_id=${cumFirstFailure.avatarId} ` +
+          `preview_url=${cumFirstFailure.previewUrl.slice(0, 250)} ` +
+          `error=${JSON.stringify(cumFirstFailure.errorMessage).slice(0, 500)} ` +
+          `diagnostics=${JSON.stringify(cumFirstFailure.diagnostics)}`,
+      );
     }
-    return count;
-  });
+
+    // Cross-chunk consecutive-failure circuit breaker. The `sig`
+    // stream is contiguous across chunk boundaries — a same-signature
+    // streak that spans chunk 3 → chunk 4 counts as one streak.
+    for (const sig of chunkResult.resultSigs) {
+      if (sig === null) {
+        cumConsecutiveFailures = 0;
+        cumLastSignature = null;
+        continue;
+      }
+      if (sig === cumLastSignature) {
+        cumConsecutiveFailures++;
+      } else {
+        cumConsecutiveFailures = 1;
+        cumLastSignature = sig;
+      }
+      if (cumConsecutiveFailures >= CROSS_CHUNK_CONSECUTIVE_FAILURE_THRESHOLD) {
+        cumEarlyExitAtChunk = chunkIdx;
+        console.error(
+          `[refresh-heygen-avatar-index:${trigger}] EARLY-EXIT at chunk ${chunkNumber}: ` +
+            `${CROSS_CHUNK_CONSECUTIVE_FAILURE_THRESHOLD} consecutive same-signature failures ` +
+            `across chunks — aborting remaining ${chunks.length - chunkNumber} chunk(s). ` +
+            `Signature: ${JSON.stringify(sig).slice(0, 300)}. ` +
+            `See FIRST FAILURE log above for the actionable diagnostics.`,
+        );
+        break;
+      }
+    }
+  }
+
+  // Convenience alias so the summary + touch step read consistently
+  // regardless of whether Step D+E was chunked or not.
+  const analyzed = {
+    attempted: cumAttempted,
+    successful: cumSuccessful,
+    failed: cumFailed,
+    earlyExit: cumEarlyExitAtChunk !== null,
+    firstFailure: cumFirstFailure,
+  };
+  const persistedCount = cumPersisted;
 
   // Step F: touch unchanged fresh rows.
   if (diff.toTouchOnlyIds.length > 0) {
@@ -482,7 +586,6 @@ export async function refreshHeygenAvatarIndexCore(
     });
   }
 
-  const totalCostUsd = analyzed.results.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
   const summary = {
     polishVersion: POLISH_VERSION,
     trigger,
@@ -492,10 +595,16 @@ export async function refreshHeygenAvatarIndexCore(
     analyzeSuccessful: analyzed.successful,
     analyzeFailed: analyzed.failed,
     persistedCount,
-    totalGeminiCostUsd: Number(totalCostUsd.toFixed(6)),
+    totalGeminiCostUsd: Number(cumCostUsd.toFixed(6)),
     staleThresholdMs: STALE_MS,
     forceAll,
     refreshUserId: userId,
+    // Polish-26.0.4 Commit 61.4: chunking stats. earlyExitAtChunk
+    // is the 0-indexed chunk that tripped the cross-chunk circuit
+    // breaker (null when the whole sync ran cleanly).
+    chunkSize: resolveHeygenAnalyzeChunkSize(),
+    totalChunks: chunks.length,
+    ...(cumEarlyExitAtChunk !== null ? { earlyExitAtChunk: cumEarlyExitAtChunk } : {}),
     // Polish-26.0.2 Commit 61.2: surface early-exit + first-failure
     // in the Inngest run summary so the operator sees the actionable
     // diagnostic without opening Runtime Logs. When earlyExit=true,
