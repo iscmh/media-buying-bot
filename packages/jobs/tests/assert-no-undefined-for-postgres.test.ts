@@ -140,16 +140,14 @@ describe('rethrowWithUndefinedContext', () => {
       caught = err as Error;
     }
     expect(caught).not.toBeNull();
-    expect(caught!.message).toMatch(/\[postgres-js UNDEFINED_VALUE at sync:cron\]/);
+    expect(caught!.message).toMatch(/\[UNDEFINED_VALUE at sync:cron\]/);
     expect(caught!.message).toContain('Undefined values are not allowed');
   });
 
   it('annotates errors that carry the code on the object shape', () => {
     // postgres-js also sets err.code = 'UNDEFINED_VALUE' on some paths.
     const pgErr = Object.assign(new Error('some driver-side message'), { code: 'UNDEFINED_VALUE' });
-    expect(() => rethrowWithUndefinedContext(pgErr, 'ctx')).toThrow(
-      /postgres-js UNDEFINED_VALUE at ctx/,
-    );
+    expect(() => rethrowWithUndefinedContext(pgErr, 'ctx')).toThrow(/UNDEFINED_VALUE at ctx/);
   });
 
   it('re-throws unrelated errors unchanged', () => {

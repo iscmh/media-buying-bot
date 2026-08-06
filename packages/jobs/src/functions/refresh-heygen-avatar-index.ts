@@ -42,7 +42,9 @@ import {
   assertArrayNoUndefinedForPostgres,
   assertNoUndefinedForPostgres,
   assertScalarDefinedForPostgres,
+  guardedStepRun,
   rethrowWithUndefinedContext,
+  safeErrorShape,
 } from '../lib/assert-no-undefined-for-postgres';
 import {
   MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
@@ -248,7 +250,7 @@ export async function refreshHeygenAvatarIndexCore(
   }
 
   // Step A: fetch live library.
-  const liveAvatars = await step.run('fetch-avatar-list', async () => {
+  const liveAvatars = await guardedStepRun(step, 'fetch-avatar-list', async () => {
     let heygenKey: string;
     try {
       const resolved = await resolveHeygenManagedKey({ userId });
@@ -278,7 +280,7 @@ export async function refreshHeygenAvatarIndexCore(
   });
 
   // Step B: diff against existing index.
-  const diff = await step.run('diff-against-index', async () => {
+  const diff = await guardedStepRun(step, 'diff-against-index', async () => {
     const db = getDb();
     const rows = await db.query.heygenAvatarIndex.findMany({
       columns: { avatarId: true, visionAnalyzedAt: true, deletedAt: true },
@@ -319,7 +321,7 @@ export async function refreshHeygenAvatarIndexCore(
   // undefined to { _void: true } but returning an actual summary
   // is both diagnostic-friendly and free.
   if (diff.toSoftDeleteIds.length > 0) {
-    await step.run('mark-disappeared-deleted', async () => {
+    await guardedStepRun(step, 'mark-disappeared-deleted', async () => {
       const db = getDb();
       // Polish-26.0.13 Commit 62.3: postgres-js UNDEFINED_VALUE guard.
       // A single undefined element in the inArray list throws at the
@@ -382,7 +384,7 @@ export async function refreshHeygenAvatarIndexCore(
   // before we start scheduling per-chunk work — otherwise a bad-key
   // failure would only surface on chunk 0's much larger invocation.
   if (diff.toAnalyzeAvatars.length > 0) {
-    await step.run('preflight-gemini-key', async () => {
+    await guardedStepRun(step, 'preflight-gemini-key', async () => {
       try {
         await loadDecryptedKeys(userId, ['gemini']);
         // Polish-26.0.12 Commit 62.2: safeInngestStepReturn even
@@ -457,7 +459,8 @@ export async function refreshHeygenAvatarIndexCore(
     if (cumEarlyExitAtChunk !== null) break;
     const chunk = chunks[chunkIdx]!;
     const chunkNumber = chunkIdx + 1;
-    const chunkResult: ChunkResult = await step.run(
+    const chunkResult: ChunkResult = await guardedStepRun(
+      step,
       `analyze-persist-chunk-${chunkIdx}`,
       async () => {
         // Preflight already ran a Gemini-key check (see above the
@@ -813,7 +816,7 @@ export async function refreshHeygenAvatarIndexCore(
   // reasoning as mark-disappeared-deleted above. This is the SECOND
   // void step Inngest was tripping UNDEFINED_VALUE on post-26.0.11.
   if (diff.toTouchOnlyIds.length > 0) {
-    await step.run('touch-fresh-rows', async () => {
+    await guardedStepRun(step, 'touch-fresh-rows', async () => {
       const db = getDb();
       // Polish-26.0.13 Commit 62.3: same postgres-js UNDEFINED_VALUE
       // guards as mark-disappeared-deleted.
@@ -899,7 +902,7 @@ export const refreshHeygenAvatarIndexCron = inngest.createFunction(
   async ({ step }) => {
     const startedAt = Date.now();
     try {
-      const userId = await step.run('resolve-refresh-user', async () => {
+      const userId = await guardedStepRun(step, 'resolve-refresh-user', async () => {
         return resolveHeygenRefreshUserId(undefined);
       });
       return await refreshHeygenAvatarIndexCore({
@@ -910,11 +913,16 @@ export const refreshHeygenAvatarIndexCron = inngest.createFunction(
         trigger: 'cron',
       });
     } catch (err) {
-      // Polish-26.0.13 Commit 62.3: top-level UNDEFINED_VALUE
-      // annotator. If postgres-js threw its opaque "Undefined values
-      // are not allowed", re-throw with the trigger context so the
-      // operator sees WHICH cron this was. Non-UNDEFINED errors are
-      // re-thrown unchanged.
+      // Polish-26.0.14 Commit 62.4: unique marker + full raw shape
+      // dump. If the operator sees "OUTER-CATCH-CRON-M14" in Vercel
+      // logs, this catch fired — the raw shape reveals what err
+      // actually looks like (Inngest's wrapper class, cause chain,
+      // etc). If the marker is absent, the catch is being bypassed
+      // and the error is emitted before it can reach here.
+      console.error(
+        `[refreshHeygenAvatarIndexCron] OUTER-CATCH-CRON-M14 raw: ` +
+          JSON.stringify(safeErrorShape(err)).slice(0, 3000),
+      );
       rethrowWithUndefinedContext(err, 'refreshHeygenAvatarIndexCron');
     }
   },
@@ -932,7 +940,7 @@ export const refreshHeygenAvatarIndexManual = inngest.createFunction(
     try {
       const data = (event?.data ?? {}) as RefreshEventData;
       const forceAll = data.forceAll === true;
-      const userId = await step.run('resolve-refresh-user', async () => {
+      const userId = await guardedStepRun(step, 'resolve-refresh-user', async () => {
         return resolveHeygenRefreshUserId(data.userId);
       });
       return await refreshHeygenAvatarIndexCore({
@@ -943,7 +951,13 @@ export const refreshHeygenAvatarIndexManual = inngest.createFunction(
         trigger: 'manual',
       });
     } catch (err) {
-      // Polish-26.0.13 Commit 62.3: top-level UNDEFINED_VALUE annotator.
+      // Polish-26.0.14 Commit 62.4: unique marker + raw shape dump —
+      // see refreshHeygenAvatarIndexCron above for the diagnostic
+      // convention. Marker: OUTER-CATCH-MANUAL-M14.
+      console.error(
+        `[refreshHeygenAvatarIndexManual] OUTER-CATCH-MANUAL-M14 raw: ` +
+          JSON.stringify(safeErrorShape(err)).slice(0, 3000),
+      );
       rethrowWithUndefinedContext(err, 'refreshHeygenAvatarIndexManual');
     }
   },

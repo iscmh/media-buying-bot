@@ -133,24 +133,144 @@ export function assertScalarDefinedForPostgres<T>(
  *   try { await step.run(...); }
  *   catch (e) { rethrowWithUndefinedContext(e, 'sync:chunk-42'); }
  */
+/**
+ * Polish-26.0.14 Commit 62.4: widened matcher. Handles:
+ *   - Error whose message contains "UNDEFINED_VALUE" (postgres-js
+ *     shape, Inngest v3 shape).
+ *   - Error/object with `code === 'UNDEFINED_VALUE'`.
+ *   - Error whose CAUSE chain (via `.cause`) contains a matching
+ *     error — Inngest v3 wraps step errors in SerializationError /
+ *     StepError, hiding postgres-js's original message on `.cause`.
+ *   - Plain object thrown value with the code field.
+ *   - Class name heuristics: SerializationError, StepError.
+ *
+ * Also handles the edge case where the thrown value itself is
+ * `undefined` (rare but possible if a callback does `throw
+ * undefined`) — this used to fall through unlogged; now it's
+ * annotated as a distinct sub-case for the operator.
+ */
+function looksLikeUndefinedValueError(err: unknown, depth = 0): boolean {
+  if (depth > 5) return false; // cycle / deep chain guard
+  if (err === undefined) return true; // bare undefined throw
+  if (err === null) return false;
+  const asRecord = err as {
+    code?: unknown;
+    message?: unknown;
+    name?: unknown;
+    cause?: unknown;
+  };
+  if (asRecord.code === 'UNDEFINED_VALUE') return true;
+  const message = typeof asRecord.message === 'string' ? asRecord.message : String(err);
+  if (/\bUNDEFINED_VALUE\b/i.test(message)) return true;
+  const name = typeof asRecord.name === 'string' ? asRecord.name : '';
+  // Inngest v3 SerializationError signals undefined-in-step-result.
+  if (/SerializationError/i.test(name) && /undefined/i.test(message)) return true;
+  if ('cause' in asRecord && asRecord.cause !== undefined) {
+    return looksLikeUndefinedValueError(asRecord.cause, depth + 1);
+  }
+  return false;
+}
+
 export function rethrowWithUndefinedContext(err: unknown, context: string): never {
-  const msg = err instanceof Error ? err.message : String(err);
-  // postgres-js formats as: "UNDEFINED_VALUE: Undefined values are not allowed"
-  // OR the code is on err.code. Match on both.
-  const looksLikePgUndefined =
-    /\bUNDEFINED_VALUE\b/i.test(msg) ||
-    (err !== null &&
-      typeof err === 'object' &&
-      (err as { code?: string }).code === 'UNDEFINED_VALUE');
-  if (looksLikePgUndefined) {
+  // Polish-26.0.14 Commit 62.4: log the raw shape ALWAYS, even
+  // when we decide not to annotate. The operator's diagnostic
+  // said prior fixes silently missed the error shape — the raw
+  // dump proves whether this catch fired and what err looked like.
+  const rawShape = safeErrorShape(err);
+  console.error(
+    `[rethrowWithUndefinedContext] context=${context} caught raw error: ${JSON.stringify(rawShape).slice(0, 2000)}`,
+  );
+  if (looksLikeUndefinedValueError(err)) {
+    const originalMessage = err instanceof Error ? err.message : String(err);
     const annotated = new Error(
-      `[postgres-js UNDEFINED_VALUE at ${context}] ${msg}. ` +
-        `An undefined query parameter reached the driver. Check every Drizzle .values/.set/.where ` +
-        `in the code path leading to '${context}' — a top-level undefined column value, an eq(col, undefined) ` +
-        `WHERE, or an inArray with undefined elements is the usual suspect.`,
+      `[UNDEFINED_VALUE at ${context}] ${originalMessage}. ` +
+        `Source is either postgres-js (undefined query parameter) or Inngest v3 (undefined ` +
+        `step-return / event value). Check every Drizzle .values/.set/.where AND every step.run ` +
+        `return in the code path leading to '${context}'.`,
     );
     (annotated as Error & { cause?: unknown }).cause = err;
     throw annotated;
   }
   throw err;
+}
+
+/**
+ * Compact, JSON-safe snapshot of an error for logging. Extracts
+ * name/message/code/cause/stack (truncated) without triggering the
+ * Error's default toString hiding.
+ */
+export function safeErrorShape(err: unknown): Record<string, unknown> {
+  if (err === undefined) return { __thrownValue: 'undefined' };
+  if (err === null) return { __thrownValue: 'null' };
+  if (typeof err !== 'object') return { __thrownValue: String(err), type: typeof err };
+  const asRecord = err as {
+    name?: unknown;
+    message?: unknown;
+    code?: unknown;
+    stack?: unknown;
+    cause?: unknown;
+  };
+  const shape: Record<string, unknown> = {};
+  if (asRecord.name !== undefined) shape.name = asRecord.name;
+  if (asRecord.message !== undefined) shape.message = asRecord.message;
+  if (asRecord.code !== undefined) shape.code = asRecord.code;
+  if (typeof asRecord.stack === 'string') {
+    shape.stack = asRecord.stack.slice(0, 800);
+  }
+  if (asRecord.cause !== undefined) {
+    shape.cause = safeErrorShape(asRecord.cause);
+  }
+  return shape;
+}
+
+/**
+ * Polish-26.0.14 Commit 62.4: guarded step.run wrapper.
+ *
+ * Wraps a step.run callback with:
+ *   1. A pre-run log line (unique marker per step) — proves the
+ *      step was invoked and helps trace execution order in Vercel
+ *      logs.
+ *   2. Try/catch INSIDE the callback that logs the raw error
+ *      shape and re-throws with `rethrowWithUndefinedContext` +
+ *      step-scoped context. Even if the outer function's catch is
+ *      bypassed by Inngest's SDK internals, the per-step catch
+ *      fires here.
+ *
+ * Type-parameterized: the caller-provided callback signature is
+ * preserved so we don't lose Drizzle type inference at call sites.
+ *
+ * Usage:
+ *   const chunkResult = await guardedStepRun(
+ *     step, `analyze-persist-chunk-${chunkIdx}`, async () => { ... }
+ *   );
+ */
+export async function guardedStepRun<T>(
+  // Loosely typed step to accept Inngest v3's actual step-tools
+  // shape (which uses overloads and generics we can't cleanly
+  // subtype). At runtime it must have a .run(id, fn) method.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  step: { run: (...args: any[]) => Promise<any> },
+  stepId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  console.log(`[guardedStepRun] BEFORE step=${stepId}`);
+  try {
+    return await step.run(stepId, async () => {
+      try {
+        return await fn();
+      } catch (err) {
+        console.error(
+          `[guardedStepRun] step=${stepId} inner-catch raw error: ${JSON.stringify(safeErrorShape(err)).slice(0, 2000)}`,
+        );
+        rethrowWithUndefinedContext(err, `step:${stepId}`);
+      }
+    });
+  } catch (err) {
+    // Belt-and-suspenders: annotate again at the outer boundary
+    // in case Inngest's SDK repackaged the inner throw.
+    console.error(
+      `[guardedStepRun] step=${stepId} OUTER-catch raw error: ${JSON.stringify(safeErrorShape(err)).slice(0, 2000)}`,
+    );
+    rethrowWithUndefinedContext(err, `step:${stepId}:outer`);
+  }
 }
