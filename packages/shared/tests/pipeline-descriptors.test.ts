@@ -78,15 +78,16 @@ describe('Polish-20 Commit 4: defaultPipeline throws — no pipeline-level defau
   });
 });
 
-describe('Polish-20 Commit 4 → Polish-23 Commit 1: ALL_PIPELINES coverage', () => {
-  it('covers legacy survivors + Polish-23 + Polish-25 + Polish-25.3 pipelines', () => {
+describe('Polish-20 Commit 4 → Polish-26 Commit 61: ALL_PIPELINES coverage', () => {
+  it('covers legacy survivors + Polish-23 + Polish-25 + Polish-25.3 + Polish-26 pipelines', () => {
     // Polish-23 Commit 1 added polish23_higgsfield_veo_lite.
-    // Polish-25 Commit 2 added polish25_makeugc as the primary
-    // recommended pipeline (MakeUGC pre-cast avatar, ~$0.05 per
-    // 60s ad — 20-50x cheaper than Polish-23).
-    // Polish-25.3 Commit 18b added static_openai_image — the new
-    // static-ad pipeline using OpenAI gpt-image-2 for reference-
-    // image-anchored edits + Claude for overlay-copy rewrites.
+    // Polish-25 Commit 2 added polish25_makeugc.
+    // Polish-25.3 Commit 18b added static_openai_image.
+    // Polish-26 Commit 61 added polish26_heygen — the new
+    // HeyGen v3 PAYG managed backend that supersedes
+    // polish25_makeugc as the primary Instant UGC pipeline (see
+    // packages/shared/src/polish-version.ts for the migration
+    // rationale). MakeUGC descriptor stays for admin/fallback.
     const expected: PipelineType[] = [
       'heygen_avatar_talking_head',
       'sora_2_single_shot',
@@ -94,6 +95,7 @@ describe('Polish-20 Commit 4 → Polish-23 Commit 1: ALL_PIPELINES coverage', ()
       'polish23_higgsfield_veo_lite',
       'polish25_makeugc',
       'static_openai_image',
+      'polish26_heygen',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
   });

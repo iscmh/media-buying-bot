@@ -9,15 +9,17 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // Polish-25 launched patch-only (25.0.x) with the MakeUGC pivot;
     // Polish-25.1 is the first MINOR bump for the UX-layer overhaul.
     // Polish-25.6 = launch-readiness milestone.
-    expect(POLISH_VERSION).toMatch(/^2(1|3|4|5|6|7|8|9|10)\.\d+\.\d+$/);
+    // Polish-26.0 Commit 61: first Polish-26 release lands the HeyGen
+    // v3 backend replacement. Regex now permits the "26" major slot.
+    expect(POLISH_VERSION).toMatch(/^2(1|3|4|5|6|7|8|9|10)\.\d+\.\d+$|^26\.\d+\.\d+$/);
   });
 
-  it('is currently 25.10.1 (Polish-25.10 Commit 60 hotfix — bump this pin deliberately on the next release)', () => {
+  it('is currently 26.0.0 (Polish-26.0 Commit 61 — bump this pin deliberately on the next release)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('25.10.1');
+    expect(POLISH_VERSION).toBe('26.0.0');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

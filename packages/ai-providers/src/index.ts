@@ -237,6 +237,56 @@ export {
   type Polish25AvatarMatchMetadata,
   type Polish25CreditsUsedMetadata,
 } from './makeugc-client';
+// Polish-26 Commit 61: HeyGen v3 PAYG managed-backend client
+// (parallel-track alongside the Polish-24 heygen-client exports
+// above — see file header for the coexistence rationale).
+//
+// Symbols with names that collide with the Polish-24 exports get
+// aliased with the `V3` suffix here so callers can unambiguously
+// pick the version they want. Non-colliding names (submit, list,
+// classify, cost helpers) keep their original identifiers because
+// the Polish-24 client exposes those under different names anyway.
+export {
+  HEYGEN_DEFAULT_VIDEO_SECONDS,
+  HEYGEN_TRANSIENT_ERROR_MESSAGE_PATTERNS as HEYGEN_V3_TRANSIENT_ERROR_MESSAGE_PATTERNS,
+  HEYGEN_USD_PER_SECOND_AVATAR_IV_1080P,
+  HEYGEN_USD_PER_SECOND_AVATAR_IV_4K,
+  HEYGEN_USD_PER_SECOND_AVATAR_V,
+  HEYGEN_VOICE_SCRIPT_MAX_CHARS,
+  HeygenModerationRejectedError,
+  HeygenNoMatchingAvatarError as HeygenV3NoMatchingAvatarError,
+  HeygenQuotaExhaustedError,
+  HeygenScriptTooLongError,
+  Polish26HeygenAvatarMatchMetadataSchema,
+  Polish26HeygenCostMetadataSchema,
+  assertHeygenScriptLength,
+  checkHeygenVideoStatus,
+  classifyHeygenError,
+  estimateHeygenVideoCostUsd,
+  isHeygenTransientError as isHeygenV3TransientError,
+  listHeygenAvatars,
+  listHeygenVoices,
+  selectHeygenAvatarForPersonaFromIndex,
+  submitHeygenVideo,
+  type CheckHeygenVideoStatusInput,
+  type CheckHeygenVideoStatusResult,
+  type EstimateHeygenVideoCostInput,
+  type HeygenAvatarMatch as HeygenV3AvatarMatch,
+  type HeygenAvatarMatchLog as HeygenV3AvatarMatchLog,
+  type HeygenAvatarV3,
+  type HeygenAvatarsListResult,
+  type HeygenEngine,
+  type HeygenEnrichedAvatar,
+  type HeygenErrorCategory,
+  type HeygenPersona as HeygenV3Persona,
+  type HeygenVideoStatus,
+  type HeygenVoiceV3,
+  type HeygenVoicesListResult,
+  type ListHeygenAvatarsInput,
+  type ListHeygenVoicesInput,
+  type SubmitHeygenVideoInput,
+  type SubmitHeygenVideoResult,
+} from './heygen-v3-client';
 export {
   callProvider,
   type ProviderName as ProviderChokepointName,

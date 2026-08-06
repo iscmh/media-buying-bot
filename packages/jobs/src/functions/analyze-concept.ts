@@ -393,6 +393,8 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   | 'generation/polish25-makeugc.requested'
   // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
   | 'generation/static-openai.requested'
+  // Polish-26 Commit 61: HeyGen v3 PAYG managed backend worker.
+  | 'generation/polish26-heygen.requested'
 > {
   try {
     const db = getDb();

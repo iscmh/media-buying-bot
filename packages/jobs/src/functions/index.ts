@@ -6,11 +6,16 @@ import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
 import { generatePolish23VeoLite } from './generate-polish23-veo-lite';
 import { generatePolish25Makeugc } from './generate-polish25-makeugc';
+import { generatePolish26Heygen } from './generate-polish26-heygen';
 import { generateStaticOpenaiImageVariants } from './generate-static-openai-image-variants';
 import {
   refreshMakeugcAvatarIndexCron,
   refreshMakeugcAvatarIndexManual,
 } from './refresh-makeugc-avatar-index';
+import {
+  refreshHeygenAvatarIndexCron,
+  refreshHeygenAvatarIndexManual,
+} from './refresh-heygen-avatar-index';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -69,6 +74,11 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // drives per-image cost; defaults to medium ($0.05) matching
   // Instant UGC per-variant economics.
   'generation/static-openai.requested',
+  // Polish-26 Commit 61: HeyGen v3 PAYG managed Instant UGC.
+  // Replaces Polish-25 MakeUGC as the primary managed backend
+  // once operator provisions HEYGEN_MANAGED_KEY. MakeUGC stays
+  // as fallback / admin-only per operator spec.
+  'generation/polish26-heygen.requested',
 ] as const);
 
 export const functions = [
@@ -91,6 +101,11 @@ export const functions = [
   generatePolish23VeoLite,
   // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
   generatePolish25Makeugc,
+  // Polish-26 Commit 61: HeyGen v3 PAYG managed UGC worker
+  // (parallel-track to legacy Polish-24 generate-ugc-variants +
+  // Polish-25 generate-polish25-makeugc — see spec for the
+  // coexistence rationale).
+  generatePolish26Heygen,
   // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
   generateStaticOpenaiImageVariants,
   // Polish-25 Commit 7: enriched MakeUGC avatar index refresh.
@@ -102,6 +117,12 @@ export const functions = [
   // vanished from the production Functions tab.
   refreshMakeugcAvatarIndexCron,
   refreshMakeugcAvatarIndexManual,
+  // Polish-26 Commit 61: enriched HeyGen avatar index refresh.
+  // Same split-into-two-single-trigger pattern as MakeUGC. Cron
+  // fires at 04:00 UTC (1h after MakeUGC's 03:00 cron) to stagger
+  // Gemini vision load.
+  refreshHeygenAvatarIndexCron,
+  refreshHeygenAvatarIndexManual,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

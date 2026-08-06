@@ -43,7 +43,9 @@ export interface PipelineDescriptor {
     // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
     | 'generation/polish25-makeugc.requested'
     // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
-    | 'generation/static-openai.requested';
+    | 'generation/static-openai.requested'
+    // Polish-26 Commit 61: HeyGen v3 managed Instant UGC worker.
+    | 'generation/polish26-heygen.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -121,6 +123,23 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     workerEvent: 'generation/static-openai.requested',
     requiredProviders: ['claude', 'openai'],
   },
+  // Polish-26 Commit 61: HeyGen v3 PAYG managed Instant UGC —
+  // successor to polish25_makeugc as the primary managed backend.
+  // Avatar V engine bills per-second ($1.50 per 30-sec video at
+  // Avatar V $0.05/sec). Character consistency via HeyGen's 500+
+  // pre-cast avatar library, enriched with Gemini vision analysis
+  // in heygen_avatar_index for persona-driven matching. Requires
+  // Claude for script condensing + Gemini for source vision +
+  // HeyGen for the video render (platform-managed via
+  // HEYGEN_MANAGED_KEY, BYOK fallback for dev).
+  polish26_heygen: {
+    pipeline: 'polish26_heygen',
+    label: 'Instant UGC ad (HeyGen)',
+    providerChoice: 'heygen',
+    format: 'polish26_heygen',
+    workerEvent: 'generation/polish26-heygen.requested',
+    requiredProviders: ['claude', 'gemini', 'heygen'],
+  },
 };
 
 export function describePipeline(pipeline: PipelineType): PipelineDescriptor {
@@ -164,4 +183,6 @@ export const ALL_PIPELINES: PipelineType[] = [
   'polish25_makeugc',
   // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad pipeline.
   'static_openai_image',
+  // Polish-26 Commit 61: HeyGen v3 managed Instant UGC (primary).
+  'polish26_heygen',
 ];

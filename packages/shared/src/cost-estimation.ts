@@ -143,7 +143,14 @@ export type PipelineType =
   // edits the image to match. Quality tier drives per-image cost
   // (low/medium/high), defaults to medium ($0.05) to match Instant
   // UGC per-variant economics.
-  | 'static_openai_image';
+  | 'static_openai_image'
+  // Polish-26 Commit 61: HeyGen v3 PAYG pre-cast avatar UGC ad.
+  // Replaces Polish-25 MakeUGC as the primary managed Instant UGC
+  // backend. Avatar V default engine bills per-second ($0.05/sec
+  // = $1.50 per 30s video). Higher per-video cost than MakeUGC's
+  // $0.05 but the per-second model + real webhook support + 500+
+  // native avatar library makes it the sustainable primary.
+  | 'polish26_heygen';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -300,9 +307,13 @@ export function labelForProvider(provider: UgcVideoProvider): string {
 function estimateByPipeline(
   pipeline: PipelineType,
   variantCount: number,
-  _estimatedDurationSeconds: number | undefined,
+  estimatedDurationSeconds: number | undefined,
   openaiStaticQuality: OpenaiStaticImageQuality | undefined,
 ): CostEstimate {
+  // Polish-26 Commit 61: HeyGen v3 branch reads this — a 30-sec
+  // hook costs half a 60-sec hook. Legacy branches ignore it (flat
+  // per-variant pricing).
+  const targetSecondsHint = estimatedDurationSeconds;
   const breakdown: CostBreakdownItem[] = [];
   switch (pipeline) {
     case 'heygen_avatar_talking_head': {
@@ -352,7 +363,7 @@ function estimateByPipeline(
       //
       // 1 variant × 60s = $1.84 = $0.04 + $0.23 + $0.02 + $1.40 + $0.15.
       // BCH's $1.40 anchor lands on the Veo-only line.
-      const target = _estimatedDurationSeconds ?? 60;
+      const target = estimatedDurationSeconds ?? 60;
       const clipCount = Math.max(1, Math.ceil(target / PRICING.polish23VeoClipSeconds));
       const veoPerVariant = round4(clipCount * PRICING.polish23VeoLite1080pUsdPerClip);
       breakdown.push({
@@ -420,6 +431,35 @@ function estimateByPipeline(
       breakdown.push({
         item: `Instant UGC pre-cast avatar video (${variantCount} × $${MAKEUGC_STARTER_USD_PER_VIDEO.toFixed(4)})`,
         cost: round4(variantCount * MAKEUGC_STARTER_USD_PER_VIDEO),
+      });
+      break;
+    }
+    case 'polish26_heygen': {
+      // Polish-26 Commit 61: HeyGen v3 PAYG billed per-second on
+      // the Avatar V default engine. $0.05/sec = $3/min. Assume a
+      // 30-sec video per variant when the caller doesn't pass a
+      // targetSeconds hint (typical UGC hook length).
+      //
+      //   Claude script condenser × variantCount   $0.02 × N
+      //   HeyGen Avatar V × variantCount            $1.50 × N (@ 30s)
+      //
+      // Duplicated constants (rather than imported from @mbb/ai-
+      // providers) because @mbb/shared cannot depend on that package
+      // without circling the dep graph — same rule the polish25 branch
+      // above follows for MakeUGC constants.
+      const CLAUDE_CONDENSER_USD = 0.02;
+      const HEYGEN_AVATAR_V_USD_PER_SECOND = 0.05;
+      const targetSeconds = targetSecondsHint ?? 30;
+      const perVideoUsd = HEYGEN_AVATAR_V_USD_PER_SECOND * targetSeconds;
+      breakdown.push({
+        item: `Claude script condenser (${variantCount} × $${CLAUDE_CONDENSER_USD.toFixed(2)})`,
+        cost: round4(variantCount * CLAUDE_CONDENSER_USD),
+      });
+      breakdown.push({
+        item:
+          `Instant UGC (HeyGen Avatar V, ${targetSeconds}s) ` +
+          `(${variantCount} × $${perVideoUsd.toFixed(2)})`,
+        cost: round4(variantCount * perVideoUsd),
       });
       break;
     }
