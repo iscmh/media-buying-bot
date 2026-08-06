@@ -32,7 +32,7 @@
  * generation/ugc.requested) is unchanged and continues to serve
  * BYOK HeyGen users on the v1/v2 endpoints.
  */
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { NonRetriableError } from 'inngest';
 import {
   callClaude,
@@ -78,6 +78,51 @@ const HEYGEN_POLL_HEARTBEAT_EVERY = 12; // every ~2 min
 
 const HEYGEN_SUBMIT_MAX_RETRIES = 2;
 const HEYGEN_SUBMIT_RETRY_BACKOFF_SECONDS = 15;
+
+/**
+ * Polish-26.0.7 Commit 61.7: launch-quality background allowlist
+ * for the enriched-index matcher.
+ *
+ * Observed distribution across the operator's first sync of 422
+ * active HeyGen avatars:
+ *   neutral        233   white/plain, reads as obviously AI
+ *   indoor_home     76   living room, kitchen — real UGC vibe
+ *   indoor_office   44   mixed — some real, some staged
+ *   studio          45   obviously fake staged studio
+ *   outdoor         21   most convincing real-life vibe
+ *   other            3   negligible
+ *
+ * The operator's first HeyGen generation matched a neutral-
+ * background avatar and the video read as obviously AI-generated.
+ * Launch-quality bar requires filtering the pool.
+ *
+ * Fallback ladder (primary → escalation):
+ *   1. PRIMARY:  HEYGEN_BACKGROUND_ALLOWLIST env, default
+ *                'indoor_home,outdoor' (97 avatars from the 422)
+ *   2. FALLBACK: add 'indoor_office' (141 total) when primary
+ *                filter + persona filter leave an empty pool
+ *   3. LAST-RESORT: add 'neutral' + 'studio' + 'other' only when
+ *                HEYGEN_ALLOW_NEUTRAL_BACKGROUNDS=true is
+ *                explicitly set — never on by default
+ */
+const DEFAULT_HEYGEN_BACKGROUND_ALLOWLIST = ['indoor_home', 'outdoor'] as const;
+const HEYGEN_FALLBACK_BACKGROUNDS = ['indoor_office'] as const;
+const HEYGEN_LAST_RESORT_BACKGROUNDS = ['neutral', 'studio', 'other'] as const;
+
+export function resolveHeygenBackgroundAllowlist(): string[] {
+  const raw = process.env['HEYGEN_BACKGROUND_ALLOWLIST']?.trim();
+  if (!raw) return [...DEFAULT_HEYGEN_BACKGROUND_ALLOWLIST];
+  const parts = raw
+    .split(',')
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => s.length > 0);
+  return parts.length > 0 ? parts : [...DEFAULT_HEYGEN_BACKGROUND_ALLOWLIST];
+}
+
+export function heygenAllowNeutralBackgrounds(): boolean {
+  const raw = process.env['HEYGEN_ALLOW_NEUTRAL_BACKGROUNDS']?.trim().toLowerCase() ?? '';
+  return raw === 'true' || raw === '1' || raw === 'yes';
+}
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -376,26 +421,89 @@ export const generatePolish26Heygen = inngest.createFunction(
         }
 
         const db = getDb();
-        const enrichedRows = await db.query.heygenAvatarIndex.findMany({
-          where: and(
-            eq(schema.heygenAvatarIndex.heygenGender, persona.gender),
-            isNull(schema.heygenAvatarIndex.deletedAt),
-          ),
-          columns: {
-            avatarId: true,
-            avatarName: true,
-            thumbnailUrl: true,
-            heygenGender: true,
-            ageBucket: true,
-            ethnicity: true,
-            hairColor: true,
-            hairStyle: true,
-            facialHair: true,
-            wardrobeStyle: true,
-            wardrobeSummary: true,
-            backgroundSetting: true,
-          },
-        });
+
+        // Polish-26.0.7 Commit 61.7: background allowlist filter.
+        // Try the primary allowlist first (indoor_home + outdoor by
+        // default). If gender + persona match leaves an empty pool,
+        // expand to fallback (add indoor_office). Only expand to
+        // last-resort backgrounds (neutral/studio/other) when the
+        // operator opts in via HEYGEN_ALLOW_NEUTRAL_BACKGROUNDS.
+        const primaryAllow = resolveHeygenBackgroundAllowlist();
+        const withFallback = [...primaryAllow, ...HEYGEN_FALLBACK_BACKGROUNDS];
+        const lastResort = heygenAllowNeutralBackgrounds()
+          ? [...withFallback, ...HEYGEN_LAST_RESORT_BACKGROUNDS]
+          : withFallback;
+
+        async function loadEnrichedForBackgrounds(allowedBackgrounds: string[]): Promise<
+          Array<{
+            avatarId: string;
+            avatarName: string;
+            thumbnailUrl: string;
+            heygenGender: string;
+            ageBucket: string;
+            ethnicity: string;
+            hairColor: string;
+            hairStyle: string | null;
+            facialHair: string | null;
+            wardrobeStyle: string | null;
+            wardrobeSummary: string | null;
+            backgroundSetting: string | null;
+          }>
+        > {
+          return db.query.heygenAvatarIndex.findMany({
+            where: and(
+              eq(schema.heygenAvatarIndex.heygenGender, persona.gender),
+              isNull(schema.heygenAvatarIndex.deletedAt),
+              inArray(schema.heygenAvatarIndex.backgroundSetting, allowedBackgrounds),
+            ),
+            columns: {
+              avatarId: true,
+              avatarName: true,
+              thumbnailUrl: true,
+              heygenGender: true,
+              ageBucket: true,
+              ethnicity: true,
+              hairColor: true,
+              hairStyle: true,
+              facialHair: true,
+              wardrobeStyle: true,
+              wardrobeSummary: true,
+              backgroundSetting: true,
+            },
+          });
+        }
+
+        let enrichedRows = await loadEnrichedForBackgrounds(primaryAllow);
+        let backgroundTier: 'primary' | 'fallback' | 'last-resort' = 'primary';
+        if (enrichedRows.length === 0) {
+          console.warn(
+            `[polish-26-worker] no avatars in primary background allowlist ` +
+              `${JSON.stringify(primaryAllow)} for gender=${persona.gender}. ` +
+              `Expanding to fallback ${JSON.stringify(HEYGEN_FALLBACK_BACKGROUNDS)}.`,
+          );
+          enrichedRows = await loadEnrichedForBackgrounds(withFallback);
+          backgroundTier = 'fallback';
+        }
+        if (enrichedRows.length === 0 && heygenAllowNeutralBackgrounds()) {
+          console.warn(
+            `[polish-26-worker] no avatars in fallback pool either — ` +
+              `HEYGEN_ALLOW_NEUTRAL_BACKGROUNDS=true opts in to last-resort ` +
+              `${JSON.stringify(HEYGEN_LAST_RESORT_BACKGROUNDS)}.`,
+          );
+          enrichedRows = await loadEnrichedForBackgrounds(lastResort);
+          backgroundTier = 'last-resort';
+        }
+        console.log(
+          `[polish-26-worker] avatar-match candidates: ${enrichedRows.length} ` +
+            `(gender=${persona.gender}, background_tier=${backgroundTier}, ` +
+            `allowlist=${JSON.stringify(
+              backgroundTier === 'primary'
+                ? primaryAllow
+                : backgroundTier === 'fallback'
+                  ? withFallback
+                  : lastResort,
+            )})`,
+        );
 
         // ---------- Enriched-index path ----------
         if (enrichedRows.length > 0) {
@@ -431,6 +539,12 @@ export const generatePolish26Heygen = inngest.createFunction(
                 winnerAgeBucket: matched.avatar.ageBucket,
                 winnerEthnicity: matched.avatar.ethnicity,
                 winnerHairColor: matched.avatar.hairColor,
+                // Polish-26.0.7 Commit 61.7: record which background
+                // tier the pool came from + the winner's actual
+                // background so a launch-quality regression is grep-
+                // pable from generation_jobs.metadata.
+                backgroundTier,
+                winnerBackground: matched.avatar.backgroundSetting,
               },
               polish26_progress: { step: 'avatar-matched', pct: 45, at: nowIso() },
             });
