@@ -37,6 +37,7 @@ import { POLISH_VERSION } from '@mbb/shared';
 import { inngest } from '../client';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { resolveHeygenManagedKey } from '../lib/resolve-heygen-managed-key';
+import { stripUndefined, stripUndefinedDeep } from '../lib/strip-undefined';
 import {
   MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
   parseMakeugcAvatarVisionAnalysisWithDiagnostics,
@@ -508,45 +509,36 @@ export async function refreshHeygenAvatarIndexCore(
         for (const row of rows) {
           if (!row.analysis) continue;
           const a = row.analysis;
+          // Polish-26.0.11 Commit 62.1: build the record once with
+          // explicit `?? null` on every nullable column, then strip
+          // any residual undefined keys before Drizzle. Belt-and-
+          // suspenders — the analysis object is Zod-validated so
+          // every field should be defined, but the raw jsonb blob
+          // gets `?? null` too so Postgres never sees `undefined`.
+          const record = stripUndefined({
+            avatarId: row.avatar.avatar_id,
+            avatarName: row.avatar.avatar_name ?? '',
+            thumbnailUrl: row.avatar.preview_image_url ?? '',
+            heygenGender: (row.avatar.gender ?? '').toLowerCase(),
+            ageBucket: a.age_bucket,
+            ethnicity: a.ethnicity,
+            hairColor: a.hair_color,
+            hairStyle: a.hair_style ?? null,
+            facialHair: a.facial_hair ?? null,
+            wardrobeStyle: a.wardrobe_style ?? null,
+            wardrobeSummary: a.wardrobe_summary ?? null,
+            backgroundSetting: a.background_setting ?? null,
+            visionAnalysisRaw: (row.r?.parsedJson ?? null) as Record<string, unknown> | null,
+            visionAnalyzedAt: now,
+            lastRefreshedAt: now,
+            deletedAt: null,
+          });
           await db
             .insert(schema.heygenAvatarIndex)
-            .values({
-              avatarId: row.avatar.avatar_id,
-              avatarName: row.avatar.avatar_name,
-              thumbnailUrl: row.avatar.preview_image_url ?? '',
-              heygenGender: (row.avatar.gender ?? '').toLowerCase(),
-              ageBucket: a.age_bucket,
-              ethnicity: a.ethnicity,
-              hairColor: a.hair_color,
-              hairStyle: a.hair_style,
-              facialHair: a.facial_hair,
-              wardrobeStyle: a.wardrobe_style,
-              wardrobeSummary: a.wardrobe_summary,
-              backgroundSetting: a.background_setting,
-              visionAnalysisRaw: (row.r?.parsedJson ?? null) as Record<string, unknown> | null,
-              visionAnalyzedAt: now,
-              lastRefreshedAt: now,
-              deletedAt: null,
-            })
+            .values(record as typeof schema.heygenAvatarIndex.$inferInsert)
             .onConflictDoUpdate({
               target: schema.heygenAvatarIndex.avatarId,
-              set: {
-                avatarName: row.avatar.avatar_name,
-                thumbnailUrl: row.avatar.preview_image_url ?? '',
-                heygenGender: (row.avatar.gender ?? '').toLowerCase(),
-                ageBucket: a.age_bucket,
-                ethnicity: a.ethnicity,
-                hairColor: a.hair_color,
-                hairStyle: a.hair_style,
-                facialHair: a.facial_hair,
-                wardrobeStyle: a.wardrobe_style,
-                wardrobeSummary: a.wardrobe_summary,
-                backgroundSetting: a.background_setting,
-                visionAnalysisRaw: (row.r?.parsedJson ?? null) as Record<string, unknown> | null,
-                visionAnalyzedAt: now,
-                lastRefreshedAt: now,
-                deletedAt: null,
-              },
+              set: record,
             });
           persistedInChunk++;
         }
@@ -608,13 +600,23 @@ export async function refreshHeygenAvatarIndexCore(
           }
           resultSigs.push(signature);
           if (row.avatar.preview_image_url && !chunkFailureSamplesBySig.has(signature)) {
+            // Polish-26.0.11 Commit 62.1: explicit `?? null` on every
+            // nullable field + deep-strip on the diagnostics object.
+            // Diagnostics comes from analyzeMakeugcAvatarThumbnail
+            // where a spread like `geminiStatus: result.status` can
+            // leak an undefined-valued key when the underlying HTTP
+            // response has no status field — Inngest's step-result
+            // serializer would then throw UNDEFINED_VALUE.
+            const rawDiagnostics = row.r?.diagnostics ?? null;
+            const cleanDiagnostics =
+              rawDiagnostics == null ? null : stripUndefinedDeep(rawDiagnostics);
             chunkFailureSamplesBySig.set(signature, {
-              avatarId: row.avatar.avatar_id,
-              avatarName: row.avatar.avatar_name,
+              avatarId: row.avatar.avatar_id ?? '(unknown)',
+              avatarName: row.avatar.avatar_name ?? '',
               previewUrl: row.avatar.preview_image_url,
-              errorMessage,
+              errorMessage: errorMessage ?? 'unknown',
               signature,
-              diagnostics: row.r?.diagnostics ?? null,
+              diagnostics: cleanDiagnostics as FailureSample['diagnostics'],
               schemaFieldIssues: row.schemaFailure?.fieldIssues ?? null,
               schemaRawSnapshot: row.schemaFailure?.rawSnapshot ?? null,
             });
@@ -626,7 +628,14 @@ export async function refreshHeygenAvatarIndexCore(
             `attempted=${attempted} successful=${successful} coerced=${coerced} failed=${failed} ` +
             `persisted=${persistedInChunk} costUsd=${costUsd.toFixed(4)}`,
         );
-        return {
+        // Polish-26.0.11 Commit 62.1: deep-strip the chunk return
+        // before Inngest serializes it. FailureSample.diagnostics is
+        // one level deep from this object; a shallow strip on the
+        // outer would still leave undefined keys nested inside
+        // diagnostics and trip UNDEFINED_VALUE. Deep-strip walks
+        // recursively — cycle-safe, preserves null/0/false, arrays
+        // pass through with per-element recursion.
+        return stripUndefinedDeep({
           attempted,
           successful,
           failed,
@@ -635,7 +644,7 @@ export async function refreshHeygenAvatarIndexCore(
           costUsd,
           resultSigs,
           chunkFailureSamples: Array.from(chunkFailureSamplesBySig.values()),
-        };
+        }) as ChunkResult;
       },
     );
 
@@ -727,6 +736,11 @@ export async function refreshHeygenAvatarIndexCore(
     });
   }
 
+  // Polish-26.0.11 Commit 62.1: the raw summary object is built here
+  // and then deep-stripped at the return statement below. Everything
+  // between must be defined-or-null (never bare `undefined`); the
+  // deep strip is belt-and-suspenders for the failure-samples
+  // sub-tree which carries nested diagnostics from Gemini.
   const summary = {
     polishVersion: POLISH_VERSION,
     trigger,
@@ -764,8 +778,15 @@ export async function refreshHeygenAvatarIndexCore(
     // schema:background_setting vs mime-filter:image/gif, etc.).
     failureSamples: analyzed.failureSamples,
   };
-  console.log(`[refresh-heygen-avatar-index:${trigger}] cycle complete ${JSON.stringify(summary)}`);
-  return summary;
+  // Polish-26.0.11 Commit 62.1: deep-strip before Inngest serializes
+  // the function return. Same rationale as the per-chunk return:
+  // failureSamples[i].diagnostics carries nested keys that can be
+  // undefined and trip Inngest UNDEFINED_VALUE.
+  const cleanSummary = stripUndefinedDeep(summary);
+  console.log(
+    `[refresh-heygen-avatar-index:${trigger}] cycle complete ${JSON.stringify(cleanSummary)}`,
+  );
+  return cleanSummary as Record<string, unknown>;
 }
 
 export const refreshHeygenAvatarIndexCron = inngest.createFunction(
