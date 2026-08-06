@@ -59,6 +59,7 @@ import { logInngestFailure } from '../error-hook';
 import { markJobCompleted, markJobFailed } from '../lib/job-markers';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
 import { resolveHeygenManagedKey } from '../lib/resolve-heygen-managed-key';
+import { stripUndefined } from '../lib/strip-undefined';
 import {
   POLISH25_CLAUDE_SCRIPT_CONDENSER_SYSTEM_PROMPT,
   checkPolish25CondensedScript,
@@ -135,9 +136,16 @@ async function patchMetadata(jobId: string, patch: Record<string, unknown>): Pro
     columns: { metadata: true },
   });
   const existing = (row?.metadata ?? {}) as Record<string, unknown>;
+  // Polish-26.0.8 Commit 61.8: strip undefined values at the boundary.
+  // Every metadata write in this worker flows through here, so one
+  // strip covers every call site — no per-invocation risk of a
+  // future contributor forgetting to sanitize. Nested objects pass
+  // through untouched; call sites that need to sanitize nested
+  // values do so explicitly with `?? null` at the projection.
+  const sanitizedPatch = stripUndefined(patch);
   await db
     .update(schema.generationJobs)
-    .set({ metadata: { ...existing, ...patch } })
+    .set({ metadata: { ...existing, ...sanitizedPatch } })
     .where(eq(schema.generationJobs.id, jobId));
 }
 
@@ -383,9 +391,15 @@ export const generatePolish26Heygen = inngest.createFunction(
 
     interface HeygenMatchStepReturn {
       avatarId: string;
-      avatarName: string;
+      // Polish-26.0.8 Commit 61.8: widened to `string | null` so the
+      // `?? null` coercion below has a landing spot in the type. avatar
+      // display-name is not-null in the schema today but the upstream
+      // HeyGenAvatarV3 shape types it as `string`, and any future
+      // refactor could relax that; keeping the return null-durable
+      // means Inngest's step-result serializer never sees undefined.
+      avatarName: string | null;
       voiceId: string;
-      voiceName: string;
+      voiceName: string | null;
       matchStrategy: 'enriched-index' | 'live-listing-gender-only';
     }
 
@@ -527,6 +541,16 @@ export const generatePolish26Heygen = inngest.createFunction(
               enriched,
               voicesResult.voices,
             );
+            // Polish-26.0.8 Commit 61.8: `?? null` every heygen_avatar_index
+            // -derived field. The schema declares hair_style, facial_hair,
+            // wardrobe_style, wardrobe_summary, background_setting as
+            // nullable text — Drizzle returns them as `T | null`, but a
+            // future refactor or select-column change could easily leak
+            // `undefined` into this projection. Explicit `?? null` makes
+            // the nulls durable in the metadata JSON (present-as-null,
+            // not omitted key) and defends against the UNDEFINED_VALUE
+            // failure mode Inngest surfaces when a step returns an
+            // object with any undefined-valued field.
             await patchMetadata(jobId, {
               polish26_avatar_match: {
                 matchStrategy: 'enriched-index',
@@ -536,23 +560,31 @@ export const generatePolish26Heygen = inngest.createFunction(
                 winnerAvatarId: matched.matchLog.winnerAvatarId,
                 winnerVoiceId: matched.matchLog.winnerVoiceId,
                 winnerScore: matched.matchLog.winnerScore,
-                winnerAgeBucket: matched.avatar.ageBucket,
-                winnerEthnicity: matched.avatar.ethnicity,
-                winnerHairColor: matched.avatar.hairColor,
+                winnerAgeBucket: matched.avatar.ageBucket ?? null,
+                winnerEthnicity: matched.avatar.ethnicity ?? null,
+                winnerHairColor: matched.avatar.hairColor ?? null,
+                winnerHairStyle: matched.avatar.hairStyle ?? null,
+                winnerFacialHair: matched.avatar.facialHair ?? null,
+                winnerWardrobeStyle: matched.avatar.wardrobeStyle ?? null,
+                winnerWardrobeSummary: matched.avatar.wardrobeSummary ?? null,
                 // Polish-26.0.7 Commit 61.7: record which background
                 // tier the pool came from + the winner's actual
                 // background so a launch-quality regression is grep-
                 // pable from generation_jobs.metadata.
                 backgroundTier,
-                winnerBackground: matched.avatar.backgroundSetting,
+                winnerBackground: matched.avatar.backgroundSetting ?? null,
               },
               polish26_progress: { step: 'avatar-matched', pct: 45, at: nowIso() },
             });
+            // Step return also gets `?? null` on the display-name field —
+            // avatarName is NOT NULL in the schema but Drizzle's typed
+            // `T | undefined` unions can drift; guarantee no undefined
+            // reaches Inngest's step-result serializer.
             return {
               avatarId: matched.avatar.avatarId,
-              avatarName: matched.avatar.avatarName,
+              avatarName: matched.avatar.avatarName ?? null,
               voiceId: matched.voice.voice_id,
-              voiceName: matched.voice.name,
+              voiceName: matched.voice.name ?? null,
               matchStrategy: 'enriched-index',
             };
           } catch (err) {
@@ -611,6 +643,10 @@ export const generatePolish26Heygen = inngest.createFunction(
           await markJobFailed(jobId, userId, msg, 0);
           throw new NonRetriableError(msg);
         }
+        // Polish-26.0.8 Commit 61.8: same `?? null` treatment as the
+        // enriched-index path above — the gender-only fallback returns
+        // HeyGen API shapes with optional fields, guaranteeing every
+        // field in the projection is null-durable (not undefined).
         await patchMetadata(jobId, {
           polish26_avatar_match: {
             matchStrategy: 'live-listing-gender-only',
@@ -619,14 +655,16 @@ export const generatePolish26Heygen = inngest.createFunction(
             winnerAvatarId: pickedAvatar.avatar_id,
             winnerVoiceId: pickedVoice.voice_id,
             winnerScore: 0,
+            winnerAvatarName: pickedAvatar.avatar_name ?? null,
+            winnerAvatarGender: pickedAvatar.gender ?? null,
           },
           polish26_progress: { step: 'avatar-matched', pct: 45, at: nowIso() },
         });
         return {
           avatarId: pickedAvatar.avatar_id,
-          avatarName: pickedAvatar.avatar_name,
+          avatarName: pickedAvatar.avatar_name ?? null,
           voiceId: pickedVoice.voice_id,
-          voiceName: pickedVoice.name,
+          voiceName: pickedVoice.name ?? null,
           matchStrategy: 'live-listing-gender-only',
         };
       },
