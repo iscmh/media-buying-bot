@@ -120,6 +120,27 @@ export const POLISH25_DESCRIPTION =
   '+ Gemini token usage.';
 
 /**
+ * Polish-26 Commit 61 + Polish-26.0.5 Commit 61.5: HeyGen v3 is the
+ * NEW primary Instant UGC backend. Commit 61 introduced the worker /
+ * client / avatar-sync / cost estimator but deferred the user-facing
+ * form wiring — this commit rebinds the "Instant UGC ad" card from
+ * the polish25_makeugc dispatch to polish26_heygen.
+ *
+ * Display name stays "Instant UGC ad" (user copy doesn't change);
+ * only the underlying backend + cost math flip. polish25_makeugc
+ * remains callable via POST /api/v1/generations with
+ * `{"pipeline": "polish25_makeugc"}` for admin / legacy testing —
+ * the descriptor + worker + refresh cron are all still registered.
+ */
+export const POLISH26_PIPELINE_ID = 'polish26_heygen' as const;
+export const POLISH26_DISPLAY_NAME = 'Instant UGC ad';
+export const POLISH26_DESCRIPTION =
+  'Pre-cast avatar picked from a 500+ HeyGen library to match your source persona. ' +
+  'Character consistency guaranteed. Standard tier at HeyGen retail ($0.50/min = ' +
+  '$0.25 per 30-second video) — verified against the first live invoice. Requires ' +
+  'Claude + Gemini for the script + persona-matching analysis.';
+
+/**
  * Polish-25.3 Commit 18b: static-ad pipeline metadata. Backs the
  * "Static ad" picker card + submission FormData routing. Pipeline
  * ID matches the descriptor at packages/shared/src/pipeline-
@@ -189,10 +210,21 @@ export interface SimplifiedFormState {
    */
   polish25Selected?: boolean;
   /**
+   * Polish-26.0.5 Commit 61.5: HeyGen v3 pre-cast avatar picker.
+   * Same "Instant UGC ad" surface as polish25Selected but routes to
+   * generation/polish26-heygen.requested (the Polish-26 successor
+   * worker). Mutually exclusive with the other flags. From
+   * Commit 61.5 onward this is what the user-facing form dispatches
+   * when the "Instant UGC ad" card is picked; polish25Selected
+   * stays in the type + form data schema for API callers that pass
+   * `pipeline=polish25_makeugc` explicitly.
+   */
+  polish26Selected?: boolean;
+  /**
    * Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad flag.
    * Mutually exclusive with polish23Selected / polish25Selected /
-   * modelId. Companion field `staticOpenaiQuality` selects the
-   * per-image cost tier when this is true.
+   * polish26Selected / modelId. Companion field `staticOpenaiQuality`
+   * selects the per-image cost tier when this is true.
    */
   staticOpenaiSelected?: boolean;
   staticOpenaiQuality?: StaticOpenaiQuality;
@@ -204,12 +236,14 @@ export interface SimplifiedFormState {
  * required from the form — the worker resolves it server-side.
  */
 export function canSubmitState(state: SimplifiedFormState): boolean {
-  // Polish-23 / Polish-25: pipeline-selected flags are alternative
-  // "picked" signals that bypass the modelId requirement. Any one of
-  // {modelId, polish23Selected, polish25Selected} satisfies the gate.
+  // Polish-23 / Polish-25 / Polish-26: pipeline-selected flags are
+  // alternative "picked" signals that bypass the modelId requirement.
+  // Any one of {modelId, polish23Selected, polish25Selected,
+  // polish26Selected, staticOpenaiSelected} satisfies the gate.
   const hasPickedPipeline =
     state.polish23Selected === true ||
     state.polish25Selected === true ||
+    state.polish26Selected === true ||
     state.staticOpenaiSelected === true;
   if (!hasPickedPipeline && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
@@ -279,11 +313,20 @@ export function buildSubmissionFormData(input: {
   // because no metadata.model_id is set. Cleaner than adding
   // polish23 as a synthetic VideoModelId, which would tangle two
   // descriptor systems.
+  if (input.state.polish26Selected === true) {
+    // Polish-26.0.5 Commit 61.5: HeyGen v3 pre-cast avatar. Routes
+    // via the polish26_heygen descriptor's workerEvent
+    // (generation/polish26-heygen.requested). Checked BEFORE
+    // polish25Selected so a form that somehow sets both defaults to
+    // the new HeyGen backend rather than the deprecated MakeUGC one.
+    fd.set('pipeline', POLISH26_PIPELINE_ID);
+    return fd;
+  }
   if (input.state.polish25Selected === true) {
-    // Polish-25 Commit 2: MakeUGC pre-cast avatar. Routes via the
-    // polish25_makeugc descriptor's workerEvent
-    // (generation/polish25-makeugc.requested). Same pattern as
-    // polish23Selected — set `pipeline` instead of modelId.
+    // Polish-25 Commit 2: MakeUGC pre-cast avatar. Kept for API
+    // callers that pass `pipeline=polish25_makeugc` explicitly.
+    // The user-facing form dispatches polish26Selected above from
+    // Commit 61.5 onward.
     fd.set('pipeline', POLISH25_PIPELINE_ID);
     return fd;
   }
@@ -353,4 +396,36 @@ export function estimatePolish25CostPerVariantUsd(): Polish25CostEstimate {
   const CLAUDE = 0.02;
   const MAKEUGC = 99 / 2000;
   return { usd: CLAUDE + MAKEUGC };
+}
+
+/**
+ * Polish-26.0.5 Commit 61.5: cost preview for the HeyGen Instant
+ * UGC pipeline card. Real anchor: Claude condenser + HeyGen v3
+ * standard-tier retail rate ($0.50/min = $0.00833/sec, see
+ * packages/ai-providers/src/heygen-v3-client.ts's LARGE COMMENT
+ * for the true-up plan against the first invoice).
+ *
+ * Duration DOES scale the line — HeyGen bills per second (unlike
+ * MakeUGC which bills per finished video). A 30-sec hook is $0.25;
+ * a 60-sec hook is $0.50; the operator picks a longer source and
+ * the preview reflects that immediately.
+ *
+ * Duplicated constants (rather than imported from @mbb/ai-providers)
+ * because this file ships in the client bundle — importing the
+ * whole ai-providers package would balloon it. Values must stay in
+ * lockstep with HEYGEN_USD_PER_SECOND_STANDARD in the client.
+ */
+export interface Polish26CostEstimate {
+  usd: number;
+}
+export function estimatePolish26CostPerVariantUsd(
+  sourceDurationSeconds: number | null,
+): Polish26CostEstimate {
+  const CLAUDE = 0.02;
+  const HEYGEN_USD_PER_SECOND_STANDARD = 0.5 / 60; // $0.00833/sec
+  const seconds =
+    typeof sourceDurationSeconds === 'number' && sourceDurationSeconds > 0
+      ? sourceDurationSeconds
+      : SIMPLIFIED_DEFAULT_DURATION_SECONDS;
+  return { usd: round4(CLAUDE + HEYGEN_USD_PER_SECOND_STANDARD * seconds) };
 }

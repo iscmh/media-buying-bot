@@ -18,8 +18,8 @@ import { cn } from '@/lib/utils';
 import { acknowledgeLiveGenerationAction } from './ack-action';
 import { createGenerationJobAction, type ConnectedProviders } from './actions';
 import {
-  POLISH25_DESCRIPTION,
-  POLISH25_DISPLAY_NAME,
+  POLISH26_DESCRIPTION,
+  POLISH26_DISPLAY_NAME,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
@@ -31,7 +31,7 @@ import {
   canSubmitState,
   clampVariantCount,
   estimatePolish23CostPerVariantUsd,
-  estimatePolish25CostPerVariantUsd,
+  estimatePolish26CostPerVariantUsd,
   estimateStaticOpenaiCostPerVariantUsd,
   getDefaultProviderForModel,
   getSoleLauncherModel,
@@ -96,7 +96,7 @@ export function SimplifiedGenerationForm({
   // Polish-25.1 Commit 10b: Polish-25 (Instant UGC) is now the
   // DEFAULT selection on mount — the recommended primary pipeline
   // shouldn't require an extra click. If the user has the Instant
-  // UGC keys connected, we start with polish25Selected=true and
+  // UGC keys connected, we start with polish26Selected=true and
   // everything else cleared. If they don't, we fall back to
   // soleModel so the form still has a picked state to submit
   // against.
@@ -105,10 +105,10 @@ export function SimplifiedGenerationForm({
   // now only checks Claude + Gemini BYOK. The MakeUGC key comes
   // from the MAKEUGC_MANAGED_KEY env var at worker submit time.
   const soleModel = getSoleLauncherModel();
-  const canDefaultPolish25 =
+  const canDefaultPolish26 =
     connectedProviders.claude.connected && connectedProviders.gemini.connected;
   const [modelId, setModelId] = React.useState<VideoModelId | null>(
-    canDefaultPolish25 ? null : soleModel ? soleModel.id : null,
+    canDefaultPolish26 ? null : soleModel ? soleModel.id : null,
   );
   // Polish-23 Commit 3.5: alternative "picked" state that bypasses
   // the VideoModel descriptor system. Picking Polish-23 clears
@@ -117,9 +117,9 @@ export function SimplifiedGenerationForm({
   // Polish-25 Commit 2: MakeUGC pre-cast avatar picker. Mutually
   // exclusive with polish23Selected + modelId. Polish-25.1 Commit 10b:
   // defaults to picked when the Polish-25 keys are all connected.
-  const [polish25Selected, setPolish25Selected] = React.useState(canDefaultPolish25);
+  const [polish26Selected, setPolish26Selected] = React.useState(canDefaultPolish26);
   // Polish-25.3 Commit 18b: static ad picker + quality tier. Mutually
-  // exclusive with polish23Selected + polish25Selected + modelId.
+  // exclusive with polish23Selected + polish26Selected + modelId.
   // Defaults to Medium quality — matches the shipped cost line.
   const [staticOpenaiSelected, setStaticOpenaiSelected] = React.useState(false);
   const [staticOpenaiQuality, setStaticOpenaiQuality] = React.useState<StaticOpenaiQuality>(
@@ -141,7 +141,7 @@ export function SimplifiedGenerationForm({
     providerId,
     variantCount,
     polish23Selected,
-    polish25Selected,
+    polish26Selected,
     staticOpenaiSelected,
     staticOpenaiQuality,
   };
@@ -163,8 +163,8 @@ export function SimplifiedGenerationForm({
       }
     : null;
   // Polish-25 Commit 2: fixed per-variant cost, duration doesn't scale.
-  const polish25Estimate = polish25Selected
-    ? { estimateUsd: variantCount * estimatePolish25CostPerVariantUsd().usd }
+  const polish26Estimate = polish26Selected
+    ? { estimateUsd: variantCount * estimatePolish26CostPerVariantUsd(detectedSourceSeconds).usd }
     : null;
   // Polish-25.3 Commit 18b: static-openai cost preview per quality
   // tier. Fixed per-variant, no duration scaling (image, not video).
@@ -175,8 +175,8 @@ export function SimplifiedGenerationForm({
     : null;
   const estimate = staticOpenaiEstimate
     ? staticOpenaiEstimate
-    : polish25Estimate
-      ? polish25Estimate
+    : polish26Estimate
+      ? polish26Estimate
       : polish23Estimate
         ? polish23Estimate
         : modelId
@@ -215,10 +215,10 @@ export function SimplifiedGenerationForm({
   // Needs Claude (script condenser) + Gemini (concept vision
   // analysis via analyze-concept). MakeUGC is platform-managed
   // post-Commit-11 — no user key check.
-  const polish25MissingKeys: string[] = [];
-  if (!connectedProviders.claude.connected) polish25MissingKeys.push('Claude');
-  if (!connectedProviders.gemini.connected) polish25MissingKeys.push('Gemini');
-  const hasPolish25Keys = polish25MissingKeys.length === 0;
+  const polish26MissingKeys: string[] = [];
+  if (!connectedProviders.claude.connected) polish26MissingKeys.push('Claude');
+  if (!connectedProviders.gemini.connected) polish26MissingKeys.push('Gemini');
+  const hasPolish26Keys = polish26MissingKeys.length === 0;
 
   // Polish-25.3 Commit 18b: static-openai gate. Needs Claude
   // (copy rewrite) + OpenAI (gpt-image-2). Gemini optional (source
@@ -236,15 +236,15 @@ export function SimplifiedGenerationForm({
 
   const hasProviderKey = staticOpenaiSelected
     ? hasStaticOpenaiKeys
-    : polish25Selected
-      ? hasPolish25Keys
+    : polish26Selected
+      ? hasPolish26Keys
       : polish23Selected
         ? hasPolish23Keys
         : hasLegacyKeys;
   const missingKeys = staticOpenaiSelected
     ? staticOpenaiMissingKeys
-    : polish25Selected
-      ? polish25MissingKeys
+    : polish26Selected
+      ? polish26MissingKeys
       : polish23Selected
         ? polish23MissingKeys
         : legacyMissingKeys;
@@ -318,11 +318,11 @@ export function SimplifiedGenerationForm({
           Character consistency guaranteed at platform level, ~$0.05
           per 60s ad (20-50x cheaper than Polish-23). Picking clears
           Polish-23 + modelId. */}
-      <Polish25PickerCard
-        picked={polish25Selected}
+      <Polish26PickerCard
+        picked={polish26Selected}
         disabled={isPending}
         onPick={() => {
-          setPolish25Selected(true);
+          setPolish26Selected(true);
           setPolish23Selected(false);
           setStaticOpenaiSelected(false);
           setModelId(null);
@@ -341,7 +341,7 @@ export function SimplifiedGenerationForm({
         quality={staticOpenaiQuality}
         onPick={() => {
           setStaticOpenaiSelected(true);
-          setPolish25Selected(false);
+          setPolish26Selected(false);
           setPolish23Selected(false);
           setModelId(null);
         }}
@@ -449,7 +449,7 @@ export function SimplifiedGenerationForm({
             User read "greyed-out button with no visible error" and
             couldn't figure out the OpenAI-key requirement. */}
         {!hasProviderKey &&
-          (modelId != null || polish23Selected || polish25Selected || staticOpenaiSelected) && (
+          (modelId != null || polish23Selected || polish26Selected || staticOpenaiSelected) && (
             <p className="mt-3 text-xs text-[color:var(--accent-negative)]">
               Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
               <Link
@@ -527,7 +527,7 @@ export function SimplifiedGenerationForm({
   );
 }
 
-interface Polish25PickerCardProps {
+interface Polish26PickerCardProps {
   picked: boolean;
   disabled: boolean;
   onPick: () => void;
@@ -538,7 +538,7 @@ interface Polish25PickerCardProps {
  * (Polish-25.2 Commit 12 hid alternate-model dropdown). Pre-cast
  * avatar library keeps character consistency guaranteed.
  */
-function Polish25PickerCard({ picked, disabled, onPick }: Polish25PickerCardProps) {
+function Polish26PickerCard({ picked, disabled, onPick }: Polish26PickerCardProps) {
   return (
     <button
       type="button"
@@ -567,8 +567,8 @@ function Polish25PickerCard({ picked, disabled, onPick }: Polish25PickerCardProp
       <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
         Instant UGC
       </div>
-      <div className="text-fg text-sm font-semibold">{POLISH25_DISPLAY_NAME}</div>
-      <div className="text-fg-muted text-xs leading-relaxed">{POLISH25_DESCRIPTION}</div>
+      <div className="text-fg text-sm font-semibold">{POLISH26_DISPLAY_NAME}</div>
+      <div className="text-fg-muted text-xs leading-relaxed">{POLISH26_DESCRIPTION}</div>
     </button>
   );
 }
