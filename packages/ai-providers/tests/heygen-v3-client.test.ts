@@ -11,6 +11,7 @@ import {
   HeygenScriptTooLongError,
   isHeygenTransientError,
 } from '../src/heygen-v3-client';
+import { isGeminiInlineImageMimeSupported } from '../src/gemini-client';
 
 /**
  * Polish-26.0.1 Commit 61.1 hotfix tripwires. Four things that
@@ -123,6 +124,58 @@ describe('assertHeygenScriptLength', () => {
     // Pin the exact number — a drift here silently changes what the
     // Claude condenser can safely emit before HeyGen rejects it.
     expect(HEYGEN_VOICE_SCRIPT_MAX_CHARS).toBe(5000);
+  });
+});
+
+/**
+ * Polish-26.0.2 Commit 61.2 tripwire: the MIME-allowlist for the
+ * Gemini inline_data image path. Run 01KZAPKYZ03W6DA9ZE8D918BHY
+ * hit 1264/1264 Gemini failures with an opaque "500 Internal error
+ * encountered" — root cause suspected to be HeyGen preview URLs
+ * returning animated WebP / video / other formats the model's
+ * decoder rejects. This filter pre-empts those calls so failures
+ * surface as actionable "unsupported MIME" messages instead of
+ * generic 500s (and doesn't burn Gemini quota on guaranteed rejects).
+ *
+ * The allowlist MUST stay tight against Gemini's documented
+ * inline_data support (PNG / JPEG / WebP / HEIC / HEIF per REST
+ * v1beta docs). Any drift here silently changes what avatars our
+ * refresh cron will attempt.
+ */
+describe('isGeminiInlineImageMimeSupported', () => {
+  it('accepts documented Gemini inline_data formats', () => {
+    expect(isGeminiInlineImageMimeSupported('image/png')).toBe(true);
+    expect(isGeminiInlineImageMimeSupported('image/jpeg')).toBe(true);
+    expect(isGeminiInlineImageMimeSupported('image/jpg')).toBe(true);
+    expect(isGeminiInlineImageMimeSupported('image/webp')).toBe(true);
+    expect(isGeminiInlineImageMimeSupported('image/heic')).toBe(true);
+    expect(isGeminiInlineImageMimeSupported('image/heif')).toBe(true);
+  });
+
+  it('rejects formats the model decoder chokes on', () => {
+    // Animated GIFs / SVG / video containers are the likely culprits
+    // for HeyGen previews. Rejecting here prevents the opaque
+    // "Google GenAI 500 Internal error" we saw pre-Commit-61.2.
+    expect(isGeminiInlineImageMimeSupported('image/gif')).toBe(false);
+    expect(isGeminiInlineImageMimeSupported('image/svg+xml')).toBe(false);
+    expect(isGeminiInlineImageMimeSupported('image/avif')).toBe(false);
+    expect(isGeminiInlineImageMimeSupported('video/mp4')).toBe(false);
+    expect(isGeminiInlineImageMimeSupported('video/webm')).toBe(false);
+    expect(isGeminiInlineImageMimeSupported('application/octet-stream')).toBe(false);
+  });
+
+  it('handles content-type header parameter suffixes', () => {
+    // Real-world headers often carry charset / codec params:
+    // "image/webp; charset=binary" — normalize before comparison.
+    expect(isGeminiInlineImageMimeSupported('image/webp; charset=binary')).toBe(true);
+    expect(isGeminiInlineImageMimeSupported('IMAGE/PNG')).toBe(true);
+    expect(isGeminiInlineImageMimeSupported('  image/jpeg  ')).toBe(true);
+  });
+
+  it('rejects null / undefined / empty', () => {
+    expect(isGeminiInlineImageMimeSupported(null)).toBe(false);
+    expect(isGeminiInlineImageMimeSupported(undefined)).toBe(false);
+    expect(isGeminiInlineImageMimeSupported('')).toBe(false);
   });
 });
 

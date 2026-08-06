@@ -1174,6 +1174,58 @@ export interface AnalyzeMakeugcAvatarThumbnailResult {
   costUsd: number;
   latencyMs: number;
   errorMessage?: string;
+  /**
+   * Polish-26.0.2 Commit 61.2: forensic diagnostics returned on
+   * failure so callers can identify the root cause without a
+   * round-trip through ai_provider_api_call_logs. All fields
+   * optional; MakeUGC refresh worker ignores them (backward-
+   * compatible) but the HeyGen refresh worker logs them on the
+   * first failure of each analyze batch. Populated whenever we
+   * have the data to fill them, even on success.
+   */
+  diagnostics?: {
+    /** Content-Type header returned by the imageUrl fetch. */
+    imageMime?: string;
+    /** Byte length of the fetched image body. */
+    imageBytes?: number;
+    /** HTTP status of the imageUrl fetch. */
+    imageFetchStatus?: number;
+    /** Gemini's HTTP status if we made the request. */
+    geminiStatus?: number;
+    /** First 2 KB of Gemini's response body (raw JSON stringified). */
+    geminiRawBodyExcerpt?: string;
+    /** Which stage produced the failure: image-fetch | mime-filter | gemini | parse. */
+    failedAt?: 'image-fetch' | 'mime-filter' | 'gemini' | 'parse';
+  };
+}
+
+/**
+ * Polish-26.0.2 Commit 61.2: content-type allowlist for the
+ * inline-data path. Gemini's generateContent inline_data accepts
+ * PNG / JPEG / WebP / HEIC / HEIF (per REST v1beta docs). Anything
+ * else — animated WebP, GIF, SVG, video — is rejected at the model
+ * decode step and surfaces as an opaque "500 Internal error
+ * encountered." Filter it BEFORE the Gemini call so we log the
+ * real reason instead of burning credits on a guaranteed reject.
+ */
+const GEMINI_INLINE_SUPPORTED_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+
+function normalizeMimeForFilter(raw: string): string {
+  // Strip parameters ("image/webp; charset=binary" → "image/webp"),
+  // lowercase, trim.
+  return raw.split(';')[0]?.trim().toLowerCase() ?? '';
+}
+
+export function isGeminiInlineImageMimeSupported(rawMime: string | null | undefined): boolean {
+  if (!rawMime) return false;
+  return GEMINI_INLINE_SUPPORTED_MIMES.has(normalizeMimeForFilter(rawMime));
 }
 
 export async function analyzeMakeugcAvatarThumbnail(
@@ -1183,19 +1235,46 @@ export async function analyzeMakeugcAvatarThumbnail(
   // Files API adds ~5s polling latency that we don't need for a
   // <2 MB PNG).
   let inlineData: { mimeType: string; data: string };
+  let fetchStatus = 0;
+  let fetchedBytes = 0;
   const fetchStart = Date.now();
   try {
     const response = await fetch(input.imageUrl);
+    fetchStatus = response.status;
     if (!response.ok) {
       return {
         ok: false,
         costUsd: 0,
         latencyMs: Date.now() - fetchStart,
         errorMessage: `Failed to fetch avatar thumbnail (HTTP ${response.status})`,
+        diagnostics: { imageFetchStatus: response.status, failedAt: 'image-fetch' },
       };
     }
     const mimeType = response.headers.get('content-type') ?? 'image/jpeg';
     const arrayBuffer = await response.arrayBuffer();
+    fetchedBytes = arrayBuffer.byteLength;
+    // Polish-26.0.2 Commit 61.2: MIME filter — refuse to call Gemini
+    // with a content-type it can't decode via inline_data. Without
+    // this, HeyGen's animated-WebP / video-container preview URLs
+    // returned an opaque "500 Internal error encountered" on every
+    // single call (1264/1264 failures observed on run 01KZAPKYZ03W6DA9ZE8D918BHY).
+    if (!isGeminiInlineImageMimeSupported(mimeType)) {
+      return {
+        ok: false,
+        costUsd: 0,
+        latencyMs: Date.now() - fetchStart,
+        errorMessage:
+          `Refusing to send unsupported MIME type "${mimeType}" to Gemini vision. ` +
+          `Supported: PNG, JPEG, WebP (static), HEIC, HEIF. ` +
+          `URL: ${input.imageUrl.slice(0, 200)} (${fetchedBytes} bytes).`,
+        diagnostics: {
+          imageMime: mimeType,
+          imageBytes: fetchedBytes,
+          imageFetchStatus: fetchStatus,
+          failedAt: 'mime-filter',
+        },
+      };
+    }
     inlineData = {
       mimeType,
       data: Buffer.from(arrayBuffer).toString('base64'),
@@ -1206,6 +1285,7 @@ export async function analyzeMakeugcAvatarThumbnail(
       costUsd: 0,
       latencyMs: Date.now() - fetchStart,
       errorMessage: `Avatar thumbnail fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+      diagnostics: { imageFetchStatus: fetchStatus, failedAt: 'image-fetch' },
     };
   }
 
@@ -1251,11 +1331,26 @@ export async function analyzeMakeugcAvatarThumbnail(
   });
 
   if (!result.ok) {
+    // Polish-26.0.2 Commit 61.2: surface the actual Gemini response
+    // body (truncated) so the caller can identify what was rejected.
+    // Pre-fix, this branch returned only "Google GenAI API 500
+    // Internal error encountered" without the request MIME or the
+    // Gemini response — leaving the operator blind to WHY the batch
+    // was rejecting every image.
+    const rawExcerpt = JSON.stringify(result.rawBody ?? {}).slice(0, 2000);
     return {
       ok: false,
       costUsd: 0,
       latencyMs: result.latencyMs,
       errorMessage: result.errorMessage,
+      diagnostics: {
+        imageMime: inlineData.mimeType,
+        imageBytes: fetchedBytes,
+        imageFetchStatus: fetchStatus,
+        geminiStatus: result.status,
+        geminiRawBodyExcerpt: rawExcerpt,
+        failedAt: 'gemini',
+      },
     };
   }
 
@@ -1268,6 +1363,13 @@ export async function analyzeMakeugcAvatarThumbnail(
       costUsd,
       latencyMs: result.latencyMs,
       errorMessage: 'Gemini returned an empty text response for avatar thumbnail analysis',
+      diagnostics: {
+        imageMime: inlineData.mimeType,
+        imageBytes: fetchedBytes,
+        imageFetchStatus: fetchStatus,
+        geminiStatus: result.status,
+        failedAt: 'parse',
+      },
     };
   }
   // Strip a potential markdown fence — responseMimeType:'application/json'

@@ -76,6 +76,7 @@ export {
   rateGeminiFaceSimilarity,
   parseFaceSimilarityScore,
   analyzeMakeugcAvatarThumbnail,
+  isGeminiInlineImageMimeSupported,
   type AnalyzeMakeugcAvatarThumbnailInput,
   type AnalyzeMakeugcAvatarThumbnailResult,
   verifyGeminiKey,

@@ -216,9 +216,28 @@ export async function refreshHeygenAvatarIndexCore(
   }
 
   // Step D: analyze thumbnails via Gemini (shared MakeUGC prompt).
+  //
+  // Polish-26.0.2 Commit 61.2: added first-failure diagnostic dump
+  // + consecutive-same-error early-exit after run 01KZAPKYZ03W6DA9ZE8D918BHY
+  // hit 1264/1264 Gemini failures with an opaque "500 Internal error
+  // encountered" — burned 20 minutes and left the operator blind to
+  // whether the root cause was a bad MIME, unreachable URL, or real
+  // Gemini outage. Diagnostics + circuit-breaker fix both:
+  //   - captures the first failure's full details (URL, HTTP status,
+  //     content-type, byte size, Gemini raw body excerpt)
+  //   - halts the batch after N consecutive same-error-signature
+  //     failures so we don't waste 20 minutes proving 1000 more will
+  //     also fail
   const analyzed = await step.run('analyze-batch', async () => {
     if (diff.toAnalyzeAvatars.length === 0) {
-      return { attempted: 0, successful: 0, failed: 0, results: [] };
+      return {
+        attempted: 0,
+        successful: 0,
+        failed: 0,
+        results: [],
+        earlyExit: false,
+        firstFailure: null,
+      } as const;
     }
     let keys;
     try {
@@ -242,10 +261,47 @@ export async function refreshHeygenAvatarIndexCore(
       costUsd: number;
       errorMessage: string | undefined;
     };
+
+    // Circuit-breaker + first-failure capture. The runWithConcurrency
+    // loop reads earlyExitTriggered — once set, remaining workers
+    // return an "aborted" row without hitting the network.
+    let earlyExitTriggered = false;
+    let consecutiveFailures = 0;
+    let firstFailure: {
+      avatarId: string;
+      avatarName: string;
+      previewUrl: string;
+      errorMessage: string;
+      diagnostics: NonNullable<
+        Awaited<ReturnType<typeof analyzeMakeugcAvatarThumbnail>>['diagnostics']
+      > | null;
+    } | null = null;
+    const EARLY_EXIT_THRESHOLD = 20;
+
+    function errorSignature(msg: string): string {
+      // Fingerprint the first 120 chars of the error, uppercase + digits
+      // and identifiers removed, so "Gemini 500 Internal (req 123)" and
+      // "Gemini 500 Internal (req 456)" hash identically.
+      return msg.slice(0, 120).replace(/\d+/g, '#').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+    let lastSignature: string | null = null;
+
     const outcomes = await runWithConcurrency(
       diff.toAnalyzeAvatars,
       VISION_CONCURRENCY,
       async (avatar): Promise<AnalyzedRow> => {
+        if (earlyExitTriggered) {
+          return {
+            avatarId: avatar.avatar_id,
+            avatarName: avatar.avatar_name,
+            thumbnailUrl: avatar.preview_image_url ?? '',
+            heygenGender: (avatar.gender ?? '').toLowerCase(),
+            analysis: null,
+            rawJson: undefined,
+            costUsd: 0,
+            errorMessage: 'skipped — batch early-exit triggered',
+          };
+        }
         if (!avatar.preview_image_url || avatar.preview_image_url.length === 0) {
           return {
             avatarId: avatar.avatar_id,
@@ -265,6 +321,51 @@ export async function refreshHeygenAvatarIndexCore(
           systemPrompt: MAKEUGC_AVATAR_VISION_SYSTEM_PROMPT,
         });
         const analysis = r.ok ? parseMakeugcAvatarVisionAnalysis(r.parsedJson) : null;
+        const failed = !r.ok || analysis === null;
+
+        if (failed) {
+          const msg = r.ok ? 'JSON did not match schema' : (r.errorMessage ?? 'unknown');
+          const sig = errorSignature(msg);
+          if (firstFailure === null) {
+            firstFailure = {
+              avatarId: avatar.avatar_id,
+              avatarName: avatar.avatar_name,
+              previewUrl: avatar.preview_image_url,
+              errorMessage: msg,
+              diagnostics: r.diagnostics ?? null,
+            };
+            // Log the first failure PROMINENTLY so it lands in Inngest
+            // Runtime Logs on the first cycle. Post-Commit-61.2 the
+            // operator has one place to read the actual cause instead
+            // of grepping 1264 identical error strings.
+            console.error(
+              `[refresh-heygen-avatar-index:${trigger}] FIRST FAILURE ` +
+                `avatar_id=${avatar.avatar_id} ` +
+                `preview_url=${avatar.preview_image_url.slice(0, 250)} ` +
+                `error=${JSON.stringify(msg).slice(0, 500)} ` +
+                `diagnostics=${JSON.stringify(r.diagnostics ?? null)}`,
+            );
+          }
+          if (sig === lastSignature) {
+            consecutiveFailures++;
+          } else {
+            consecutiveFailures = 1;
+            lastSignature = sig;
+          }
+          if (consecutiveFailures >= EARLY_EXIT_THRESHOLD) {
+            earlyExitTriggered = true;
+            console.error(
+              `[refresh-heygen-avatar-index:${trigger}] EARLY-EXIT ` +
+                `${EARLY_EXIT_THRESHOLD} consecutive same-signature failures — ` +
+                `aborting batch. Signature: ${JSON.stringify(sig).slice(0, 300)}. ` +
+                `See FIRST FAILURE log above for the actionable diagnostics.`,
+            );
+          }
+        } else {
+          consecutiveFailures = 0;
+          lastSignature = null;
+        }
+
         return {
           avatarId: avatar.avatar_id,
           avatarName: avatar.avatar_name,
@@ -300,9 +401,17 @@ export async function refreshHeygenAvatarIndexCore(
     const totalCostUsd = results.reduce((acc, r) => acc + (r.costUsd ?? 0), 0);
     console.log(
       `[refresh-heygen-avatar-index:${trigger}] vision batch attempted=${results.length} ` +
-        `successful=${successful} failed=${failed} totalCostUsd=${totalCostUsd.toFixed(4)}`,
+        `successful=${successful} failed=${failed} totalCostUsd=${totalCostUsd.toFixed(4)} ` +
+        `earlyExit=${earlyExitTriggered}`,
     );
-    return { attempted: results.length, successful, failed, results };
+    return {
+      attempted: results.length,
+      successful,
+      failed,
+      results,
+      earlyExit: earlyExitTriggered,
+      firstFailure,
+    };
   });
 
   // Step E: upsert successful analyses.
@@ -387,6 +496,13 @@ export async function refreshHeygenAvatarIndexCore(
     staleThresholdMs: STALE_MS,
     forceAll,
     refreshUserId: userId,
+    // Polish-26.0.2 Commit 61.2: surface early-exit + first-failure
+    // in the Inngest run summary so the operator sees the actionable
+    // diagnostic without opening Runtime Logs. When earlyExit=true,
+    // firstFailure carries the URL / MIME / geminiRawBodyExcerpt
+    // that identifies the root cause.
+    earlyExit: analyzed.earlyExit,
+    firstFailure: analyzed.firstFailure,
   };
   console.log(`[refresh-heygen-avatar-index:${trigger}] cycle complete ${JSON.stringify(summary)}`);
   return summary;
