@@ -16,12 +16,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     );
   });
 
-  it('is currently 28.0.0 (Polish-28.0.0 Commit 64 — MAJOR bump: BYOK cloned-UGC pipeline)', () => {
+  it('is currently 28.0.1 (Polish-28.0.1 Commit 64.1 hotfix — analyze-concept vision-gate for polish28)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.0.0');
+    expect(POLISH_VERSION).toBe('28.0.1');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

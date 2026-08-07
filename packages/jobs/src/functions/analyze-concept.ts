@@ -206,10 +206,18 @@ export const analyzeConcept = inngest.createFunction(
       // analyses; already-analyzed concepts get a fallback synthesizer
       // in the worker (see synthesizePersonaFromSubject there).
       const picked = jobPipelineRow?.pickedPipeline ?? null;
+      // Polish-28.0.0 Commit 64.1 hotfix: add polish28_clone_ugc to the
+      // Polish-23-vision gate. Polish-28 worker reads
+      // concept.metadata.analysis.persona (same shape as Polish-25/26)
+      // for its Nano Banana Pro character-clone prompt. Missing this
+      // gate meant Polish-28 jobs got UGC_DECONSTRUCTOR (subject-only)
+      // output; the worker's subject.appearance fallback is a hack
+      // rather than a fix.
       const usesPolish23Vision =
         picked === 'polish23_higgsfield_veo_lite' ||
         picked === 'polish25_makeugc' ||
-        picked === 'polish26_heygen';
+        picked === 'polish26_heygen' ||
+        picked === 'polish28_clone_ugc';
       const visionSystemPrompt = usesPolish23Vision
         ? POLISH23_VISION_SYSTEM_PROMPT
         : UGC_DECONSTRUCTOR_SYSTEM_PROMPT;
