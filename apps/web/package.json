@@ -12,7 +12,6 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@hookform/resolvers": "^3.9.1",
     "@mbb/ai-providers": "workspace:*",
     "@mbb/db": "workspace:*",

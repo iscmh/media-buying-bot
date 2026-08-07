@@ -29,10 +29,6 @@
  * for Meta Reels / TikTok / IG Reels affiliate creatives.
  */
 import { Buffer } from 'node:buffer';
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { NonRetriableError } from 'inngest';
 import {
@@ -181,26 +177,36 @@ export const generatePolish28CloneUgc = inngest.createFunction(
 
       const keys = await guardedStepRun(step, 'preflight-byok', async () => {
         try {
+          // Polish-28.0.5 Commit 64.5: added `replicate` — Vercel Hobby
+          // can't host the ffmpeg binary (~78MB > 50MB function limit)
+          // so audio + frame extraction pivots to Replicate ffmpeg.
+          // 5-BYOK requirement.
           const loaded = await loadDecryptedKeys(jobUserId, [
             'claude',
             'gemini',
             'elevenlabs',
             'heygen',
+            'kling',
           ]);
           if (!loaded.claude) throw new MissingProviderKeyError('claude');
           if (!loaded.gemini) throw new MissingProviderKeyError('gemini');
           if (!loaded.elevenlabs) throw new MissingProviderKeyError('elevenlabs');
           if (!loaded.heygen) throw new MissingProviderKeyError('heygen');
+          if (!loaded.kling) throw new MissingProviderKeyError('kling');
           return safeInngestStepReturn({
             claude: loaded.claude,
             gemini: loaded.gemini,
             elevenlabs: loaded.elevenlabs,
             heygen: loaded.heygen,
+            // Stored under 'kling' DecryptedKeys slot but sourced from
+            // the Replicate ai_provider_connections row (see load-keys.ts
+            // fetchCiphertext's kling→replicate fallback).
+            kling: loaded.kling,
           });
         } catch (err) {
           if (err instanceof MissingProviderKeyError) {
             throw new NonRetriableError(
-              `Polish-28 requires 4 BYOK keys (Claude + Gemini + ElevenLabs + HeyGen). ` +
+              `Polish-28 requires 5 BYOK keys (Claude + Gemini + ElevenLabs + HeyGen + Replicate). ` +
                 `Missing: ${err.message}. Connect at /settings/connections.`,
             );
           }
@@ -314,6 +320,9 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         const outcome = await extractSourceAudioLoopMitigated({
           storageBucket: SOURCE_BUCKET,
           storagePath: sourceStoragePath,
+          userId: jobUserId,
+          replicateApiKey: keys.kling,
+          generationJobId: jobId,
         });
         if (!outcome.ok) {
           throw new NonRetriableError(
@@ -411,6 +420,9 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         const framePng = await extractFirstFramePng({
           storageBucket: SOURCE_BUCKET,
           storagePath: sourceStoragePath,
+          userId: jobUserId,
+          replicateApiKey: keys.kling,
+          generationJobId: jobId,
         });
         const prompt = composeNanoBananaCharacterClonePrompt(source.personaDescription);
         const r = await cloneCharacterReferenceImage({
@@ -703,70 +715,131 @@ export const generatePolish28CloneUgc = inngest.createFunction(
 );
 
 /**
- * Extract the first frame of a video URL as PNG bytes via ffmpeg.
- * Used by Step G to hand a still-image reference to Nano Banana Pro
- * (which requires an image, not a video).
+ * Extract the first frame of a source video as PNG bytes.
+ *
+ * Polish-28.0.5 Commit 64.5: switched from local ffmpeg spawn to
+ * Replicate ffmpeg (same reason as extract-source-audio — the local
+ * @ffmpeg-installer binary blew Vercel Hobby's 50MB function limit
+ * in 28.0.4). Signed-URL → Replicate submit → poll → download PNG.
  */
-async function extractFirstFramePng(
-  source: { videoUrl: string } | { storageBucket: string; storagePath: string },
-): Promise<{ base64: string }> {
-  const { resolveFfmpegPath } = await import('../lib/video-compress');
-  const { downloadAsBase64 } = await import('../lib/storage');
-  const workDir = await mkdtemp(join(tmpdir(), 'polish28-frame-'));
-  try {
-    // Polish-28.0.3 Commit 64.3 hotfix: same two-shape input router as
-    // extract-source-audio — Supabase storage tuple OR HTTPS URL.
-    let srcBuf: Buffer;
-    if ('storageBucket' in source) {
-      const dl = await downloadAsBase64({
-        bucket: source.storageBucket,
-        path: source.storagePath,
-      });
-      srcBuf = Buffer.from(dl.base64, 'base64');
-    } else {
-      const res = await fetch(source.videoUrl);
-      if (!res.ok) throw new Error(`fetch source-video HTTP ${res.status}`);
-      srcBuf = Buffer.from(await res.arrayBuffer());
-    }
-    const srcPath = join(workDir, 'source.mp4');
-    const outPath = join(workDir, 'frame.png');
-    await writeFile(srcPath, srcBuf);
+async function extractFirstFramePng(input: {
+  storageBucket: string;
+  storagePath: string;
+  userId: string;
+  replicateApiKey: string;
+  generationJobId?: string;
+}): Promise<{ base64: string }> {
+  const { getServiceRoleSupabase } = await import('../lib/storage');
+  const { callProvider } = await import('@mbb/ai-providers');
+  const { getPolish28FfmpegModelId } = await import('../lib/extract-source-audio');
 
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(
-        resolveFfmpegPath(),
-        [
-          '-hide_banner',
-          '-loglevel',
-          'error',
-          '-ss',
-          '00:00:01',
-          '-i',
-          srcPath,
-          '-frames:v',
-          '1',
-          '-y',
-          outPath,
-        ],
-        { stdio: ['ignore', 'ignore', 'pipe'] },
-      );
-      const errChunks: Buffer[] = [];
-      child.stderr?.on('data', (c: Buffer) => errChunks.push(c));
-      child.on('error', reject);
-      child.on('close', (code) => {
-        if (code === 0) resolve();
-        else
-          reject(
-            new Error(
-              `ffmpeg frame-extract exited ${code}: ${Buffer.concat(errChunks).toString('utf8').slice(0, 400)}`,
-            ),
-          );
-      });
-    });
-
-    const pngBuf = await readFile(outPath);
-    return { base64: pngBuf.toString('base64') };
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  const modelRaw = getPolish28FfmpegModelId();
+  if (!modelRaw) {
+    throw new Error(
+      'POLISH28_REPLICATE_FFMPEG_MODEL_ID unset — Polish-28 frame-extract needs a Replicate ffmpeg model. See extract-source-audio.ts docs.',
+    );
   }
+
+  // Sign the source URL for Replicate.
+  const supabase = getServiceRoleSupabase();
+  const { data: signed, error: signErr } = await supabase.storage
+    .from(input.storageBucket)
+    .createSignedUrl(input.storagePath, 60 * 60);
+  if (signErr || !signed?.signedUrl) {
+    throw new Error(
+      `Polish-28 frame-extract signed-URL failed for ${input.storageBucket}/${input.storagePath}: ${signErr?.message ?? 'no signedUrl'}`,
+    );
+  }
+  const sourceUrl = signed.signedUrl;
+
+  // Submit — extract first frame at 1s (skip title cards / fade-ins).
+  const ffmpegArgs = '-i INPUT -ss 00:00:01 -frames:v 1 -y OUTPUT';
+  const colonIdx = modelRaw.indexOf(':');
+  const modelPath = colonIdx === -1 ? modelRaw : modelRaw.slice(0, colonIdx);
+  const version = colonIdx === -1 ? '' : modelRaw.slice(colonIdx + 1).trim();
+  const inputFields = {
+    video: sourceUrl,
+    video_url: sourceUrl,
+    video_file: sourceUrl,
+    input: sourceUrl,
+    input_video: sourceUrl,
+    command: ffmpegArgs,
+    args: ffmpegArgs,
+    ffmpeg_args: ffmpegArgs,
+    filter: ffmpegArgs,
+  };
+  const submitUrl = version
+    ? 'https://api.replicate.com/v1/predictions'
+    : `https://api.replicate.com/v1/models/${modelPath}/predictions`;
+  const submitBody = version ? { version, input: inputFields } : { input: inputFields };
+
+  const submitResult = await callProvider<{ id?: string; error?: string }>({
+    userId: input.userId,
+    provider: 'kling' as const,
+    url: submitUrl,
+    method: 'POST',
+    headers: {
+      Authorization: `Token ${input.replicateApiKey}`,
+      'content-type': 'application/json',
+    },
+    body: submitBody,
+    timeoutMs: 30_000,
+    requestBodyForLog: { polish28_frame_extract: true, model: modelPath },
+    ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+  });
+  if (!submitResult.ok) {
+    throw new Error(
+      `Polish-28 frame-extract Replicate submit failed: ${submitResult.errorMessage}`,
+    );
+  }
+  if (!submitResult.data.id) {
+    throw new Error('Polish-28 frame-extract Replicate submit returned no prediction id');
+  }
+  const predictionId = submitResult.data.id;
+
+  // Poll.
+  let outputUrl: string | null = null;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await new Promise((r) => setTimeout(r, 2_000));
+    const check = await callProvider<{ status?: string; output?: unknown; error?: string }>({
+      userId: input.userId,
+      provider: 'kling' as const,
+      url: `https://api.replicate.com/v1/predictions/${encodeURIComponent(predictionId)}`,
+      method: 'GET',
+      headers: { Authorization: `Token ${input.replicateApiKey}` },
+      timeoutMs: 15_000,
+      ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+    });
+    if (!check.ok) continue;
+    const status = check.data.status ?? '';
+    if (status === 'failed' || status === 'canceled') {
+      throw new Error(
+        `Polish-28 frame-extract Replicate ${status}: ${check.data.error ?? 'unknown'}`,
+      );
+    }
+    if (status === 'succeeded') {
+      const out = check.data.output;
+      if (typeof out === 'string' && out.startsWith('http')) outputUrl = out;
+      else if (Array.isArray(out)) {
+        for (const item of out)
+          if (typeof item === 'string' && item.startsWith('http')) {
+            outputUrl = item;
+            break;
+          }
+      } else if (out && typeof out === 'object') {
+        const obj = out as { image?: string; frame?: string };
+        outputUrl = obj.image ?? obj.frame ?? null;
+      }
+      break;
+    }
+  }
+  if (!outputUrl) {
+    throw new Error('Polish-28 frame-extract Replicate timed out or returned no output URL');
+  }
+
+  // Download.
+  const res = await fetch(outputUrl);
+  if (!res.ok) throw new Error(`Polish-28 frame-extract download HTTP ${res.status}`);
+  const pngBuf = Buffer.from(await res.arrayBuffer());
+  return { base64: pngBuf.toString('base64') };
 }

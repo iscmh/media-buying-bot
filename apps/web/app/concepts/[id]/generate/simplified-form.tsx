@@ -235,14 +235,17 @@ export function SimplifiedGenerationForm({
   if (!connectedProviders.gemini.connected) polish26MissingKeys.push('Gemini');
   const hasPolish26Keys = polish26MissingKeys.length === 0;
 
-  // Polish-28.0.0 Commit 64: cloned-UGC key gate. Requires all 4
-  // BYOK — Claude + Gemini + ElevenLabs + HeyGen. Missing keys
-  // surface in the disabled-Generate tooltip + inline nudge.
+  // Polish-28.0.5 Commit 64.5: cloned-UGC key gate now 5 BYOK.
+  // Replicate added — Vercel Hobby's 50MB serverless limit rejected
+  // the local ffmpeg binary bundling in 28.0.4, so audio + frame
+  // extraction went to Replicate ffmpeg. Missing keys surface in
+  // the disabled-Generate tooltip + inline nudge.
   const polish28MissingKeys: string[] = [];
   if (!connectedProviders.claude.connected) polish28MissingKeys.push('Claude');
   if (!connectedProviders.gemini.connected) polish28MissingKeys.push('Gemini');
   if (!connectedProviders.elevenlabs.connected) polish28MissingKeys.push('ElevenLabs');
   if (!connectedProviders.heygen.connected) polish28MissingKeys.push('HeyGen');
+  if (!connectedProviders.replicate.connected) polish28MissingKeys.push('Replicate');
   const hasPolish28Keys = polish28MissingKeys.length === 0;
 
   // Polish-25.3 Commit 18b: static-openai gate. Needs Claude

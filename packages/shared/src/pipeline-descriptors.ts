@@ -63,6 +63,11 @@ export interface PipelineDescriptor {
     // Polish-28.0.0 Commit 64: ElevenLabs BYOK — required for the
     // Instant Voice Clone + TTS-with-cloned-voice steps.
     | 'elevenlabs'
+    // Polish-28.0.5 Commit 64.5: Replicate BYOK — required for the
+    // ffmpeg audio-extract + frame-extract steps (pivoted off local
+    // ffmpeg after Vercel Hobby's 50MB function limit rejected the
+    // @ffmpeg-installer binary bundling).
+    | 'replicate'
   >;
 }
 
@@ -158,7 +163,9 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     providerChoice: 'clone_ugc',
     format: 'polish28_clone_ugc',
     workerEvent: 'generation/polish28-clone-ugc.requested',
-    requiredProviders: ['claude', 'gemini', 'elevenlabs', 'heygen'],
+    // Polish-28.0.5 Commit 64.5: 5th BYOK 'replicate' added for
+    // Vercel-hosted ffmpeg (audio + frame extraction).
+    requiredProviders: ['claude', 'gemini', 'elevenlabs', 'heygen', 'replicate'],
   },
 };
 

@@ -144,13 +144,13 @@ export const POLISH28_PIPELINE_ID = 'polish28_clone_ugc' as const;
 export const POLISH28_DISPLAY_NAME = 'Instant UGC (Cloned)';
 export const POLISH28_DESCRIPTION =
   'Clones character + voice from your source ad and generates a lip-synced 9:16 variant. ' +
-  'BYOK required: Claude, Gemini, ElevenLabs, HeyGen.';
-/** Per-30s BYOK cost from Phase 1 investigation (all vendor lines). */
+  'BYOK required: Claude, Gemini, ElevenLabs, HeyGen, Replicate.';
+/** Per-30s BYOK cost from Phase 1 investigation + Commit-64.5 Replicate add-on. */
 export function estimatePolish28CostPerVariantUsd(): { usd: number } {
   // Claude 0.02 + Gemini vision 0.05 + Nano Banana Pro 0.13 +
   // ElevenLabs TTS 0.01 + HeyGen Avatar IV 30s @ 1080p 2.00 +
-  // storage/ffmpeg 0.02 = 2.23.
-  return { usd: 2.23 };
+  // Replicate ffmpeg (2 calls) 0.03 + storage 0.02 = 2.26.
+  return { usd: 2.26 };
 }
 export const POLISH26_DISPLAY_NAME = 'Instant UGC ad';
 export const POLISH26_DESCRIPTION =

@@ -509,6 +509,10 @@ function estimateByPipeline(
       const P28_NANO_BANANA_PRO = 0.13;
       const P28_ELEVENLABS_TTS = 0.01;
       const P28_HEYGEN_AVATAR_IV_PER_SEC = (0.5 / 60) * 8; // 0.0667 $/sec = $4/min = $2/30s
+      // Polish-28.0.5 Commit 64.5: Replicate ffmpeg replaces local
+      // ffmpeg (2 predictions per gen — audio extract + first-frame
+      // extract). cog-ffmpeg on Replicate is ~$0.005-0.02 per call.
+      const P28_REPLICATE_FFMPEG = 0.03;
       const P28_STORAGE_FFMPEG = 0.02;
       const targetSeconds28 = targetSecondsHint ?? 30;
       const perVideoHeygen = P28_HEYGEN_AVATAR_IV_PER_SEC * targetSeconds28;
@@ -539,7 +543,11 @@ function estimateByPipeline(
         cost: round4(variantCount * perVideoHeygen),
       });
       breakdown.push({
-        item: `Storage + ffmpeg (${variantCount} × $${P28_STORAGE_FFMPEG.toFixed(2)})`,
+        item: `Replicate ffmpeg — audio + frame extract (${variantCount} × $${P28_REPLICATE_FFMPEG.toFixed(2)})`,
+        cost: round4(variantCount * P28_REPLICATE_FFMPEG),
+      });
+      breakdown.push({
+        item: `Storage (${variantCount} × $${P28_STORAGE_FFMPEG.toFixed(2)})`,
         cost: round4(variantCount * P28_STORAGE_FFMPEG),
       });
       break;

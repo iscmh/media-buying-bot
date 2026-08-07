@@ -14,39 +14,21 @@ const nextConfig = {
     // @mbb/ai-providers/scripts/build-prompts.mjs which embeds the
     // prompt text into the JS bundle. No file-tracing required.
     //
-    // Polish-28.0.4 Commit 64.4 hotfix: @ffmpeg-installer/ffmpeg ships
-    // a per-platform binary that Next.js's default file-tracing does
-    // NOT follow through workspace CommonJS require() chains. Mark it
-    // external so Next doesn't try to bundle the .so/.exe into JS,
-    // then explicitly include the binary directory in the serverless
-    // function bundle via outputFileTracingIncludes.
+    // Polish-28.0.5 Commit 64.5: reverted 28.0.4's @ffmpeg-installer
+    // bundling. The linux-x64 ffmpeg binary is ~78MB alone; Vercel
+    // Hobby caps serverless functions at 50MB uncompressed. The 28.0.4
+    // deploy silently failed post-build with a generic "unexpected
+    // error" — /api/health never advanced past 28.0.3.
     //
-    // Real Vercel Hobby constraint: 50MB uncompressed per function.
-    // The linux-x64 ffmpeg binary is ~78MB, which BLOWS THIS LIMIT.
-    // Consequence: this config only unblocks Polish-28 on Vercel Pro
-    // (250MB limit). If the build fails on Hobby with a
-    // "Serverless Function too large" error, the follow-up hotfix is
-    // to pivot extract-source-audio.ts to Replicate ffmpeg (adds
-    // REPLICATE as a 5th BYOK requirement — the pattern already
-    // proven by replicate-audio-trim.ts + replicate-concat.ts).
-    serverComponentsExternalPackages: [
-      '@ffmpeg-installer/ffmpeg',
-      '@ffmpeg-installer/linux-x64',
-    ],
-    outputFileTracingIncludes: {
-      // Every serverless function (Inngest workers + /api routes)
-      // gets the ffmpeg-installer directory. Only the Polish-28
-      // worker actually calls spawn(ffmpeg), but pnpm's hoisting
-      // means the binary might land in either apps/web/node_modules
-      // or the workspace-root .pnpm store — the double-pattern
-      // catches both layouts.
-      '/**/*': [
-        './node_modules/@ffmpeg-installer/**/*',
-        './node_modules/.pnpm/@ffmpeg-installer+**/node_modules/@ffmpeg-installer/**/*',
-        '../../node_modules/@ffmpeg-installer/**/*',
-        '../../node_modules/.pnpm/@ffmpeg-installer+**/node_modules/@ffmpeg-installer/**/*',
-      ],
-    },
+    // Polish-28 audio + frame extraction now goes through Replicate
+    // ffmpeg (packages/jobs/src/lib/extract-source-audio.ts +
+    // extractFirstFramePng in the worker). REPLICATE is the 5th BYOK
+    // required for Polish-28. Pattern predecessor:
+    // packages/ai-providers/src/replicate-audio-trim.ts.
+    //
+    // @ffmpeg-installer/ffmpeg is kept as a packages/jobs dep for
+    // local dev only (used by video-compress.ts's graceful-degrade
+    // path — never invoked in production).
   },
   transpilePackages: ['@mbb/shared', '@mbb/db', '@mbb/jobs', '@mbb/meta-api', '@mbb/ai-providers'],
   eslint: {

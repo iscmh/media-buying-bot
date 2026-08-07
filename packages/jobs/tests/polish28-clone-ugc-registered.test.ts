@@ -38,9 +38,11 @@ describe('Polish-28.0.0 Commit 64: cloned-UGC pipeline registered', () => {
     expect(d.workerEvent).toBe('generation/polish28-clone-ugc.requested');
     expect(d.format).toBe('polish28_clone_ugc');
     expect(d.providerChoice).toBe('clone_ugc');
-    // The 4-BYOK requirement — every one must be present + no extras.
+    // Polish-28.0.5 Commit 64.5: 5-BYOK requirement — Replicate added
+    // for Vercel-hosted ffmpeg (audio + frame extract). Every entry
+    // must be present + no extras.
     expect(new Set(d.requiredProviders)).toEqual(
-      new Set(['claude', 'gemini', 'elevenlabs', 'heygen']),
+      new Set(['claude', 'gemini', 'elevenlabs', 'heygen', 'replicate']),
     );
     expect(d.label.toLowerCase()).toContain('cloned');
   });

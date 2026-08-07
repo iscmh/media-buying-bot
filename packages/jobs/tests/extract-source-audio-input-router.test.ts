@@ -1,79 +1,118 @@
 /**
- * Polish-28.0.3 Commit 64.3 tripwire: extract-source-audio input router.
+ * Polish-28.0.5 Commit 64.5 tripwire: extract-source-audio input router
+ * (Replicate-backed).
  *
- * Failure mode this defends against: Polish-28 crashed with
- * `Failed to parse URL from 843ca6d6-.../concepts/ddca175b-.../source.mp4`
- * because concept.file_url stores a Supabase-storage RELATIVE PATH,
- * not an https URL, and Commit-64's helper piped that string straight
- * into fetch().
+ * Post-64.5 the extractor accepts either a { sourceVideoUrl } or
+ * { storageBucket, storagePath } shape, PLUS the required
+ * userId + replicateApiKey Replicate credentials. Local ffmpeg
+ * spawning is dropped entirely (Vercel Hobby function-size limit).
  *
- * Post-Commit-64.3 the helper accepts TWO input shapes:
- *   - { sourceVideoUrl }               → HTTPS fetch()
- *   - { storageBucket, storagePath }   → Supabase authenticated download
- *
- * We can't invoke the full extractor here (would require spawning
- * ffmpeg + a real Supabase client), but we CAN pin the input-router
- * contract via cheap failure-path assertions: both branches must
- * short-circuit with a clean `source-video-fetch-failed` outcome
- * when the underlying I/O breaks. Anything else (e.g. a TypeError
- * from URL parsing) means the router was bypassed.
+ * These tests pin the input-router contract via cheap failure-path
+ * assertions — the extractor must short-circuit with `ffmpeg-missing`
+ * (env-config missing) OR `source-video-fetch-failed` (bad input)
+ * rather than throwing an uncaught TypeError. The prior Commit-64
+ * "Failed to parse URL from" bug must never re-appear.
  */
 import { describe, expect, it } from 'vitest';
 import { extractSourceAudioLoopMitigated } from '../src/lib/extract-source-audio';
 
-describe('extractSourceAudioLoopMitigated input router', () => {
+const REPLICATE_KEY_STUB = 'r8_stub_test_key_polish28';
+const USER_ID_STUB = 'polish28-regression-test';
+
+describe('extractSourceAudioLoopMitigated input router (Replicate-backed)', () => {
   it('storage-tuple shape: empty storagePath returns actionable error (no crash)', async () => {
-    const r = await extractSourceAudioLoopMitigated({
-      storageBucket: 'concepts',
-      storagePath: '',
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe('source-video-fetch-failed');
-      expect(r.detail).toMatch(/storagePath is empty|Re-upload/i);
+    // Set the env so we get past the model-id check and hit the router.
+    const prev = process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
+    process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'] = 'test-model';
+    try {
+      const r = await extractSourceAudioLoopMitigated({
+        storageBucket: 'concepts',
+        storagePath: '',
+        userId: USER_ID_STUB,
+        replicateApiKey: REPLICATE_KEY_STUB,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.reason).toBe('source-video-fetch-failed');
+        expect(r.detail).toMatch(/storagePath is empty|Re-upload/i);
+      }
+    } finally {
+      if (prev == null) delete process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
+      else process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'] = prev;
     }
   });
 
-  it('storage-tuple shape: non-existent path returns source-video-fetch-failed (no URL parse crash)', async () => {
-    // A path that doesn't resolve — Supabase returns { error } which
-    // the helper wraps. The KEY assertion is that we DON'T get a
-    // TypeError like the Commit-64 bug: `Failed to parse URL from ...`.
-    // Real: this will hit real Supabase; skip if unavailable.
-    const r = await extractSourceAudioLoopMitigated({
-      storageBucket: 'concepts',
-      storagePath: 'polish28-regression-test/nonexistent.mp4',
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe('source-video-fetch-failed');
-      // Regression: the Commit-64 bug produced this exact string.
-      // Post-Commit-64.3 the storage-tuple path never touches fetch()
-      // so this substring must NOT appear in the returned detail.
-      expect(r.detail).not.toMatch(/Failed to parse URL from/);
+  it('missing model-id env returns ffmpeg-missing (actionable env-config hint)', async () => {
+    const prev = process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
+    const prevTrim = process.env['REPLICATE_AUDIO_TRIM_MODEL_ID'];
+    delete process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
+    delete process.env['REPLICATE_AUDIO_TRIM_MODEL_ID'];
+    try {
+      const r = await extractSourceAudioLoopMitigated({
+        storageBucket: 'concepts',
+        storagePath: 'ignored-when-env-missing',
+        userId: USER_ID_STUB,
+        replicateApiKey: REPLICATE_KEY_STUB,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.reason).toBe('ffmpeg-missing');
+        expect(r.detail).toMatch(/POLISH28_REPLICATE_FFMPEG_MODEL_ID/);
+      }
+    } finally {
+      if (prev != null) process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'] = prev;
+      if (prevTrim != null) process.env['REPLICATE_AUDIO_TRIM_MODEL_ID'] = prevTrim;
+    }
+  });
+
+  it('regression: no local ffmpeg-spawn path exists (no ENOENT / Failed-to-parse-URL from prior commits)', async () => {
+    // The prior Commit-64 bug: piping concept.file_url (a relative
+    // storage path) straight to fetch() throws "Failed to parse URL
+    // from". Post-64.5 the storage-tuple router never touches fetch()
+    // — it uses Supabase signed URLs → Replicate. Prior Commit-64.4
+    // bug: local ffmpeg spawn ENOENTs on Vercel Hobby. Post-64.5 all
+    // ffmpeg work goes through Replicate.
+    //
+    // We can't invoke real Supabase/Replicate here without live creds,
+    // so this test asserts the failure MODES the router produces are
+    // ONLY ones the router explicitly emits — not raw thrown errors.
+    const prev = process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
+    process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'] = 'test-model';
+    try {
+      const r = await extractSourceAudioLoopMitigated({
+        storageBucket: 'concepts',
+        storagePath: 'polish28-regression/some/nonexistent.mp4',
+        userId: USER_ID_STUB,
+        replicateApiKey: REPLICATE_KEY_STUB,
+      });
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(['source-video-fetch-failed', 'ffmpeg-failed']).toContain(r.reason);
+        expect(r.detail).not.toMatch(/spawn ffmpeg ENOENT/);
+        expect(r.detail).not.toMatch(/Failed to parse URL from/);
+      }
+    } finally {
+      if (prev == null) delete process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
+      else process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'] = prev;
     }
   }, 30_000);
 
-  it('url-shape: malformed URL string returns source-video-fetch-failed (no crash)', async () => {
-    // This IS the exact Commit-64 failure case, now routed cleanly.
-    const r = await extractSourceAudioLoopMitigated({
-      sourceVideoUrl: '843ca6d6/concepts/ddca175b/source.mp4',
-    });
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe('source-video-fetch-failed');
-      // The error message now includes the useful "Failed to parse URL"
-      // signal (bubbled from fetch), but it's returned as a graceful
-      // failure, not an uncaught throw.
-      expect(typeof r.detail).toBe('string');
-    }
-  });
-
   it('missing both shapes: returns actionable error', async () => {
-    const r = await extractSourceAudioLoopMitigated({} as never);
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.reason).toBe('source-video-fetch-failed');
-      expect(r.detail).toMatch(/sourceVideoUrl.*storageBucket|neither was provided/i);
+    const prev = process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
+    process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'] = 'test-model';
+    try {
+      const r = await extractSourceAudioLoopMitigated({
+        userId: USER_ID_STUB,
+        replicateApiKey: REPLICATE_KEY_STUB,
+      } as never);
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.reason).toBe('source-video-fetch-failed');
+        expect(r.detail).toMatch(/sourceVideoUrl.*storageBucket|neither was provided/i);
+      }
+    } finally {
+      if (prev == null) delete process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
+      else process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'] = prev;
     }
   });
 });

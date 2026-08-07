@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.0.4';
+export const POLISH_VERSION = '28.0.5';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.0.4';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.0.4 Commit 64.4 hotfix - ship @ffmpeg-installer via Next.js outputFileTracingIncludes (fixes spawn ffmpeg ENOENT on Vercel serverless)';
+  'Polish-28.0.5 Commit 64.5 - pivot ffmpeg to Replicate (Vercel Hobby 50MB function limit rejected 28.0.4 bundled binary); Polish-28 now requires 5 BYOK (Claude + Gemini + ElevenLabs + HeyGen + Replicate)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

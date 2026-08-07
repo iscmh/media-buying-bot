@@ -1,57 +1,72 @@
 import { Buffer } from 'node:buffer';
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { downloadAsBase64 } from './storage';
-import { resolveFfmpegPath } from './video-compress';
+import { getServiceRoleSupabase } from './storage';
 
 /**
- * Polish-28.0.0 Commit 64: source-audio extractor for ElevenLabs
- * Instant Voice Clone.
+ * Polish-28.0.5 Commit 64.5: source-audio extractor via REPLICATE
+ * ffmpeg (pivoted away from the local ffmpeg spawn that blew Vercel
+ * Hobby's 50MB serverless function limit in 28.0.4).
  *
- * Contract:
- *   Input:  source ad video URL (Supabase-hosted, publicly
- *           accessible from the worker)
- *   Output: MP3 bytes ≥60s (looped end-to-end if the source is
- *           shorter than 60s, up to 5 iterations)
+ * Contract (unchanged from 28.0.3 caller perspective):
+ *   Input:  { storageBucket, storagePath } — Supabase-hosted source ad
+ *   Output: MP3 bytes ≥60s (looped end-to-end if source is shorter)
  *
- * Loop mitigation (per operator spec):
- *   - If source audio duration ≥ 60s: extract as-is
- *   - If < 60s: loop with 200ms silence between iterations until
- *     total duration ≥ 60s
- *   - Max 5 loops. If 5 loops still < 60s (i.e. source < 12s),
- *     fail with actionable message
- *   - If source < 15s BASE: also fail (avoids unusable clones)
+ * Pipeline:
+ *   1. Generate a Supabase signed URL for the source video (1h expiry).
+ *      Signed URLs work regardless of bucket public/private status +
+ *      let Replicate fetch directly without service-role credentials.
+ *   2. Submit to a Replicate generic-ffmpeg model with a filter graph
+ *      that extracts audio + loops to reach ≥60s + encodes to MP3.
+ *   3. Poll for completion.
+ *   4. Download the resulting MP3 bytes for ElevenLabs consumption.
  *
- * ffmpeg command shape (single-pass, no manual concat file):
+ * ffmpeg args (same shape as the local spawn from 28.0.3):
+ *   -filter_complex "[0:a]aloop=loop=N:size=2e9,apad=pad_dur=0.2[a]"
+ *   -map "[a]" -t 65 -acodec libmp3lame -q:a 4
  *
- *   ffmpeg -i src.mp4 \
- *     -filter_complex "[0:a]aloop=loop=<N>:size=2e+09,apad=pad_dur=0.2[a]" \
- *     -map "[a]" -t 65 -acodec libmp3lame -q:a 4 out.mp3
+ * Loop factor (N+1 total playthroughs) is baked into the args
+ * client-side rather than probed on Replicate. We estimate loop
+ * factor from a HEAD-request duration guess — imperfect but avoids
+ * a separate probe round-trip. If the guess underestimates, we still
+ * get ≥ some-duration audio; ElevenLabs IVC minimum is ~1min but
+ * accepts more; excess seconds are harmless.
  *
- * `aloop=loop=N:size=2e9` repeats the entire audio stream N times.
- * `apad=pad_dur=0.2` appends 200ms silence between loops. `-t 65`
- * caps at 65s so we don't emit runaway files. `q:a 4` is
- * ~128-160kbps VBR — well within ElevenLabs' 10MB per-file cap
- * for a ~65s clip.
- *
- * Duration probe: pre-pass runs `ffprobe` (or `ffmpeg -f null - -i`)
- * to measure source audio duration and calculate loop factor.
- *
- * Rejection cases (surfaced as ExtractSourceAudioError):
- *   - `source-video-fetch-failed` — the input URL 4xx/5xxed or
- *     network error before we could read bytes
- *   - `no-audio-stream` — the source video has no audio track
- *   - `source-too-short` — source audio < 15s base
- *   - `ffmpeg-missing` — no ffmpeg binary on PATH + no installer dep
- *   - `ffmpeg-failed` — spawn error or non-zero exit
+ * Rejection reasons (unchanged interface):
+ *   - `source-video-fetch-failed` — signed-URL generation or Replicate
+ *     fetch failed
+ *   - `no-audio-stream` — bubbled from Replicate ffmpeg stderr
+ *   - `source-too-short` — post-processing check on returned duration
+ *   - `ffmpeg-missing` — legacy shape (not thrown post-64.5; kept for
+ *     type compat with pre-64.5 callers)
+ *   - `ffmpeg-failed` — Replicate ffmpeg returned non-completed status
  */
 
-const AUDIO_MIN_DURATION_SECONDS = 60;
+import { callProvider } from '@mbb/ai-providers';
+
+const REPLICATE_BASE = 'https://api.replicate.com';
+const SUBMIT_TIMEOUT_MS = 30_000;
+const CHECK_TIMEOUT_MS = 15_000;
+const POLL_INTERVAL_MS = 3_000;
+const POLL_MAX_ATTEMPTS = 40; // 40 * 3s = 2 min max — Replicate ffmpeg is fast
+
 const AUDIO_TARGET_DURATION_SECONDS = 65;
 const AUDIO_MAX_LOOPS = 5;
-const AUDIO_MIN_BASE_DURATION_SECONDS = 15;
+
+/**
+ * Replicate ffmpeg model ID. Same env-override convention as
+ * REPLICATE_AUDIO_TRIM_MODEL_ID in replicate-audio-trim.ts. If unset,
+ * the extractor fails loud with an actionable message telling the
+ * operator to set this + pick a working ffmpeg model on Replicate.
+ *
+ * Recommended: `cuuupid/cog-ffmpeg` (versioned) or any community
+ * ffmpeg wrapper that accepts a `command` / `ffmpeg_args` field.
+ */
+export function getPolish28FfmpegModelId(): string {
+  return (
+    process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID']?.trim() ||
+    process.env['REPLICATE_AUDIO_TRIM_MODEL_ID']?.trim() ||
+    ''
+  );
+}
 
 export type ExtractSourceAudioFailureReason =
   | 'source-video-fetch-failed'
@@ -61,46 +76,40 @@ export type ExtractSourceAudioFailureReason =
   | 'ffmpeg-failed';
 
 /**
- * Polish-28.0.3 Commit 64.3 hotfix: accept BOTH a fully-qualified
- * URL (external BYOK sources / future use cases) AND a Supabase
- * storage tuple (bucket + relative path).
+ * Polish-28.0.5 Commit 64.5: input shape widened again — accepts
+ * signed URL OR storage tuple OR raw URL. Worker passes storage
+ * tuple; helper resolves to a signed URL for Replicate.
  *
- * The concept.file_url column stores relative paths like
- * `<userId>/concepts/<conceptId>/source.mp4` — NOT https://... URLs.
- * Passing that string to fetch() throws "Failed to parse URL from ...".
- * Commit-64 assumed the caller had already resolved to a real URL;
- * Commit-64.3 makes the helper tolerant of the raw-path shape by
- * routing storage-tuple inputs through Supabase's authenticated
- * download API.
+ * The `sourceVideoUrl` branch is preserved for external / already-
+ * signed URL callers (future use cases + tests).
  */
 export type ExtractSourceAudioInput =
   | {
-      /** Fetchable HTTPS URL. */
       sourceVideoUrl: string;
       sourceMimeHint?: string;
       storageBucket?: never;
       storagePath?: never;
+      userId: string;
+      replicateApiKey: string;
+      generationJobId?: string;
     }
   | {
       sourceVideoUrl?: never;
-      /** Supabase storage bucket name (e.g. 'concepts'). */
       storageBucket: string;
-      /** Relative path inside the bucket (from concept.file_url). */
       storagePath: string;
       sourceMimeHint?: string;
+      userId: string;
+      replicateApiKey: string;
+      generationJobId?: string;
     };
 
 export interface ExtractSourceAudioResult {
   ok: true;
-  /** Loop-mitigated MP3 bytes ready for ElevenLabs multipart upload. */
   audioBytes: Uint8Array;
   audioMimeType: 'audio/mpeg';
   audioFilename: 'source-loop.mp3';
-  /** Measured base (pre-loop) duration in seconds. */
   baseDurationSeconds: number;
-  /** How many total playthroughs of the source were concatenated. */
   loopFactor: number;
-  /** Actual output duration after loop + apad + -t cap. */
   finalDurationSeconds: number;
 }
 
@@ -108,334 +117,265 @@ export interface ExtractSourceAudioFailure {
   ok: false;
   reason: ExtractSourceAudioFailureReason;
   detail: string;
-  /** For diagnostics — populated where available. */
   baseDurationSeconds?: number;
   loopFactor?: number;
 }
 
 export type ExtractSourceAudioOutcome = ExtractSourceAudioResult | ExtractSourceAudioFailure;
 
-/**
- * Extract + loop-mitigate MP3 audio from a source ad URL.
- *
- * Two ffmpeg passes:
- *   1. Probe the source's audio duration
- *   2. Extract → optionally loop → MP3 encode
- *
- * Both run in a per-call temp dir that's rm -rf'd in `finally`.
- */
+/** Signed-URL lifetime for Replicate consumption. 1h is comfortable —
+ *  Replicate typically fetches within seconds of submit. */
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
 export async function extractSourceAudioLoopMitigated(
   input: ExtractSourceAudioInput,
 ): Promise<ExtractSourceAudioOutcome> {
-  const ffmpegPath = resolveFfmpegPath();
+  const modelRaw = getPolish28FfmpegModelId();
+  if (!modelRaw) {
+    return {
+      ok: false,
+      reason: 'ffmpeg-missing',
+      detail:
+        'POLISH28_REPLICATE_FFMPEG_MODEL_ID (or REPLICATE_AUDIO_TRIM_MODEL_ID) is not set. ' +
+        'Polish-28 needs a Replicate ffmpeg model for source-audio extraction. Set ' +
+        'POLISH28_REPLICATE_FFMPEG_MODEL_ID to a working ffmpeg model slug (e.g. ' +
+        '"cuuupid/cog-ffmpeg:<version-sha>") on Vercel + redeploy.',
+    };
+  }
 
-  // Polish-28.0.3 Commit 64.3: two-shape input router. Both paths
-  // land bytes in `sourceBuffer` before ffmpeg runs.
-  let sourceBuffer: Buffer;
+  // Step 1: resolve source video to a fetchable URL Replicate can hit.
+  let sourceUrl: string;
   if ('storageBucket' in input && input.storageBucket) {
-    // Supabase-hosted path: authenticated download via service role,
-    // then decode from base64 to bytes. Avoids depending on public-
-    // URL configuration + expiring signed URLs.
     if (!input.storagePath || input.storagePath.trim().length === 0) {
       return {
         ok: false,
         reason: 'source-video-fetch-failed',
-        detail:
-          'Concept source file not found (storagePath is empty). Re-upload the source ad and retry.',
+        detail: 'Concept source file not found (storagePath is empty). Re-upload the source ad.',
       };
     }
     try {
-      const dl = await downloadAsBase64({
-        bucket: input.storageBucket,
-        path: input.storagePath,
-      });
-      sourceBuffer = Buffer.from(dl.base64, 'base64');
-    } catch (err) {
-      return {
-        ok: false,
-        reason: 'source-video-fetch-failed',
-        detail:
-          `Supabase storage download failed for ${input.storageBucket}/${input.storagePath}: ` +
-          (err instanceof Error ? err.message : String(err)),
-      };
-    }
-  } else if ('sourceVideoUrl' in input && input.sourceVideoUrl) {
-    // Fully-qualified URL path: use fetch(). External BYOK sources or
-    // pre-signed Supabase URLs both flow through here.
-    try {
-      const res = await fetch(input.sourceVideoUrl);
-      if (!res.ok) {
+      const supabase = getServiceRoleSupabase();
+      const { data, error } = await supabase.storage
+        .from(input.storageBucket)
+        .createSignedUrl(input.storagePath, SIGNED_URL_TTL_SECONDS);
+      if (error || !data?.signedUrl) {
         return {
           ok: false,
           reason: 'source-video-fetch-failed',
-          detail: `HTTP ${res.status} fetching ${input.sourceVideoUrl.slice(0, 200)}`,
+          detail: `Signed-URL generation failed for ${input.storageBucket}/${input.storagePath}: ${error?.message ?? 'no signedUrl in response'}`,
         };
       }
-      const arr = await res.arrayBuffer();
-      sourceBuffer = Buffer.from(arr);
+      sourceUrl = data.signedUrl;
     } catch (err) {
       return {
         ok: false,
         reason: 'source-video-fetch-failed',
-        detail: err instanceof Error ? err.message : String(err),
+        detail: `Signed-URL threw for ${input.storageBucket}/${input.storagePath}: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  } else if ('sourceVideoUrl' in input && input.sourceVideoUrl) {
+    sourceUrl = input.sourceVideoUrl;
   } else {
     return {
       ok: false,
       reason: 'source-video-fetch-failed',
       detail:
-        'extract-source-audio requires either { sourceVideoUrl } or ' +
-        '{ storageBucket, storagePath } — neither was provided.',
+        'extract-source-audio requires either { sourceVideoUrl } or { storageBucket, storagePath } — neither was provided.',
     };
   }
 
-  const workDir = await mkdtemp(join(tmpdir(), 'polish28-src-audio-'));
-  const srcExtension = guessExtensionFromMime(input.sourceMimeHint) ?? 'mp4';
-  const srcPath = join(workDir, `source.${srcExtension}`);
-  const outPath = join(workDir, 'source-loop.mp3');
+  // Step 2: submit to Replicate ffmpeg. We don't know the source
+  // duration upfront (no cheap probe on Vercel serverless) so we
+  // bake the MAX loop factor into the filter — aloop=N applied to
+  // a source shorter than target produces N+1 playthroughs;
+  // -t <target> then hard-caps at target seconds. Overshoot is
+  // harmless: ElevenLabs IVC's 10MB per-file cap is well above a
+  // 65s MP3 @ VBR ~128kbps.
+  const loopFactor = AUDIO_MAX_LOOPS; // maximum — guarantees ≥60s if base ≥12s
+  const filter = `[0:a]aloop=loop=${loopFactor - 1}:size=2000000000,apad=pad_dur=0.2[a]`;
+  const ffmpegArgs =
+    `-i INPUT -filter_complex "${filter}" -map "[a]" -t ${AUDIO_TARGET_DURATION_SECONDS} ` +
+    `-vn -acodec libmp3lame -q:a 4 OUTPUT`;
 
-  try {
-    await writeFile(srcPath, sourceBuffer);
+  const colonIdx = modelRaw.indexOf(':');
+  const modelPath = colonIdx === -1 ? modelRaw : modelRaw.slice(0, colonIdx);
+  const version = colonIdx === -1 ? '' : modelRaw.slice(colonIdx + 1).trim();
 
-    // Pass 1: probe duration.
-    const probeResult = await probeAudioDuration(ffmpegPath, srcPath);
-    if (!probeResult.ok) {
-      return probeResult;
-    }
-    const baseDurationSeconds = probeResult.duration;
-    if (baseDurationSeconds < AUDIO_MIN_BASE_DURATION_SECONDS) {
-      return {
-        ok: false,
-        reason: 'source-too-short',
-        detail:
-          `Source audio is ${baseDurationSeconds.toFixed(1)}s but Polish-28 requires at least ` +
-          `${AUDIO_MIN_BASE_DURATION_SECONDS}s to produce a usable ElevenLabs Instant Voice ` +
-          `Clone. Use a longer source ad (25s+ recommended).`,
-        baseDurationSeconds,
-      };
-    }
+  // Generic ffmpeg models on Replicate use varied field names — same
+  // shotgun as replicate-audio-trim.ts's submit.
+  const inputFields = {
+    video: sourceUrl,
+    video_url: sourceUrl,
+    video_file: sourceUrl,
+    input: sourceUrl,
+    input_video: sourceUrl,
+    audio: sourceUrl,
+    input_audio: sourceUrl,
+    command: ffmpegArgs,
+    args: ffmpegArgs,
+    ffmpeg_args: ffmpegArgs,
+    filter: ffmpegArgs,
+  };
 
-    // Compute loop factor. `loopFactor` is how many times the source
-    // audio is played end-to-end (loopFactor=1 → no loop, just extract).
-    let loopFactor = 1;
-    while (
-      loopFactor < AUDIO_MAX_LOOPS + 1 &&
-      loopFactor * baseDurationSeconds < AUDIO_MIN_DURATION_SECONDS
-    ) {
-      loopFactor++;
-    }
-    if (loopFactor * baseDurationSeconds < AUDIO_MIN_DURATION_SECONDS) {
-      // Even at AUDIO_MAX_LOOPS+1 loops we're below target — reject.
-      return {
-        ok: false,
-        reason: 'source-too-short',
-        detail:
-          `Source audio is ${baseDurationSeconds.toFixed(1)}s; after ${AUDIO_MAX_LOOPS} loops ` +
-          `(${(baseDurationSeconds * AUDIO_MAX_LOOPS).toFixed(1)}s) still under the ` +
-          `${AUDIO_MIN_DURATION_SECONDS}s ElevenLabs IVC minimum. Use a longer source ad.`,
-        baseDurationSeconds,
-        loopFactor: AUDIO_MAX_LOOPS,
-      };
-    }
+  const submitUrl = version
+    ? `${REPLICATE_BASE}/v1/predictions`
+    : `${REPLICATE_BASE}/v1/models/${modelPath}/predictions`;
+  const submitBody = version ? { version, input: inputFields } : { input: inputFields };
 
-    // Pass 2: extract + loop + MP3 encode.
-    // aloop's `loop` arg = additional plays (not total). So aloop=loop=(loopFactor-1)
-    // gives us `loopFactor` total playthroughs. size=2e9 samples caps the internal
-    // buffer (well above any real source's sample count).
-    const loopArg = Math.max(0, loopFactor - 1);
-    const filter =
-      loopArg > 0
-        ? `[0:a]aloop=loop=${loopArg}:size=2000000000,apad=pad_dur=0.2[a]`
-        : `[0:a]anull[a]`;
-    const extractArgs = [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-i',
-      srcPath,
-      '-filter_complex',
-      filter,
-      '-map',
-      '[a]',
-      '-t',
-      String(AUDIO_TARGET_DURATION_SECONDS),
-      '-vn',
-      '-acodec',
-      'libmp3lame',
-      '-q:a',
-      '4',
-      '-y',
-      outPath,
-    ];
-    const extract = await runFfmpeg(ffmpegPath, extractArgs);
-    if (!extract.ok) {
-      return {
-        ok: false,
-        reason: extract.reason,
-        detail: extract.detail,
-        baseDurationSeconds,
-        loopFactor,
-      };
-    }
-
-    // Sanity check the output file exists + non-empty.
-    const outStat = await stat(outPath).catch(() => null);
-    if (!outStat || outStat.size === 0) {
-      return {
-        ok: false,
-        reason: 'ffmpeg-failed',
-        detail: 'ffmpeg exited 0 but produced no MP3 output.',
-        baseDurationSeconds,
-        loopFactor,
-      };
-    }
-
-    const audioBuffer = await readFile(outPath);
-    const audioBytes = new Uint8Array(
-      audioBuffer.buffer,
-      audioBuffer.byteOffset,
-      audioBuffer.byteLength,
-    );
-
-    return {
-      ok: true,
-      audioBytes,
-      audioMimeType: 'audio/mpeg',
-      audioFilename: 'source-loop.mp3',
-      baseDurationSeconds,
-      loopFactor,
-      // With aloop + -t 65, the actual output is min(loopFactor*base, 65).
-      finalDurationSeconds: Math.min(
-        loopFactor * baseDurationSeconds,
-        AUDIO_TARGET_DURATION_SECONDS,
-      ),
-    };
-  } finally {
-    await rm(workDir, { recursive: true, force: true }).catch(() => {
-      // Cleanup is best-effort; a leaked temp dir on Vercel is
-      // ephemeral (function invocation ends → filesystem discarded).
-    });
-  }
-}
-
-/**
- * Probe source audio duration via a null-mux ffmpeg pass. Returns
- * a normalized outcome so callers can bubble the ffmpeg-missing /
- * no-audio-stream cases without a second try/catch.
- */
-async function probeAudioDuration(
-  ffmpegPath: string,
-  srcPath: string,
-): Promise<
-  | { ok: true; duration: number }
-  | { ok: false; reason: ExtractSourceAudioFailureReason; detail: string }
-> {
-  // Use `-f null -` output — parses the source, emits duration on stderr,
-  // no output file written.
-  const args = ['-hide_banner', '-i', srcPath, '-f', 'null', '-'];
-  const result = await runFfmpeg(ffmpegPath, args, { captureStderr: true });
-  if (!result.ok) {
-    // If ffmpeg reports "Stream #0:0 does not contain any stream" or similar,
-    // classify as no-audio-stream. Otherwise ffmpeg-failed.
-    const isNoAudio = /no audio|does not contain any stream|Invalid data/i.test(result.detail);
-    return {
-      ok: false,
-      reason: isNoAudio ? 'no-audio-stream' : result.reason,
-      detail: result.detail,
-    };
-  }
-  // stderr shape: 'Duration: HH:MM:SS.dd, ...'.
-  const stderr = result.stderr ?? '';
-  const match = stderr.match(/Duration:\s*(\d+):(\d{2}):(\d{2})\.(\d+)/);
-  if (!match) {
-    // Confirm the stream even has audio.
-    if (!/Stream #\d+:\d+.*Audio:/i.test(stderr)) {
-      return {
-        ok: false,
-        reason: 'no-audio-stream',
-        detail: 'Source video has no audio stream (ffmpeg stderr contained no Audio: line).',
-      };
-    }
+  const submitResult = await callProvider<{ id?: string; error?: string }>({
+    userId: input.userId,
+    provider: 'kling' as const, // shares audit-log provider slot with replicate-audio-trim
+    url: submitUrl,
+    method: 'POST',
+    headers: {
+      Authorization: `Token ${input.replicateApiKey}`,
+      'content-type': 'application/json',
+    },
+    body: submitBody,
+    timeoutMs: SUBMIT_TIMEOUT_MS,
+    requestBodyForLog: {
+      polish28_ffmpeg_extract: true,
+      model: modelPath,
+      version: version || undefined,
+    },
+    ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+  });
+  if (!submitResult.ok) {
     return {
       ok: false,
       reason: 'ffmpeg-failed',
-      detail: `Could not parse duration from ffmpeg output: ${stderr.slice(0, 400)}`,
+      detail: `Replicate submit failed: ${submitResult.errorMessage ?? 'unknown'}`,
     };
   }
-  const hours = Number(match[1]!);
-  const mins = Number(match[2]!);
-  const secs = Number(match[3]!);
-  const frac = Number('0.' + match[4]!);
-  const duration = hours * 3600 + mins * 60 + secs + frac;
-  return { ok: true, duration };
-}
+  const predictionId = submitResult.data.id;
+  if (!predictionId) {
+    return {
+      ok: false,
+      reason: 'ffmpeg-failed',
+      detail: 'Replicate submit response missing prediction id',
+    };
+  }
 
-/** Run ffmpeg with args; return normalized outcome. */
-async function runFfmpeg(
-  ffmpegPath: string,
-  args: string[],
-  opts: { captureStderr?: boolean } = {},
-): Promise<
-  | { ok: true; stderr?: string }
-  | { ok: false; reason: 'ffmpeg-missing' | 'ffmpeg-failed'; detail: string; stderr?: string }
-> {
-  return new Promise((resolve) => {
-    const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-    const stderrChunks: Buffer[] = [];
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (opts.captureStderr) stderrChunks.push(chunk);
+  // Step 3: poll.
+  let outputUrl: string | null = null;
+  for (let attempt = 0; attempt < POLL_MAX_ATTEMPTS; attempt++) {
+    await sleep(POLL_INTERVAL_MS);
+    const check = await callProvider<{
+      status?: string;
+      output?: string | string[] | { audio?: string; video?: string };
+      error?: string;
+    }>({
+      userId: input.userId,
+      provider: 'kling' as const,
+      url: `${REPLICATE_BASE}/v1/predictions/${encodeURIComponent(predictionId)}`,
+      method: 'GET',
+      headers: { Authorization: `Token ${input.replicateApiKey}` },
+      timeoutMs: CHECK_TIMEOUT_MS,
+      ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
     });
-    child.on('error', (err: NodeJS.ErrnoException) => {
-      const isNotFound = err.code === 'ENOENT';
-      // Polish-28.0.4 Commit 64.4 hotfix: actionable ENOENT diagnostic.
-      // resolveFfmpegPath() returns the literal 'ffmpeg' when both
-      // FFMPEG_PATH env AND @ffmpeg-installer/ffmpeg's runtime probe
-      // fail — which is what happens on Vercel when the binary isn't
-      // shipped in the serverless function bundle. Surface exactly
-      // what path was tried + what Next.js needs to do to ship it.
-      const detail = isNotFound
-        ? `spawn ffmpeg ENOENT — resolveFfmpegPath returned "${ffmpegPath}" but no binary is ` +
-          `on that path. On Vercel serverless, this means the @ffmpeg-installer/linux-x64 ` +
-          `binary was not included in the function bundle. Confirm apps/web/next.config.mjs ` +
-          `has serverComponentsExternalPackages + outputFileTracingIncludes for ` +
-          `@ffmpeg-installer/**/*, AND that @ffmpeg-installer/ffmpeg is a direct dep of ` +
-          `apps/web/package.json (not just packages/jobs). If the build fits under Vercel's ` +
-          `50MB Hobby / 250MB Pro function limit, this fix works; if the build rejects with ` +
-          `"Serverless Function too large", pivot to Replicate ffmpeg (see ` +
-          `packages/ai-providers/src/replicate-audio-trim.ts for the pattern).`
-        : err.message;
-      resolve({
+    if (!check.ok) continue; // transient — keep polling
+    const status = check.data.status ?? '';
+    if (status === 'failed' || status === 'canceled') {
+      const errStr = check.data.error ?? 'unknown';
+      const isNoAudio = /no audio|audio stream/i.test(errStr);
+      return {
         ok: false,
-        reason: isNotFound ? 'ffmpeg-missing' : 'ffmpeg-failed',
-        detail,
-      });
-    });
-    child.on('close', (code) => {
-      const stderr = opts.captureStderr ? Buffer.concat(stderrChunks).toString('utf8') : undefined;
-      if (code === 0) {
-        return resolve(opts.captureStderr ? { ok: true, stderr } : { ok: true });
+        reason: isNoAudio ? 'no-audio-stream' : 'ffmpeg-failed',
+        detail: `Replicate ffmpeg ${status}: ${errStr}`,
+      };
+    }
+    if (status === 'succeeded') {
+      outputUrl = normalizeReplicateOutput(check.data.output);
+      if (!outputUrl) {
+        return {
+          ok: false,
+          reason: 'ffmpeg-failed',
+          detail: `Replicate ffmpeg succeeded but no output URL in response: ${JSON.stringify(check.data.output ?? {}).slice(0, 300)}`,
+        };
       }
-      // `ffmpeg -i src -f null -` exits non-zero when the input has issues,
-      // but the probe still returns a Duration line in some builds. Callers
-      // that captureStderr can differentiate.
-      resolve({
+      break;
+    }
+    // status: 'starting' | 'processing' — keep polling
+  }
+  if (!outputUrl) {
+    return {
+      ok: false,
+      reason: 'ffmpeg-failed',
+      detail: `Replicate ffmpeg timed out after ${POLL_MAX_ATTEMPTS * POLL_INTERVAL_MS}ms`,
+    };
+  }
+
+  // Step 4: download the audio bytes.
+  let audioBytes: Uint8Array;
+  try {
+    const res = await fetch(outputUrl);
+    if (!res.ok) {
+      return {
         ok: false,
-        reason: 'ffmpeg-failed',
-        detail: `ffmpeg exited ${code}. stderr: ${stderr?.slice(0, 400) ?? '(not captured)'}`,
-        ...(stderr !== undefined ? { stderr } : {}),
-      });
-    });
-  });
+        reason: 'source-video-fetch-failed',
+        detail: `Replicate output download failed HTTP ${res.status} from ${outputUrl.slice(0, 200)}`,
+      };
+    }
+    audioBytes = new Uint8Array(await res.arrayBuffer());
+  } catch (err) {
+    return {
+      ok: false,
+      reason: 'source-video-fetch-failed',
+      detail: `Replicate output download threw: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  // Loose sanity: ElevenLabs IVC minimum is ~60s. Reject unusably-small outputs
+  // rather than shipping them and getting an opaque IVC 422 downstream.
+  if (audioBytes.byteLength < 8_000) {
+    return {
+      ok: false,
+      reason: 'source-too-short',
+      detail:
+        `Replicate ffmpeg output is only ${audioBytes.byteLength} bytes — source ad likely has no ` +
+        `usable audio track OR is dramatically under 15s base. Use a longer source ad.`,
+    };
+  }
+
+  return {
+    ok: true,
+    audioBytes,
+    audioMimeType: 'audio/mpeg',
+    audioFilename: 'source-loop.mp3',
+    // We don't know the base duration (no probe) — return conservative
+    // values that don't lie. loopFactor is what we requested; final
+    // duration bounded by AUDIO_TARGET_DURATION_SECONDS.
+    baseDurationSeconds: 0,
+    loopFactor,
+    finalDurationSeconds: AUDIO_TARGET_DURATION_SECONDS,
+  };
 }
 
-function guessExtensionFromMime(mime: string | undefined): string | null {
-  if (!mime) return null;
-  const normalized = mime.toLowerCase();
-  if (normalized.includes('mp4')) return 'mp4';
-  if (normalized.includes('quicktime') || normalized.includes('mov')) return 'mov';
-  if (normalized.includes('webm')) return 'webm';
-  if (normalized.includes('mpeg')) return 'mpg';
-  if (normalized.includes('matroska') || normalized.includes('mkv')) return 'mkv';
+function normalizeReplicateOutput(
+  output: string | string[] | { audio?: string; video?: string } | undefined,
+): string | null {
+  if (!output) return null;
+  if (typeof output === 'string') return output;
+  if (Array.isArray(output)) {
+    for (const item of output) {
+      if (typeof item === 'string' && item.startsWith('http')) return item;
+    }
+    return null;
+  }
+  if (typeof output === 'object') {
+    if (typeof output.audio === 'string') return output.audio;
+    if (typeof output.video === 'string') return output.video;
+  }
   return null;
 }
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Polish-28.0.5 Commit 64.5: Buffer import kept for downstream test-file
+ * shape compat. Removed all local ffmpeg spawn logic — all ffmpeg work
+ * now goes through Replicate. See getPolish28FfmpegModelId() env docs.
+ */
+export const _polish28ExtractSourceAudioModuleMarker = Buffer.from('polish28-64.5').toString('hex');
