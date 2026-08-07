@@ -132,8 +132,27 @@ async function ProvidersTab({ userId }: { userId: string }) {
   const aiByProvider = new Map(aiRows.map((r) => [r.provider as AIProviderName, r]));
 
   const REQUIRED_TOOLS: ToolProviderName[] = ['claude', 'gemini'];
-  const OPTIONAL_TOOLS = TOOL_PROVIDERS_ORDER.filter((p) => !REQUIRED_TOOLS.includes(p));
-  const OPTIONAL_AI_PROVIDERS = CONNECTABLE_AI_PROVIDERS.filter((p) => p !== 'makeugc');
+  // Polish-27.0.0 Commit 63: hide legacy UGC-only provider BYOK cards
+  // pre-Polish-28 rebuild. Removed: hedra, elevenlabs, wavespeed_ai,
+  // makeugc, heygen, replicate, kie_ai. What remains visible is Claude,
+  // Gemini (Required — powering script + vision) + OpenAI (for the
+  // sole surviving Static ad pipeline). Provider rows in the DB are
+  // preserved; cards return in the Polish-28 build.
+  const HIDDEN_LEGACY_AI_PROVIDERS = new Set<AIProviderName>([
+    'hedra',
+    'elevenlabs',
+    'wavespeed_ai',
+    'makeugc',
+    'heygen',
+    'replicate',
+  ]);
+  const HIDDEN_LEGACY_TOOL_PROVIDERS = new Set<ToolProviderName>(['kie_ai']);
+  const OPTIONAL_TOOLS = TOOL_PROVIDERS_ORDER.filter(
+    (p) => !REQUIRED_TOOLS.includes(p) && !HIDDEN_LEGACY_TOOL_PROVIDERS.has(p),
+  );
+  const OPTIONAL_AI_PROVIDERS = CONNECTABLE_AI_PROVIDERS.filter(
+    (p) => !HIDDEN_LEGACY_AI_PROVIDERS.has(p),
+  );
 
   // Count how many optional providers the user has already connected —
   // if any, expand the disclosure by default so they can see + manage them.
@@ -148,7 +167,10 @@ async function ProvidersTab({ userId }: { userId: string }) {
           Required
         </h2>
         <p className="text-fg-subtle mb-3 text-xs">
-          Instant UGC video generation is included on the platform. No key needed.
+          {/* Polish-27.0.0 Commit 63: Instant UGC line removed; the
+              managed backend is being rebuilt in Polish-28. */}
+          Claude + Gemini power ad-spec generation, source-video analysis, and Static ad copy
+          rewrites.
         </p>
         <div className="space-y-4">
           {REQUIRED_TOOLS.map((provider) => {
@@ -188,9 +210,11 @@ async function ProvidersTab({ userId }: { userId: string }) {
             </span>
           </summary>
           <p className="text-fg-muted mb-4 text-xs">
-            Add these only if you want to swap the default UGC video pipeline for a specific model
-            (HeyGen avatars, Hedra Character 3, Higgsfield Soul, OpenAI Sora, or a Replicate-hosted
-            model). Leave collapsed if you&apos;re not sure. The default works.
+            {/* Polish-27.0.0 Commit 63: legacy UGC provider cards hidden
+                until Polish-28 rebuilds the pipeline. Only Static ad
+                (OpenAI) is live right now. */}
+            Optional provider keys for the pipelines available today. Custom UGC pipelines return in
+            the next release.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {OPTIONAL_AI_PROVIDERS.map((provider) => {

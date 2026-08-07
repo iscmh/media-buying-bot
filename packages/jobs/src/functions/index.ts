@@ -4,18 +4,23 @@ import { manualDailySummary } from './manual-daily-summary';
 import { generateVideoVariant } from './generate-video-variant';
 import { generateSoraVariants } from './generate-sora-variants';
 import { generateStaticImageVariants } from './generate-static-image-variants';
-import { generatePolish23VeoLite } from './generate-polish23-veo-lite';
-import { generatePolish25Makeugc } from './generate-polish25-makeugc';
-import { generatePolish26Heygen } from './generate-polish26-heygen';
+// Polish-27.0.0 Commit 63: legacy UGC workers UNREGISTERED for the
+// Polish-28 rebuild. Import statements retained (commented) so the
+// rollback is a one-line reversal. Worker files themselves are NOT
+// deleted — code stays on disk, tests stay live, DB tables preserved.
+// See POLISH_RELEASE_NAME for the rebuild rationale.
+// import { generatePolish23VeoLite } from './generate-polish23-veo-lite';
+// import { generatePolish25Makeugc } from './generate-polish25-makeugc';
+// import { generatePolish26Heygen } from './generate-polish26-heygen';
+// import {
+//   refreshMakeugcAvatarIndexCron,
+//   refreshMakeugcAvatarIndexManual,
+// } from './refresh-makeugc-avatar-index';
+// import {
+//   refreshHeygenAvatarIndexCron,
+//   refreshHeygenAvatarIndexManual,
+// } from './refresh-heygen-avatar-index';
 import { generateStaticOpenaiImageVariants } from './generate-static-openai-image-variants';
-import {
-  refreshMakeugcAvatarIndexCron,
-  refreshMakeugcAvatarIndexManual,
-} from './refresh-makeugc-avatar-index';
-import {
-  refreshHeygenAvatarIndexCron,
-  refreshHeygenAvatarIndexManual,
-} from './refresh-heygen-avatar-index';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -48,6 +53,14 @@ import { weeklyTelegramRollup } from './weekly-telegram-rollup';
  * the inngest.createFunction listener config inside the worker file.
  * The CI test catches mismatches.
  */
+// Polish-27.0.0 Commit 63: legacy UGC events UNREGISTERED.
+// Removed from this set: polish23-veo-lite.requested,
+// polish25-makeugc.requested, polish26-heygen.requested. Corresponding
+// worker files preserved on disk (see commented imports above);
+// pipeline descriptors preserved so PipelineType stays complete for
+// downstream forensics + the coverage test's ALL_PIPELINES has been
+// narrowed to only-registered set in pipeline-descriptors.ts. Rollback
+// = uncomment the imports + function[] entries + descriptor entries.
 export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   'generation/ugc.requested',
   'generation/sora.requested',
@@ -58,27 +71,10 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // provider_id from job.metadata and dispatches through the
   // descriptor-driven kie-video client.
   'generation/video-variant.requested',
-  // Polish-23 Commit 1: reserved event for the Higgsfield Soul +
-  // kie.ai Veo 3.1 Lite pipeline. Worker file lands in Commit 3;
-  // event is registered here now so the descriptor-coverage
-  // tripwire and cost-estimator stay in lockstep.
-  'generation/polish23-veo-lite.requested',
-  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad. Single video
-  // output ($0.0495 per 60s @ Starter tier). Replaces Polish-23/24
-  // as the primary pipeline going forward.
-  'generation/polish25-makeugc.requested',
-  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad pipeline.
-  // Reference-image-anchored via /v1/images/edits — user uploads a
-  // winning static ad, Claude rewrites overlay copy per variant,
-  // OpenAI edits the image to match. Quality tier (low/medium/high)
-  // drives per-image cost; defaults to medium ($0.05) matching
-  // Instant UGC per-variant economics.
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad pipeline —
+  // the SOLE surviving user-facing generation pipeline post-Polish-27
+  // Commit 63 nuke. Static ads keep working end-to-end.
   'generation/static-openai.requested',
-  // Polish-26 Commit 61: HeyGen v3 PAYG managed Instant UGC.
-  // Replaces Polish-25 MakeUGC as the primary managed backend
-  // once operator provisions HEYGEN_MANAGED_KEY. MakeUGC stays
-  // as fallback / admin-only per operator spec.
-  'generation/polish26-heygen.requested',
 ] as const);
 
 export const functions = [
@@ -93,36 +89,17 @@ export const functions = [
   // Polish-20: unified descriptor-driven video-variant worker
   // (Seedance 1.5 Pro / Kling 3.0 Standard / Seedance 2).
   generateVideoVariant,
-  // Polish-23 Commit 3: Higgsfield Soul + kie.ai Veo 3.1 Lite
-  // end-to-end UGC pipeline. Event reserved in Commit 1's
-  // REGISTERED_GENERATION_WORKER_EVENTS tripwire; this line
-  // completes the registration by adding the function to the
-  // dispatch array.
-  generatePolish23VeoLite,
-  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad worker.
-  generatePolish25Makeugc,
-  // Polish-26 Commit 61: HeyGen v3 PAYG managed UGC worker
-  // (parallel-track to legacy Polish-24 generate-ugc-variants +
-  // Polish-25 generate-polish25-makeugc — see spec for the
-  // coexistence rationale).
-  generatePolish26Heygen,
+  // Polish-27.0.0 Commit 63: legacy UGC workers UNREGISTERED for
+  // the Polish-28 rebuild. Removed from the dispatch array:
+  //   - generatePolish23VeoLite
+  //   - generatePolish25Makeugc
+  //   - generatePolish26Heygen
+  //   - refreshMakeugcAvatarIndexCron + refreshMakeugcAvatarIndexManual
+  //   - refreshHeygenAvatarIndexCron + refreshHeygenAvatarIndexManual
+  // Worker files preserved on disk; rollback = uncomment the
+  // imports at the top of the file + re-add these entries here.
   // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
   generateStaticOpenaiImageVariants,
-  // Polish-25 Commit 7: enriched MakeUGC avatar index refresh.
-  // Commit 8 SPLIT the original multi-trigger function into two
-  // single-trigger functions — matches the repo's existing pattern
-  // (poll-ad-performance, token-expiry-checker, daily-summary-
-  // generator all use single-trigger) and works around an Inngest
-  // manifest-sync issue where multi-trigger functions silently
-  // vanished from the production Functions tab.
-  refreshMakeugcAvatarIndexCron,
-  refreshMakeugcAvatarIndexManual,
-  // Polish-26 Commit 61: enriched HeyGen avatar index refresh.
-  // Same split-into-two-single-trigger pattern as MakeUGC. Cron
-  // fires at 04:00 UTC (1h after MakeUGC's 03:00 cron) to stagger
-  // Gemini vision load.
-  refreshHeygenAvatarIndexCron,
-  refreshHeygenAvatarIndexManual,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

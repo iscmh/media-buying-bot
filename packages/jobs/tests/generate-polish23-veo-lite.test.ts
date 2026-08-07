@@ -203,17 +203,22 @@ describe('Polish-23 Commit 3: composePolish23AdSpecUserPrompt — carries the so
   });
 });
 
-describe('Polish-23 Commit 3: worker registration — the miss-once-caught tripwire', () => {
-  it("registers 'generation/polish23-veo-lite.requested' in REGISTERED_GENERATION_WORKER_EVENTS (Commit 1 reservation)", () => {
-    expect(REGISTERED_GENERATION_WORKER_EVENTS.has('generation/polish23-veo-lite.requested')).toBe(
-      true,
-    );
+describe('Polish-27.0.0 Commit 63: polish23 worker UNREGISTERED (nuke prep for Polish-28 rebuild)', () => {
+  it("no longer registers 'generation/polish23-veo-lite.requested' in REGISTERED_GENERATION_WORKER_EVENTS", () => {
+    // Inverse of the original Commit-3 tripwire. The polish23 worker
+    // file is preserved on disk (rollback = uncomment its import +
+    // functions[] entry in packages/jobs/src/functions/index.ts) but
+    // the Inngest dispatch is off. If this ever re-passes, either
+    // the rollback happened (delete this test) or a merge conflict
+    // silently re-added the registration.
+    // Post-Commit-63 the Set's element type no longer includes the
+    // polish23 event literal — cast to widen for the .has() call.
+    const events: ReadonlySet<string> = REGISTERED_GENERATION_WORKER_EVENTS as ReadonlySet<string>;
+    expect(events.has('generation/polish23-veo-lite.requested')).toBe(false);
   });
 
-  it('adds the worker function to functions[] (dispatch coverage)', () => {
-    // Identity check by reference — avoids Inngest SDK's private
-    // `id` getter shape drift across versions.
-    expect(functions).toContain(generatePolish23VeoLite);
+  it('drops the worker function from functions[]', () => {
+    expect(functions).not.toContain(generatePolish23VeoLite);
   });
 });
 

@@ -46,6 +46,24 @@ export const POST = withApi('generations.create', async (req, ctx) => {
   const contentType = concept.contentType as ConceptType;
 
   const detectedPipeline = pipelineFromString(body.pipeline ?? null);
+  // Polish-27.0.0 Commit 63: reject legacy UGC pipelines at the API
+  // boundary. Their Inngest workers are unregistered post-Commit-63
+  // (see packages/jobs/src/functions/index.ts) — dispatching would
+  // silently hang. Returning 400 here gives API consumers a clear
+  // signal instead. Rebuild lands in Polish-28 Commit 64.
+  const UNAVAILABLE_LEGACY_UGC_PIPELINES = new Set([
+    'polish23_higgsfield_veo_lite',
+    'polish25_makeugc',
+    'polish26_heygen',
+  ]);
+  if (detectedPipeline && UNAVAILABLE_LEGACY_UGC_PIPELINES.has(detectedPipeline)) {
+    return apiError(
+      'validation_error',
+      `Pipeline '${detectedPipeline}' is temporarily unavailable — under reconstruction for the ` +
+        `Polish-28 UGC rebuild. Use 'static_openai_image' for static ads. Custom UGC pipelines ` +
+        `return in the next release.`,
+    );
+  }
   const pipelineDesc = detectedPipeline
     ? describePipeline(detectedPipeline)
     : describePipeline('heygen_avatar_talking_head');

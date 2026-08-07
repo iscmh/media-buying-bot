@@ -18,8 +18,9 @@ import { cn } from '@/lib/utils';
 import { acknowledgeLiveGenerationAction } from './ack-action';
 import { createGenerationJobAction, type ConnectedProviders } from './actions';
 import {
-  POLISH26_DESCRIPTION,
-  POLISH26_DISPLAY_NAME,
+  // Polish-27.0.0 Commit 63: POLISH26_DESCRIPTION + POLISH26_DISPLAY_NAME
+  // imports dropped along with Polish26PickerCard. Constants still
+  // exported from simplified-form-helpers for the Polish-28 restore.
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
@@ -104,20 +105,23 @@ export function SimplifiedGenerationForm({
   // Polish-25.2 Commit 11: MakeUGC is platform-managed — the gate
   // now only checks Claude + Gemini BYOK. The MakeUGC key comes
   // from the MAKEUGC_MANAGED_KEY env var at worker submit time.
+  // Polish-27.0.0 Commit 63: UGC surface nuked pre-Polish-28 rebuild.
+  // polish23Selected + polish26Selected forced-false, canDefaultPolish26
+  // gate disabled. The state variables + setters are RETAINED so the
+  // rollback (Polish-28 Commit 64) is a one-line reversal per hook.
+  // Every downstream branch that reads them (estimators, key gates,
+  // pick handlers) is preserved as dead code — harmless because
+  // polish*Selected can never become true post-Commit-63.
   const soleModel = getSoleLauncherModel();
-  const canDefaultPolish26 =
-    connectedProviders.claude.connected && connectedProviders.gemini.connected;
+  // canDefaultPolish26 was the gate that auto-picked the UGC card
+  // pre-Commit-63; retained inline as a comment for the rollback
+  // reference. Post-Commit-63 the card is a "Coming soon" placeholder,
+  // so there's nothing to auto-pick.
   const [modelId, setModelId] = React.useState<VideoModelId | null>(
-    canDefaultPolish26 ? null : soleModel ? soleModel.id : null,
+    soleModel ? soleModel.id : null,
   );
-  // Polish-23 Commit 3.5: alternative "picked" state that bypasses
-  // the VideoModel descriptor system. Picking Polish-23 clears
-  // modelId; picking any classic model clears polish23Selected.
   const [polish23Selected, setPolish23Selected] = React.useState(false);
-  // Polish-25 Commit 2: MakeUGC pre-cast avatar picker. Mutually
-  // exclusive with polish23Selected + modelId. Polish-25.1 Commit 10b:
-  // defaults to picked when the Polish-25 keys are all connected.
-  const [polish26Selected, setPolish26Selected] = React.useState(canDefaultPolish26);
+  const [polish26Selected, setPolish26Selected] = React.useState(false);
   // Polish-25.3 Commit 18b: static ad picker + quality tier. Mutually
   // exclusive with polish23Selected + polish26Selected + modelId.
   // Defaults to Medium quality — matches the shipped cost line.
@@ -313,21 +317,26 @@ export function SimplifiedGenerationForm({
         </section>
       )}
 
-      {/* Polish-25 Commit 2: MakeUGC pre-cast avatar card — primary
-          recommended pipeline going forward. Positioned FIRST.
-          Character consistency guaranteed at platform level, ~$0.05
-          per 60s ad (20-50x cheaper than Polish-23). Picking clears
-          Polish-23 + modelId. */}
-      <Polish26PickerCard
-        picked={polish26Selected}
-        disabled={isPending}
-        onPick={() => {
-          setPolish26Selected(true);
-          setPolish23Selected(false);
-          setStaticOpenaiSelected(false);
-          setModelId(null);
-        }}
-      />
+      {/* Polish-27.0.0 Commit 63: UGC pipelines under reconstruction
+          for the Polish-28 rebuild (Seedance 2.5 + Higgsfield Speak v2
+          + ElevenLabs BYOK). The Polish26PickerCard render is replaced
+          with a "Coming soon" placeholder — Static ad remains the sole
+          user-facing generation pipeline until Polish-28 lands. Full
+          card component + all state hooks preserved above; rollback
+          brings the card back in a single edit. */}
+      <section
+        className="border-border bg-bg-surface rounded-md border p-4 opacity-60"
+        aria-disabled
+      >
+        <div className="text-fg-subtle mb-1 text-xs font-semibold uppercase tracking-wider">
+          Custom UGC
+        </div>
+        <div className="text-fg text-sm font-medium">Coming soon</div>
+        <p className="text-fg-muted mt-1 text-xs">
+          UGC pipelines under reconstruction. Static ad below is the sole live pipeline while we
+          rebuild custom-avatar UGC on a new backend.
+        </p>
+      </section>
 
       {/* Polish-25.3 Commit 18b: Static ad picker. Rendered next to
           Instant UGC. Reveals a low/medium/high quality selector when
@@ -468,7 +477,9 @@ export function SimplifiedGenerationForm({
             gate visible. */}
         {!canSubmit && !overCap && (
           <p className="text-fg-muted mt-3 text-xs">
-            Pick a pipeline above (Instant UGC, Static ad, or Higgsfield UGC ad) to enable Generate.
+            {/* Polish-27.0.0 Commit 63: only Static ad is live pre-Polish-28
+                rebuild — the hint no longer mentions Instant UGC / Higgsfield. */}
+            Pick Static ad above to enable Generate. Custom UGC returns in the next release.
           </p>
         )}
       </div>
@@ -527,51 +538,16 @@ export function SimplifiedGenerationForm({
   );
 }
 
-interface Polish26PickerCardProps {
-  picked: boolean;
-  disabled: boolean;
-  onPick: () => void;
-}
-
 /**
- * Instant UGC picker card. Only pipeline surfaced in the MVP
- * (Polish-25.2 Commit 12 hid alternate-model dropdown). Pre-cast
- * avatar library keeps character consistency guaranteed.
+ * Polish-27.0.0 Commit 63: Polish26PickerCard component + its
+ * Polish26PickerCardProps interface removed —
+ * TS6133 unused-symbol rule doesn't tolerate a defined-but-unused
+ * component. The card's markup + props interface Polish26PickerCardProps
+ * remain resurrectable via git history when Polish-28 (Commit 64)
+ * restores the Custom UGC surface. See git log --diff-filter=D --
+ * apps/web/app/concepts/[id]/generate/simplified-form.tsx for the
+ * pre-Commit-63 shape.
  */
-function Polish26PickerCard({ picked, disabled, onPick }: Polish26PickerCardProps) {
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      disabled={disabled}
-      aria-pressed={picked}
-      className={cn(
-        'group relative flex w-full flex-col gap-2 rounded-md border p-4 text-left transition-colors',
-        picked
-          ? 'border-fg bg-fg/5'
-          : 'border-[color:var(--accent-positive)]/50 bg-bg-surface hover:border-fg/50',
-        disabled && 'cursor-not-allowed opacity-60',
-      )}
-    >
-      <span
-        className={cn(
-          'absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
-          'bg-[color:var(--accent-positive)]/15 text-[color:var(--accent-positive)]',
-        )}
-      >
-        Primary - Recommended
-      </span>
-      {picked && (
-        <CheckCircle2 className="text-fg absolute right-24 top-3 h-4 w-4" aria-hidden="true" />
-      )}
-      <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
-        Instant UGC
-      </div>
-      <div className="text-fg text-sm font-semibold">{POLISH26_DISPLAY_NAME}</div>
-      <div className="text-fg-muted text-xs leading-relaxed">{POLISH26_DESCRIPTION}</div>
-    </button>
-  );
-}
 
 // Polish-25.2 Commit 12: Polish23PickerCard + ModelCard components
 // removed. They were only referenced from the "Change model"

@@ -60,8 +60,21 @@ export default async function AdminRawUgcPage() {
     <AppShell crumbs={[{ label: 'Admin' }, { label: 'Raw UGC' }]}>
       <PageHeader
         title="Raw UGC generator"
-        subtitle={`Admin-only. ${avatars.length} avatars available. Bypasses the standard Instant UGC pipeline: pick, paste, generate, download.`}
+        subtitle={`Admin-only. ${avatars.length} avatars in the archived MakeUGC index (read-only during reconstruction).`}
       />
+      {/* Polish-27.0.0 Commit 63: MakeUGC + HeyGen sync crons + workers
+          are unregistered pre-Polish-28 rebuild. Avatar catalog is
+          still queryable (rows preserved) so this page still renders,
+          but attempting to dispatch will fail at the /api/v1 rejection
+          layer. Banner keeps admin oriented while the rebuild is in
+          flight. */}
+      <div role="status" className="border-border bg-bg-surface mb-4 rounded-md border p-3 text-sm">
+        <div className="text-fg font-medium">UGC pipelines under reconstruction</div>
+        <p className="text-fg-muted mt-1 text-xs">
+          MakeUGC + HeyGen dispatch is disabled. The avatar catalog below is preserved for
+          reference; generation returns in the Polish-28 build with a new backend stack.
+        </p>
+      </div>
       <RawUgcClient avatars={avatars} />
     </AppShell>
   );

@@ -171,18 +171,36 @@ export function defaultPipeline(): PipelineType {
   );
 }
 
+/**
+ * Polish-27.0.0 Commit 63: this list narrowed to REGISTERED pipelines
+ * only (i.e. those whose workerEvent appears in
+ * REGISTERED_GENERATION_WORKER_EVENTS). The Polish-28 UGC rebuild is
+ * imminent; the four legacy UGC pipelines (polish23_higgsfield_veo_lite,
+ * polish25_makeugc, polish26_heygen, heygen_avatar_talking_head) had
+ * their workers unregistered and are not dispatchable, so the dispatch-
+ * coverage tripwire (packages/jobs/tests/dispatch-coverage.test.ts)
+ * would fail if they stayed in ALL_PIPELINES.
+ *
+ * DESCRIPTORS (above) still carries the full type — PipelineType stays
+ * complete so downstream forensics (log parsers reading historical
+ * generation_jobs.picked_pipeline) still round-trip cleanly. This is a
+ * narrowing of "what dispatch currently supports", not a schema
+ * removal.
+ *
+ * Rollback: add the removed entries back here and re-register their
+ * workers in packages/jobs/src/functions/index.ts.
+ */
 export const ALL_PIPELINES: PipelineType[] = [
+  // heygen_avatar_talking_head is legacy Polish-4 UGC, still dispatched
+  // through generateUgcVariants (event 'generation/ugc.requested') which
+  // remains registered. Not surfaced on the generate form post-Polish-27
+  // Commit 63 nuke, but the API + coverage test still see it.
   'heygen_avatar_talking_head',
   'sora_2_single_shot',
   'nano_banana_static_image',
-  // Polish-23 Commit 1: reserved; not surfaced in the form until
-  // Commit 3 wires the worker.
-  'polish23_higgsfield_veo_lite',
-  // Polish-25 Commit 2: MakeUGC pre-cast avatar UGC ad — primary
-  // pipeline going forward (single video output @ ~$0.05).
-  'polish25_makeugc',
-  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad pipeline.
+  // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad pipeline —
+  // the SOLE user-facing generation pipeline post-Polish-27 Commit 63
+  // nuke. Users pick Static ad from the generate form; the "Custom UGC"
+  // slot shows a "Coming soon" placeholder until Polish-28 lands.
   'static_openai_image',
-  // Polish-26 Commit 61: HeyGen v3 managed Instant UGC (primary).
-  'polish26_heygen',
 ];
