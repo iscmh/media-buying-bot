@@ -768,13 +768,32 @@ async function extractFirstFramePng(input: {
     ffmpeg_args: ffmpegArgs,
     filter: ffmpegArgs,
   };
-  // Polish-28.0.7 Commit 64.7: canonical /v1/predictions shape works for
-  // every published model — /v1/models/*/predictions 404s on community
-  // wrappers. See extract-source-audio.ts submit block for the rationale.
+  // Polish-28.0.8 Commit 64.8: Replicate's /v1/predictions REQUIRES
+  // a version SHA — see extract-source-audio.ts submit block for the
+  // detailed rationale. Auto-resolve latest_version.id via GET
+  // /v1/models/{owner}/{name} when the slug has no explicit :sha.
+  let resolvedVersion = version;
+  if (!resolvedVersion) {
+    const resolveResult = await callProvider<{ latest_version?: { id?: string } }>({
+      userId: input.userId,
+      provider: 'kling' as const,
+      url: `https://api.replicate.com/v1/models/${modelPath}`,
+      method: 'GET',
+      headers: { Authorization: `Token ${input.replicateApiKey}` },
+      timeoutMs: 15_000,
+      requestBodyForLog: { polish28_frame_extract_resolve_version: true, model: modelPath },
+      ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+    });
+    if (!resolveResult.ok || !resolveResult.data.latest_version?.id) {
+      throw new Error(
+        `Polish-28 frame-extract Replicate version-resolve failed for ${modelPath}: HTTP ${resolveResult.status}. ` +
+          `Response: ${JSON.stringify(resolveResult.ok ? resolveResult.data : (resolveResult.rawBody ?? {})).slice(0, 400)}`,
+      );
+    }
+    resolvedVersion = resolveResult.data.latest_version.id;
+  }
   const submitUrl = 'https://api.replicate.com/v1/predictions';
-  const submitBody = version
-    ? { version, input: inputFields }
-    : { model: modelPath, input: inputFields };
+  const submitBody = { version: resolvedVersion, input: inputFields };
 
   const submitResult = await callProvider<{ id?: string; error?: string }>({
     userId: input.userId,

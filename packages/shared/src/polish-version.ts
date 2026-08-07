@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.0.7';
+export const POLISH_VERSION = '28.0.8';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.0.7';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.0.7 Commit 64.7 hotfix - switch Replicate submit to POST /v1/predictions with {model,input} (fixes 404 on community ffmpeg wrappers)';
+  'Polish-28.0.8 Commit 64.8 hotfix - auto-resolve Replicate latest_version.id when slug has no :sha (fixes 422 "version is required")';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

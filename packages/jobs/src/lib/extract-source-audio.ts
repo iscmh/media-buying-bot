@@ -224,17 +224,51 @@ export async function extractSourceAudioLoopMitigated(
     filter: ffmpegArgs,
   };
 
-  // Polish-28.0.7 Commit 64.7 hotfix: ALWAYS use `POST /v1/predictions`
-  // with { model, input } or { version, input } — Replicate's canonical
-  // shapes that work for every published model. Prior 64.5/64.6 used
-  // the `/v1/models/{owner}/{name}/predictions` path for versionless
-  // slugs; that path 404s for community models (only Replicate-official
-  // + owner-flagged models expose it). This is why cuuupid/cog-ffmpeg
-  // 404'd on 28.0.6 despite the model existing.
+  // Polish-28.0.8 Commit 64.8 hotfix: Replicate's `/v1/predictions`
+  // REQUIRES a `version` SHA — "Additional property model is not
+  // allowed" (surfaced 28.0.7). Prior code assumed `{model, input}`
+  // would work; that shape is only accepted by owner-flagged models
+  // via `/v1/models/{owner}/{name}/predictions` (which 404s for
+  // community wrappers — the 28.0.6 failure).
+  //
+  // Real Replicate contract:
+  //   - `POST /v1/predictions` needs `{version: "sha256...", input}`
+  //   - Only way to get the latest SHA for a versionless slug is
+  //     `GET /v1/models/{owner}/{name}` which returns latest_version.id
+  //
+  // Resolution: if slug has no `:sha`, fetch latest version first
+  // then submit with it. One extra round-trip per generation
+  // (~200ms) — worth it for zero-config operation.
+  let resolvedVersion = version;
+  if (!resolvedVersion) {
+    const resolveResult = await callProvider<{ latest_version?: { id?: string } }>({
+      userId: input.userId,
+      provider: 'kling' as const,
+      url: `${REPLICATE_BASE}/v1/models/${modelPath}`,
+      method: 'GET',
+      headers: { Authorization: `Token ${input.replicateApiKey}` },
+      timeoutMs: SUBMIT_TIMEOUT_MS,
+      requestBodyForLog: { polish28_ffmpeg_resolve_version: true, model: modelPath },
+      ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+    });
+    if (!resolveResult.ok || !resolveResult.data.latest_version?.id) {
+      const rawExcerpt = JSON.stringify(
+        resolveResult.ok ? resolveResult.data : (resolveResult.rawBody ?? {}),
+      ).slice(0, 500);
+      return {
+        ok: false,
+        reason: 'ffmpeg-failed',
+        detail:
+          `Replicate model version-resolve failed for ${modelPath}: HTTP ${resolveResult.status}. ` +
+          `Response: ${rawExcerpt}. If the model doesn't exist, pick a working Replicate ffmpeg ` +
+          `wrapper — search https://replicate.com/explore for "ffmpeg" and set ` +
+          `POLISH28_REPLICATE_FFMPEG_MODEL_ID env to "owner/name:version-sha".`,
+      };
+    }
+    resolvedVersion = resolveResult.data.latest_version.id;
+  }
   const submitUrl = `${REPLICATE_BASE}/v1/predictions`;
-  const submitBody = version
-    ? { version, input: inputFields }
-    : { model: modelPath, input: inputFields };
+  const submitBody = { version: resolvedVersion, input: inputFields };
 
   const submitResult = await callProvider<{ id?: string; error?: string; detail?: string }>({
     userId: input.userId,
@@ -250,7 +284,7 @@ export async function extractSourceAudioLoopMitigated(
     requestBodyForLog: {
       polish28_ffmpeg_extract: true,
       model: modelPath,
-      version: version || undefined,
+      version: resolvedVersion.slice(0, 12),
     },
     ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
   });
@@ -265,7 +299,7 @@ export async function extractSourceAudioLoopMitigated(
       reason: 'ffmpeg-failed',
       detail:
         `Replicate submit failed: ${submitResult.errorMessage ?? 'unknown'}. ` +
-        `Model attempted: ${modelPath}${version ? `:${version.slice(0, 12)}...` : ' (no version SHA)'}. ` +
+        `Model attempted: ${modelPath}:${resolvedVersion.slice(0, 12)}...  ` +
         `Response body: ${rawExcerpt}. ` +
         `If it says "model not found", pick a working Replicate ffmpeg wrapper — ` +
         `browse https://replicate.com/explore + copy the "owner/name:version-sha" slug ` +
