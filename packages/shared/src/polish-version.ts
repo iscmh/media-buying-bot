@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.0.8';
+export const POLISH_VERSION = '28.0.9';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.0.8';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.0.8 Commit 64.8 hotfix - auto-resolve Replicate latest_version.id when slug has no :sha (fixes 422 "version is required")';
+  'Polish-28.0.9 Commit 64.9 hotfix - swap broken cuuupid/cog-ffmpeg default to verified fofr/toolkit (fixes 404 "Model not found") + wire task/input_file schema';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

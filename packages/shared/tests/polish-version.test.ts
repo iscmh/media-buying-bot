@@ -16,12 +16,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     );
   });
 
-  it('is currently 28.0.8 (Polish-28.0.8 Commit 64.8 hotfix — Replicate auto-resolve latest_version)', () => {
+  it('is currently 28.0.9 (Polish-28.0.9 Commit 64.9 hotfix — swap broken cuuupid/cog-ffmpeg default to verified fofr/toolkit)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.0.8');
+    expect(POLISH_VERSION).toBe('28.0.9');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

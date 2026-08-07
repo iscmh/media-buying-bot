@@ -56,16 +56,24 @@ const AUDIO_MAX_LOOPS = 5;
  *   1. POLISH28_REPLICATE_FFMPEG_MODEL_ID env — operator override
  *   2. REPLICATE_AUDIO_TRIM_MODEL_ID env — shared with Polish-23's
  *      audio-trim helper so a single env var covers both
- *   3. Hardcoded default POLISH28_DEFAULT_FFMPEG_MODEL — a
- *      well-known community ffmpeg wrapper on Replicate that
- *      accepts the standard `command` / `ffmpeg_args` field shape
+ *   3. Hardcoded default POLISH28_DEFAULT_FFMPEG_MODEL
  *
- * Polish-28.0.6 Commit 64.6 hotfix: added the hardcoded default
- * because Polish-28 was silently blocked on operators who hadn't
- * pre-configured either env var. If Replicate ever deprecates the
- * default, the two env vars are the escape hatch.
+ * Polish-28.0.9 Commit 64.9 hotfix: default swapped from
+ * `cuuupid/cog-ffmpeg` (which returned HTTP 404 "Model not found"
+ * — didn't exist on Replicate; 28.0.8 death) to `fofr/toolkit`, a
+ * verified-existing CPU-based Cog wrapper for common ffmpeg tasks
+ * (https://replicate.com/fofr/toolkit). Its schema is task-based
+ * (`task: 'extract_video_audio_as_mp3'` + `input_file: <url>`), not
+ * arbitrary-args, so the aloop-based loop-mitigation from 28.0.5 is
+ * silently dropped when this default is in use — short source ads
+ * (<60s) will fail downstream at ElevenLabs IVC's minimum-duration
+ * check. Operators with source ads that short should either:
+ *   (a) re-record to ≥60s, or
+ *   (b) set POLISH28_REPLICATE_FFMPEG_MODEL_ID to a versioned
+ *       generic-ffmpeg wrapper that accepts the `command` /
+ *       `ffmpeg_args` shape the shotgun below still sends.
  */
-export const POLISH28_DEFAULT_FFMPEG_MODEL = 'cuuupid/cog-ffmpeg';
+export const POLISH28_DEFAULT_FFMPEG_MODEL = 'fofr/toolkit';
 
 export function getPolish28FfmpegModelId(): string {
   return (
@@ -208,9 +216,20 @@ export async function extractSourceAudioLoopMitigated(
   const modelPath = colonIdx === -1 ? modelRaw : modelRaw.slice(0, colonIdx);
   const version = colonIdx === -1 ? '' : modelRaw.slice(colonIdx + 1).trim();
 
-  // Generic ffmpeg models on Replicate use varied field names — same
-  // shotgun as replicate-audio-trim.ts's submit.
+  // Generic ffmpeg models on Replicate use varied field names — send
+  // a shotgun and let the chosen model consume whichever names it
+  // recognises (Replicate silently ignores unknown input fields).
+  //
+  // Polish-28.0.9 Commit 64.9: added `task` + `input_file` so the
+  // default `fofr/toolkit` route works out of the box. Everything
+  // else preserved for operators who point POLISH28_REPLICATE_FFMPEG_MODEL_ID
+  // at a generic ffmpeg wrapper (which will consume `command` /
+  // `ffmpeg_args` / `filter` instead and ignore `task`).
   const inputFields = {
+    // fofr/toolkit shape:
+    task: 'extract_video_audio_as_mp3',
+    input_file: sourceUrl,
+    // Generic ffmpeg wrapper shapes (source URL under many names):
     video: sourceUrl,
     video_url: sourceUrl,
     video_file: sourceUrl,
@@ -218,6 +237,7 @@ export async function extractSourceAudioLoopMitigated(
     input_video: sourceUrl,
     audio: sourceUrl,
     input_audio: sourceUrl,
+    // Generic ffmpeg wrapper shapes (loop-mitigation args):
     command: ffmpegArgs,
     args: ffmpegArgs,
     ffmpeg_args: ffmpegArgs,
