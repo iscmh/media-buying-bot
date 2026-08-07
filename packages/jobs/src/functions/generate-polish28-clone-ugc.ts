@@ -244,7 +244,12 @@ export const generatePolish28CloneUgc = inngest.createFunction(
           personaDescription,
           personaRawShape: typeof rawPersona,
           ugcOriginalScript: concept.ugcOriginalScript ?? '',
-          sourceVideoUrl: concept.fileUrl ?? null,
+          // Polish-28.0.3 Commit 64.3 hotfix: concept.file_url is a
+          // Supabase-storage RELATIVE PATH (not an https URL). Passing
+          // that string to fetch() throws "Failed to parse URL from".
+          // Downstream steps (extract-source-audio, extractFirstFramePng)
+          // now consume this as a storage-tuple ({bucket:'concepts', path}).
+          sourceStoragePath: concept.fileUrl ?? null,
           cachedCharacterReference: cachedRef,
           conceptMeta,
         });
@@ -260,12 +265,16 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         await markJobFailed(jobId, jobUserId, msg, 0);
         throw new NonRetriableError(msg);
       }
-      if (!source.sourceVideoUrl) {
-        const msg = 'Polish-28 requires concept.file_url (source video URL).';
+      if (!source.sourceStoragePath) {
+        const msg =
+          'Polish-28 requires concept.file_url (source video storage path). ' +
+          'Re-upload the source ad and retry.';
         await markJobFailed(jobId, jobUserId, msg, 0);
         throw new NonRetriableError(msg);
       }
-      const sourceVideoUrl = source.sourceVideoUrl;
+      const sourceStoragePath = source.sourceStoragePath;
+      /** Bucket name matches analyze-concept.ts + generate-static-*.ts. */
+      const SOURCE_BUCKET = 'concepts';
 
       // ---------- Step D: condense script ----------
       const condensed = await guardedStepRun(step, 'condense-script', async () => {
@@ -303,7 +312,8 @@ export const generatePolish28CloneUgc = inngest.createFunction(
       // ---------- Step E: extract source audio (with loop mitigation) ----------
       const sourceAudio = await guardedStepRun(step, 'extract-source-audio', async () => {
         const outcome = await extractSourceAudioLoopMitigated({
-          sourceVideoUrl: sourceVideoUrl!,
+          storageBucket: SOURCE_BUCKET,
+          storagePath: sourceStoragePath,
         });
         if (!outcome.ok) {
           throw new NonRetriableError(
@@ -398,7 +408,10 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         //
         // Simpler + reliable: fetch source video, ffmpeg-extract the
         // first frame as PNG, base64-encode, send as reference.
-        const framePng = await extractFirstFramePng(sourceVideoUrl!);
+        const framePng = await extractFirstFramePng({
+          storageBucket: SOURCE_BUCKET,
+          storagePath: sourceStoragePath,
+        });
         const prompt = composeNanoBananaCharacterClonePrompt(source.personaDescription);
         const r = await cloneCharacterReferenceImage({
           userId: jobUserId,
@@ -694,13 +707,27 @@ export const generatePolish28CloneUgc = inngest.createFunction(
  * Used by Step G to hand a still-image reference to Nano Banana Pro
  * (which requires an image, not a video).
  */
-async function extractFirstFramePng(videoUrl: string): Promise<{ base64: string }> {
+async function extractFirstFramePng(
+  source: { videoUrl: string } | { storageBucket: string; storagePath: string },
+): Promise<{ base64: string }> {
   const { resolveFfmpegPath } = await import('../lib/video-compress');
+  const { downloadAsBase64 } = await import('../lib/storage');
   const workDir = await mkdtemp(join(tmpdir(), 'polish28-frame-'));
   try {
-    const res = await fetch(videoUrl);
-    if (!res.ok) throw new Error(`fetch source-video HTTP ${res.status}`);
-    const srcBuf = Buffer.from(await res.arrayBuffer());
+    // Polish-28.0.3 Commit 64.3 hotfix: same two-shape input router as
+    // extract-source-audio — Supabase storage tuple OR HTTPS URL.
+    let srcBuf: Buffer;
+    if ('storageBucket' in source) {
+      const dl = await downloadAsBase64({
+        bucket: source.storageBucket,
+        path: source.storagePath,
+      });
+      srcBuf = Buffer.from(dl.base64, 'base64');
+    } else {
+      const res = await fetch(source.videoUrl);
+      if (!res.ok) throw new Error(`fetch source-video HTTP ${res.status}`);
+      srcBuf = Buffer.from(await res.arrayBuffer());
+    }
     const srcPath = join(workDir, 'source.mp4');
     const outPath = join(workDir, 'frame.png');
     await writeFile(srcPath, srcBuf);

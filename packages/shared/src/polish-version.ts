@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.0.2';
+export const POLISH_VERSION = '28.0.3';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.0.2';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.0.2 Commit 64.2 hotfix - persona object coercer (fixes .trim TypeError on Polish-23 structured persona)';
+  'Polish-28.0.3 Commit 64.3 hotfix - extract-source-audio accepts Supabase storage tuple (fixes Failed-to-parse-URL on concept.file_url)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

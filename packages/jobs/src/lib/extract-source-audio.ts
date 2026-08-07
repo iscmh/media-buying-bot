@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { downloadAsBase64 } from './storage';
 import { resolveFfmpegPath } from './video-compress';
 
 /**
@@ -59,12 +60,35 @@ export type ExtractSourceAudioFailureReason =
   | 'ffmpeg-missing'
   | 'ffmpeg-failed';
 
-export interface ExtractSourceAudioInput {
-  /** Fetchable URL to the source ad video (Supabase public, typically). */
-  sourceVideoUrl: string;
-  /** Optional MIME hint if the URL doesn't respond with a content-type. */
-  sourceMimeHint?: string;
-}
+/**
+ * Polish-28.0.3 Commit 64.3 hotfix: accept BOTH a fully-qualified
+ * URL (external BYOK sources / future use cases) AND a Supabase
+ * storage tuple (bucket + relative path).
+ *
+ * The concept.file_url column stores relative paths like
+ * `<userId>/concepts/<conceptId>/source.mp4` — NOT https://... URLs.
+ * Passing that string to fetch() throws "Failed to parse URL from ...".
+ * Commit-64 assumed the caller had already resolved to a real URL;
+ * Commit-64.3 makes the helper tolerant of the raw-path shape by
+ * routing storage-tuple inputs through Supabase's authenticated
+ * download API.
+ */
+export type ExtractSourceAudioInput =
+  | {
+      /** Fetchable HTTPS URL. */
+      sourceVideoUrl: string;
+      sourceMimeHint?: string;
+      storageBucket?: never;
+      storagePath?: never;
+    }
+  | {
+      sourceVideoUrl?: never;
+      /** Supabase storage bucket name (e.g. 'concepts'). */
+      storageBucket: string;
+      /** Relative path inside the bucket (from concept.file_url). */
+      storagePath: string;
+      sourceMimeHint?: string;
+    };
 
 export interface ExtractSourceAudioResult {
   ok: true;
@@ -105,24 +129,64 @@ export async function extractSourceAudioLoopMitigated(
 ): Promise<ExtractSourceAudioOutcome> {
   const ffmpegPath = resolveFfmpegPath();
 
-  // Fetch source video bytes.
+  // Polish-28.0.3 Commit 64.3: two-shape input router. Both paths
+  // land bytes in `sourceBuffer` before ffmpeg runs.
   let sourceBuffer: Buffer;
-  try {
-    const res = await fetch(input.sourceVideoUrl);
-    if (!res.ok) {
+  if ('storageBucket' in input && input.storageBucket) {
+    // Supabase-hosted path: authenticated download via service role,
+    // then decode from base64 to bytes. Avoids depending on public-
+    // URL configuration + expiring signed URLs.
+    if (!input.storagePath || input.storagePath.trim().length === 0) {
       return {
         ok: false,
         reason: 'source-video-fetch-failed',
-        detail: `HTTP ${res.status} fetching ${input.sourceVideoUrl.slice(0, 200)}`,
+        detail:
+          'Concept source file not found (storagePath is empty). Re-upload the source ad and retry.',
       };
     }
-    const arr = await res.arrayBuffer();
-    sourceBuffer = Buffer.from(arr);
-  } catch (err) {
+    try {
+      const dl = await downloadAsBase64({
+        bucket: input.storageBucket,
+        path: input.storagePath,
+      });
+      sourceBuffer = Buffer.from(dl.base64, 'base64');
+    } catch (err) {
+      return {
+        ok: false,
+        reason: 'source-video-fetch-failed',
+        detail:
+          `Supabase storage download failed for ${input.storageBucket}/${input.storagePath}: ` +
+          (err instanceof Error ? err.message : String(err)),
+      };
+    }
+  } else if ('sourceVideoUrl' in input && input.sourceVideoUrl) {
+    // Fully-qualified URL path: use fetch(). External BYOK sources or
+    // pre-signed Supabase URLs both flow through here.
+    try {
+      const res = await fetch(input.sourceVideoUrl);
+      if (!res.ok) {
+        return {
+          ok: false,
+          reason: 'source-video-fetch-failed',
+          detail: `HTTP ${res.status} fetching ${input.sourceVideoUrl.slice(0, 200)}`,
+        };
+      }
+      const arr = await res.arrayBuffer();
+      sourceBuffer = Buffer.from(arr);
+    } catch (err) {
+      return {
+        ok: false,
+        reason: 'source-video-fetch-failed',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+  } else {
     return {
       ok: false,
       reason: 'source-video-fetch-failed',
-      detail: err instanceof Error ? err.message : String(err),
+      detail:
+        'extract-source-audio requires either { sourceVideoUrl } or ' +
+        '{ storageBucket, storagePath } — neither was provided.',
     };
   }
 
