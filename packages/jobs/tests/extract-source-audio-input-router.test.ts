@@ -42,28 +42,37 @@ describe('extractSourceAudioLoopMitigated input router (Replicate-backed)', () =
     }
   });
 
-  it('missing model-id env returns ffmpeg-missing (actionable env-config hint)', async () => {
+  it('Commit 64.6: missing env-config falls back to POLISH28_DEFAULT_FFMPEG_MODEL (no ffmpeg-missing block)', async () => {
+    // Polish-28.0.6 Commit 64.6 hotfix: getPolish28FfmpegModelId now
+    // returns a hardcoded 'cuuupid/cog-ffmpeg' default when neither env
+    // is set. So with both envs cleared, the extractor DOES NOT fail
+    // at 'ffmpeg-missing' — it proceeds and hits downstream failure
+    // paths (Supabase / Replicate). The regression tripwire here
+    // asserts we never re-introduce the pre-64.6 block-on-env-unset
+    // behavior that stranded operators without config.
     const prev = process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
     const prevTrim = process.env['REPLICATE_AUDIO_TRIM_MODEL_ID'];
     delete process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'];
     delete process.env['REPLICATE_AUDIO_TRIM_MODEL_ID'];
     try {
+      const { getPolish28FfmpegModelId, POLISH28_DEFAULT_FFMPEG_MODEL } =
+        await import('../src/lib/extract-source-audio');
+      expect(getPolish28FfmpegModelId()).toBe(POLISH28_DEFAULT_FFMPEG_MODEL);
+      // And the extractor proceeds past the env check — reason CANNOT
+      // be 'ffmpeg-missing' when envs are unset (that's the regression).
       const r = await extractSourceAudioLoopMitigated({
         storageBucket: 'concepts',
-        storagePath: 'ignored-when-env-missing',
+        storagePath: 'ignored',
         userId: USER_ID_STUB,
         replicateApiKey: REPLICATE_KEY_STUB,
       });
       expect(r.ok).toBe(false);
-      if (!r.ok) {
-        expect(r.reason).toBe('ffmpeg-missing');
-        expect(r.detail).toMatch(/POLISH28_REPLICATE_FFMPEG_MODEL_ID/);
-      }
+      if (!r.ok) expect(r.reason).not.toBe('ffmpeg-missing');
     } finally {
       if (prev != null) process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID'] = prev;
       if (prevTrim != null) process.env['REPLICATE_AUDIO_TRIM_MODEL_ID'] = prevTrim;
     }
-  });
+  }, 30_000);
 
   it('regression: no local ffmpeg-spawn path exists (no ENOENT / Failed-to-parse-URL from prior commits)', async () => {
     // The prior Commit-64 bug: piping concept.file_url (a relative

@@ -52,19 +52,26 @@ const AUDIO_TARGET_DURATION_SECONDS = 65;
 const AUDIO_MAX_LOOPS = 5;
 
 /**
- * Replicate ffmpeg model ID. Same env-override convention as
- * REPLICATE_AUDIO_TRIM_MODEL_ID in replicate-audio-trim.ts. If unset,
- * the extractor fails loud with an actionable message telling the
- * operator to set this + pick a working ffmpeg model on Replicate.
+ * Replicate ffmpeg model ID. Resolution order:
+ *   1. POLISH28_REPLICATE_FFMPEG_MODEL_ID env — operator override
+ *   2. REPLICATE_AUDIO_TRIM_MODEL_ID env — shared with Polish-23's
+ *      audio-trim helper so a single env var covers both
+ *   3. Hardcoded default POLISH28_DEFAULT_FFMPEG_MODEL — a
+ *      well-known community ffmpeg wrapper on Replicate that
+ *      accepts the standard `command` / `ffmpeg_args` field shape
  *
- * Recommended: `cuuupid/cog-ffmpeg` (versioned) or any community
- * ffmpeg wrapper that accepts a `command` / `ffmpeg_args` field.
+ * Polish-28.0.6 Commit 64.6 hotfix: added the hardcoded default
+ * because Polish-28 was silently blocked on operators who hadn't
+ * pre-configured either env var. If Replicate ever deprecates the
+ * default, the two env vars are the escape hatch.
  */
+export const POLISH28_DEFAULT_FFMPEG_MODEL = 'cuuupid/cog-ffmpeg';
+
 export function getPolish28FfmpegModelId(): string {
   return (
     process.env['POLISH28_REPLICATE_FFMPEG_MODEL_ID']?.trim() ||
     process.env['REPLICATE_AUDIO_TRIM_MODEL_ID']?.trim() ||
-    ''
+    POLISH28_DEFAULT_FFMPEG_MODEL
   );
 }
 
