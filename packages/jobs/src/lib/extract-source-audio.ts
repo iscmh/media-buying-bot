@@ -224,12 +224,19 @@ export async function extractSourceAudioLoopMitigated(
     filter: ffmpegArgs,
   };
 
-  const submitUrl = version
-    ? `${REPLICATE_BASE}/v1/predictions`
-    : `${REPLICATE_BASE}/v1/models/${modelPath}/predictions`;
-  const submitBody = version ? { version, input: inputFields } : { input: inputFields };
+  // Polish-28.0.7 Commit 64.7 hotfix: ALWAYS use `POST /v1/predictions`
+  // with { model, input } or { version, input } — Replicate's canonical
+  // shapes that work for every published model. Prior 64.5/64.6 used
+  // the `/v1/models/{owner}/{name}/predictions` path for versionless
+  // slugs; that path 404s for community models (only Replicate-official
+  // + owner-flagged models expose it). This is why cuuupid/cog-ffmpeg
+  // 404'd on 28.0.6 despite the model existing.
+  const submitUrl = `${REPLICATE_BASE}/v1/predictions`;
+  const submitBody = version
+    ? { version, input: inputFields }
+    : { model: modelPath, input: inputFields };
 
-  const submitResult = await callProvider<{ id?: string; error?: string }>({
+  const submitResult = await callProvider<{ id?: string; error?: string; detail?: string }>({
     userId: input.userId,
     provider: 'kling' as const, // shares audit-log provider slot with replicate-audio-trim
     url: submitUrl,
@@ -248,10 +255,21 @@ export async function extractSourceAudioLoopMitigated(
     ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
   });
   if (!submitResult.ok) {
+    // Polish-28.0.7 Commit 64.7: surface the Replicate raw response
+    // body via rawBody dump so a 404/422/401 gives the actual
+    // Replicate error text, not just "HTTP 404". Prior message told
+    // us nothing about which model was tried or why it failed.
+    const rawExcerpt = JSON.stringify(submitResult.rawBody ?? {}).slice(0, 800);
     return {
       ok: false,
       reason: 'ffmpeg-failed',
-      detail: `Replicate submit failed: ${submitResult.errorMessage ?? 'unknown'}`,
+      detail:
+        `Replicate submit failed: ${submitResult.errorMessage ?? 'unknown'}. ` +
+        `Model attempted: ${modelPath}${version ? `:${version.slice(0, 12)}...` : ' (no version SHA)'}. ` +
+        `Response body: ${rawExcerpt}. ` +
+        `If it says "model not found", pick a working Replicate ffmpeg wrapper — ` +
+        `browse https://replicate.com/explore + copy the "owner/name:version-sha" slug ` +
+        `into POLISH28_REPLICATE_FFMPEG_MODEL_ID env.`,
     };
   }
   const predictionId = submitResult.data.id;

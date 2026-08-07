@@ -768,10 +768,13 @@ async function extractFirstFramePng(input: {
     ffmpeg_args: ffmpegArgs,
     filter: ffmpegArgs,
   };
-  const submitUrl = version
-    ? 'https://api.replicate.com/v1/predictions'
-    : `https://api.replicate.com/v1/models/${modelPath}/predictions`;
-  const submitBody = version ? { version, input: inputFields } : { input: inputFields };
+  // Polish-28.0.7 Commit 64.7: canonical /v1/predictions shape works for
+  // every published model — /v1/models/*/predictions 404s on community
+  // wrappers. See extract-source-audio.ts submit block for the rationale.
+  const submitUrl = 'https://api.replicate.com/v1/predictions';
+  const submitBody = version
+    ? { version, input: inputFields }
+    : { model: modelPath, input: inputFields };
 
   const submitResult = await callProvider<{ id?: string; error?: string }>({
     userId: input.userId,
