@@ -122,6 +122,9 @@ export {
   NANO_BANANA_STANDARD_MODEL_ID,
   composeNanoBananaCharacterClonePrompt,
   nanoBananaProModel,
+  // Polish-28.0.2 Commit 64.2 hotfix: persona shape coercer — accepts
+  // the Polish-23 structured object OR a freeform string.
+  flattenPersonaForClonePrompt,
   type CloneCharacterReferenceImageInput,
   type CloneCharacterReferenceImageResult,
 } from './gemini-client';

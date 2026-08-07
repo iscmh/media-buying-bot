@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.0.1';
+export const POLISH_VERSION = '28.0.2';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.0.1';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.0.1 Commit 64.1 hotfix - analyze-concept vision-gate now recognizes polish28_clone_ugc';
+  'Polish-28.0.2 Commit 64.2 hotfix - persona object coercer (fixes .trim TypeError on Polish-23 structured persona)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

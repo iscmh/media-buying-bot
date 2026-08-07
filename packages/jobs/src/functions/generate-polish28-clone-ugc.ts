@@ -42,6 +42,7 @@ import {
   createInstantVoiceClone,
   deleteElevenLabsVoice,
   estimateHeygenAvatarIvCostUsd,
+  flattenPersonaForClonePrompt,
   isTerminalAvatarIvStatus,
   POLISH28_ASPECT_RATIO,
   POLISH28_TEMP_VOICE_NAME_PREFIX,
@@ -223,24 +224,39 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         }
         const conceptMeta = (concept.metadata ?? null) as Record<string, unknown> | null;
         const analysis = (conceptMeta?.['analysis'] ?? null) as Record<string, unknown> | null;
-        const persona =
-          (analysis?.['persona'] as string | undefined) ??
-          (analysis?.['subject'] as { appearance?: string } | undefined)?.appearance ??
-          '';
-        // Source video URL lives directly on concepts.file_url (Supabase
-        // public bucket URL is stored whole, not split into path).
+        // Polish-28.0.2 Commit 64.2 hotfix: persona from POLISH23_VISION
+        // is a STRUCTURED OBJECT { gender, age_range, ethnicity, look,
+        // voice_tone } — not a string. Also handle the legacy UGC_
+        // DECONSTRUCTOR shape (analysis.subject.appearance) as a
+        // fallback so pre-Commit-64.1 concepts still produce a portrait
+        // rather than throwing at .trim(). flattenPersonaForClonePrompt
+        // normalizes both shapes to a rich description string.
+        const rawPersona = analysis?.['persona'] ?? null;
+        const subjectAppearance =
+          (analysis?.['subject'] as { appearance?: string } | undefined)?.appearance ?? null;
+        // Prefer the structured persona object; if absent, fall back to
+        // subject.appearance as a raw string.
+        const personaSource: unknown = rawPersona ?? subjectAppearance ?? '';
+        const personaDescription = flattenPersonaForClonePrompt(personaSource);
         const cachedRef = (conceptMeta?.['polish28_character_reference'] ??
           null) as Polish28CharacterReference | null;
         return safeInngestStepReturn({
-          persona,
+          personaDescription,
+          personaRawShape: typeof rawPersona,
           ugcOriginalScript: concept.ugcOriginalScript ?? '',
           sourceVideoUrl: concept.fileUrl ?? null,
           cachedCharacterReference: cachedRef,
           conceptMeta,
         });
       });
-      if (!source.persona || source.persona.trim().length < 10) {
-        const msg = 'Polish-28 requires concept.metadata.analysis.persona (Gemini vision output).';
+      if (
+        typeof source.personaDescription !== 'string' ||
+        source.personaDescription.trim().length < 10
+      ) {
+        const msg =
+          `Polish-28 could not extract a usable persona from concept.metadata.analysis. ` +
+          `Rendered length=${source.personaDescription?.length ?? 0} raw-shape=${source.personaRawShape}. ` +
+          `Expected the POLISH23_VISION structured persona object OR a non-empty subject.appearance string.`;
         await markJobFailed(jobId, jobUserId, msg, 0);
         throw new NonRetriableError(msg);
       }
@@ -347,7 +363,7 @@ export const generatePolish28CloneUgc = inngest.createFunction(
       allocatedVoiceId = voice.voiceId;
 
       // ---------- Step G: clone-or-reuse character reference ----------
-      const personaHash = hashPersona(source.persona);
+      const personaHash = hashPersona(source.personaDescription);
       const cached = source.cachedCharacterReference;
       const cachedIsFresh =
         cached &&
@@ -383,7 +399,7 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         // Simpler + reliable: fetch source video, ffmpeg-extract the
         // first frame as PNG, base64-encode, send as reference.
         const framePng = await extractFirstFramePng(sourceVideoUrl!);
-        const prompt = composeNanoBananaCharacterClonePrompt(source.persona);
+        const prompt = composeNanoBananaCharacterClonePrompt(source.personaDescription);
         const r = await cloneCharacterReferenceImage({
           userId: jobUserId,
           apiKey: keys.gemini!,

@@ -1,11 +1,6 @@
 import { computeGeminiImageCost, computeGeminiTextCost } from '@mbb/shared';
 import { callProvider, type CallProviderResult } from './chokepoint';
-import {
-  NANO_BANANA_PRO_DEFAULT_MODEL_ID,
-  NANO_BANANA_STANDARD_MODEL_ID,
-  composeNanoBananaCharacterClonePrompt,
-  nanoBananaProModel,
-} from './nano-banana-character-clone-prompt';
+import { nanoBananaProModel } from './nano-banana-character-clone-prompt';
 
 /**
  * Gemini 2.5 Flash (vision) + Nano Banana 2 (image gen) clients.
@@ -1787,7 +1782,9 @@ export {
   NANO_BANANA_STANDARD_MODEL_ID,
   composeNanoBananaCharacterClonePrompt,
   nanoBananaProModel,
-};
+  // Polish-28.0.2 Commit 64.2 hotfix.
+  flattenPersonaForClonePrompt,
+} from './nano-banana-character-clone-prompt';
 
 export async function verifyGeminiKey(
   apiKey: string,

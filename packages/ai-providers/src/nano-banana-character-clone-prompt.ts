@@ -67,8 +67,70 @@ export function nanoBananaProModel(): string {
  *   - Solid neutral background (transparent-adjacent light gray)
  *   - Sharp 1024×1024+ resolution
  */
-export function composeNanoBananaCharacterClonePrompt(personaDescription: string): string {
-  const trimmedPersona = personaDescription.trim();
+/**
+ * Polish-28.0.2 Commit 64.2 hotfix: shape-safe input coercion.
+ *
+ * The `analysis.persona` field emitted by the POLISH23_VISION_SYSTEM_
+ * PROMPT is a structured Polish23Persona object:
+ *
+ *   { gender: 'male' | 'female' | 'ambiguous',
+ *     age_range: '60s',
+ *     ethnicity: 'white' | 'black' | 'asian' | ... ,
+ *     look: 'Older gentleman with silver hair, warm expression, ...',
+ *     voice_tone: 'Warm, gentle, sincere' }
+ *
+ * The persona-synthesizer fallback (Polish-26.0.6 Commit 61.6, used
+ * when the UGC_DECONSTRUCTOR prompt fired for a Polish-23-shape
+ * pipeline) also returns this same shape.
+ *
+ * flattenPersonaForClonePrompt accepts EITHER the object shape OR a
+ * freeform string (for future-compat / degraded outputs). String
+ * input passes through trimmed; object input renders as a compact
+ * multi-line description that surfaces gender / age / ethnicity /
+ * look for maximum character-clone fidelity.
+ *
+ * voice_tone is intentionally OMITTED — it's audio-related and
+ * irrelevant to a visual portrait. Nano Banana Pro would only be
+ * distracted by "warm, sincere" when generating a portrait.
+ */
+export function flattenPersonaForClonePrompt(persona: unknown): string {
+  if (typeof persona === 'string') return persona.trim();
+  if (persona && typeof persona === 'object') {
+    const p = persona as {
+      gender?: unknown;
+      age_range?: unknown;
+      ethnicity?: unknown;
+      look?: unknown;
+      // Some callers might pass the UGC_DECONSTRUCTOR shape here —
+      // handle the `appearance` field too (worker's fallback path).
+      appearance?: unknown;
+    };
+    const parts: string[] = [];
+    if (typeof p.age_range === 'string' && p.age_range.trim()) {
+      parts.push(`Age: ${p.age_range.trim()}`);
+    }
+    if (typeof p.gender === 'string' && p.gender.trim()) {
+      parts.push(`Gender: ${p.gender.trim()}`);
+    }
+    if (typeof p.ethnicity === 'string' && p.ethnicity.trim()) {
+      parts.push(`Ethnicity: ${p.ethnicity.trim()}`);
+    }
+    const lookText =
+      typeof p.look === 'string' && p.look.trim()
+        ? p.look.trim()
+        : typeof p.appearance === 'string' && p.appearance.trim()
+          ? p.appearance.trim()
+          : '';
+    if (lookText) parts.push(`Look: ${lookText}`);
+    return parts.join('. ');
+  }
+  return '';
+}
+
+export function composeNanoBananaCharacterClonePrompt(
+  personaDescription: string | Record<string, unknown>,
+): string {
+  const trimmedPersona = flattenPersonaForClonePrompt(personaDescription);
   return [
     'Generate a photorealistic head-and-upper-torso PORTRAIT of the person described',
     'below. The reference image attached shows the exact person to preserve — carry',
