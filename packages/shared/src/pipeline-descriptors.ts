@@ -23,7 +23,7 @@ export interface PipelineDescriptor {
   /** label rendered in the form + job-review header */
   label: string;
   /** providerChoice column written on generation_jobs */
-  providerChoice: 'heygen' | 'openai' | 'gemini' | 'makeugc';
+  providerChoice: 'heygen' | 'openai' | 'gemini' | 'makeugc' | 'clone_ugc';
   /** format column written on generation_jobs */
   format: string;
   /**
@@ -45,7 +45,10 @@ export interface PipelineDescriptor {
     // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
     | 'generation/static-openai.requested'
     // Polish-26 Commit 61: HeyGen v3 managed Instant UGC worker.
-    | 'generation/polish26-heygen.requested';
+    | 'generation/polish26-heygen.requested'
+    // Polish-28.0.0 Commit 64: BYOK-only cloned-UGC pipeline
+    // (Nano Banana Pro + ElevenLabs IVC + HeyGen Avatar IV).
+    | 'generation/polish28-clone-ugc.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -57,6 +60,9 @@ export interface PipelineDescriptor {
     | 'wavespeed_ai'
     // Polish-25 Commit 2: MakeUGC pre-cast avatar renderer.
     | 'makeugc'
+    // Polish-28.0.0 Commit 64: ElevenLabs BYOK — required for the
+    // Instant Voice Clone + TTS-with-cloned-voice steps.
+    | 'elevenlabs'
   >;
 }
 
@@ -140,6 +146,20 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     workerEvent: 'generation/polish26-heygen.requested',
     requiredProviders: ['claude', 'gemini', 'heygen'],
   },
+  // Polish-28.0.0 Commit 64: BYOK-only cloned-UGC pipeline. Source-
+  // cloned character (Nano Banana Pro) + source-cloned voice
+  // (ElevenLabs IVC) + HeyGen Avatar IV image-to-video lip-sync.
+  // Platform variable cost = $0; user pays direct via their 4 BYOK
+  // keys (Claude, Gemini, ElevenLabs, HeyGen). Output locked to
+  // 9:16 vertical for Meta Reels / TikTok / IG Reels.
+  polish28_clone_ugc: {
+    pipeline: 'polish28_clone_ugc',
+    label: 'Instant UGC (Cloned)',
+    providerChoice: 'clone_ugc',
+    format: 'polish28_clone_ugc',
+    workerEvent: 'generation/polish28-clone-ugc.requested',
+    requiredProviders: ['claude', 'gemini', 'elevenlabs', 'heygen'],
+  },
 };
 
 export function describePipeline(pipeline: PipelineType): PipelineDescriptor {
@@ -203,4 +223,8 @@ export const ALL_PIPELINES: PipelineType[] = [
   // nuke. Users pick Static ad from the generate form; the "Custom UGC"
   // slot shows a "Coming soon" placeholder until Polish-28 lands.
   'static_openai_image',
+  // Polish-28.0.0 Commit 64: BYOK-only cloned-UGC pipeline. Worker
+  // is registered in packages/jobs/src/functions/index.ts; user-facing
+  // via the "Instant UGC (Cloned)" card on the generate form.
+  'polish28_clone_ugc',
 ];

@@ -347,3 +347,371 @@ export class ElevenLabsProvider implements AIProvider {
 export function bytesToBuffer(bytes: Uint8Array): Buffer {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 }
+
+// -------------------------------------------------------------------
+// Polish-28.0.0 Commit 64: Instant Voice Clone (IVC)
+// -------------------------------------------------------------------
+//
+// Endpoint (verified via elevenlabs.io/docs 2026):
+//   POST https://api.elevenlabs.io/v1/voices/add
+//   Auth : xi-api-key: <key>
+//   Body : multipart/form-data
+//     - name (str, required)
+//     - files (one or more audio blobs, required)
+//     - description (str, optional)
+//     - labels (JSON string, optional)
+//     - remove_background_noise (bool, optional)
+//   Response 200: { voice_id: string, requires_verification: false }
+//
+// IVC is FREE to create — no character credits consumed at creation
+// time. Slots are the hard cap: Starter 10 / Creator 30 / Pro 160 /
+// Scale 660 / Business 1660. Slots are lifetime holdings; deleting a
+// voice frees the slot immediately. Polish-28 uses one temp voice
+// per generation + deletes it in the cleanup step (with a daily
+// orphan-reaper cron as backstop).
+//
+// Sample requirements: ≥1 min of clean speech; 1-2 min sweet spot.
+// Source ads shorter than 60s are LOOPED by extract-source-audio.ts
+// before submission (Polish-28 spec).
+
+const IVC_TIMEOUT_MS = 45_000;
+const DELETE_VOICE_TIMEOUT_MS = 15_000;
+
+/**
+ * Polish-28.0.0 Commit 64: name prefix for temp voices created by the
+ * Polish-28 worker. The daily orphaned-voice reaper cron uses this
+ * prefix to identify + delete voices that outlived their generation
+ * job (i.e. cleanup step didn't fire cleanly).
+ */
+export const POLISH28_TEMP_VOICE_NAME_PREFIX = 'polish28_temp_';
+
+export interface CreateInstantVoiceCloneInput {
+  userId: string;
+  apiKey: string;
+  /**
+   * Voice name. Should start with POLISH28_TEMP_VOICE_NAME_PREFIX so
+   * the orphan reaper can identify it. Downstream `deleteElevenLabsVoice`
+   * cleanup happens after successful generation.
+   */
+  name: string;
+  /**
+   * The source ad's audio bytes (after ffmpeg extraction + loop
+   * mitigation). ElevenLabs accepts MP3 / WAV / FLAC / M4A / OGG /
+   * WebM. ≤10 MB per file, ≤25 files per clone.
+   */
+  audioBytes: Uint8Array;
+  audioMimeType: string;
+  /** Suggested filename for the multipart part (e.g. 'source.mp3'). */
+  audioFilename: string;
+  description?: string;
+  removeBackgroundNoise?: boolean;
+  generationJobId?: string;
+  generatedCreativeId?: string;
+}
+
+export interface CreateInstantVoiceCloneResult {
+  ok: boolean;
+  voiceId?: string;
+  latencyMs: number;
+  status?: number;
+  errorMessage?: string;
+  /** True when ElevenLabs flagged the voice as needing manual verification
+   *  (never expected for IVC — PVC only — but surfaced for forensics). */
+  requiresVerification?: boolean;
+}
+
+/**
+ * Create an Instant Voice Clone. Multipart upload of the source-ad
+ * audio bytes; returns a voice_id ready for immediate TTS use.
+ *
+ * Cost: FREE at creation (only a slot is consumed). Slot pressure is
+ * the real constraint — the caller MUST call deleteElevenLabsVoice
+ * after use (or the reaper will collect it within 24h).
+ */
+export async function createInstantVoiceClone(
+  input: CreateInstantVoiceCloneInput,
+): Promise<CreateInstantVoiceCloneResult> {
+  const t0 = Date.now();
+  const url = `${ELEVENLABS_BASE}/v1/voices/add`;
+
+  const form = new FormData();
+  form.append('name', input.name);
+  // Copy the Uint8Array bytes into a fresh ArrayBuffer so Blob's
+  // BlobPart typing accepts it (Buffer's SharedArrayBuffer-tagged
+  // backing store fails the ArrayBuffer constraint in TS strict).
+  const audioCopy = new Uint8Array(input.audioBytes.byteLength);
+  audioCopy.set(input.audioBytes);
+  const blob = new Blob([audioCopy], { type: input.audioMimeType });
+  form.append('files', blob, input.audioFilename);
+  if (input.description) form.append('description', input.description);
+  if (input.removeBackgroundNoise) form.append('remove_background_noise', 'true');
+
+  logElevenLabsRequest('ivc-create', 'POST', url, input.apiKey, {
+    name: input.name,
+    audio_bytes: input.audioBytes.byteLength,
+    audio_mime: input.audioMimeType,
+    audio_filename: input.audioFilename,
+    remove_background_noise: input.removeBackgroundNoise ?? false,
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), IVC_TIMEOUT_MS);
+  let status = 0;
+  let errorMessage: string | undefined;
+  let voiceId: string | undefined;
+  let requiresVerification: boolean | undefined;
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        // NOTE: do NOT set content-type — fetch will set the correct
+        // multipart boundary automatically when body is FormData.
+        'xi-api-key': input.apiKey,
+        accept: 'application/json',
+      },
+      body: form,
+      signal: controller.signal,
+    });
+    status = res.status;
+    if (status >= 200 && status < 300) {
+      const body = (await res.json()) as { voice_id?: string; requires_verification?: boolean };
+      voiceId = typeof body.voice_id === 'string' ? body.voice_id : undefined;
+      requiresVerification = body.requires_verification === true;
+      if (!voiceId) {
+        errorMessage = `ElevenLabs IVC-create response missing voice_id: ${JSON.stringify(body).slice(0, 400)}`;
+      }
+    } else {
+      let errBody: unknown = undefined;
+      try {
+        errBody = await res.json();
+      } catch {
+        errBody = await res.text();
+      }
+      const detail = extractElevenLabsErrorMessage(errBody) ?? undefined;
+      errorMessage = translateElevenLabsErrorStatus(status, detail);
+    }
+  } catch (err) {
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    errorMessage = isAbort
+      ? `ElevenLabs IVC-create timed out after ${IVC_TIMEOUT_MS}ms`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const latencyMs = Date.now() - t0;
+  logElevenLabsResponse('ivc-create', 'POST', url, status, 0, errorMessage);
+  try {
+    await logAiProviderApiCall({
+      userId: input.userId,
+      provider: 'elevenlabs' as AIProviderName,
+      endpoint: 'POST /v1/voices/add',
+      method: 'POST',
+      responseStatus: status,
+      latencyMs,
+      requestBody: {
+        purpose: 'polish28_ivc_create',
+        name: input.name,
+        audio_bytes: input.audioBytes.byteLength,
+      },
+      ...(errorMessage ? { errorMessage } : {}),
+      ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+      ...(input.generatedCreativeId ? { generatedCreativeId: input.generatedCreativeId } : {}),
+    });
+  } catch (logErr) {
+    console.error('[elevenlabs] IVC-create audit log failed:', logErr);
+  }
+
+  if (voiceId) {
+    return {
+      ok: true,
+      voiceId,
+      latencyMs,
+      status,
+      ...(requiresVerification !== undefined ? { requiresVerification } : {}),
+    };
+  }
+  return {
+    ok: false,
+    latencyMs,
+    status,
+    errorMessage: errorMessage ?? 'ElevenLabs IVC-create failed with no error message.',
+  };
+}
+
+// -------------------------------------------------------------------
+// Delete voice — DELETE /v1/voices/{voice_id}
+// -------------------------------------------------------------------
+
+export interface DeleteElevenLabsVoiceInput {
+  userId: string;
+  apiKey: string;
+  voiceId: string;
+  generationJobId?: string;
+}
+
+export interface DeleteElevenLabsVoiceResult {
+  ok: boolean;
+  latencyMs: number;
+  status?: number;
+  errorMessage?: string;
+}
+
+/**
+ * DELETE /v1/voices/{voice_id}. Frees a voice slot immediately.
+ * Used by the Polish-28 worker's cleanup step (post-generation) and
+ * the daily orphaned-voice reaper cron (backstop).
+ *
+ * Idempotent: a 404 on delete is treated as success (voice already
+ * gone — nothing to clean up). Any other non-2xx is surfaced.
+ */
+export async function deleteElevenLabsVoice(
+  input: DeleteElevenLabsVoiceInput,
+): Promise<DeleteElevenLabsVoiceResult> {
+  const t0 = Date.now();
+  const url = `${ELEVENLABS_BASE}/v1/voices/${encodeURIComponent(input.voiceId)}`;
+  logElevenLabsRequest('voice-delete', 'DELETE', url, input.apiKey, { voice_id: input.voiceId });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DELETE_VOICE_TIMEOUT_MS);
+  let status = 0;
+  let errorMessage: string | undefined;
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'xi-api-key': input.apiKey, accept: 'application/json' },
+      signal: controller.signal,
+    });
+    status = res.status;
+    if (status === 404) {
+      // Idempotent — voice already gone.
+      return { ok: true, latencyMs: Date.now() - t0, status };
+    }
+    if (status < 200 || status >= 300) {
+      let errBody: unknown = undefined;
+      try {
+        errBody = await res.json();
+      } catch {
+        errBody = await res.text();
+      }
+      errorMessage = translateElevenLabsErrorStatus(
+        status,
+        extractElevenLabsErrorMessage(errBody) ?? undefined,
+      );
+    }
+  } catch (err) {
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    errorMessage = isAbort
+      ? `ElevenLabs voice-delete timed out after ${DELETE_VOICE_TIMEOUT_MS}ms`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const latencyMs = Date.now() - t0;
+  logElevenLabsResponse('voice-delete', 'DELETE', url, status, 0, errorMessage);
+  try {
+    await logAiProviderApiCall({
+      userId: input.userId,
+      provider: 'elevenlabs' as AIProviderName,
+      endpoint: 'DELETE /v1/voices/{id}',
+      method: 'DELETE',
+      responseStatus: status,
+      latencyMs,
+      requestBody: { purpose: 'polish28_ivc_delete', voice_id: input.voiceId },
+      ...(errorMessage ? { errorMessage } : {}),
+      ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+    });
+  } catch (logErr) {
+    console.error('[elevenlabs] voice-delete audit log failed:', logErr);
+  }
+
+  return {
+    ok: !errorMessage,
+    latencyMs,
+    status,
+    ...(errorMessage ? { errorMessage } : {}),
+  };
+}
+
+// -------------------------------------------------------------------
+// List voices — GET /v1/voices  (used by the orphan-reaper cron)
+// -------------------------------------------------------------------
+
+export interface ListElevenLabsVoicesInput {
+  userId: string;
+  apiKey: string;
+}
+
+export interface ListedElevenLabsVoice {
+  voice_id: string;
+  name: string;
+  category?: string;
+  /** Milliseconds since epoch when the voice was created. Present on
+   *  cloned voices; may be missing on stock voices. */
+  created_at_unix?: number;
+}
+
+export interface ListElevenLabsVoicesResult {
+  ok: boolean;
+  voices: ListedElevenLabsVoice[];
+  latencyMs: number;
+  status?: number;
+  errorMessage?: string;
+}
+
+/**
+ * List all voices on the account. Used by the Polish-28 daily
+ * orphan-reaper to find polish28_temp_ voices older than 24h.
+ */
+export async function listElevenLabsVoices(
+  input: ListElevenLabsVoicesInput,
+): Promise<ListElevenLabsVoicesResult> {
+  const t0 = Date.now();
+  const url = `${ELEVENLABS_BASE}/v1/voices`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
+  let status = 0;
+  let voices: ListedElevenLabsVoice[] = [];
+  let errorMessage: string | undefined;
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { 'xi-api-key': input.apiKey, accept: 'application/json' },
+      signal: controller.signal,
+    });
+    status = res.status;
+    if (status >= 200 && status < 300) {
+      const body = (await res.json()) as { voices?: ListedElevenLabsVoice[] };
+      voices = Array.isArray(body.voices) ? body.voices : [];
+    } else {
+      let errBody: unknown = undefined;
+      try {
+        errBody = await res.json();
+      } catch {
+        errBody = await res.text();
+      }
+      errorMessage = translateElevenLabsErrorStatus(
+        status,
+        extractElevenLabsErrorMessage(errBody) ?? undefined,
+      );
+    }
+  } catch (err) {
+    errorMessage = err instanceof Error ? err.message : String(err);
+  } finally {
+    clearTimeout(timer);
+  }
+  const latencyMs = Date.now() - t0;
+  return {
+    ok: !errorMessage,
+    voices,
+    latencyMs,
+    status,
+    ...(errorMessage ? { errorMessage } : {}),
+  };
+}

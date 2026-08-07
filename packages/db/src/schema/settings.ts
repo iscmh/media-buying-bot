@@ -136,6 +136,15 @@ export const userSettings = pgTable('user_settings', {
   defaultHeygenAvatarId: text('default_heygen_avatar_id'),
   defaultHeygenVoiceId: text('default_heygen_voice_id'),
 
+  // Polish-28.0.0 Commit 64: first-time acknowledgment of the HeyGen
+  // Avatar IV likeness-rights TOS. The Polish-28 generation form
+  // requires this checkbox before the first cloned-UGC dispatch so
+  // the paper trail is stored per-user (HeyGen TOS assigns caller
+  // liability for uploaded persona images). NULL = user has never
+  // fired a Polish-28 job. Set to the acceptance timestamp on first
+  // acknowledgment; downstream generations skip the modal.
+  polish28RightsAcceptedAt: timestamp('polish28_rights_accepted_at', { withTimezone: true }),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

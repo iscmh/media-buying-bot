@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '27.0.0';
+export const POLISH_VERSION = '28.0.0';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '27.0.0';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-27.0.0 Commit 63 - nuke legacy UGC surface for Polish-28 rebuild';
+  'Polish-28.0.0 Commit 64 - BYOK cloned-UGC pipeline (Nano Banana Pro + ElevenLabs IVC + HeyGen Avatar IV)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -62,6 +62,18 @@ export {
   ELEVENLABS_UGC_VOICE_SETTINGS,
   type ElevenLabsTtsInput,
   type ElevenLabsTtsResult,
+  // Polish-28.0.0 Commit 64: Instant Voice Clone + cleanup + reaper support.
+  POLISH28_TEMP_VOICE_NAME_PREFIX,
+  createInstantVoiceClone,
+  deleteElevenLabsVoice,
+  listElevenLabsVoices,
+  type CreateInstantVoiceCloneInput,
+  type CreateInstantVoiceCloneResult,
+  type DeleteElevenLabsVoiceInput,
+  type DeleteElevenLabsVoiceResult,
+  type ListElevenLabsVoicesInput,
+  type ListElevenLabsVoicesResult,
+  type ListedElevenLabsVoice,
 } from './elevenlabs';
 
 // Phase 3b: real provider clients used by the Inngest generation jobs.
@@ -104,6 +116,14 @@ export {
   describeGeminiUploadError,
   // Polish-25.8 Commit 53: Gemini vision model resolver + env override.
   DEFAULT_GEMINI_VISION_MODEL,
+  // Polish-28.0.0 Commit 64: Nano Banana Pro character-clone image gen.
+  cloneCharacterReferenceImage,
+  NANO_BANANA_PRO_DEFAULT_MODEL_ID,
+  NANO_BANANA_STANDARD_MODEL_ID,
+  composeNanoBananaCharacterClonePrompt,
+  nanoBananaProModel,
+  type CloneCharacterReferenceImageInput,
+  type CloneCharacterReferenceImageResult,
 } from './gemini-client';
 export {
   callClaude,
@@ -296,6 +316,34 @@ export {
   type SubmitHeygenVideoInput,
   type SubmitHeygenVideoResult,
 } from './heygen-v3-client';
+
+// Polish-28.0.0 Commit 64: HeyGen Avatar IV image-to-video client
+// (BYOK per user). Distinct from the v3 pre-cast-avatar client above
+// — takes a caller-supplied reference image + audio URL, returns a
+// lip-synced video.
+export {
+  POLISH28_ASPECT_RATIO,
+  heygenAvatarIvCostPerSecUsd,
+  estimateHeygenAvatarIvCostUsd,
+  uploadHeygenImageAsset,
+  submitHeygenAvatarIvGeneration,
+  checkHeygenAvatarIvStatus,
+  isTerminalAvatarIvStatus,
+  classifyHeygenAvatarIvError,
+  HeygenAvatarIvAuthError,
+  HeygenAvatarIvModerationError,
+  HeygenAvatarIvQuotaError,
+  type Polish28AspectRatio,
+  type HeygenAvatarIvErrorCategory,
+  type HeygenAvatarIvVideoStatus,
+  type UploadHeygenImageAssetInput,
+  type UploadHeygenImageAssetResult,
+  type SubmitHeygenAvatarIvInput,
+  type SubmitHeygenAvatarIvResult,
+  type CheckHeygenAvatarIvStatusInput,
+  type CheckHeygenAvatarIvStatusResult,
+} from './heygen-avatar-iv-client';
+
 export {
   callProvider,
   type ProviderName as ProviderChokepointName,

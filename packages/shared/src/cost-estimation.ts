@@ -150,7 +150,13 @@ export type PipelineType =
   // = $1.50 per 30s video). Higher per-video cost than MakeUGC's
   // $0.05 but the per-second model + real webhook support + 500+
   // native avatar library makes it the sustainable primary.
-  | 'polish26_heygen';
+  | 'polish26_heygen'
+  // Polish-28.0.0 Commit 64: BYOK-only cloned-UGC pipeline —
+  // Nano Banana Pro character clone + ElevenLabs Instant Voice
+  // Clone + HeyGen Avatar IV image-to-video lip-sync. Users pay
+  // direct via BYOK; platform variable cost = $0. Per-30s BYOK
+  // cost ~$2.23 (Avatar IV 1080p dominates at ~$2.00).
+  | 'polish28_clone_ugc';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -474,6 +480,67 @@ function estimateByPipeline(
           `Instant UGC (HeyGen standard, ${targetSeconds}s) ` +
           `(${variantCount} × $${perVideoUsd.toFixed(2)})`,
         cost: round4(variantCount * perVideoUsd),
+      });
+      break;
+    }
+    case 'polish28_clone_ugc': {
+      // Polish-28.0.0 Commit 64: full per-provider cost breakdown for
+      // the cloned-UGC BYOK pipeline. Per operator's Phase-1 approved
+      // decision, we surface each vendor line so users see exactly
+      // where their money goes across their own connected keys.
+      //
+      // Real Phase-1 verified rates (2026):
+      //   Claude script condenser              $0.02/variant
+      //   Gemini vision (source + frame)       $0.05/variant
+      //   Nano Banana Pro character clone      $0.13/variant  (~2K tokens × $120/1M)
+      //   ElevenLabs voice clone (creation)    $0.00           (FREE)
+      //   ElevenLabs TTS (~30s @ ~500 chars)   $0.01/variant  (Creator tier)
+      //   HeyGen Avatar IV 1080p               $2.00/30s      ($0.0667/sec × 30)
+      //   Supabase storage + ffmpeg extract    $0.02/variant
+      //   -----------------------------------
+      //   Total per 30s BYOK video             ~$2.23
+      //
+      // Duplicated constants (rather than imported from
+      // @mbb/ai-providers) because @mbb/shared cannot depend on that
+      // package without cycling the dep graph — same pattern the
+      // polish25/26 branches above follow.
+      const P28_CLAUDE = 0.02;
+      const P28_GEMINI_VISION = 0.05;
+      const P28_NANO_BANANA_PRO = 0.13;
+      const P28_ELEVENLABS_TTS = 0.01;
+      const P28_HEYGEN_AVATAR_IV_PER_SEC = (0.5 / 60) * 8; // 0.0667 $/sec = $4/min = $2/30s
+      const P28_STORAGE_FFMPEG = 0.02;
+      const targetSeconds28 = targetSecondsHint ?? 30;
+      const perVideoHeygen = P28_HEYGEN_AVATAR_IV_PER_SEC * targetSeconds28;
+      breakdown.push({
+        item: `Claude script condense (${variantCount} × $${P28_CLAUDE.toFixed(2)})`,
+        cost: round4(variantCount * P28_CLAUDE),
+      });
+      breakdown.push({
+        item: `Gemini vision — source + frame (${variantCount} × $${P28_GEMINI_VISION.toFixed(2)})`,
+        cost: round4(variantCount * P28_GEMINI_VISION),
+      });
+      breakdown.push({
+        item: `Nano Banana Pro character clone (${variantCount} × $${P28_NANO_BANANA_PRO.toFixed(2)})`,
+        cost: round4(variantCount * P28_NANO_BANANA_PRO),
+      });
+      breakdown.push({
+        item: `ElevenLabs voice clone (creation, free)`,
+        cost: 0,
+      });
+      breakdown.push({
+        item: `ElevenLabs TTS with cloned voice (${variantCount} × $${P28_ELEVENLABS_TTS.toFixed(2)})`,
+        cost: round4(variantCount * P28_ELEVENLABS_TTS),
+      });
+      breakdown.push({
+        item:
+          `HeyGen Avatar IV lip-sync 1080p (${targetSeconds28}s) ` +
+          `(${variantCount} × $${perVideoHeygen.toFixed(2)})`,
+        cost: round4(variantCount * perVideoHeygen),
+      });
+      breakdown.push({
+        item: `Storage + ffmpeg (${variantCount} × $${P28_STORAGE_FFMPEG.toFixed(2)})`,
+        cost: round4(variantCount * P28_STORAGE_FFMPEG),
       });
       break;
     }

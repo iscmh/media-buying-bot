@@ -21,6 +21,10 @@ import { generateStaticImageVariants } from './generate-static-image-variants';
 //   refreshHeygenAvatarIndexManual,
 // } from './refresh-heygen-avatar-index';
 import { generateStaticOpenaiImageVariants } from './generate-static-openai-image-variants';
+// Polish-28.0.0 Commit 64: BYOK cloned-UGC pipeline (Nano Banana Pro
+// character clone + ElevenLabs Instant Voice Clone + HeyGen Avatar IV
+// image-to-video lip-sync). Rebuild successor to the Polish-25/26 nuke.
+import { generatePolish28CloneUgc } from './generate-polish28-clone-ugc';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -75,6 +79,9 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // the SOLE surviving user-facing generation pipeline post-Polish-27
   // Commit 63 nuke. Static ads keep working end-to-end.
   'generation/static-openai.requested',
+  // Polish-28.0.0 Commit 64: BYOK cloned-UGC pipeline. First re-add
+  // to the registered set since the Polish-27 Commit 63 clear-out.
+  'generation/polish28-clone-ugc.requested',
 ] as const);
 
 export const functions = [
@@ -100,6 +107,8 @@ export const functions = [
   // imports at the top of the file + re-add these entries here.
   // Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad worker.
   generateStaticOpenaiImageVariants,
+  // Polish-28.0.0 Commit 64: BYOK cloned-UGC pipeline worker.
+  generatePolish28CloneUgc,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

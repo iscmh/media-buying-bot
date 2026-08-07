@@ -407,6 +407,11 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   | 'generation/static-openai.requested'
   // Polish-26 Commit 61: HeyGen v3 PAYG managed backend worker.
   | 'generation/polish26-heygen.requested'
+  // Polish-28.0.0 Commit 64: BYOK cloned-UGC pipeline (character +
+  // voice clone + HeyGen Avatar IV lip-sync). Descriptor now
+  // dispatches this event; typing the union keeps analyze-concept
+  // in lockstep with pipeline-descriptors.ts.
+  | 'generation/polish28-clone-ugc.requested'
 > {
   try {
     const db = getDb();

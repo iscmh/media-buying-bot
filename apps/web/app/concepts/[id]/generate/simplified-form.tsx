@@ -18,9 +18,10 @@ import { cn } from '@/lib/utils';
 import { acknowledgeLiveGenerationAction } from './ack-action';
 import { createGenerationJobAction, type ConnectedProviders } from './actions';
 import {
-  // Polish-27.0.0 Commit 63: POLISH26_DESCRIPTION + POLISH26_DISPLAY_NAME
-  // imports dropped along with Polish26PickerCard. Constants still
-  // exported from simplified-form-helpers for the Polish-28 restore.
+  // Polish-28.0.0 Commit 64: cloned-UGC card constants.
+  POLISH28_DESCRIPTION,
+  POLISH28_DISPLAY_NAME,
+  estimatePolish28CostPerVariantUsd,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
@@ -122,6 +123,8 @@ export function SimplifiedGenerationForm({
   );
   const [polish23Selected, setPolish23Selected] = React.useState(false);
   const [polish26Selected, setPolish26Selected] = React.useState(false);
+  // Polish-28.0.0 Commit 64: cloned-UGC card selection state.
+  const [polish28Selected, setPolish28Selected] = React.useState(false);
   // Polish-25.3 Commit 18b: static ad picker + quality tier. Mutually
   // exclusive with polish23Selected + polish26Selected + modelId.
   // Defaults to Medium quality — matches the shipped cost line.
@@ -146,6 +149,7 @@ export function SimplifiedGenerationForm({
     variantCount,
     polish23Selected,
     polish26Selected,
+    polish28Selected,
     staticOpenaiSelected,
     staticOpenaiQuality,
   };
@@ -170,6 +174,11 @@ export function SimplifiedGenerationForm({
   const polish26Estimate = polish26Selected
     ? { estimateUsd: variantCount * estimatePolish26CostPerVariantUsd(detectedSourceSeconds).usd }
     : null;
+  // Polish-28.0.0 Commit 64: fixed per-variant BYOK cost from Phase 1
+  // investigation ($2.23 per 30s video, dominated by HeyGen Avatar IV).
+  const polish28Estimate = polish28Selected
+    ? { estimateUsd: variantCount * estimatePolish28CostPerVariantUsd().usd }
+    : null;
   // Polish-25.3 Commit 18b: static-openai cost preview per quality
   // tier. Fixed per-variant, no duration scaling (image, not video).
   const staticOpenaiEstimate = staticOpenaiSelected
@@ -177,20 +186,22 @@ export function SimplifiedGenerationForm({
         estimateUsd: variantCount * estimateStaticOpenaiCostPerVariantUsd(staticOpenaiQuality).usd,
       }
     : null;
-  const estimate = staticOpenaiEstimate
-    ? staticOpenaiEstimate
-    : polish26Estimate
-      ? polish26Estimate
-      : polish23Estimate
-        ? polish23Estimate
-        : modelId
-          ? estimateGenerationCost({
-              conceptType: 'ugc',
-              variantCount,
-              videoModelId: modelId,
-              sourceDurationSeconds: previewSeconds,
-            })
-          : null;
+  const estimate = polish28Estimate
+    ? polish28Estimate
+    : staticOpenaiEstimate
+      ? staticOpenaiEstimate
+      : polish26Estimate
+        ? polish26Estimate
+        : polish23Estimate
+          ? polish23Estimate
+          : modelId
+            ? estimateGenerationCost({
+                conceptType: 'ugc',
+                variantCount,
+                videoModelId: modelId,
+                sourceDurationSeconds: previewSeconds,
+              })
+            : null;
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate != null && estimate.estimateUsd > remaining;
@@ -224,6 +235,16 @@ export function SimplifiedGenerationForm({
   if (!connectedProviders.gemini.connected) polish26MissingKeys.push('Gemini');
   const hasPolish26Keys = polish26MissingKeys.length === 0;
 
+  // Polish-28.0.0 Commit 64: cloned-UGC key gate. Requires all 4
+  // BYOK — Claude + Gemini + ElevenLabs + HeyGen. Missing keys
+  // surface in the disabled-Generate tooltip + inline nudge.
+  const polish28MissingKeys: string[] = [];
+  if (!connectedProviders.claude.connected) polish28MissingKeys.push('Claude');
+  if (!connectedProviders.gemini.connected) polish28MissingKeys.push('Gemini');
+  if (!connectedProviders.elevenlabs.connected) polish28MissingKeys.push('ElevenLabs');
+  if (!connectedProviders.heygen.connected) polish28MissingKeys.push('HeyGen');
+  const hasPolish28Keys = polish28MissingKeys.length === 0;
+
   // Polish-25.3 Commit 18b: static-openai gate. Needs Claude
   // (copy rewrite) + OpenAI (gpt-image-2). Gemini optional (source
   // vision analysis is skipped for the static path). Missing keys
@@ -238,20 +259,24 @@ export function SimplifiedGenerationForm({
   if (!hasElevenLabsKey) legacyMissingKeys.push('ElevenLabs');
   const hasLegacyKeys = hasHedraKey && hasElevenLabsKey;
 
-  const hasProviderKey = staticOpenaiSelected
-    ? hasStaticOpenaiKeys
-    : polish26Selected
-      ? hasPolish26Keys
-      : polish23Selected
-        ? hasPolish23Keys
-        : hasLegacyKeys;
-  const missingKeys = staticOpenaiSelected
-    ? staticOpenaiMissingKeys
-    : polish26Selected
-      ? polish26MissingKeys
-      : polish23Selected
-        ? polish23MissingKeys
-        : legacyMissingKeys;
+  const hasProviderKey = polish28Selected
+    ? hasPolish28Keys
+    : staticOpenaiSelected
+      ? hasStaticOpenaiKeys
+      : polish26Selected
+        ? hasPolish26Keys
+        : polish23Selected
+          ? hasPolish23Keys
+          : hasLegacyKeys;
+  const missingKeys = polish28Selected
+    ? polish28MissingKeys
+    : staticOpenaiSelected
+      ? staticOpenaiMissingKeys
+      : polish26Selected
+        ? polish26MissingKeys
+        : polish23Selected
+          ? polish23MissingKeys
+          : legacyMissingKeys;
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -317,26 +342,25 @@ export function SimplifiedGenerationForm({
         </section>
       )}
 
-      {/* Polish-27.0.0 Commit 63: UGC pipelines under reconstruction
-          for the Polish-28 rebuild (Seedance 2.5 + Higgsfield Speak v2
-          + ElevenLabs BYOK). The Polish26PickerCard render is replaced
-          with a "Coming soon" placeholder — Static ad remains the sole
-          user-facing generation pipeline until Polish-28 lands. Full
-          card component + all state hooks preserved above; rollback
-          brings the card back in a single edit. */}
-      <section
-        className="border-border bg-bg-surface rounded-md border p-4 opacity-60"
-        aria-disabled
-      >
-        <div className="text-fg-subtle mb-1 text-xs font-semibold uppercase tracking-wider">
-          Custom UGC
-        </div>
-        <div className="text-fg text-sm font-medium">Coming soon</div>
-        <p className="text-fg-muted mt-1 text-xs">
-          UGC pipelines under reconstruction. Static ad below is the sole live pipeline while we
-          rebuild custom-avatar UGC on a new backend.
-        </p>
-      </section>
+      {/* Polish-28.0.0 Commit 64: active "Instant UGC (Cloned)" card
+          replaces the Commit-63 "Coming soon" placeholder. Dispatches
+          the polish28_clone_ugc pipeline via analyze-concept → the
+          generate-polish28-clone-ugc worker (character clone via Nano
+          Banana Pro + voice clone via ElevenLabs IVC + lip-sync via
+          HeyGen Avatar IV). BYOK-required: Claude + Gemini + ElevenLabs
+          + HeyGen. Output locked to 9:16 vertical. */}
+      <Polish28PickerCard
+        picked={polish28Selected}
+        disabled={isPending}
+        missingKeys={polish28MissingKeys}
+        onPick={() => {
+          setPolish28Selected(true);
+          setStaticOpenaiSelected(false);
+          setPolish26Selected(false);
+          setPolish23Selected(false);
+          setModelId(null);
+        }}
+      />
 
       {/* Polish-25.3 Commit 18b: Static ad picker. Rendered next to
           Instant UGC. Reveals a low/medium/high quality selector when
@@ -660,5 +684,68 @@ function StaticOpenaiPickerCard({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Polish-28.0.0 Commit 64: cloned-UGC picker card. Active successor
+ * to the pre-nuke Polish26PickerCard. Displays the four required
+ * BYOK providers + the fixed per-30s cost ($2.23). Missing-key
+ * warning surfaces inline so users see exactly which key to connect.
+ */
+interface Polish28PickerCardProps {
+  picked: boolean;
+  disabled: boolean;
+  missingKeys: string[];
+  onPick: () => void;
+}
+
+function Polish28PickerCard({ picked, disabled, missingKeys, onPick }: Polish28PickerCardProps) {
+  const canPick = missingKeys.length === 0;
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      disabled={disabled || !canPick}
+      aria-pressed={picked}
+      className={cn(
+        'group relative flex w-full flex-col gap-2 rounded-md border p-4 text-left transition-colors',
+        picked
+          ? 'border-fg bg-fg/5'
+          : 'border-[color:var(--accent-positive)]/50 bg-bg-surface hover:border-fg/50',
+        (disabled || !canPick) && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <span
+        className={cn(
+          'absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+          'bg-[color:var(--accent-positive)]/15 text-[color:var(--accent-positive)]',
+        )}
+      >
+        BYOK - Recommended
+      </span>
+      {picked && (
+        <CheckCircle2 className="text-fg absolute right-28 top-3 h-4 w-4" aria-hidden="true" />
+      )}
+      <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
+        Instant UGC (Cloned)
+      </div>
+      <div className="text-fg text-sm font-semibold">{POLISH28_DISPLAY_NAME}</div>
+      <div className="text-fg-muted text-xs leading-relaxed">{POLISH28_DESCRIPTION}</div>
+      <div className="text-fg-subtle mt-1 text-[11px]">Output: 9:16 vertical (Reels/TikTok)</div>
+      {!canPick && (
+        <div className="mt-2 text-xs text-[color:var(--accent-negative)]">
+          Connect {missingKeys.join(' + ')} at{' '}
+          <Link
+            href="/settings/connections"
+            className="underline underline-offset-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Settings → Connections
+          </Link>{' '}
+          to unlock.
+        </div>
+      )}
+    </button>
   );
 }

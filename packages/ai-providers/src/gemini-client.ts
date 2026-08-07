@@ -1,5 +1,11 @@
 import { computeGeminiImageCost, computeGeminiTextCost } from '@mbb/shared';
 import { callProvider, type CallProviderResult } from './chokepoint';
+import {
+  NANO_BANANA_PRO_DEFAULT_MODEL_ID,
+  NANO_BANANA_STANDARD_MODEL_ID,
+  composeNanoBananaCharacterClonePrompt,
+  nanoBananaProModel,
+} from './nano-banana-character-clone-prompt';
 
 /**
  * Gemini 2.5 Flash (vision) + Nano Banana 2 (image gen) clients.
@@ -1589,6 +1595,200 @@ export async function analyzeMakeugcAvatarThumbnail(
 }
 
 /** Lightweight verify: 1-token text request. Returns 200 on valid key. */
+// =========================================================================
+// Polish-28.0.0 Commit 64: Nano Banana Pro character-clone image gen
+// =========================================================================
+//
+// Uses Google's Gemini image-generation head (model
+// `gemini-3-pro-image-preview`, aka "Nano Banana Pro"). Same base URL +
+// x-goog-api-key auth as the vision / text calls above — only the model
+// ID + generationConfig.responseModalities differ.
+//
+// Retail cost (2026 verified): ~$0.134/image at 1K-2K output resolution
+// (~2K output tokens × $120/1M output tokens). Standard Nano Banana
+// (`gemini-2.5-flash-image`) is ~$0.039/image — 3× cheaper, lower fidelity;
+// Polish-28 defaults to Pro per operator's Phase 1 decision.
+//
+// The response returns the image as base64 in `inline_data.data` with
+// the MIME type on `inline_data.mime_type` — extractImage() (above)
+// handles both snake_case + camelCase shapes Google occasionally
+// returns.
+
+export interface CloneCharacterReferenceImageInput {
+  userId: string;
+  apiKey: string;
+  /**
+   * The persona-clone prompt built via
+   * composeNanoBananaCharacterClonePrompt(personaDescription).
+   */
+  prompt: string;
+  /**
+   * ONE reference frame from the source ad (Gemini frame extract or
+   * ffmpeg-extracted keyframe). Base64-encoded WITHOUT the data-URL
+   * prefix. Nano Banana Pro can accept up to 14 refs; we keep it at
+   * one for cost + latency determinism.
+   */
+  referenceImageBase64: string;
+  /** MIME of the reference image ('image/png' | 'image/jpeg' | 'image/webp'). */
+  referenceImageMimeType: string;
+  /**
+   * Optional model ID override. Defaults to the env-configurable
+   * NANO_BANANA_PRO_DEFAULT_MODEL_ID ('gemini-3-pro-image-preview').
+   * Pass NANO_BANANA_STANDARD_MODEL_ID ('gemini-2.5-flash-image')
+   * for the cheaper MVP tier.
+   */
+  modelId?: string;
+  generationJobId?: string;
+  generatedCreativeId?: string;
+}
+
+export interface CloneCharacterReferenceImageResult {
+  ok: boolean;
+  /** Generated portrait as base64 (no data-URL prefix). Undefined on failure. */
+  imageBase64?: string;
+  /** MIME type Google returned (typically 'image/png'). */
+  imageMimeType?: string;
+  costUsd: number;
+  latencyMs: number;
+  errorMessage?: string;
+  /** Per-generation diagnostics for logging. */
+  diagnostics?: {
+    modelId: string;
+    referenceBytes: number;
+    referenceMime: string;
+    geminiStatus?: number;
+    geminiRawBodyExcerpt?: string;
+    failedAt?: 'gemini' | 'no-image-in-response';
+  };
+}
+
+/**
+ * Nano Banana Pro character-clone. Sends a persona-anchored prompt +
+ * ONE reference frame → gets ONE portrait image back. Used by the
+ * Polish-28 clone-UGC worker to produce a persona-consistent
+ * reference frame that HeyGen Avatar IV animates.
+ *
+ * Cost (Nano Banana Pro, 1K-2K aspect 1:1): ~$0.13/call. Cost is
+ * derived from `usageMetadata.candidatesTokenCount * $120/1M` at
+ * response time so the caller's cost estimator is truthful even if
+ * Google shifts the rate mid-run.
+ */
+export async function cloneCharacterReferenceImage(
+  input: CloneCharacterReferenceImageInput,
+): Promise<CloneCharacterReferenceImageResult> {
+  const modelId = input.modelId ?? nanoBananaProModel();
+  const url = `${GEMINI_BASE}/models/${modelId}:generateContent`;
+  const referenceBytes = Math.floor((input.referenceImageBase64.length * 3) / 4);
+  const body = {
+    contents: [
+      {
+        role: 'user' as const,
+        parts: [
+          {
+            inline_data: {
+              mime_type: input.referenceImageMimeType,
+              data: input.referenceImageBase64,
+            },
+          },
+          { text: input.prompt },
+        ],
+      },
+    ],
+    generationConfig: {
+      responseModalities: ['IMAGE'] as const,
+      imageConfig: { aspectRatio: '1:1' as const },
+      temperature: 0.4,
+    },
+  };
+
+  const result = await callProvider<GeminiResponse>({
+    userId: input.userId,
+    provider: 'gemini',
+    url,
+    method: 'POST',
+    headers: {
+      'x-goog-api-key': input.apiKey,
+      'content-type': 'application/json',
+    },
+    body,
+    timeoutMs: 120_000,
+    requestBodyForLog: {
+      model: modelId,
+      purpose: 'polish28_character_clone',
+      prompt_chars: input.prompt.length,
+      reference_bytes: referenceBytes,
+      reference_mime: input.referenceImageMimeType,
+    },
+    ...(input.generationJobId ? { generationJobId: input.generationJobId } : {}),
+    ...(input.generatedCreativeId ? { generatedCreativeId: input.generatedCreativeId } : {}),
+  });
+
+  if (!result.ok) {
+    const rawExcerpt = JSON.stringify(result.rawBody ?? {}).slice(0, 2000);
+    return {
+      ok: false,
+      costUsd: 0,
+      latencyMs: result.latencyMs,
+      errorMessage: result.errorMessage,
+      diagnostics: {
+        modelId,
+        referenceBytes,
+        referenceMime: input.referenceImageMimeType,
+        geminiStatus: result.status,
+        geminiRawBodyExcerpt: rawExcerpt,
+        failedAt: 'gemini',
+      },
+    };
+  }
+
+  const usage = result.data.usageMetadata ?? {};
+  // Nano Banana Pro billing: $120 per 1M OUTPUT tokens. Image emissions
+  // report as output tokens (~1120 tokens for a 1K-2K portrait). Derive
+  // per-call cost so the estimator round-trips against actual usage.
+  const outputTokens = usage.candidatesTokenCount ?? 0;
+  const costUsd = (outputTokens / 1_000_000) * 120;
+
+  const image = extractImage(result.data);
+  if (!image) {
+    return {
+      ok: false,
+      costUsd,
+      latencyMs: result.latencyMs,
+      errorMessage: 'Nano Banana Pro returned no image part in the response.',
+      diagnostics: {
+        modelId,
+        referenceBytes,
+        referenceMime: input.referenceImageMimeType,
+        geminiStatus: result.status,
+        failedAt: 'no-image-in-response',
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    imageBase64: image.data,
+    imageMimeType: image.mimeType,
+    costUsd,
+    latencyMs: result.latencyMs,
+    diagnostics: {
+      modelId,
+      referenceBytes,
+      referenceMime: input.referenceImageMimeType,
+      ...(result.status !== undefined ? { geminiStatus: result.status } : {}),
+    },
+  };
+}
+
+// Re-export the model IDs + prompt composer so the worker's import
+// block stays short (one from '@mbb/ai-providers' instead of two).
+export {
+  NANO_BANANA_PRO_DEFAULT_MODEL_ID,
+  NANO_BANANA_STANDARD_MODEL_ID,
+  composeNanoBananaCharacterClonePrompt,
+  nanoBananaProModel,
+};
+
 export async function verifyGeminiKey(
   apiKey: string,
   userId: string,

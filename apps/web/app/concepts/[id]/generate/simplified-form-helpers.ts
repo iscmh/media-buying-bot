@@ -133,6 +133,25 @@ export const POLISH25_DESCRIPTION =
  * the descriptor + worker + refresh cron are all still registered.
  */
 export const POLISH26_PIPELINE_ID = 'polish26_heygen' as const;
+
+/**
+ * Polish-28.0.0 Commit 64: BYOK cloned-UGC pipeline. Character
+ * clone via Nano Banana Pro + voice clone via ElevenLabs IVC +
+ * lip-sync via HeyGen Avatar IV. Requires 4 BYOK keys — display
+ * name kept short ("Instant UGC (Cloned)").
+ */
+export const POLISH28_PIPELINE_ID = 'polish28_clone_ugc' as const;
+export const POLISH28_DISPLAY_NAME = 'Instant UGC (Cloned)';
+export const POLISH28_DESCRIPTION =
+  'Clones character + voice from your source ad and generates a lip-synced 9:16 variant. ' +
+  'BYOK required: Claude, Gemini, ElevenLabs, HeyGen.';
+/** Per-30s BYOK cost from Phase 1 investigation (all vendor lines). */
+export function estimatePolish28CostPerVariantUsd(): { usd: number } {
+  // Claude 0.02 + Gemini vision 0.05 + Nano Banana Pro 0.13 +
+  // ElevenLabs TTS 0.01 + HeyGen Avatar IV 30s @ 1080p 2.00 +
+  // storage/ffmpeg 0.02 = 2.23.
+  return { usd: 2.23 };
+}
 export const POLISH26_DISPLAY_NAME = 'Instant UGC ad';
 export const POLISH26_DESCRIPTION =
   'Pre-cast avatar picked from a 500+ HeyGen library to match your source persona. ' +
@@ -221,6 +240,12 @@ export interface SimplifiedFormState {
    */
   polish26Selected?: boolean;
   /**
+   * Polish-28.0.0 Commit 64: cloned-UGC pipeline flag. Routes to
+   * generation/polish28-clone-ugc.requested. Mutually exclusive
+   * with the other pipeline flags.
+   */
+  polish28Selected?: boolean;
+  /**
    * Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad flag.
    * Mutually exclusive with polish23Selected / polish25Selected /
    * polish26Selected / modelId. Companion field `staticOpenaiQuality`
@@ -244,6 +269,7 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
     state.polish23Selected === true ||
     state.polish25Selected === true ||
     state.polish26Selected === true ||
+    state.polish28Selected === true ||
     state.staticOpenaiSelected === true;
   if (!hasPickedPipeline && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
@@ -313,12 +339,19 @@ export function buildSubmissionFormData(input: {
   // because no metadata.model_id is set. Cleaner than adding
   // polish23 as a synthetic VideoModelId, which would tangle two
   // descriptor systems.
+  if (input.state.polish28Selected === true) {
+    // Polish-28.0.0 Commit 64: cloned-UGC pipeline dispatches
+    // pipeline=polish28_clone_ugc. Checked FIRST — it's the only
+    // user-facing UGC pipeline post-Commit-63 nuke.
+    fd.set('pipeline', POLISH28_PIPELINE_ID);
+    return fd;
+  }
   if (input.state.polish26Selected === true) {
     // Polish-26.0.5 Commit 61.5: HeyGen v3 pre-cast avatar. Routes
     // via the polish26_heygen descriptor's workerEvent
-    // (generation/polish26-heygen.requested). Checked BEFORE
-    // polish25Selected so a form that somehow sets both defaults to
-    // the new HeyGen backend rather than the deprecated MakeUGC one.
+    // (generation/polish26-heygen.requested). Note: worker
+    // unregistered post-Commit-63, so this branch is API-callable
+    // but the /api/v1/generations endpoint will reject it with 400.
     fd.set('pipeline', POLISH26_PIPELINE_ID);
     return fd;
   }

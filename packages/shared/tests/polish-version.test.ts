@@ -11,15 +11,17 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // Polish-25.6 = launch-readiness milestone.
     // Polish-26.0 Commit 61: first Polish-26 release lands the HeyGen
     // v3 backend replacement. Regex now permits the "26" major slot.
-    expect(POLISH_VERSION).toMatch(/^2(1|3|4|5|6|7|8|9|10)\.\d+\.\d+$|^26\.\d+\.\d+$/);
+    expect(POLISH_VERSION).toMatch(
+      /^2(1|3|4|5|6|7|8|9|10)\.\d+\.\d+$|^26\.\d+\.\d+$|^28\.\d+\.\d+$/,
+    );
   });
 
-  it('is currently 27.0.0 (Polish-27.0.0 Commit 63 — MAJOR bump: nuke legacy UGC surface for Polish-28 rebuild)', () => {
+  it('is currently 28.0.0 (Polish-28.0.0 Commit 64 — MAJOR bump: BYOK cloned-UGC pipeline)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('27.0.0');
+    expect(POLISH_VERSION).toBe('28.0.0');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

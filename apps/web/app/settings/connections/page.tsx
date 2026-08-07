@@ -132,18 +132,16 @@ async function ProvidersTab({ userId }: { userId: string }) {
   const aiByProvider = new Map(aiRows.map((r) => [r.provider as AIProviderName, r]));
 
   const REQUIRED_TOOLS: ToolProviderName[] = ['claude', 'gemini'];
-  // Polish-27.0.0 Commit 63: hide legacy UGC-only provider BYOK cards
-  // pre-Polish-28 rebuild. Removed: hedra, elevenlabs, wavespeed_ai,
-  // makeugc, heygen, replicate, kie_ai. What remains visible is Claude,
-  // Gemini (Required — powering script + vision) + OpenAI (for the
-  // sole surviving Static ad pipeline). Provider rows in the DB are
-  // preserved; cards return in the Polish-28 build.
+  // Polish-28.0.0 Commit 64: ElevenLabs + HeyGen unhidden — required
+  // BYOK for the Polish-28 cloned-UGC pipeline (ElevenLabs Instant
+  // Voice Clone + HeyGen Avatar IV image-to-video). Kept hidden from
+  // the Commit-63 blocklist: hedra / wavespeed_ai / makeugc /
+  // replicate / kie_ai — those pipelines remain nuked and their DB
+  // rows are preserved for rollback.
   const HIDDEN_LEGACY_AI_PROVIDERS = new Set<AIProviderName>([
     'hedra',
-    'elevenlabs',
     'wavespeed_ai',
     'makeugc',
-    'heygen',
     'replicate',
   ]);
   const HIDDEN_LEGACY_TOOL_PROVIDERS = new Set<ToolProviderName>(['kie_ai']);
@@ -210,11 +208,10 @@ async function ProvidersTab({ userId }: { userId: string }) {
             </span>
           </summary>
           <p className="text-fg-muted mb-4 text-xs">
-            {/* Polish-27.0.0 Commit 63: legacy UGC provider cards hidden
-                until Polish-28 rebuilds the pipeline. Only Static ad
-                (OpenAI) is live right now. */}
-            Optional provider keys for the pipelines available today. Custom UGC pipelines return in
-            the next release.
+            {/* Polish-28.0.0 Commit 64: ElevenLabs + HeyGen unhidden —
+                required BYOK for Instant UGC (Cloned). */}
+            Optional provider keys for the pipelines available today. Connect ElevenLabs + HeyGen to
+            unlock Instant UGC (Cloned); OpenAI powers Static ad.
           </p>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {OPTIONAL_AI_PROVIDERS.map((provider) => {
