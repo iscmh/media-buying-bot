@@ -59,9 +59,20 @@ export function __setFfmpegPathForTests(path: string | undefined): void {
 export function resolveFfmpegPath(): string {
   if (_ffmpegPathOverride) return _ffmpegPathOverride;
   const fromEnv = process.env['FFMPEG_PATH'];
-  if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) return fromEnv.trim();
+  if (typeof fromEnv === 'string' && fromEnv.trim().length > 0) {
+    // Polish-28.0.4 Commit 64.4: log source so ENOENT is diagnosable.
+    console.log(`[resolveFfmpegPath] using FFMPEG_PATH env: ${fromEnv.trim()}`);
+    return fromEnv.trim();
+  }
   const fromInstaller = tryFfmpegInstallerPath();
-  if (fromInstaller) return fromInstaller;
+  if (fromInstaller) {
+    console.log(`[resolveFfmpegPath] using @ffmpeg-installer path: ${fromInstaller}`);
+    return fromInstaller;
+  }
+  console.log(
+    `[resolveFfmpegPath] falling back to bare 'ffmpeg' on PATH — likely ENOENT ` +
+      `on Vercel serverless. Check next.config.mjs outputFileTracingIncludes.`,
+  );
   return 'ffmpeg';
 }
 

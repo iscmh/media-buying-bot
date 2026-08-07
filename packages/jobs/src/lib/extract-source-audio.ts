@@ -388,10 +388,27 @@ async function runFfmpeg(
     });
     child.on('error', (err: NodeJS.ErrnoException) => {
       const isNotFound = err.code === 'ENOENT';
+      // Polish-28.0.4 Commit 64.4 hotfix: actionable ENOENT diagnostic.
+      // resolveFfmpegPath() returns the literal 'ffmpeg' when both
+      // FFMPEG_PATH env AND @ffmpeg-installer/ffmpeg's runtime probe
+      // fail — which is what happens on Vercel when the binary isn't
+      // shipped in the serverless function bundle. Surface exactly
+      // what path was tried + what Next.js needs to do to ship it.
+      const detail = isNotFound
+        ? `spawn ffmpeg ENOENT — resolveFfmpegPath returned "${ffmpegPath}" but no binary is ` +
+          `on that path. On Vercel serverless, this means the @ffmpeg-installer/linux-x64 ` +
+          `binary was not included in the function bundle. Confirm apps/web/next.config.mjs ` +
+          `has serverComponentsExternalPackages + outputFileTracingIncludes for ` +
+          `@ffmpeg-installer/**/*, AND that @ffmpeg-installer/ffmpeg is a direct dep of ` +
+          `apps/web/package.json (not just packages/jobs). If the build fits under Vercel's ` +
+          `50MB Hobby / 250MB Pro function limit, this fix works; if the build rejects with ` +
+          `"Serverless Function too large", pivot to Replicate ffmpeg (see ` +
+          `packages/ai-providers/src/replicate-audio-trim.ts for the pattern).`
+        : err.message;
       resolve({
         ok: false,
         reason: isNotFound ? 'ffmpeg-missing' : 'ffmpeg-failed',
-        detail: err.message,
+        detail,
       });
     });
     child.on('close', (code) => {

@@ -16,12 +16,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     );
   });
 
-  it('is currently 28.0.3 (Polish-28.0.3 Commit 64.3 hotfix — extract-source-audio storage-tuple input)', () => {
+  it('is currently 28.0.4 (Polish-28.0.4 Commit 64.4 hotfix — ship @ffmpeg-installer on Vercel)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.0.3');
+    expect(POLISH_VERSION).toBe('28.0.4');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.0.3';
+export const POLISH_VERSION = '28.0.4';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.0.3';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.0.3 Commit 64.3 hotfix - extract-source-audio accepts Supabase storage tuple (fixes Failed-to-parse-URL on concept.file_url)';
+  'Polish-28.0.4 Commit 64.4 hotfix - ship @ffmpeg-installer via Next.js outputFileTracingIncludes (fixes spawn ffmpeg ENOENT on Vercel serverless)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
