@@ -244,10 +244,20 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         const personaDescription = flattenPersonaForClonePrompt(personaSource);
         const cachedRef = (conceptMeta?.['polish28_character_reference'] ??
           null) as Polish28CharacterReference | null;
+        // Polish-28.1.5 Commit 70 hotfix: pass the FULL vision analysis
+        // JSON to the condenser (matching Polish-25's pattern), not the
+        // raw ugcOriginalScript. The condenser prompt expects
+        // "source-video vision analysis (JSON with transcript + persona
+        // + emotional_arc + hook_structure + niche_category)" — feeding
+        // it just an empty raw script string produced literal "no
+        // transcript" refusals from Claude, which TTS then spoke aloud
+        // (28.1.4 output: 19s of voiceover saying "no transcript").
+        const visionAnalysisJson = analysis ? JSON.stringify(analysis, null, 2) : null;
         return safeInngestStepReturn({
           personaDescription,
           personaRawShape: typeof rawPersona,
           ugcOriginalScript: concept.ugcOriginalScript ?? '',
+          visionAnalysisJson,
           // Polish-28.0.3 Commit 64.3 hotfix: concept.file_url is a
           // Supabase-storage RELATIVE PATH (not an https URL). Passing
           // that string to fetch() throws "Failed to parse URL from".
@@ -281,8 +291,29 @@ export const generatePolish28CloneUgc = inngest.createFunction(
       const SOURCE_BUCKET = 'concepts';
 
       // ---------- Step D: condense script ----------
+      // Polish-28.1.5 Commit 70: feed the FULL vision-analysis JSON
+      // (transcript + persona + hook + emotional arc + niche) not just
+      // the bare ugcOriginalScript. See load-source-context step's
+      // visionAnalysisJson field for the pattern rationale.
       const condensed = await guardedStepRun(step, 'condense-script', async () => {
-        const userPrompt = composePolish25CondenserUserPrompt(source.ugcOriginalScript);
+        // Preflight: refuse to call Claude if we have neither
+        // vision-analysis JSON nor a meaningful raw script. Without
+        // input Claude returns literal "no transcript" refusals
+        // (28.1.4 death). Better to fail fast with a directional
+        // error than TTS-speak the refusal.
+        const rawInput =
+          source.visionAnalysisJson ??
+          (source.ugcOriginalScript && source.ugcOriginalScript.trim().length >= 20
+            ? source.ugcOriginalScript
+            : null);
+        if (!rawInput) {
+          throw new NonRetriableError(
+            `Polish-28 condense-script has no usable input: concept ${conceptId} has neither ` +
+              `metadata.analysis (Gemini vision output) nor ugcOriginalScript >=20 chars. ` +
+              `Re-run analyze-concept on this concept before submitting Polish-28.`,
+          );
+        }
+        const userPrompt = composePolish25CondenserUserPrompt(rawInput);
         const r = await callClaude({
           userId: jobUserId,
           apiKey: keys.claude!,
@@ -297,6 +328,19 @@ export const generatePolish28CloneUgc = inngest.createFunction(
           );
         }
         const rawText = r.text.trim();
+        // Polish-28.1.5 refusal guard: reject Claude outputs that are
+        // clearly meta-commentary ("no transcript", "cannot condense",
+        // "no analysis provided") rather than a real UGC monologue.
+        // 28.1.4 output was 19s of TTS saying "no transcript" because
+        // Claude was given an empty input and politely refused; we then
+        // TTS'd the refusal.
+        if (isCondenserRefusalOutput(rawText)) {
+          throw new NonRetriableError(
+            `Polish-28 Claude condense output looks like a refusal (${JSON.stringify(rawText.slice(0, 200))}). ` +
+              `Input was ${rawInput.length} chars. Concept may lack usable vision analysis — ` +
+              `re-run analyze-concept.`,
+          );
+        }
         // Same gate as Polish-26: skip nested-quote check (HeyGen tolerates)
         // + keep empty/too-long/appearance-leak enforced.
         const check = checkPolish25CondensedScript(rawText, { skipNestedQuotes: true });
@@ -873,4 +917,35 @@ async function extractFirstFramePng(input: {
 function clampCropPct(raw: number, fallback: number): number {
   if (!Number.isFinite(raw) || raw < 0 || raw >= 45) return fallback;
   return raw;
+}
+
+/**
+ * Polish-28.1.5 Commit 70: heuristic detector for Claude "I can't
+ * condense empty input" refusals. Short (< 200 chars) outputs that
+ * contain any of these markers are almost certainly meta-commentary,
+ * not a real UGC monologue. Prevents the 28.1.4 failure mode where
+ * "no transcript" got TTS'd verbatim and shipped as the output
+ * voiceover.
+ */
+function isCondenserRefusalOutput(text: string): boolean {
+  if (text.length > 400) return false; // Real monologues are longer.
+  const lower = text.toLowerCase();
+  const refusalMarkers = [
+    'no transcript',
+    'no script',
+    'no analysis',
+    'no vision analysis',
+    'cannot condense',
+    "can't condense",
+    'unable to condense',
+    'no source',
+    'no content to',
+    'nothing to condense',
+    'not provided',
+    'no input',
+    'empty input',
+    'i cannot',
+    "i can't",
+  ];
+  return refusalMarkers.some((m) => lower.includes(m));
 }
