@@ -752,12 +752,33 @@ async function extractFirstFramePng(input: {
   }
   const sourceUrl = signed.signedUrl;
 
-  // Submit — extract first frame at 1s (skip title cards / fade-ins).
+  // Polish-28.0.10 Commit 64.10 hotfix: fofr/toolkit (the 28.0.9
+  // default) is a task-based wrapper, not a generic-args wrapper.
+  // The generic ffmpeg args shape from 28.0.5 (which worked with the
+  // never-existed cuuupid/cog-ffmpeg default) gets silently ignored
+  // by fofr/toolkit + submit 422s.
+  //
+  // fofr/toolkit's `extract_frames_from_input` task returns a list of
+  // frame file URLs (List[Path]). At fps=1 we get one frame per second
+  // of source — take output[0] as the first frame. Overshoot on frame
+  // count is harmless: fofr charges by pod-second, not per-frame; a
+  // 60s ad at fps=1 finishes in single-digit seconds.
+  //
+  // The `input_file` + `task` fields are fofr's schema. The other
+  // legacy field names are preserved as a defensive shotgun for
+  // operators who override POLISH28_REPLICATE_FFMPEG_MODEL_ID with a
+  // generic-args wrapper (which will use `video`/`command` and ignore
+  // `task`).
   const ffmpegArgs = '-i INPUT -ss 00:00:01 -frames:v 1 -y OUTPUT';
   const colonIdx = modelRaw.indexOf(':');
   const modelPath = colonIdx === -1 ? modelRaw : modelRaw.slice(0, colonIdx);
   const version = colonIdx === -1 ? '' : modelRaw.slice(colonIdx + 1).trim();
   const inputFields = {
+    // fofr/toolkit shape:
+    task: 'extract_frames_from_input',
+    input_file: sourceUrl,
+    fps: 1,
+    // Generic ffmpeg wrapper shapes (ignored by fofr/toolkit):
     video: sourceUrl,
     video_url: sourceUrl,
     video_file: sourceUrl,
