@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.2.7';
+export const POLISH_VERSION = '28.2.8';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.2.7';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.2.7 Commit 80 - fix cropped video controls (aspect-square container + object-cover cropped scrubber and volume off-screen for 9:16 videos)';
+  'Polish-28.2.8 Commit 81 - refactor variant video to natural-aspect + max-h-70vh (matches working concept-page pattern) + add "Open in new tab" escape hatch';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

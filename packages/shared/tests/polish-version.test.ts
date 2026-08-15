@@ -16,12 +16,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     );
   });
 
-  it('is currently 28.2.7 (Polish-28.2.7 Commit 80 — fix cropped video controls, aspect-[9/16] + object-contain)', () => {
+  it('is currently 28.2.8 (Polish-28.2.8 Commit 81 — natural-aspect video + open-in-new-tab)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.2.7');
+    expect(POLISH_VERSION).toBe('28.2.8');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

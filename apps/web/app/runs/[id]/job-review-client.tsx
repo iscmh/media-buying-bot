@@ -945,19 +945,18 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
         (isRejected ? 'opacity-50' : '')
       }
     >
-      {/* Polish-28.2.7 Commit 80: split video/image container aspect.
-          Was `aspect-square` for both — combined with `object-cover` on
-          a 9:16 polish28 video, that cropped the top+bottom of the video
-          to fit a square, which cropped the browser's video controls
-          (timeline scrubber + volume button live at the bottom of the
-          video area). Operator couldn't scrub or unmute.
-          Fix: 9:16-tall container + object-contain for videos so the
-          full frame + controls are visible. Images keep square + cover. */}
-      <div className={isImage ? 'bg-muted aspect-square w-full' : 'bg-muted aspect-[9/16] w-full'}>
-        {isImage ? (
-          // Plain img — Phase 3a uses placehold.co (external) and Phase 3c
-          // stores Supabase public URLs. next/image's optimizer doesn't
-          // help either case.
+      {/* Polish-28.2.8 Commit 81: video container switched from
+          aspect-[9/16] (which made each card ~1240px tall in a 2-col
+          grid on desktop — controls technically visible but scrolled
+          way below the fold) to the natural-aspect pattern that
+          concepts/[id]/page.tsx uses successfully. Video renders at
+          its own aspect, capped at 70vh so it fits typical desktop
+          viewports. Images unchanged.
+          Also added an "Open in new tab" escape hatch below the video
+          so if the embedded player misbehaves for any reason the
+          operator can always open the file directly. */}
+      {isImage ? (
+        <div className="bg-muted aspect-square w-full">
           <button
             type="button"
             onClick={() => setExpandOpen(true)}
@@ -970,16 +969,28 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
               className="h-full w-full object-cover"
             />
           </button>
-        ) : (
+        </div>
+      ) : (
+        <div className="border-border overflow-hidden border-b bg-black">
           <video
             src={variant.fileUrl}
             controls
             playsInline
-            className="h-full w-full object-contain"
+            className="mx-auto block max-h-[70vh] w-auto max-w-full bg-black object-contain"
             preload="auto"
           />
-        )}
-      </div>
+          <div className="border-border flex items-center justify-end gap-3 border-t px-3 py-2 text-xs">
+            <a
+              href={variant.fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-fg-subtle hover:text-fg underline underline-offset-2"
+            >
+              Open in new tab ↗
+            </a>
+          </div>
+        </div>
+      )}
 
       {isImage && (
         <Dialog open={expandOpen} onOpenChange={setExpandOpen}>
