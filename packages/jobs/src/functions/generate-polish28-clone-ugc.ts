@@ -480,39 +480,47 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         }
         const arr = await fetchRes.arrayBuffer();
         const bytes = new Uint8Array(arr);
-        // Polish-28.1.2 Commit 67 hotfix: detect actual MIME from
-        // magic bytes instead of hardcoding image/png. Nano Banana
-        // Pro can return either PNG or JPEG depending on the model
-        // version + prompt — 28.1.1 died with HeyGen 400 "Content
-        // type not match image/png != image/jpeg" when the character
-        // clone came back as JPEG. HeyGen validates the declared
-        // content-type against the actual bytes and rejects on
-        // mismatch. Sniff and trust the bytes.
-        const detectedMime: 'image/png' | 'image/jpeg' | 'image/webp' =
-          bytes.length >= 4 &&
-          bytes[0] === 0x89 &&
-          bytes[1] === 0x50 &&
-          bytes[2] === 0x4e &&
-          bytes[3] === 0x47
-            ? 'image/png'
-            : bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
-              ? 'image/jpeg'
-              : bytes.length >= 12 &&
-                  bytes[0] === 0x52 &&
-                  bytes[1] === 0x49 &&
-                  bytes[2] === 0x46 &&
-                  bytes[3] === 0x46 &&
-                  bytes[8] === 0x57 &&
-                  bytes[9] === 0x45 &&
-                  bytes[10] === 0x42 &&
-                  bytes[11] === 0x50
-                ? 'image/webp'
-                : 'image/png'; // Defensive fallback — HeyGen will reject if wrong, cheaper than throwing here.
+        // Polish-28.1.2 Commit 67 handled magic-byte MIME detection to
+        // avoid HeyGen 400 content-type mismatches. Polish-28.2.1
+        // Commit 74 supersedes that with an unconditional pad-and-encode
+        // pass via jimp — output is always JPEG so we can hardcode
+        // 'image/jpeg' below and jimp reads any input format correctly.
+
+        // Polish-28.2.1 Commit 74: pad the character image before HeyGen
+        // upload. HeyGen Avatar IV zooms in on the face during lip-sync;
+        // if the input is already a tight portrait, output is uncomfortably
+        // close (operator flagged this in 28.2.0). Padding the image with
+        // a solid margin gives HeyGen room to "zoom" without over-cropping.
+        // Combined with the wider Nano Banana framing prompt (also 28.2.1),
+        // this should give natural head-and-shoulders framing in the output.
+        //
+        // Padding math: add 25% margin on all sides. If input is 1024x1024,
+        // pad to 1536x1536 with a neutral gray background (fits the "home
+        // setting" aesthetic vs pure white which would jump).
+        const { Jimp } = await import('jimp');
+        const originalImage = await Jimp.read(
+          Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+        );
+        const origW = originalImage.bitmap.width;
+        const origH = originalImage.bitmap.height;
+        const padPct = Number(process.env['POLISH28_HEYGEN_INPUT_PAD_PCT']) || 25;
+        const padPx = Math.floor((Math.max(origW, origH) * padPct) / 100);
+        const paddedW = origW + padPx * 2;
+        const paddedH = origH + padPx * 2;
+        // Solid neutral gray (0x808080ff) — reads as generic room shadow, doesn't clash
+        const padded = new Jimp({ width: paddedW, height: paddedH, color: 0x808080ff });
+        padded.composite(originalImage, padPx, padPx);
+        const paddedBuf = await padded.getBuffer('image/jpeg', { quality: 90 });
+        const paddedBytes = new Uint8Array(paddedBuf);
+        console.log(
+          `[polish28] heygen-pad: ${origW}x${origH} -> ${paddedW}x${paddedH} (${padPct}% margin, gray fill)`,
+        );
+
         const r = await uploadHeygenImageAsset({
           userId: jobUserId,
           apiKey: keys.heygen!,
-          imageBytes: bytes,
-          imageMimeType: detectedMime,
+          imageBytes: paddedBytes,
+          imageMimeType: 'image/jpeg',
           generationJobId: jobId,
         });
         if (!r.ok || !r.imageKey) {

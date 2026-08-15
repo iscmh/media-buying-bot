@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.2.0';
+export const POLISH_VERSION = '28.2.1';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.2.0';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.2.0 Commit 73 - pivot audio to HeyGen native TTS (script+voice_id); drop ElevenLabs from polish28 (audio_url + audio_asset_id both failed silently)';
+  'Polish-28.2.1 Commit 74 - widen Nano Banana framing + pad character image before HeyGen (fixes over-zoomed face in output)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

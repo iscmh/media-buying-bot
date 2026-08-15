@@ -16,12 +16,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     );
   });
 
-  it('is currently 28.2.0 (Polish-28.2.0 Commit 73 — pivot to HeyGen native TTS, drop ElevenLabs)', () => {
+  it('is currently 28.2.1 (Polish-28.2.1 Commit 74 — widen Nano Banana framing + pad character image before HeyGen)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.2.0');
+    expect(POLISH_VERSION).toBe('28.2.1');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {
