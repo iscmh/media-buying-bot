@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.1.7';
+export const POLISH_VERSION = '28.2.0';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.1.7';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.1.7 Commit 72 - restore Nano Banana Pro with UGC-realism prompt + fix audio via HeyGen audio_asset_id upload (fixes captions bleed + silent output)';
+  'Polish-28.2.0 Commit 73 - pivot audio to HeyGen native TTS (script+voice_id); drop ElevenLabs from polish28 (audio_url + audio_asset_id both failed silently)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

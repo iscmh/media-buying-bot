@@ -330,6 +330,8 @@ export {
   estimateHeygenAvatarIvCostUsd,
   uploadHeygenImageAsset,
   uploadHeygenAudioAsset,
+  fetchHeygenVoices,
+  matchHeygenVoiceForPersona,
   submitHeygenAvatarIvGeneration,
   checkHeygenAvatarIvStatus,
   isTerminalAvatarIvStatus,

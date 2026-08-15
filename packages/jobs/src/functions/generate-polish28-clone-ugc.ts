@@ -65,17 +65,17 @@ import {
   cloneCharacterReferenceImage,
   composeNanoBananaCharacterClonePrompt,
   estimateHeygenAvatarIvCostUsd,
+  fetchHeygenVoices,
   flattenPersonaForClonePrompt,
   isTerminalAvatarIvStatus,
+  matchHeygenVoiceForPersona,
   POLISH28_ASPECT_RATIO,
-  submitElevenLabsTts,
   submitHeygenAvatarIvGeneration,
   checkHeygenAvatarIvStatus,
-  uploadHeygenAudioAsset,
   uploadHeygenImageAsset,
 } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
-import { matchElevenLabsVoiceForPersona, POLISH_VERSION } from '@mbb/shared';
+import { POLISH_VERSION } from '@mbb/shared';
 import { inngest } from '../client';
 import { logInngestFailure } from '../error-hook';
 import { loadDecryptedKeys, MissingProviderKeyError } from '../lib/load-keys';
@@ -92,11 +92,7 @@ import {
   composePolish25CondenserUserPrompt,
   POLISH25_CLAUDE_SCRIPT_CONDENSER_SYSTEM_PROMPT,
 } from '../lib/polish25-claude-script-condenser-prompt';
-import {
-  uploadGeneratedAudio,
-  uploadGeneratedImage,
-  uploadGeneratedVideoFromUrl,
-} from '../lib/storage';
+import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
 
 console.log(`[jobs.generate-polish28-clone-ugc] cold start — POLISH_VERSION=${POLISH_VERSION}`);
 
@@ -192,26 +188,25 @@ export const generatePolish28CloneUgc = inngest.createFunction(
 
       const keys = await guardedStepRun(step, 'preflight-byok', async () => {
         try {
-          // Polish-28.0.5 Commit 64.5: added `replicate` — Vercel Hobby
-          // can't host the ffmpeg binary (~78MB > 50MB function limit)
-          // so audio + frame extraction pivots to Replicate ffmpeg.
-          // 5-BYOK requirement.
+          // Polish-28.2.0 Commit 73: ElevenLabs dropped from BYOK.
+          // HeyGen native TTS (script + voice_id) replaces the
+          // ElevenLabs TTS + external-audio-upload chain. 4-BYOK now:
+          // Claude (script condense), Gemini (character clone via
+          // Nano Banana), HeyGen (voice list + Avatar IV lip-sync +
+          // TTS), Replicate (ffmpeg frame extract).
           const loaded = await loadDecryptedKeys(jobUserId, [
             'claude',
             'gemini',
-            'elevenlabs',
             'heygen',
             'kling',
           ]);
           if (!loaded.claude) throw new MissingProviderKeyError('claude');
           if (!loaded.gemini) throw new MissingProviderKeyError('gemini');
-          if (!loaded.elevenlabs) throw new MissingProviderKeyError('elevenlabs');
           if (!loaded.heygen) throw new MissingProviderKeyError('heygen');
           if (!loaded.kling) throw new MissingProviderKeyError('kling');
           return safeInngestStepReturn({
             claude: loaded.claude,
             gemini: loaded.gemini,
-            elevenlabs: loaded.elevenlabs,
             heygen: loaded.heygen,
             // Stored under 'kling' DecryptedKeys slot but sourced from
             // the Replicate ai_provider_connections row (see load-keys.ts
@@ -374,25 +369,39 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         return safeInngestStepReturn({ text: rawText, chars: rawText.length });
       });
 
-      // ---------- Step E: match voice for persona ----------
-      // Polish-28.1.0 Commit 65 pivot: no more IVC. Match against the
-      // curated ELEVENLABS_VOICE_ROSTER (5 public preset voices,
-      // work on every ElevenLabs tier). Keyword-scan the flattened
-      // persona for gender + age markers → best-fit roster entry.
-      const voice = await guardedStepRun(step, 'match-voice-for-persona', async () => {
-        const matched = matchElevenLabsVoiceForPersona(source.personaDescription);
+      // ---------- Step E: match HeyGen voice for persona ----------
+      // Polish-28.2.0 Commit 73: switched from ElevenLabs roster to
+      // HeyGen /v2/voices at runtime. HeyGen native TTS eliminates the
+      // audio_url / audio_asset_id silent-output failure modes that
+      // dogged 28.1.4-28.1.7 — passing script + voice_id directly
+      // means HeyGen does TTS internally and bakes into the video.
+      // No external audio fetch to fail.
+      const voice = await guardedStepRun(step, 'match-heygen-voice-for-persona', async () => {
+        const fetched = await fetchHeygenVoices({
+          userId: jobUserId,
+          apiKey: keys.heygen!,
+          generationJobId: jobId,
+        });
+        if (!fetched.ok || fetched.voices.length === 0) {
+          throw new NonRetriableError(
+            `Polish-28 HeyGen voice-list fetch failed: ${fetched.errorMessage ?? 'no voices returned'} ` +
+              `(HTTP ${fetched.httpStatus ?? '?'}). Check HeyGen API key + tier.`,
+          );
+        }
+        const matched = matchHeygenVoiceForPersona(fetched.voices, source.personaDescription);
         await patchMetadata(jobId, {
           polish28_progress: { step: 'match-voice', pct: 30, at: nowIso() },
           polish28_matched_voice: {
-            voice_id: matched.id,
-            label: matched.label,
+            voice_id: matched.voice_id,
+            name: matched.name,
             gender: matched.gender,
-            age: matched.age,
+            language: matched.language,
+            roster_size: fetched.voices.length,
           },
         });
         return safeInngestStepReturn({
-          voiceId: matched.id,
-          label: matched.label,
+          voiceId: matched.voice_id,
+          name: matched.name,
         });
       });
 
@@ -453,39 +462,11 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         });
       });
 
-      // ---------- Step G: TTS with matched voice ----------
-      // Polish-28.1.0 pivot: no more verify-voice-ready poll —
-      // public preset voices are always queryable, no eventual-consistency
-      // race like fresh IVC clones had (Polish-28.0.13's failure mode).
-      const tts = await guardedStepRun(step, 'tts-with-matched-voice', async () => {
-        const r = await submitElevenLabsTts({
-          userId: jobUserId,
-          apiKey: keys.elevenlabs!,
-          voiceId: voice.voiceId,
-          text: condensed.text,
-          generationJobId: jobId,
-        });
-        if (!r.ok || !r.audio) {
-          throw new NonRetriableError(`Polish-28 TTS failed: ${r.errorMessage ?? 'unknown'}`);
-        }
-        const buf = Buffer.from(r.audio);
-        const uploaded = await uploadGeneratedAudio({
-          userId: jobUserId,
-          jobId,
-          audioBase64: buf.toString('base64'),
-          mimeType: 'audio/mpeg',
-          filename: 'polish28-voice',
-        });
-        await patchMetadata(jobId, {
-          polish28_progress: { step: 'tts', pct: 60, at: nowIso() },
-          polish28_voice_audio: { path: uploaded.path, url: uploaded.publicUrl },
-        });
-        return safeInngestStepReturn({
-          audioUrl: uploaded.publicUrl,
-          audioPath: uploaded.path,
-          audioBytes: r.audio.byteLength,
-        });
-      });
+      // Polish-28.2.0 Commit 73: TTS-with-matched-voice + upload-audio-asset
+      // steps REMOVED. HeyGen does TTS internally when we pass
+      // script + voice_id (see step J below). This eliminates both
+      // (a) the ElevenLabs TTS call and (b) the flaky external-audio
+      // upload path that was silent-outputting in 28.1.4-28.1.7.
 
       // ---------- Step I: upload character image to HeyGen ----------
       // Polish-28.1.7: fetches character (Nano Banana Pro output),
@@ -547,40 +528,9 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         return safeInngestStepReturn({ imageKey: r.imageKey });
       });
 
-      // ---------- Step I2: upload TTS audio to HeyGen asset store ----------
-      // Polish-28.1.7 Commit 72: HeyGen's audio_url path was silently
-      // dropping audio in 28.1.4-28.1.6 output (silent videos despite
-      // publicly-fetchable Supabase URLs). Uploading the mp3 bytes to
-      // HeyGen's own /v1/asset endpoint and referencing via
-      // audio_asset_id bypasses the external-fetch reliability issue.
-      const heygenAudioAsset = await guardedStepRun(step, 'upload-heygen-audio-asset', async () => {
-        const fetchRes = await fetch(tts.audioUrl);
-        if (!fetchRes.ok) {
-          throw new NonRetriableError(
-            `Polish-28 could not fetch TTS audio for HeyGen upload (HTTP ${fetchRes.status}).`,
-          );
-        }
-        const arr = await fetchRes.arrayBuffer();
-        const bytes = new Uint8Array(arr);
-        const r = await uploadHeygenAudioAsset({
-          userId: jobUserId,
-          apiKey: keys.heygen!,
-          audioBytes: bytes,
-          audioMimeType: 'audio/mpeg',
-          generationJobId: jobId,
-        });
-        if (!r.ok || !r.audioAssetId) {
-          throw new NonRetriableError(
-            `Polish-28 HeyGen audio upload failed [${r.errorCategory ?? 'unknown'}]: ` +
-              `${r.errorMessage ?? 'unknown'}`,
-          );
-        }
-        await patchMetadata(jobId, {
-          polish28_progress: { step: 'upload-heygen-audio', pct: 72, at: nowIso() },
-          polish28_heygen_audio_asset_id: r.audioAssetId,
-        });
-        return safeInngestStepReturn({ audioAssetId: r.audioAssetId });
-      });
+      // Polish-28.2.0 Commit 73: upload-heygen-audio-asset step REMOVED.
+      // HeyGen native TTS (script + voice_id passed to av4/generate)
+      // makes external audio upload unnecessary.
 
       // ---------- Step J: submit HeyGen Avatar IV generation ----------
       const heygenSubmit = await guardedStepRun(step, 'submit-heygen-avatar-iv', async () => {
@@ -588,7 +538,8 @@ export const generatePolish28CloneUgc = inngest.createFunction(
           userId: jobUserId,
           apiKey: keys.heygen!,
           imageKey: heygenAsset.imageKey,
-          audioAssetId: heygenAudioAsset.audioAssetId,
+          script: condensed.text,
+          voiceId: voice.voiceId,
           videoTitle: `polish28_${jobId}`,
           generationJobId: jobId,
         });

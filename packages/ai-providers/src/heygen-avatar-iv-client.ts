@@ -391,6 +391,130 @@ export async function uploadHeygenAudioAsset(
 }
 
 // =========================================================================
+// GET /v2/voices — fetch HeyGen voice roster + match to persona
+// =========================================================================
+//
+// Polish-28.2.0 Commit 73: HeyGen native TTS pivot. External audio
+// (audio_url, audio_asset_id) has been unreliable across three
+// attempts (28.1.4-28.1.7 all produced silent output). Instead of
+// providing audio, we now pass a script + HeyGen voice_id — HeyGen
+// generates the audio internally and bakes it into the video. Their
+// pipeline end-to-end, no external fetch to fail.
+
+const HEYGEN_VOICES_URL = `${HEYGEN_BASE}/v2/voices`;
+
+export interface HeygenVoice {
+  voice_id: string;
+  language: string;
+  gender: 'male' | 'female' | 'neutral' | string;
+  name: string;
+  preview_audio?: string;
+  support_pause?: boolean;
+  emotion_support?: boolean;
+}
+
+export interface FetchHeygenVoicesResult {
+  ok: boolean;
+  voices: HeygenVoice[];
+  latencyMs: number;
+  httpStatus?: number;
+  errorMessage?: string;
+}
+
+export async function fetchHeygenVoices(input: {
+  userId: string;
+  apiKey: string;
+  generationJobId?: string;
+}): Promise<FetchHeygenVoicesResult> {
+  const t0 = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
+  let status = 0;
+  let errorMessage: string | undefined;
+  let voices: HeygenVoice[] = [];
+  try {
+    const res = await fetch(HEYGEN_VOICES_URL, {
+      method: 'GET',
+      headers: { 'X-Api-Key': input.apiKey, Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    status = res.status;
+    if (status >= 200 && status < 300) {
+      const body = (await res.json()) as HeygenEnvelope<{ voices?: HeygenVoice[] }>;
+      voices = body.data?.voices ?? [];
+    } else {
+      let bodyText = '';
+      try {
+        bodyText = await res.text();
+      } catch {
+        // ignore
+      }
+      errorMessage = `HeyGen fetch-voices failed HTTP ${status}: ${bodyText.slice(0, 400)}`;
+    }
+  } catch (err) {
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    errorMessage = isAbort
+      ? `HeyGen fetch-voices timed out after ${CHECK_TIMEOUT_MS}ms`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  } finally {
+    clearTimeout(timer);
+  }
+  const latencyMs = Date.now() - t0;
+  console.log(
+    `[heygen] fetch-voices ${status} count=${voices.length} error=${errorMessage ?? 'null'} latencyMs=${latencyMs}`,
+  );
+  return errorMessage
+    ? { ok: false, voices: [], latencyMs, httpStatus: status, errorMessage }
+    : { ok: true, voices, latencyMs, httpStatus: status };
+}
+
+/**
+ * Pick the best-matching HeyGen voice for a persona description.
+ * Heuristic: filter to English voices matching the target gender;
+ * prefer voices with emotion_support; fall back to first English
+ * voice if no gender match. Throws if no English voices exist at
+ * all (should never happen — HeyGen ships hundreds by default).
+ *
+ * Persona → gender extraction uses the same keyword-scan as the
+ * ElevenLabs matcher in @mbb/shared.
+ */
+export function matchHeygenVoiceForPersona(
+  voices: readonly HeygenVoice[],
+  personaDescription: string,
+): HeygenVoice {
+  if (voices.length === 0) {
+    throw new Error('matchHeygenVoiceForPersona: empty voice list from HeyGen.');
+  }
+  const lower = personaDescription.toLowerCase();
+  const femaleHit = /\b(woman|female|girl|lady|she\b|her\b|hers|feminine)\b/.test(lower);
+  const maleHit = /\b(man|male|guy|boy|dude|he\b|him\b|his\b|masculine)\b/.test(lower);
+  const targetGender: 'female' | 'male' | null =
+    femaleHit && !maleHit ? 'female' : maleHit && !femaleHit ? 'male' : null;
+
+  const isEnglish = (v: HeygenVoice): boolean =>
+    typeof v.language === 'string' && v.language.toLowerCase().startsWith('en');
+  const englishVoices = voices.filter(isEnglish);
+  if (englishVoices.length === 0) {
+    // Fallback: any language, first voice
+    return voices[0]!;
+  }
+  if (targetGender) {
+    const matched = englishVoices.filter(
+      (v) => typeof v.gender === 'string' && v.gender.toLowerCase() === targetGender,
+    );
+    // Prefer emotion-support voices for UGC (more natural delivery)
+    const withEmotion = matched.filter((v) => v.emotion_support === true);
+    if (withEmotion.length > 0) return withEmotion[0]!;
+    if (matched.length > 0) return matched[0]!;
+  }
+  // No gender match — first English voice with emotion support, else first English
+  const englishWithEmotion = englishVoices.filter((v) => v.emotion_support === true);
+  return englishWithEmotion[0] ?? englishVoices[0]!;
+}
+
+// =========================================================================
 // POST /v2/video/av4/generate — submit Avatar IV image-to-video job
 // =========================================================================
 
@@ -402,16 +526,23 @@ export interface SubmitHeygenAvatarIvInput {
   /** From uploadHeygenImageAsset — HeyGen's opaque handle for the ref image. */
   imageKey: string;
   /**
-   * Polish-28.1.7 Commit 72: preferred audio path — HeyGen-hosted
-   * asset id (from uploadHeygenAudioAsset). Bypasses HeyGen's
-   * unreliable audio_url external-fetch. If both audioAssetId and
-   * audioUrl are provided, audioAssetId wins.
+   * Polish-28.2.0 Commit 73: PREFERRED audio path — HeyGen native TTS.
+   * Pass the script text + a HeyGen voice_id; HeyGen generates audio
+   * internally and bakes it in. Guaranteed audio (no external fetch
+   * to fail). Wins over audioAssetId / audioUrl if provided.
+   */
+  script?: string;
+  voiceId?: string;
+  /**
+   * Polish-28.1.7 Commit 72: HeyGen-hosted asset id (uploaded via
+   * uploadHeygenAudioAsset). Kept for compat but silent-output
+   * failures in 28.1.7 make it unreliable; prefer script + voiceId.
    */
   audioAssetId?: string;
   /**
-   * Fallback audio path — public URL to voice audio (mp3/wav).
-   * HeyGen sometimes silently drops audio when it can't fetch this,
-   * so audioAssetId is preferred.
+   * Last-resort audio path — public URL to voice audio (mp3/wav).
+   * HeyGen frequently drops audio when it can't fetch this; only
+   * used when no script/voiceId AND no audioAssetId are provided.
    */
   audioUrl?: string;
   /** Human-readable title for the HeyGen dashboard. */
@@ -439,24 +570,29 @@ export interface SubmitHeygenAvatarIvResult {
 export async function submitHeygenAvatarIvGeneration(
   input: SubmitHeygenAvatarIvInput,
 ): Promise<SubmitHeygenAvatarIvResult> {
-  if (!input.audioAssetId && !input.audioUrl) {
+  const hasScript = !!(input.script && input.voiceId);
+  if (!hasScript && !input.audioAssetId && !input.audioUrl) {
     return {
       ok: false,
       latencyMs: 0,
-      errorMessage: 'submitHeygenAvatarIvGeneration requires either audioAssetId or audioUrl.',
+      errorMessage:
+        'submitHeygenAvatarIvGeneration requires ONE of: (script + voiceId), audioAssetId, or audioUrl.',
       errorCategory: 'validation',
     };
   }
-  // Polish-28.1.7 Commit 72: prefer audio_asset_id over audio_url.
-  // HeyGen's audio_url path was unreliable in prod (silent output
-  // even with verifiably-public Supabase URLs) — passing an asset id
-  // that lives on HeyGen's own infra bypasses that failure mode.
+  // Polish-28.2.0 Commit 73: audio-source priority order:
+  //   1. script + voice_id — HeyGen native TTS (guaranteed audio)
+  //   2. audio_asset_id — HeyGen-hosted asset (28.1.7, silent in prod)
+  //   3. audio_url — external URL (28.1.4-28.1.6, silent in prod)
   const body: Record<string, unknown> = {
     image_key: input.imageKey,
     video_title: input.videoTitle,
     video_orientation: 'portrait', // 9:16
   };
-  if (input.audioAssetId) {
+  if (hasScript) {
+    body['script'] = input.script;
+    body['voice_id'] = input.voiceId;
+  } else if (input.audioAssetId) {
     body['audio_asset_id'] = input.audioAssetId;
   } else if (input.audioUrl) {
     body['audio_url'] = input.audioUrl;
@@ -468,9 +604,11 @@ export async function submitHeygenAvatarIvGeneration(
   }
   if (input.callbackId) body['callback_id'] = input.callbackId;
 
-  const audioMode = input.audioAssetId
-    ? `asset_id=${input.audioAssetId.slice(0, 40)}`
-    : `url_len=${input.audioUrl?.length ?? 0}`;
+  const audioMode = hasScript
+    ? `script_len=${input.script?.length ?? 0}_voice=${input.voiceId?.slice(0, 20) ?? ''}`
+    : input.audioAssetId
+      ? `asset_id=${input.audioAssetId.slice(0, 40)}`
+      : `url_len=${input.audioUrl?.length ?? 0}`;
   console.log(
     `[heygen-avatar-iv] submit REQUEST image_key=${input.imageKey.slice(0, 40)}... ` +
       `audio_${audioMode} motion_prompt_chars=${input.customMotionPrompt?.length ?? 0} ` +

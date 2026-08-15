@@ -163,9 +163,13 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     providerChoice: 'clone_ugc',
     format: 'polish28_clone_ugc',
     workerEvent: 'generation/polish28-clone-ugc.requested',
-    // Polish-28.0.5 Commit 64.5: 5th BYOK 'replicate' added for
-    // Vercel-hosted ffmpeg (audio + frame extraction).
-    requiredProviders: ['claude', 'gemini', 'elevenlabs', 'heygen', 'replicate'],
+    // Polish-28.2.0 Commit 73: dropped 'elevenlabs' — HeyGen native
+    // TTS (script + voice_id) replaced external audio path after
+    // audio_url + audio_asset_id both failed silently in prod. 4-BYOK.
+    // Kept: claude (script condense), gemini (Nano Banana character
+    // clone), heygen (voice list + Avatar IV lip-sync + TTS),
+    // replicate (fofr/toolkit frame extract).
+    requiredProviders: ['claude', 'gemini', 'heygen', 'replicate'],
   },
 };
 
