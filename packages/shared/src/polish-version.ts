@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.1.5';
+export const POLISH_VERSION = '28.1.6';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.1.5';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.1.5 Commit 70 - feed full visionAnalysisJson to condenser + refusal guard (fixes 19s "no transcript" voiceover)';
+  'Polish-28.1.6 Commit 71 hotfix - bump HeyGen poll ceiling 5min -> 22min (Avatar IV routinely takes 5-15min for image-to-video)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

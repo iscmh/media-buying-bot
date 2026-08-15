@@ -89,8 +89,14 @@ import {
 
 console.log(`[jobs.generate-polish28-clone-ugc] cold start — POLISH_VERSION=${POLISH_VERSION}`);
 
-const HEYGEN_POLL_MAX_ATTEMPTS = 30;
-const HEYGEN_POLL_INTERVAL_SECONDS = 10;
+// Polish-28.1.6 Commit 71: 30x10s=300s (5min) ceiling was too tight
+// for HeyGen Avatar IV image-to-video which routinely takes 5-15
+// min end-to-end. 28.1.5 first-credited-run timed out mid-generation.
+// Bumped to 90x15s=1350s (~22 min) — covers p99 completion time
+// while capping the total spend at a reasonable ceiling for a
+// stuck HeyGen job.
+const HEYGEN_POLL_MAX_ATTEMPTS = 90;
+const HEYGEN_POLL_INTERVAL_SECONDS = 15;
 
 function nowIso(): string {
   return new Date().toISOString();
