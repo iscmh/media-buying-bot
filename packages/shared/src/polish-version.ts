@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.2.6';
+export const POLISH_VERSION = '28.2.7';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.2.6';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.2.6 Commit 79 - remove pre-HeyGen padding (was showing as literal gray bars in output; obsolete now that Nano Banana + HeyGen aspect ratios match end-to-end)';
+  'Polish-28.2.7 Commit 80 - fix cropped video controls (aspect-square container + object-cover cropped scrubber and volume off-screen for 9:16 videos)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

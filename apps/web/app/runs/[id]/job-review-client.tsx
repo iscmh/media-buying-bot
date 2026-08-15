@@ -945,7 +945,15 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
         (isRejected ? 'opacity-50' : '')
       }
     >
-      <div className="bg-muted aspect-square w-full">
+      {/* Polish-28.2.7 Commit 80: split video/image container aspect.
+          Was `aspect-square` for both — combined with `object-cover` on
+          a 9:16 polish28 video, that cropped the top+bottom of the video
+          to fit a square, which cropped the browser's video controls
+          (timeline scrubber + volume button live at the bottom of the
+          video area). Operator couldn't scrub or unmute.
+          Fix: 9:16-tall container + object-contain for videos so the
+          full frame + controls are visible. Images keep square + cover. */}
+      <div className={isImage ? 'bg-muted aspect-square w-full' : 'bg-muted aspect-[9/16] w-full'}>
         {isImage ? (
           // Plain img — Phase 3a uses placehold.co (external) and Phase 3c
           // stores Supabase public URLs. next/image's optimizer doesn't
@@ -967,7 +975,7 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
             src={variant.fileUrl}
             controls
             playsInline
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain"
             preload="auto"
           />
         )}
