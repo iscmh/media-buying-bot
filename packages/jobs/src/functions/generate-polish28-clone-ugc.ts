@@ -885,19 +885,52 @@ async function extractFirstFramePng(input: {
   if (!res.ok) throw new Error(`Polish-28 frame-extract download HTTP ${res.status}`);
   const rawBuf = Buffer.from(await res.arrayBuffer());
 
-  // Polish-28.0.11 Commit 64.11 hotfix: downscale before base64 —
-  // fofr/toolkit's extract_frames_from_input returns source-resolution
-  // PNGs. A 4K source ad produces a ~30MB PNG which blows Gemini's
-  // ~20MB inline_data cap (28.0.10 failed with HTTP 400 "Unable to
-  // process input image"). Nano Banana Pro character reference needs
-  // only ~1024px anyway — the model's own output is 1024x1024.
+  // Polish-28.0.12 Commit 64.12 hotfix: fofr/toolkit's
+  // extract_frames_from_input returns a ZIP bundling all frames as
+  // individual files (verified in prod at 28.0.11: jimp threw
+  // "Mime type application/zip does not support decoding"). Detect
+  // via PK\x03\x04 magic bytes + unzip in-memory + take the first
+  // .png/.jpg entry. Operator-overridden ffmpeg models that return
+  // a single image URL still work (else-branch).
   //
-  // jimp is pure-JS (no native binary → no Vercel bundling risk like
-  // the @ffmpeg-installer saga from 28.0.4). Slower than sharp but a
-  // one-shot resize of a 30MB PNG completes in single-digit seconds,
-  // well within Vercel's 60s function timeout.
+  // adm-zip is pure-JS with a synchronous buffer API — same
+  // rationale as jimp: no native binary, no Vercel bundling risk.
+  let imageBytes: Buffer;
+  const isZip =
+    rawBuf.length >= 4 &&
+    rawBuf[0] === 0x50 &&
+    rawBuf[1] === 0x4b &&
+    rawBuf[2] === 0x03 &&
+    rawBuf[3] === 0x04;
+  if (isZip) {
+    const AdmZip = (await import('adm-zip')).default;
+    const zip = new AdmZip(rawBuf);
+    const entries = zip.getEntries().filter((e) => !e.isDirectory);
+    // Sort by entry name — fofr/toolkit names frames sequentially
+    // (frame_00001.png, frame_00002.png, ...), so alphabetical sort
+    // puts the first-extracted frame at index 0.
+    entries.sort((a, b) => a.entryName.localeCompare(b.entryName));
+    const firstImage = entries.find((e) => /\.(png|jpe?g)$/i.test(e.entryName));
+    if (!firstImage) {
+      throw new Error(
+        `Polish-28 frame-extract zip contained no image entries (found ${entries.length} entries: ${entries
+          .slice(0, 5)
+          .map((e) => e.entryName)
+          .join(', ')})`,
+      );
+    }
+    imageBytes = firstImage.getData();
+  } else {
+    imageBytes = rawBuf;
+  }
+
+  // Polish-28.0.11 Commit 64.11 hotfix: downscale before base64 —
+  // fofr/toolkit's frame is source-resolution. A 4K source ad
+  // produces a ~30MB PNG which blows Gemini's ~20MB inline_data cap.
+  // Nano Banana Pro character reference needs only ~1024px anyway
+  // (the model's own output is 1024x1024). jimp is pure-JS.
   const { Jimp } = await import('jimp');
-  const image = await Jimp.read(rawBuf);
+  const image = await Jimp.read(imageBytes);
   image.scaleToFit({ w: 1024, h: 1024 });
   const jpegBuf = await image.getBuffer('image/jpeg', { quality: 85 });
   return { base64: jpegBuf.toString('base64'), mimeType: 'image/jpeg' };
