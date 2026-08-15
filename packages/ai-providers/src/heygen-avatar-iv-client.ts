@@ -350,6 +350,7 @@ export async function submitHeygenAvatarIvGeneration(
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       image_key_prefix: input.imageKey.slice(0, 40),
+      audio_url: input.audioUrl, // Polish-28.1.4: log the full URL to diagnose whether HeyGen can fetch it
       audio_url_len: input.audioUrl.length,
       video_title: input.videoTitle,
       video_orientation: 'portrait',

@@ -833,14 +833,44 @@ async function extractFirstFramePng(input: {
     imageBytes = rawBuf;
   }
 
-  // Polish-28.0.11 Commit 64.11 hotfix: downscale before base64 —
-  // fofr/toolkit's frame is source-resolution. A 4K source ad
-  // produces a ~30MB PNG which blows Gemini's ~20MB inline_data cap.
-  // Nano Banana Pro character reference needs only ~1024px anyway
-  // (the model's own output is 1024x1024). jimp is pure-JS.
+  // Polish-28.0.11 Commit 64.11: downscale before base64 (was for
+  // Gemini's 20MB inline_data cap; still relevant for HeyGen upload
+  // size + speed). jimp = pure-JS, no native binary.
+  //
+  // Polish-28.1.4 Commit 69: BEFORE downscale, crop out the top 10%
+  // and bottom 25% of the source frame. Most UGC / affiliate source
+  // ads have burned-in captions at the bottom (TikTok / Reels style)
+  // and title cards / logos at the top. HeyGen faithfully preserves
+  // whatever it's given, so an uncropped frame produces a lip-synced
+  // video with the source ad's captions still overlaid — visible
+  // artifact operator flagged in 28.1.3.
+  //
+  // Middle 65% keeps the face for center-framed and top-framed
+  // subjects; may crop off subjects framed near the bottom of the
+  // shot. Acceptable default for UGC-style pieces where the person
+  // is centered. Env-tunable via POLISH28_FRAME_CROP_TOP_PCT and
+  // POLISH28_FRAME_CROP_BOTTOM_PCT (each 0-45; sum <90) so a user
+  // with unusual composition can bypass.
+  const cropTopPct = clampCropPct(Number(process.env['POLISH28_FRAME_CROP_TOP_PCT']), 10);
+  const cropBottomPct = clampCropPct(Number(process.env['POLISH28_FRAME_CROP_BOTTOM_PCT']), 25);
   const { Jimp } = await import('jimp');
   const image = await Jimp.read(imageBytes);
+  const originalW = image.bitmap.width;
+  const originalH = image.bitmap.height;
+  const cropTopPx = Math.floor((originalH * cropTopPct) / 100);
+  const cropBottomPx = Math.floor((originalH * cropBottomPct) / 100);
+  const cropH = Math.max(1, originalH - cropTopPx - cropBottomPx);
+  image.crop({ x: 0, y: cropTopPx, w: originalW, h: cropH });
+  console.log(
+    `[polish28] frame-crop: ${originalW}x${originalH} -> ${originalW}x${cropH} ` +
+      `(top ${cropTopPct}%=${cropTopPx}px, bottom ${cropBottomPct}%=${cropBottomPx}px)`,
+  );
   image.scaleToFit({ w: 1024, h: 1024 });
   const jpegBuf = await image.getBuffer('image/jpeg', { quality: 85 });
   return { base64: jpegBuf.toString('base64'), mimeType: 'image/jpeg' };
+}
+
+function clampCropPct(raw: number, fallback: number): number {
+  if (!Number.isFinite(raw) || raw < 0 || raw >= 45) return fallback;
+  return raw;
 }

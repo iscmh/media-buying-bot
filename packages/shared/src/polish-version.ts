@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.1.3';
+export const POLISH_VERSION = '28.1.4';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.1.3';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.1.3 Commit 68 - skip Nano Banana character clone entirely, feed real source-ad frame to HeyGen for UGC realism (real face, real bg, real lighting)';
+  'Polish-28.1.4 Commit 69 - crop source frame to remove captions/titles (top 10% + bottom 25%) + log audio_url for HeyGen no-audio diagnostics';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
