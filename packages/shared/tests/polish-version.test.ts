@@ -16,12 +16,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     );
   });
 
-  it('is currently 28.0.10 (Polish-28.0.10 Commit 64.10 hotfix — rewrite extractFirstFramePng for fofr/toolkit task schema)', () => {
+  it('is currently 28.0.11 (Polish-28.0.11 Commit 64.11 hotfix — downscale first-frame via jimp before Gemini inline_data)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.0.10');
+    expect(POLISH_VERSION).toBe('28.0.11');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

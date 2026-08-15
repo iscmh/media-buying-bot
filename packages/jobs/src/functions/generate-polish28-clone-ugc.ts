@@ -430,7 +430,7 @@ export const generatePolish28CloneUgc = inngest.createFunction(
           apiKey: keys.gemini!,
           prompt,
           referenceImageBase64: framePng.base64,
-          referenceImageMimeType: 'image/png',
+          referenceImageMimeType: framePng.mimeType,
           generationJobId: jobId,
         });
         if (!r.ok || !r.imageBase64) {
@@ -728,7 +728,7 @@ async function extractFirstFramePng(input: {
   userId: string;
   replicateApiKey: string;
   generationJobId?: string;
-}): Promise<{ base64: string }> {
+}): Promise<{ base64: string; mimeType: 'image/jpeg' }> {
   const { getServiceRoleSupabase } = await import('../lib/storage');
   const { callProvider } = await import('@mbb/ai-providers');
   const { getPolish28FfmpegModelId } = await import('../lib/extract-source-audio');
@@ -883,6 +883,22 @@ async function extractFirstFramePng(input: {
   // Download.
   const res = await fetch(outputUrl);
   if (!res.ok) throw new Error(`Polish-28 frame-extract download HTTP ${res.status}`);
-  const pngBuf = Buffer.from(await res.arrayBuffer());
-  return { base64: pngBuf.toString('base64') };
+  const rawBuf = Buffer.from(await res.arrayBuffer());
+
+  // Polish-28.0.11 Commit 64.11 hotfix: downscale before base64 —
+  // fofr/toolkit's extract_frames_from_input returns source-resolution
+  // PNGs. A 4K source ad produces a ~30MB PNG which blows Gemini's
+  // ~20MB inline_data cap (28.0.10 failed with HTTP 400 "Unable to
+  // process input image"). Nano Banana Pro character reference needs
+  // only ~1024px anyway — the model's own output is 1024x1024.
+  //
+  // jimp is pure-JS (no native binary → no Vercel bundling risk like
+  // the @ffmpeg-installer saga from 28.0.4). Slower than sharp but a
+  // one-shot resize of a 30MB PNG completes in single-digit seconds,
+  // well within Vercel's 60s function timeout.
+  const { Jimp } = await import('jimp');
+  const image = await Jimp.read(rawBuf);
+  image.scaleToFit({ w: 1024, h: 1024 });
+  const jpegBuf = await image.getBuffer('image/jpeg', { quality: 85 });
+  return { base64: jpegBuf.toString('base64'), mimeType: 'image/jpeg' };
 }
