@@ -36,6 +36,9 @@
 import { callProvider } from './chokepoint';
 
 const HEYGEN_BASE = 'https://api.heygen.com';
+/** Polish-28.1.1: separate subdomain for asset uploads — HeyGen splits
+ *  the upload traffic away from api.heygen.com. */
+const HEYGEN_UPLOAD_BASE = 'https://upload.heygen.com';
 const UPLOAD_TIMEOUT_MS = 60_000;
 const SUBMIT_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_MS = 15_000;
@@ -144,10 +147,29 @@ export function classifyHeygenAvatarIvError(
 }
 
 // =========================================================================
-// POST /v2/upload/asset — upload reference image bytes
+// POST upload.heygen.com/v1/asset — upload reference image bytes
 // =========================================================================
+//
+// Polish-28.1.1 Commit 66 hotfix: the Polish-28.0.0 Phase 1 investigation
+// encoded `${HEYGEN_BASE}/v2/upload/asset` which returned HTTP 404
+// with an HTML "Not Found" page in prod (28.1.0 first HeyGen-reaching
+// test). That URL does not exist on HeyGen's API surface.
+//
+// HeyGen's actual asset upload lives on a SEPARATE subdomain
+// (upload.heygen.com, not api.heygen.com) at /v1/asset. Raw binary
+// body with the image MIME as content-type. Response envelope:
+//   { code: 100, data: { image_key: 'image/...', url: '...' } }
+//
+// The image_key field name matches what /v2/video/av4/generate
+// consumes downstream — no downstream changes needed.
+//
+// If this URL also 404s in prod (would mean HeyGen deprecated it
+// entirely), the fallback is /v3/assets on api.heygen.com which
+// uses multipart/form-data and returns asset_id — that would
+// require also renaming image_key -> image_asset_id in the av4
+// generate call. Ship that as Commit 67 if the legacy URL is dead.
 
-const HEYGEN_UPLOAD_ASSET_URL = `${HEYGEN_BASE}/v2/upload/asset`;
+const HEYGEN_UPLOAD_ASSET_URL = `${HEYGEN_UPLOAD_BASE}/v1/asset`;
 
 export interface UploadHeygenImageAssetInput {
   userId: string;
