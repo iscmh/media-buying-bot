@@ -277,6 +277,120 @@ export async function uploadHeygenImageAsset(
 }
 
 // =========================================================================
+// POST upload.heygen.com/v1/asset — upload audio bytes (returns asset_id)
+// =========================================================================
+//
+// Polish-28.1.7 Commit 72: HeyGen accepts audio via 3 paths (script+voice_id,
+// audio_url, audio_asset_id). audio_url has been unreliable in prod
+// (28.1.4-28.1.6 output was silent even when Supabase URL was verifiably
+// public) — HeyGen's servers apparently drop the audio silently when
+// they can't fetch the URL. Uploading the audio bytes to HeyGen's own
+// asset storage bypasses this: their servers already have the file, no
+// external fetch needed. Same endpoint as image upload, different
+// content-type + returned field.
+
+export interface UploadHeygenAudioAssetInput {
+  userId: string;
+  apiKey: string;
+  audioBytes: Uint8Array;
+  audioMimeType: 'audio/mpeg' | 'audio/mp3' | 'audio/wav';
+  generationJobId?: string;
+}
+
+export interface UploadHeygenAudioAssetResult {
+  ok: boolean;
+  audioAssetId?: string;
+  latencyMs: number;
+  httpStatus?: number;
+  errorMessage?: string;
+  errorCategory?: HeygenAvatarIvErrorCategory;
+}
+
+export async function uploadHeygenAudioAsset(
+  input: UploadHeygenAudioAssetInput,
+): Promise<UploadHeygenAudioAssetResult> {
+  const t0 = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  let status = 0;
+  let errorMessage: string | undefined;
+  let audioAssetId: string | undefined;
+
+  const bodyCopy = new Uint8Array(input.audioBytes.byteLength);
+  bodyCopy.set(input.audioBytes);
+
+  console.log(
+    `[heygen-avatar-iv] upload-audio-asset REQUEST: POST ${HEYGEN_UPLOAD_ASSET_URL} ` +
+      `bytes=${bodyCopy.byteLength} mime=${input.audioMimeType} jobId=${input.generationJobId ?? 'null'}`,
+  );
+
+  try {
+    const res = await fetch(HEYGEN_UPLOAD_ASSET_URL, {
+      method: 'POST',
+      headers: {
+        'X-Api-Key': input.apiKey,
+        'Content-Type': input.audioMimeType,
+      },
+      body: bodyCopy,
+      signal: controller.signal,
+    });
+    status = res.status;
+    if (status >= 200 && status < 300) {
+      // HeyGen's audio-upload response envelope carries a few possible
+      // field names depending on API version. Extract defensively:
+      //   { code: 100, data: { asset_id: 'audio/...' } }        // newer
+      //   { code: 100, data: { audio_asset_id: 'audio/...' } }  // older
+      //   { code: 100, data: { id: 'audio/...' } }              // fallback
+      const body = (await res.json()) as HeygenEnvelope<{
+        asset_id?: string;
+        audio_asset_id?: string;
+        id?: string;
+      }>;
+      audioAssetId = body.data?.asset_id ?? body.data?.audio_asset_id ?? body.data?.id;
+      if (!audioAssetId) {
+        errorMessage =
+          `HeyGen audio upload response missing asset id (checked asset_id / ` +
+          `audio_asset_id / id): ${JSON.stringify(body).slice(0, 400)}`;
+      }
+    } else {
+      let bodyText = '';
+      try {
+        bodyText = await res.text();
+      } catch {
+        // ignore
+      }
+      errorMessage = `HeyGen audio-upload failed HTTP ${status}: ${bodyText.slice(0, 400)}`;
+    }
+  } catch (err) {
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    errorMessage = isAbort
+      ? `HeyGen audio-upload timed out after ${UPLOAD_TIMEOUT_MS}ms`
+      : err instanceof Error
+        ? err.message
+        : String(err);
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const latencyMs = Date.now() - t0;
+  console.log(
+    `[heygen-avatar-iv] upload-audio-asset RESPONSE: ${status} assetId=${audioAssetId ?? '(none)'} ` +
+      `error=${errorMessage ?? 'null'} latencyMs=${latencyMs}`,
+  );
+
+  if (audioAssetId) {
+    return { ok: true, audioAssetId, latencyMs, httpStatus: status };
+  }
+  return {
+    ok: false,
+    latencyMs,
+    httpStatus: status,
+    errorMessage: errorMessage ?? 'HeyGen audio-upload failed with no error message.',
+    errorCategory: classifyHeygenAvatarIvError(status, errorMessage),
+  };
+}
+
+// =========================================================================
 // POST /v2/video/av4/generate — submit Avatar IV image-to-video job
 // =========================================================================
 
@@ -288,10 +402,18 @@ export interface SubmitHeygenAvatarIvInput {
   /** From uploadHeygenImageAsset — HeyGen's opaque handle for the ref image. */
   imageKey: string;
   /**
-   * Public URL to the voice audio (mp3/wav). ElevenLabs TTS output
-   * uploaded to Supabase → the resulting public URL goes here.
+   * Polish-28.1.7 Commit 72: preferred audio path — HeyGen-hosted
+   * asset id (from uploadHeygenAudioAsset). Bypasses HeyGen's
+   * unreliable audio_url external-fetch. If both audioAssetId and
+   * audioUrl are provided, audioAssetId wins.
    */
-  audioUrl: string;
+  audioAssetId?: string;
+  /**
+   * Fallback audio path — public URL to voice audio (mp3/wav).
+   * HeyGen sometimes silently drops audio when it can't fetch this,
+   * so audioAssetId is preferred.
+   */
+  audioUrl?: string;
   /** Human-readable title for the HeyGen dashboard. */
   videoTitle: string;
   /**
@@ -317,12 +439,28 @@ export interface SubmitHeygenAvatarIvResult {
 export async function submitHeygenAvatarIvGeneration(
   input: SubmitHeygenAvatarIvInput,
 ): Promise<SubmitHeygenAvatarIvResult> {
+  if (!input.audioAssetId && !input.audioUrl) {
+    return {
+      ok: false,
+      latencyMs: 0,
+      errorMessage: 'submitHeygenAvatarIvGeneration requires either audioAssetId or audioUrl.',
+      errorCategory: 'validation',
+    };
+  }
+  // Polish-28.1.7 Commit 72: prefer audio_asset_id over audio_url.
+  // HeyGen's audio_url path was unreliable in prod (silent output
+  // even with verifiably-public Supabase URLs) — passing an asset id
+  // that lives on HeyGen's own infra bypasses that failure mode.
   const body: Record<string, unknown> = {
     image_key: input.imageKey,
-    audio_url: input.audioUrl,
     video_title: input.videoTitle,
     video_orientation: 'portrait', // 9:16
   };
+  if (input.audioAssetId) {
+    body['audio_asset_id'] = input.audioAssetId;
+  } else if (input.audioUrl) {
+    body['audio_url'] = input.audioUrl;
+  }
   if (input.customMotionPrompt && input.customMotionPrompt.trim().length > 0) {
     body['custom_motion_prompt'] = input.customMotionPrompt.trim();
     // Documented flag — HeyGen may enhance short prompts via LLM.
@@ -330,9 +468,12 @@ export async function submitHeygenAvatarIvGeneration(
   }
   if (input.callbackId) body['callback_id'] = input.callbackId;
 
+  const audioMode = input.audioAssetId
+    ? `asset_id=${input.audioAssetId.slice(0, 40)}`
+    : `url_len=${input.audioUrl?.length ?? 0}`;
   console.log(
     `[heygen-avatar-iv] submit REQUEST image_key=${input.imageKey.slice(0, 40)}... ` +
-      `audio_url_len=${input.audioUrl.length} motion_prompt_chars=${input.customMotionPrompt?.length ?? 0} ` +
+      `audio_${audioMode} motion_prompt_chars=${input.customMotionPrompt?.length ?? 0} ` +
       `jobId=${input.generationJobId ?? 'null'}`,
   );
 
@@ -350,8 +491,9 @@ export async function submitHeygenAvatarIvGeneration(
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       image_key_prefix: input.imageKey.slice(0, 40),
-      audio_url: input.audioUrl, // Polish-28.1.4: log the full URL to diagnose whether HeyGen can fetch it
-      audio_url_len: input.audioUrl.length,
+      audio_asset_id: input.audioAssetId ?? null,
+      audio_url: input.audioUrl ?? null,
+      audio_url_len: input.audioUrl?.length ?? 0,
       video_title: input.videoTitle,
       video_orientation: 'portrait',
       motion_prompt_chars: input.customMotionPrompt?.length ?? 0,

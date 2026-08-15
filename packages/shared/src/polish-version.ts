@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.1.6';
+export const POLISH_VERSION = '28.1.7';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.1.6';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.1.6 Commit 71 hotfix - bump HeyGen poll ceiling 5min -> 22min (Avatar IV routinely takes 5-15min for image-to-video)';
+  'Polish-28.1.7 Commit 72 - restore Nano Banana Pro with UGC-realism prompt + fix audio via HeyGen audio_asset_id upload (fixes captions bleed + silent output)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
