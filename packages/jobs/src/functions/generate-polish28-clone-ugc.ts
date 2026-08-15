@@ -24,8 +24,10 @@
  *   D. condense-script           Claude → 30s-target UGC monologue
  *   E. match-voice-for-persona   pick from ELEVENLABS_VOICE_ROSTER
  *                                based on gender+age keywords in persona
- *   F. clone-or-reuse-character  Nano Banana Pro clone OR reuse from
- *                                concepts.metadata.polish28_character_reference
+ *   F. prepare-source-frame      Polish-28.1.3: extract source-ad frame
+ *                                via fofr/toolkit + jimp downscale (was
+ *                                Nano Banana Pro clone in 28.1.2 — pivoted
+ *                                for UGC realism, see Commit 68 header)
  *   G. tts-with-matched-voice    ElevenLabs TTS → mp3 bytes → Supabase URL
  *   H. upload-heygen-image-asset upload character image bytes → image_key
  *   I. submit-heygen-avatar-iv   image_key + audio_url → video_id
@@ -52,8 +54,6 @@ import { eq } from 'drizzle-orm';
 import { NonRetriableError } from 'inngest';
 import {
   callClaude,
-  cloneCharacterReferenceImage,
-  composeNanoBananaCharacterClonePrompt,
   estimateHeygenAvatarIvCostUsd,
   flattenPersonaForClonePrompt,
   isTerminalAvatarIvStatus,
@@ -91,8 +91,6 @@ console.log(`[jobs.generate-polish28-clone-ugc] cold start — POLISH_VERSION=${
 
 const HEYGEN_POLL_MAX_ATTEMPTS = 30;
 const HEYGEN_POLL_INTERVAL_SECONDS = 10;
-/** Freshness window for reusing a cached Nano Banana Pro character clone. */
-const CHARACTER_REF_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -121,17 +119,6 @@ interface Polish28CharacterReference {
   personaHash: string;
   createdAt: string;
   modelIdUsed: string;
-}
-
-function hashPersona(persona: string): string {
-  // Cheap deterministic hash for cache-invalidation checks. Not
-  // security-sensitive — collision-tolerant. FNV-1a 32-bit.
-  let h = 2166136261;
-  for (let i = 0; i < persona.length; i++) {
-    h ^= persona.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(16);
 }
 
 export const generatePolish28CloneUgc = inngest.createFunction(
@@ -348,105 +335,61 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         });
       });
 
-      // ---------- Step G: clone-or-reuse character reference ----------
-      const personaHash = hashPersona(source.personaDescription);
-      const cached = source.cachedCharacterReference;
-      const cachedIsFresh =
-        cached &&
-        cached.personaHash === personaHash &&
-        Date.now() - new Date(cached.createdAt).getTime() < CHARACTER_REF_MAX_AGE_MS;
-
-      const character = await guardedStepRun(step, 'clone-or-reuse-character', async () => {
-        if (cachedIsFresh && cached) {
-          console.log(
-            `[polish28] reusing cached character reference personaHash=${personaHash} ` +
-              `age=${Math.round((Date.now() - new Date(cached.createdAt).getTime()) / 1000)}s`,
-          );
-          return safeInngestStepReturn({
-            reused: true,
-            storagePath: cached.storagePath,
-            publicUrl: cached.publicUrl,
-            personaHash: cached.personaHash,
-            costUsd: 0,
-          });
-        }
-        // Fresh clone via Nano Banana Pro.
-        // Need a reference frame from the source ad — fetch the source
-        // video and extract a mid-clip frame via ffmpeg. For MVP we
-        // pass the whole source video as the reference (Gemini image
-        // API accepts video-first-frame from an image ref anyway) —
-        // actually Nano Banana Pro requires a still image, so fetch
-        // the source video's first frame via ffmpeg.
-        // For a scoped MVP: just pass the source video URL AS a ref
-        // frame; Gemini will use the first accessible frame when the
-        // MIME suggests video. Fallback: send an already-uploaded
-        // preview frame if one exists.
-        //
-        // Simpler + reliable: fetch source video, ffmpeg-extract the
-        // first frame as PNG, base64-encode, send as reference.
-        const framePng = await extractFirstFramePng({
+      // ---------- Step F: prepare source frame for HeyGen ----------
+      // Polish-28.1.3 Commit 68: skip Nano Banana Pro character clone
+      // ENTIRELY. Feed HeyGen Avatar IV the ACTUAL source-ad frame —
+      // real person, real background, real lighting. HeyGen explicitly
+      // supports "any photo" for Avatar IV.
+      //
+      // Why: 28.1.2 shipped a green pipeline but the Nano Banana Pro
+      // output was studio-portrait aesthetic (clean white bg, slightly
+      // stylized) — HeyGen then faithfully lip-synced that stylized
+      // image, giving non-UGC-realistic output. The pipeline was
+      // technically correct but the value prop was broken.
+      //
+      // Trade-offs of this pivot:
+      //   + Real UGC realism (source ad's actual face + bg)
+      //   + Perfect character consistency (same frame every gen from
+      //     same concept — was best-effort with Nano Banana cache)
+      //   + Removes a $0.13/gen Nano Banana call (whole pipeline cost
+      //     drops by that much)
+      //   + Removes Gemini image-gen dependency from the polish28 hot
+      //     path (Gemini vision still needed upstream in analyze-concept
+      //     for persona extraction — 5-BYOK gate unchanged)
+      //   - No visual variation across generations from same concept —
+      //     the person always looks identical because it IS identical.
+      //     Fine for A/B variant testing on script + voice only.
+      const sourceFrame = await guardedStepRun(step, 'prepare-source-frame', async () => {
+        const frame = await extractFirstFramePng({
           storageBucket: SOURCE_BUCKET,
           storagePath: sourceStoragePath,
           userId: jobUserId,
           replicateApiKey: keys.kling,
           generationJobId: jobId,
         });
-        const prompt = composeNanoBananaCharacterClonePrompt(source.personaDescription);
-        const r = await cloneCharacterReferenceImage({
-          userId: jobUserId,
-          apiKey: keys.gemini!,
-          prompt,
-          referenceImageBase64: framePng.base64,
-          referenceImageMimeType: framePng.mimeType,
-          generationJobId: jobId,
-        });
-        if (!r.ok || !r.imageBase64) {
-          throw new NonRetriableError(
-            `Polish-28 character clone failed: ${r.errorMessage ?? 'unknown'}. ` +
-              `diagnostics=${JSON.stringify(r.diagnostics ?? {}).slice(0, 500)}`,
-          );
-        }
+        // Persist so we have a Supabase URL for the composite record +
+        // operator debug + downstream HeyGen upload can fetch it.
         const uploaded = await uploadGeneratedImage({
           userId: jobUserId,
           jobId,
           variantIndex: 0,
-          imageBase64: r.imageBase64,
-          mimeType: r.imageMimeType ?? 'image/png',
-          filenamePrefix: 'polish28-character-',
+          imageBase64: frame.base64,
+          mimeType: frame.mimeType,
+          filenamePrefix: 'polish28-sourceframe-',
         });
-        // Persist to concept metadata for future reuse.
-        const db = getDb();
-        const concept = await db.query.concepts.findFirst({
-          where: eq(schema.concepts.id, conceptId),
-          columns: { metadata: true },
-        });
-        const conceptMeta = (concept?.metadata ?? {}) as Record<string, unknown>;
-        const refPayload: Polish28CharacterReference = {
-          storagePath: uploaded.path,
-          publicUrl: uploaded.publicUrl,
-          personaHash,
-          createdAt: nowIso(),
-          modelIdUsed: r.diagnostics?.modelId ?? 'gemini-3-pro-image-preview',
-        };
-        const updatedMeta = assertNoUndefinedForPostgres(
-          { ...conceptMeta, polish28_character_reference: refPayload },
-          'polish28:persist-character-reference',
-        );
-        await db
-          .update(schema.concepts)
-          .set({ metadata: updatedMeta })
-          .where(eq(schema.concepts.id, conceptId));
         await patchMetadata(jobId, {
-          polish28_progress: { step: 'clone-character', pct: 50, at: nowIso() },
-          polish28_character_ref_generated: true,
-          polish28_character_cost_usd: r.costUsd,
+          polish28_progress: { step: 'prepare-source-frame', pct: 50, at: nowIso() },
+          polish28_source_frame: {
+            path: uploaded.path,
+            url: uploaded.publicUrl,
+            mime: frame.mimeType,
+          },
         });
         return safeInngestStepReturn({
-          reused: false,
-          storagePath: uploaded.path,
           publicUrl: uploaded.publicUrl,
-          personaHash,
-          costUsd: r.costUsd,
+          storagePath: uploaded.path,
+          mimeType: frame.mimeType,
+          costUsd: 0, // No Nano Banana call — just frame extract cost bundled in Replicate
         });
       });
 
@@ -484,13 +427,14 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         });
       });
 
-      // ---------- Step I: upload character image to HeyGen ----------
+      // ---------- Step I: upload source frame to HeyGen ----------
+      // Polish-28.1.3: fetches sourceFrame (real source-ad frame) not
+      // the deleted Nano Banana character clone.
       const heygenAsset = await guardedStepRun(step, 'upload-heygen-image-asset', async () => {
-        // Fetch character image bytes from Supabase (public URL).
-        const fetchRes = await fetch(character.publicUrl);
+        const fetchRes = await fetch(sourceFrame.publicUrl);
         if (!fetchRes.ok) {
           throw new NonRetriableError(
-            `Polish-28 could not fetch character image for HeyGen upload (HTTP ${fetchRes.status}).`,
+            `Polish-28 could not fetch source frame for HeyGen upload (HTTP ${fetchRes.status}).`,
           );
         }
         const arr = await fetchRes.arrayBuffer();
@@ -632,7 +576,7 @@ export const generatePolish28CloneUgc = inngest.createFunction(
       await guardedStepRun(step, 'persist-creative', async () => {
         const db = getDb();
         const heygenCost = estimateHeygenAvatarIvCostUsd(finalDurationSeconds ?? 30);
-        const totalCost = heygenCost + (character.costUsd ?? 0) + 0.03;
+        const totalCost = heygenCost + (sourceFrame.costUsd ?? 0) + 0.03;
         const creativeRecord = assertNoUndefinedForPostgres(
           {
             userId: jobUserId,
@@ -656,7 +600,7 @@ export const generatePolish28CloneUgc = inngest.createFunction(
       // Polish-28.1.0 pivot: no cleanup-temp-voice step — matched
       // voices are public presets, nothing to clean up.
       const heygenCost = estimateHeygenAvatarIvCostUsd(finalDurationSeconds ?? 30);
-      const totalCost = heygenCost + (character.costUsd ?? 0) + 0.03;
+      const totalCost = heygenCost + (sourceFrame.costUsd ?? 0) + 0.03;
       await markJobCompleted({
         jobId,
         userId: jobUserId,
