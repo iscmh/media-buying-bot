@@ -584,10 +584,19 @@ export async function submitHeygenAvatarIvGeneration(
   //   1. script + voice_id — HeyGen native TTS (guaranteed audio)
   //   2. audio_asset_id — HeyGen-hosted asset (28.1.7, silent in prod)
   //   3. audio_url — external URL (28.1.4-28.1.6, silent in prod)
+  //
+  // Polish-28.2.5 Commit 78: `video_orientation: 'portrait'` was
+  // silently ignored by HeyGen — outputs were coming back non-9:16
+  // even though the input character was 9:16 (Commit 77 fixed Nano
+  // Banana to emit 9:16). Real HeyGen fields: `aspect_ratio: '9:16'`
+  // (documented) + `dimension: {width, height}` (defensive fallback).
+  // Keeping video_orientation too since HeyGen ignores unknown fields.
   const body: Record<string, unknown> = {
     image_key: input.imageKey,
     video_title: input.videoTitle,
-    video_orientation: 'portrait', // 9:16
+    aspect_ratio: '9:16',
+    dimension: { width: 1080, height: 1920 },
+    video_orientation: 'portrait', // legacy — kept for safety, ignored if unrecognized
   };
   if (hasScript) {
     body['script'] = input.script;
