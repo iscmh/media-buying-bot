@@ -495,11 +495,39 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         }
         const arr = await fetchRes.arrayBuffer();
         const bytes = new Uint8Array(arr);
+        // Polish-28.1.2 Commit 67 hotfix: detect actual MIME from
+        // magic bytes instead of hardcoding image/png. Nano Banana
+        // Pro can return either PNG or JPEG depending on the model
+        // version + prompt — 28.1.1 died with HeyGen 400 "Content
+        // type not match image/png != image/jpeg" when the character
+        // clone came back as JPEG. HeyGen validates the declared
+        // content-type against the actual bytes and rejects on
+        // mismatch. Sniff and trust the bytes.
+        const detectedMime: 'image/png' | 'image/jpeg' | 'image/webp' =
+          bytes.length >= 4 &&
+          bytes[0] === 0x89 &&
+          bytes[1] === 0x50 &&
+          bytes[2] === 0x4e &&
+          bytes[3] === 0x47
+            ? 'image/png'
+            : bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+              ? 'image/jpeg'
+              : bytes.length >= 12 &&
+                  bytes[0] === 0x52 &&
+                  bytes[1] === 0x49 &&
+                  bytes[2] === 0x46 &&
+                  bytes[3] === 0x46 &&
+                  bytes[8] === 0x57 &&
+                  bytes[9] === 0x45 &&
+                  bytes[10] === 0x42 &&
+                  bytes[11] === 0x50
+                ? 'image/webp'
+                : 'image/png'; // Defensive fallback — HeyGen will reject if wrong, cheaper than throwing here.
         const r = await uploadHeygenImageAsset({
           userId: jobUserId,
           apiKey: keys.heygen!,
           imageBytes: bytes,
-          imageMimeType: 'image/png',
+          imageMimeType: detectedMime,
           generationJobId: jobId,
         });
         if (!r.ok || !r.imageKey) {

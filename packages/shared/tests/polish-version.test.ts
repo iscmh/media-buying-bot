@@ -16,12 +16,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     );
   });
 
-  it('is currently 28.1.1 (Polish-28.1.1 Commit 66 hotfix — swap HeyGen upload URL to upload.heygen.com/v1/asset)', () => {
+  it('is currently 28.1.2 (Polish-28.1.2 Commit 67 hotfix — detect character image MIME from magic bytes before HeyGen upload)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.1.1');
+    expect(POLISH_VERSION).toBe('28.1.2');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

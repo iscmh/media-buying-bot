@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.1.1';
+export const POLISH_VERSION = '28.1.2';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.1.1';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.1.1 Commit 66 hotfix - swap HeyGen upload URL from hallucinated /v2/upload/asset to upload.heygen.com/v1/asset (fixes 404 HTML)';
+  'Polish-28.1.2 Commit 67 hotfix - detect character image MIME from magic bytes before HeyGen upload (fixes 400 content-type mismatch)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
