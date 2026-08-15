@@ -16,12 +16,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     );
   });
 
-  it('is currently 28.0.13 (Polish-28.0.13 Commit 64.13 hotfix — verify-voice-ready poll before TTS + surface raw 401 body)', () => {
+  it('is currently 28.1.0 (Polish-28.1.0 Commit 65 — pivot from IVC voice-clone to voice-match from public roster)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.0.13');
+    expect(POLISH_VERSION).toBe('28.1.0');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

@@ -706,6 +706,50 @@ export function isElevenLabsVoiceRosterUncurated(
 export const isHedraVoiceRosterUncurated = isElevenLabsVoiceRosterUncurated;
 
 /**
+ * Polish-28.1.0 Commit 65: match a persona description to the
+ * best-fit voice from the ElevenLabs public roster. Used by the
+ * Polish-28 cloned-UGC worker after the IVC-clone pivot — voice is
+ * MATCHED (not cloned) so the pipeline works on every ElevenLabs
+ * tier including Free (IVC required Starter+).
+ *
+ * Heuristic: keyword-scan the flattened persona description for
+ * gender + age markers, pick the closest roster entry. Falls back
+ * to gender-only match, then to the roster default (Sarah).
+ *
+ * Deliberately simple — 5-voice roster doesn't need audio-feature
+ * matching. A future upgrade could pull the ElevenLabs shared
+ * voice library (hundreds of voices) and match on audio fingerprint,
+ * but that's Polish-28.2+ territory.
+ */
+export function matchElevenLabsVoiceForPersona(
+  personaDescription: string,
+  roster: readonly ElevenLabsVoiceRosterEntry[] = ELEVENLABS_VOICE_ROSTER,
+): ElevenLabsVoiceRosterEntry {
+  if (roster.length === 0) {
+    throw new Error(
+      'matchElevenLabsVoiceForPersona: empty voice roster — cannot pick. ' +
+        'Seed ELEVENLABS_VOICE_ROSTER with at least one entry.',
+    );
+  }
+  const lower = personaDescription.toLowerCase();
+  const femaleHit = /\b(woman|female|girl|lady|she\b|her\b|hers|feminine)\b/.test(lower);
+  const maleHit = /\b(man|male|guy|boy|dude|he\b|him\b|his\b|masculine)\b/.test(lower);
+  const youngHit = /\b(young|youthful|teen|20s|early 30s|twenties|thirties)\b/.test(lower);
+  const targetGender: 'female' | 'male' | 'neutral' =
+    femaleHit && !maleHit ? 'female' : maleHit && !femaleHit ? 'male' : 'neutral';
+  const targetAge: 'young' | 'middle_aged' = youngHit ? 'young' : 'middle_aged';
+
+  // 1. Exact match on gender + age.
+  const exact = roster.find((v) => v.gender === targetGender && v.age === targetAge);
+  if (exact) return exact;
+  // 2. Gender-only match.
+  const gender = roster.find((v) => v.gender === targetGender);
+  if (gender) return gender;
+  // 3. Default.
+  return getDefaultElevenLabsVoice(roster) ?? roster[0]!;
+}
+
+/**
  * Character gender values the Nano Banana / Hedra character shape
  * emits. Kept narrow so a future roster or picker widening (adding
  * a 'neutral' timbre voice) surfaces via a compile error — TS won't

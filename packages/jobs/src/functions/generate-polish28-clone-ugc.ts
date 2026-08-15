@@ -1,28 +1,47 @@
 /**
- * Polish-28.0.0 Commit 64: BYOK-only cloned-UGC pipeline worker.
+ * Polish-28.1.0 Commit 65: BYOK-only cloned-CHARACTER + matched-voice
+ * UGC pipeline worker. Face is CLONED via Nano Banana Pro from a
+ * source-ad frame; voice is MATCHED from a curated public ElevenLabs
+ * roster based on the persona description.
+ *
+ * Pivoted from Polish-28.0.x's Instant-Voice-Clone (IVC) approach
+ * because IVC hit hard walls: (1) requires ElevenLabs Starter+ tier
+ * (Free users blocked at clone step), (2) triggers "probation mode"
+ * on rapid-clone patterns, (3) 10-voice cap on Starter → filled up
+ * in a day of testing, (4) eventual-consistency lag between clone
+ * and TTS caused spurious 401s. Public voices from the roster work
+ * on every ElevenLabs tier including Free, have no cap, no cleanup,
+ * and are always queryable for TTS immediately.
+ *
+ * Trade-off: matched voice ≈ source voice (similar gender/age/timbre)
+ * but not identical. For UGC ad variations this is acceptable —
+ * the visual character clone carries the identity load.
  *
  * Steps (each its own guardedStepRun for per-step try/catch + logging):
  *   A. load-job                  fetch generation_jobs + concept
  *   B. mark-processing           update status + progress
  *   C. load-source-context       persona + source video URL from concepts
  *   D. condense-script           Claude → 30s-target UGC monologue
- *   E. extract-source-audio      ffmpeg extract + loop-mitigate → mp3 bytes
- *   F. clone-voice               ElevenLabs Instant Voice Clone → voice_id
- *   G. clone-or-reuse-character  Nano Banana Pro clone OR reuse from
+ *   E. match-voice-for-persona   pick from ELEVENLABS_VOICE_ROSTER
+ *                                based on gender+age keywords in persona
+ *   F. clone-or-reuse-character  Nano Banana Pro clone OR reuse from
  *                                concepts.metadata.polish28_character_reference
- *   H. tts-with-cloned-voice     ElevenLabs TTS → mp3 bytes → Supabase URL
- *   I. upload-heygen-image-asset upload character image bytes → image_key
- *   J. submit-heygen-avatar-iv   image_key + audio_url → video_id
- *   K. poll-heygen-status        chunked 1-shot-per-step polls
- *   L. upload-final-video        download from HeyGen → Supabase → publicUrl
- *   M. persist-creative          insert generated_creatives row
- *   N. cleanup-temp-voice        best-effort DELETE /v1/voices/{id}
+ *   G. tts-with-matched-voice    ElevenLabs TTS → mp3 bytes → Supabase URL
+ *   H. upload-heygen-image-asset upload character image bytes → image_key
+ *   I. submit-heygen-avatar-iv   image_key + audio_url → video_id
+ *   J. poll-heygen-status        chunked 1-shot-per-step polls
+ *   K. upload-final-video        download from HeyGen → Supabase → publicUrl
+ *   L. persist-creative          insert generated_creatives row
  *
- * BYOK requirement: user must have all 4 keys connected (Claude,
- * Gemini, ElevenLabs, HeyGen). The generate form gates on this
- * upstream; the worker double-checks in the load-keys step to give
- * a clear NonRetriableError if any key vanished between submit +
- * execution.
+ * REMOVED vs Polish-28.0.x: extract-source-audio (was IVC input),
+ * clone-voice (IVC), verify-voice-ready (IVC race workaround),
+ * cleanup-temp-voice (IVC housekeeping). Also drops the ≥60s source
+ * ad requirement (IVC's minimum-duration constraint).
+ *
+ * BYOK requirement: 5 keys (Claude, Gemini, ElevenLabs, HeyGen,
+ * Replicate). Replicate still needed for the first-frame extract
+ * feeding Nano Banana Pro character reference. The generate form
+ * gates on this upstream; the worker double-checks in load-keys.
  *
  * Output: 9:16 vertical video (locked per Polish-28 spec — no user
  * choice). HeyGen Avatar IV supports 9:16 or 16:9 only; 9:16 wins
@@ -35,20 +54,17 @@ import {
   callClaude,
   cloneCharacterReferenceImage,
   composeNanoBananaCharacterClonePrompt,
-  createInstantVoiceClone,
-  deleteElevenLabsVoice,
   estimateHeygenAvatarIvCostUsd,
   flattenPersonaForClonePrompt,
   isTerminalAvatarIvStatus,
   POLISH28_ASPECT_RATIO,
-  POLISH28_TEMP_VOICE_NAME_PREFIX,
   submitElevenLabsTts,
   submitHeygenAvatarIvGeneration,
   checkHeygenAvatarIvStatus,
   uploadHeygenImageAsset,
 } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
-import { POLISH_VERSION } from '@mbb/shared';
+import { matchElevenLabsVoiceForPersona, POLISH_VERSION } from '@mbb/shared';
 import { inngest } from '../client';
 import { logInngestFailure } from '../error-hook';
 import { loadDecryptedKeys, MissingProviderKeyError } from '../lib/load-keys';
@@ -60,7 +76,6 @@ import {
   rethrowWithUndefinedContext,
 } from '../lib/assert-no-undefined-for-postgres';
 import { safeInngestStepReturn } from '../lib/strip-undefined';
-import { extractSourceAudioLoopMitigated } from '../lib/extract-source-audio';
 import {
   checkPolish25CondensedScript,
   composePolish25CondenserUserPrompt,
@@ -134,10 +149,6 @@ export const generatePolish28CloneUgc = inngest.createFunction(
       mode: 'mock' | 'live';
     };
     const startedAt = Date.now();
-    // Track resources for cleanup on late failure. All must be
-    // deleted in the finally-equivalent cleanup step so a mid-run
-    // crash doesn't leak an ElevenLabs voice slot.
-    let allocatedVoiceId: string | null = null;
 
     try {
       const jobUserId = assertScalarDefinedForPostgres(userId, 'userId', 'polish28:entry');
@@ -315,71 +326,27 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         return safeInngestStepReturn({ text: rawText, chars: rawText.length });
       });
 
-      // ---------- Step E: extract source audio (with loop mitigation) ----------
-      const sourceAudio = await guardedStepRun(step, 'extract-source-audio', async () => {
-        const outcome = await extractSourceAudioLoopMitigated({
-          storageBucket: SOURCE_BUCKET,
-          storagePath: sourceStoragePath,
-          userId: jobUserId,
-          replicateApiKey: keys.kling,
-          generationJobId: jobId,
-        });
-        if (!outcome.ok) {
-          throw new NonRetriableError(
-            `Polish-28 source-audio extract failed [${outcome.reason}]: ${outcome.detail}`,
-          );
-        }
+      // ---------- Step E: match voice for persona ----------
+      // Polish-28.1.0 Commit 65 pivot: no more IVC. Match against the
+      // curated ELEVENLABS_VOICE_ROSTER (5 public preset voices,
+      // work on every ElevenLabs tier). Keyword-scan the flattened
+      // persona for gender + age markers → best-fit roster entry.
+      const voice = await guardedStepRun(step, 'match-voice-for-persona', async () => {
+        const matched = matchElevenLabsVoiceForPersona(source.personaDescription);
         await patchMetadata(jobId, {
-          polish28_progress: { step: 'extract-source-audio', pct: 25, at: nowIso() },
-          polish28_source_audio: {
-            base_duration_seconds: outcome.baseDurationSeconds,
-            loop_factor: outcome.loopFactor,
-            final_duration_seconds: outcome.finalDurationSeconds,
-            bytes: outcome.audioBytes.byteLength,
+          polish28_progress: { step: 'match-voice', pct: 30, at: nowIso() },
+          polish28_matched_voice: {
+            voice_id: matched.id,
+            label: matched.label,
+            gender: matched.gender,
+            age: matched.age,
           },
         });
-        // Serializing the audio bytes through Inngest's step return
-        // would be huge — instead return a base64 snapshot for the
-        // next step to consume. Sizes here are ~1-2 MB for 65s @ 128kbps.
-        const buf = Buffer.from(outcome.audioBytes);
         return safeInngestStepReturn({
-          audioBase64: buf.toString('base64'),
-          audioMimeType: outcome.audioMimeType,
-          audioFilename: outcome.audioFilename,
-          baseDurationSeconds: outcome.baseDurationSeconds,
-          loopFactor: outcome.loopFactor,
-          finalDurationSeconds: outcome.finalDurationSeconds,
+          voiceId: matched.id,
+          label: matched.label,
         });
       });
-
-      // ---------- Step F: clone voice ----------
-      const voiceName = `${POLISH28_TEMP_VOICE_NAME_PREFIX}${jobId}_${Date.now()}`;
-      const voice = await guardedStepRun(step, 'clone-voice', async () => {
-        const buf = Buffer.from(sourceAudio.audioBase64, 'base64');
-        const audioBytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-        const r = await createInstantVoiceClone({
-          userId: jobUserId,
-          apiKey: keys.elevenlabs!,
-          name: voiceName,
-          audioBytes,
-          audioMimeType: sourceAudio.audioMimeType,
-          audioFilename: sourceAudio.audioFilename,
-          description: `Polish-28 temp voice for jobId=${jobId}`,
-          removeBackgroundNoise: true,
-          generationJobId: jobId,
-        });
-        if (!r.ok || !r.voiceId) {
-          throw new NonRetriableError(
-            `Polish-28 voice clone failed: ${r.errorMessage ?? 'unknown'}`,
-          );
-        }
-        await patchMetadata(jobId, {
-          polish28_progress: { step: 'clone-voice', pct: 35, at: nowIso() },
-          polish28_temp_voice_id: r.voiceId,
-        });
-        return safeInngestStepReturn({ voiceId: r.voiceId });
-      });
-      allocatedVoiceId = voice.voiceId;
 
       // ---------- Step G: clone-or-reuse character reference ----------
       const personaHash = hashPersona(source.personaDescription);
@@ -483,44 +450,11 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         });
       });
 
-      // ---------- Step H0: verify cloned voice is queryable ----------
-      // Polish-28.0.13 Commit 64.13 hotfix: ElevenLabs IVC returns
-      // voice_id immediately but the voice has an eventual-consistency
-      // lag before the TTS endpoint's regional cache picks it up.
-      // 28.0.12 died at TTS with HTTP 401 despite the clone succeeding
-      // in the same job — classic symptom of the voice not being
-      // queryable yet on the TTS path. Poll GET /v1/voices/{id} until
-      // 200 (up to ~20s) before hitting TTS. Cheap probe, self-heals
-      // the race, and adds diagnostic info if the voice truly is
-      // missing.
-      await guardedStepRun(step, 'verify-voice-ready', async () => {
-        const url = `https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voice.voiceId)}`;
-        const maxAttempts = 10;
-        const delayMs = 2_000;
-        let lastStatus = 0;
-        let lastBody = '';
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          const res = await fetch(url, {
-            method: 'GET',
-            headers: { 'xi-api-key': keys.elevenlabs!, accept: 'application/json' },
-          });
-          lastStatus = res.status;
-          if (res.status >= 200 && res.status < 300) {
-            return safeInngestStepReturn({ ready: true, attempts: attempt + 1 });
-          }
-          lastBody = (await res.text()).slice(0, 500);
-          await new Promise((r) => setTimeout(r, delayMs));
-        }
-        throw new NonRetriableError(
-          `Polish-28 voice-ready verify failed for voice_id=${voice.voiceId}: last HTTP ${lastStatus} after ${maxAttempts} attempts (${(maxAttempts * delayMs) / 1000}s). ` +
-            `ElevenLabs response: ${lastBody}. ` +
-            `If your ElevenLabs account still has this voice in the dashboard, this is an eventual-consistency race — retry the job. ` +
-            `If the voice is missing from the dashboard, the clone step failed silently — check /connections/ai-provider.`,
-        );
-      });
-
-      // ---------- Step H: TTS with cloned voice ----------
-      const tts = await guardedStepRun(step, 'tts-with-cloned-voice', async () => {
+      // ---------- Step G: TTS with matched voice ----------
+      // Polish-28.1.0 pivot: no more verify-voice-ready poll —
+      // public preset voices are always queryable, no eventual-consistency
+      // race like fresh IVC clones had (Polish-28.0.13's failure mode).
+      const tts = await guardedStepRun(step, 'tts-with-matched-voice', async () => {
         const r = await submitElevenLabsTts({
           userId: jobUserId,
           apiKey: keys.elevenlabs!,
@@ -690,23 +624,9 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         return safeInngestStepReturn({ totalCostUsd: totalCost });
       });
 
-      // ---------- Step N: cleanup temp voice ----------
-      await guardedStepRun(step, 'cleanup-temp-voice', async () => {
-        if (!allocatedVoiceId) return safeInngestStepReturn({ skipped: true });
-        const r = await deleteElevenLabsVoice({
-          userId: jobUserId,
-          apiKey: keys.elevenlabs!,
-          voiceId: allocatedVoiceId,
-          generationJobId: jobId,
-        });
-        return safeInngestStepReturn({
-          deleted: r.ok,
-          voiceId: allocatedVoiceId,
-          errorMessage: r.errorMessage ?? null,
-        });
-      });
-
-      // ---------- Step O: mark completed ----------
+      // ---------- Step L': mark completed ----------
+      // Polish-28.1.0 pivot: no cleanup-temp-voice step — matched
+      // voices are public presets, nothing to clean up.
       const heygenCost = estimateHeygenAvatarIvCostUsd(finalDurationSeconds ?? 30);
       const totalCost = heygenCost + (character.costUsd ?? 0) + 0.03;
       await markJobCompleted({
@@ -724,27 +644,8 @@ export const generatePolish28CloneUgc = inngest.createFunction(
       });
       return { jobId, mode, generated: 1, finalVideoUrl: uploaded.publicUrl };
     } catch (err) {
-      // Best-effort orphan-voice cleanup on error path so the slot
-      // is freed before Inngest re-raises. Daily reaper backstops this.
-      if (allocatedVoiceId) {
-        try {
-          const keysForCleanup = await loadDecryptedKeys(userId, ['elevenlabs']);
-          if (keysForCleanup.elevenlabs) {
-            await deleteElevenLabsVoice({
-              userId,
-              apiKey: keysForCleanup.elevenlabs,
-              voiceId: allocatedVoiceId,
-              generationJobId: jobId,
-            });
-            console.log(`[polish28] cleaned up orphan voice ${allocatedVoiceId} on error path`);
-          }
-        } catch (cleanupErr) {
-          console.error(
-            `[polish28] orphan voice cleanup failed for ${allocatedVoiceId}:`,
-            cleanupErr,
-          );
-        }
-      }
+      // Polish-28.1.0 pivot: no orphan-voice cleanup — matched voices
+      // are public presets, nothing to leak on the error path.
       rethrowWithUndefinedContext(err, 'generatePolish28CloneUgc');
     }
   },
