@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.2.2';
+export const POLISH_VERSION = '28.2.3';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.2.2';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.2.2 Commit 75 - fix laggy dashboard playback (preload=metadata -> auto on variant video player)';
+  'Polish-28.2.3 Commit 76 - remove phone/hands/arms from Nano Banana output (28.2.1 prompt language literally requested them, HeyGen lip-synced the awkward pose)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
