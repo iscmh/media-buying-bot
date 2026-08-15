@@ -966,8 +966,9 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
           <video
             src={variant.fileUrl}
             controls
+            playsInline
             className="h-full w-full object-cover"
-            preload="metadata"
+            preload="auto"
           />
         )}
       </div>
