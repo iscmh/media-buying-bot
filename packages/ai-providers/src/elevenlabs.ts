@@ -293,7 +293,10 @@ export function translateElevenLabsErrorStatus(
   if (status === 400)
     return `ElevenLabs validation failed${fallback ? `: ${fallback}` : ' (check inputs)'}.`;
   if (status === 401)
-    return 'ElevenLabs authentication failed. Re-paste your key at /connections/ai-provider.';
+    return (
+      'ElevenLabs authentication failed. Re-paste your key at /connections/ai-provider.' +
+      (fallback ? ` ElevenLabs said: ${fallback}` : '')
+    );
   if (status === 402)
     return 'Insufficient ElevenLabs credits. Top up at elevenlabs.io/app/settings/billing.';
   if (status === 403)

@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.0.12';
+export const POLISH_VERSION = '28.0.13';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.0.12';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.0.12 Commit 64.12 hotfix - unzip fofr/toolkit frame-extract output before jimp decode (fixes application/zip decode error)';
+  'Polish-28.0.13 Commit 64.13 hotfix - verify-voice-ready poll before TTS (self-heals IVC eventual-consistency 401) + surface raw 401 body';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -483,6 +483,42 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         });
       });
 
+      // ---------- Step H0: verify cloned voice is queryable ----------
+      // Polish-28.0.13 Commit 64.13 hotfix: ElevenLabs IVC returns
+      // voice_id immediately but the voice has an eventual-consistency
+      // lag before the TTS endpoint's regional cache picks it up.
+      // 28.0.12 died at TTS with HTTP 401 despite the clone succeeding
+      // in the same job — classic symptom of the voice not being
+      // queryable yet on the TTS path. Poll GET /v1/voices/{id} until
+      // 200 (up to ~20s) before hitting TTS. Cheap probe, self-heals
+      // the race, and adds diagnostic info if the voice truly is
+      // missing.
+      await guardedStepRun(step, 'verify-voice-ready', async () => {
+        const url = `https://api.elevenlabs.io/v1/voices/${encodeURIComponent(voice.voiceId)}`;
+        const maxAttempts = 10;
+        const delayMs = 2_000;
+        let lastStatus = 0;
+        let lastBody = '';
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          const res = await fetch(url, {
+            method: 'GET',
+            headers: { 'xi-api-key': keys.elevenlabs!, accept: 'application/json' },
+          });
+          lastStatus = res.status;
+          if (res.status >= 200 && res.status < 300) {
+            return safeInngestStepReturn({ ready: true, attempts: attempt + 1 });
+          }
+          lastBody = (await res.text()).slice(0, 500);
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        throw new NonRetriableError(
+          `Polish-28 voice-ready verify failed for voice_id=${voice.voiceId}: last HTTP ${lastStatus} after ${maxAttempts} attempts (${(maxAttempts * delayMs) / 1000}s). ` +
+            `ElevenLabs response: ${lastBody}. ` +
+            `If your ElevenLabs account still has this voice in the dashboard, this is an eventual-consistency race — retry the job. ` +
+            `If the voice is missing from the dashboard, the clone step failed silently — check /connections/ai-provider.`,
+        );
+      });
+
       // ---------- Step H: TTS with cloned voice ----------
       const tts = await guardedStepRun(step, 'tts-with-cloned-voice', async () => {
         const r = await submitElevenLabsTts({
