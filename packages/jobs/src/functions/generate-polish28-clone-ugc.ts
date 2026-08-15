@@ -486,47 +486,29 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         // pass via jimp — output is always JPEG so we can hardcode
         // 'image/jpeg' below and jimp reads any input format correctly.
 
-        // Polish-28.2.1 Commit 74: pad the character image before HeyGen
-        // upload. HeyGen Avatar IV zooms in on the face during lip-sync;
-        // if the input is already a tight portrait, output is uncomfortably
-        // close (operator flagged this in 28.2.0). Padding the image with
-        // a solid margin gives HeyGen room to "zoom" without over-cropping.
-        // Combined with the wider Nano Banana framing prompt (also 28.2.1),
-        // this should give natural head-and-shoulders framing in the output.
-        //
-        // Padding math: add 25% margin on all sides. If input is 1024x1024,
-        // pad to 1536x1536 with a neutral gray background (fits the "home
-        // setting" aesthetic vs pure white which would jump).
-        const { Jimp } = await import('jimp');
-        const originalImage = await Jimp.read(
-          Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength),
-        );
-        const origW = originalImage.bitmap.width;
-        const origH = originalImage.bitmap.height;
-        const padPct = Number(process.env['POLISH28_HEYGEN_INPUT_PAD_PCT']) || 25;
-        // Polish-28.2.4 Commit 77: pad by percentage of EACH dimension
-        // separately so aspect ratio is preserved (was padding by
-        // max-dim on all sides, which turned a 9:16 input into an
-        // ~11:14 near-square and made HeyGen crop/reframe aggressively).
-        const padWPx = Math.floor((origW * padPct) / 100);
-        const padHPx = Math.floor((origH * padPct) / 100);
-        const paddedW = origW + padWPx * 2;
-        const paddedH = origH + padHPx * 2;
-        // Solid neutral gray (0x808080ff) — reads as generic room shadow, doesn't clash
-        const padded = new Jimp({ width: paddedW, height: paddedH, color: 0x808080ff });
-        padded.composite(originalImage, padWPx, padHPx);
-        const paddedBuf = await padded.getBuffer('image/jpeg', { quality: 90 });
-        const paddedBytes = new Uint8Array(paddedBuf);
-        console.log(
-          `[polish28] heygen-pad: ${origW}x${origH} -> ${paddedW}x${paddedH} ` +
-            `(${padPct}% each dim, aspect preserved, gray fill)`,
-        );
+        // Polish-28.2.6 Commit 79: pad step REMOVED. The 28.2.1 Commit 74
+        // pad was a workaround for HeyGen over-zooming a 1:1 Nano Banana
+        // output into a 9:16 output container. Now that (a) Nano Banana
+        // emits 9:16 natively (28.2.4 Commit 77) and (b) HeyGen is
+        // explicitly told aspect_ratio: '9:16' (28.2.5 Commit 78),
+        // aspect ratios match end-to-end — no reframe needed. Padding
+        // now shows up as literal gray bars in the output video
+        // (operator screenshot in 28.2.5 review). Upload the character
+        // bytes directly, no re-encode.
 
+        // Character step returns the actual mime from Nano Banana
+        // (either image/png or image/jpeg). HeyGen validates
+        // declared content-type against actual bytes (28.1.2 Commit 67
+        // failure), so trust the character step's mime not a guess.
+        const characterMime =
+          character.mimeType === 'image/jpeg' || character.mimeType === 'image/jpg'
+            ? 'image/jpeg'
+            : 'image/png';
         const r = await uploadHeygenImageAsset({
           userId: jobUserId,
           apiKey: keys.heygen!,
-          imageBytes: paddedBytes,
-          imageMimeType: 'image/jpeg',
+          imageBytes: bytes,
+          imageMimeType: characterMime,
           generationJobId: jobId,
         });
         if (!r.ok || !r.imageKey) {
