@@ -1691,7 +1691,12 @@ export async function cloneCharacterReferenceImage(
     ],
     generationConfig: {
       responseModalities: ['IMAGE'] as const,
-      imageConfig: { aspectRatio: '1:1' as const },
+      // Polish-28.2.4 Commit 77: was '1:1' since 28.0.0. Operator flagged
+      // that the character output + final HeyGen video weren't vertical
+      // — root cause was Gemini emitting square while HeyGen expects
+      // 9:16 (portrait); HeyGen was cropping/letterboxing the square
+      // input into a 9:16 container, giving weird composition.
+      imageConfig: { aspectRatio: '9:16' as const },
       temperature: 0.4,
     },
   };

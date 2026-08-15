@@ -504,16 +504,22 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         const origW = originalImage.bitmap.width;
         const origH = originalImage.bitmap.height;
         const padPct = Number(process.env['POLISH28_HEYGEN_INPUT_PAD_PCT']) || 25;
-        const padPx = Math.floor((Math.max(origW, origH) * padPct) / 100);
-        const paddedW = origW + padPx * 2;
-        const paddedH = origH + padPx * 2;
+        // Polish-28.2.4 Commit 77: pad by percentage of EACH dimension
+        // separately so aspect ratio is preserved (was padding by
+        // max-dim on all sides, which turned a 9:16 input into an
+        // ~11:14 near-square and made HeyGen crop/reframe aggressively).
+        const padWPx = Math.floor((origW * padPct) / 100);
+        const padHPx = Math.floor((origH * padPct) / 100);
+        const paddedW = origW + padWPx * 2;
+        const paddedH = origH + padHPx * 2;
         // Solid neutral gray (0x808080ff) — reads as generic room shadow, doesn't clash
         const padded = new Jimp({ width: paddedW, height: paddedH, color: 0x808080ff });
-        padded.composite(originalImage, padPx, padPx);
+        padded.composite(originalImage, padWPx, padHPx);
         const paddedBuf = await padded.getBuffer('image/jpeg', { quality: 90 });
         const paddedBytes = new Uint8Array(paddedBuf);
         console.log(
-          `[polish28] heygen-pad: ${origW}x${origH} -> ${paddedW}x${paddedH} (${padPct}% margin, gray fill)`,
+          `[polish28] heygen-pad: ${origW}x${origH} -> ${paddedW}x${paddedH} ` +
+            `(${padPct}% each dim, aspect preserved, gray fill)`,
         );
 
         const r = await uploadHeygenImageAsset({
