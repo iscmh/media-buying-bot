@@ -619,12 +619,21 @@ export const generatePolish28CloneUgc = inngest.createFunction(
         const db = getDb();
         const heygenCost = estimateHeygenAvatarIvCostUsd(finalDurationSeconds ?? 30);
         const totalCost = heygenCost + (character.costUsd ?? 0) + 0.03;
+        // Polish-28.2.9 Commit 82 hotfix: DO NOT set imageStoragePath
+        // on a video variant. The runs-page's isImageVariant predicate
+        // (apps/web/app/runs/[id]/job-review-client.tsx:72) treats any
+        // variant with imageStoragePath present as an IMAGE — renders
+        // <img> instead of <video>, so no seek bar, no audio, "Download
+        // image" label. Every polish28 output since 28.0.0 was misrendered
+        // as an image because this insert set imageStoragePath to the
+        // FINAL VIDEO's storage path. imageStoragePath is exclusively
+        // for actual image variants (static_openai_image / nano_banana
+        // static). For video variants, fileUrl alone carries the mp4.
         const creativeRecord = assertNoUndefinedForPostgres(
           {
             userId: jobUserId,
             generationJobId: jobId,
             fileUrl: uploaded.publicUrl,
-            imageStoragePath: uploaded.path,
             hookVariantIndex: 0,
             bodyVariantIndex: 0,
             ctaVariantIndex: 0,

@@ -69,8 +69,18 @@ interface Variant {
  *      that predate the format tagging)
  */
 function isImageVariant(variant: Variant, conceptType: 'static' | 'ugc'): boolean {
-  if (variant.imageStoragePath) return true;
+  // Polish-28.2.9 Commit 82: format wins over imageStoragePath. Prior
+  // logic returned true whenever imageStoragePath was populated, which
+  // misclassified all polish28 videos (whose worker mistakenly stamped
+  // imageStoragePath with the mp4 storage path — fixed in the worker,
+  // but pre-fix rows still exist in the DB). If format explicitly names
+  // a video pipeline, always treat as video regardless of legacy
+  // imageStoragePath value.
   const f = variant.format ?? '';
+  if (f === 'polish28_clone_ugc' || f.startsWith('polish25_') || f.startsWith('polish26_')) {
+    return false;
+  }
+  if (variant.imageStoragePath) return true;
   if (f.startsWith('static_') || f.startsWith('nano_banana')) return true;
   return conceptType === 'static';
 }

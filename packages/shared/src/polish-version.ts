@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.2.8';
+export const POLISH_VERSION = '28.2.9';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.2.8';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.2.8 Commit 81 - refactor variant video to natural-aspect + max-h-70vh (matches working concept-page pattern) + add "Open in new tab" escape hatch';
+  'Polish-28.2.9 Commit 82 THE REAL FIX - polish28 was misclassified as image (worker set imageStoragePath on video insert), no controls / no audio / "Download image" label were symptoms of rendering <img> not <video>';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
