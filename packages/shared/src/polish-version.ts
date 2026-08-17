@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.3.0';
+export const POLISH_VERSION = '28.3.1';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.3.0';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.3.0 Commit 85 - variations pipeline (Claude batches N distinct persona+script pairs, each renders as fresh Nano Banana character + matched HeyGen voice + native TTS; 3-BYOK, Replicate no longer needed)';
+  'Polish-28.3.1 Commit 86 - variations picker card in generate form (sibling of clone card, routes to polish28_variations_ugc dispatch, 3-BYOK)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

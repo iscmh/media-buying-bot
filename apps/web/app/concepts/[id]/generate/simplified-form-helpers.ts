@@ -143,14 +143,27 @@ export const POLISH26_PIPELINE_ID = 'polish26_heygen' as const;
 export const POLISH28_PIPELINE_ID = 'polish28_clone_ugc' as const;
 export const POLISH28_DISPLAY_NAME = 'Instant UGC (Cloned)';
 export const POLISH28_DESCRIPTION =
-  'Clones character + voice from your source ad and generates a lip-synced 9:16 variant. ' +
-  'BYOK required: Claude, Gemini, ElevenLabs, HeyGen, Replicate.';
+  'Clones the exact character + voice from your source ad. One video, same person as the source. ' +
+  'BYOK: Claude + Gemini + HeyGen + Replicate.';
 /** Per-30s BYOK cost from Phase 1 investigation + Commit-64.5 Replicate add-on. */
 export function estimatePolish28CostPerVariantUsd(): { usd: number } {
   // Claude 0.02 + Gemini vision 0.05 + Nano Banana Pro 0.13 +
   // ElevenLabs TTS 0.01 + HeyGen Avatar IV 30s @ 1080p 2.00 +
   // Replicate ffmpeg (2 calls) 0.03 + storage 0.02 = 2.26.
   return { usd: 2.26 };
+}
+
+// Polish-28.3.0 Commit 86: variations pipeline picker.
+export const POLISH28_VARIATIONS_PIPELINE_ID = 'polish28_variations_ugc' as const;
+export const POLISH28_VARIATIONS_DISPLAY_NAME = 'Instant UGC (Variations)';
+export const POLISH28_VARIATIONS_DESCRIPTION =
+  'Generates N distinct spokespeople (different persona, voice, and script variation each) all ' +
+  'pitching the same offer. Meta A/B-testing pattern. BYOK: Claude + Gemini + HeyGen.';
+/** Per-variant cost — no Replicate line (no source-frame extract). */
+export function estimatePolish28VariationsCostPerVariantUsd(): { usd: number } {
+  // Nano Banana Pro 0.13 + HeyGen Avatar IV 30s @ 1080p 2.00 +
+  // storage 0.02 + amortized Claude batch (~$0.05 / N variants) = ~2.15.
+  return { usd: 2.15 };
 }
 export const POLISH26_DISPLAY_NAME = 'Instant UGC ad';
 export const POLISH26_DESCRIPTION =
@@ -246,6 +259,13 @@ export interface SimplifiedFormState {
    */
   polish28Selected?: boolean;
   /**
+   * Polish-28.3.0 Commit 86: variations pipeline flag. Routes to
+   * generation/polish28-variations-ugc.requested. Sibling of
+   * polish28Selected — mutually exclusive with clone mode + all
+   * other pipeline flags.
+   */
+  polish28VariationsSelected?: boolean;
+  /**
    * Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad flag.
    * Mutually exclusive with polish23Selected / polish25Selected /
    * polish26Selected / modelId. Companion field `staticOpenaiQuality`
@@ -270,6 +290,7 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
     state.polish25Selected === true ||
     state.polish26Selected === true ||
     state.polish28Selected === true ||
+    state.polish28VariationsSelected === true ||
     state.staticOpenaiSelected === true;
   if (!hasPickedPipeline && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
@@ -339,10 +360,16 @@ export function buildSubmissionFormData(input: {
   // because no metadata.model_id is set. Cleaner than adding
   // polish23 as a synthetic VideoModelId, which would tangle two
   // descriptor systems.
+  if (input.state.polish28VariationsSelected === true) {
+    // Polish-28.3.0 Commit 86: variations pipeline. Checked BEFORE
+    // clone branch — if both flags are set (shouldn't happen with
+    // the mutually-exclusive picker UI), variations wins.
+    fd.set('pipeline', POLISH28_VARIATIONS_PIPELINE_ID);
+    return fd;
+  }
   if (input.state.polish28Selected === true) {
     // Polish-28.0.0 Commit 64: cloned-UGC pipeline dispatches
-    // pipeline=polish28_clone_ugc. Checked FIRST — it's the only
-    // user-facing UGC pipeline post-Commit-63 nuke.
+    // pipeline=polish28_clone_ugc.
     fd.set('pipeline', POLISH28_PIPELINE_ID);
     return fd;
   }
