@@ -180,6 +180,7 @@ export function JobReviewClient({
   const [showLaunchDialog, setShowLaunchDialog] = React.useState(false);
   const [launchPending, setLaunchPending] = React.useState(false);
   const [launchError, setLaunchError] = React.useState<string | null>(null);
+  const [downloadingAll, setDownloadingAll] = React.useState(false);
 
   // Polish-3.5: launch is always live. The mock back door survives in
   // the server action for tests / CLI; the UI never reaches it.
@@ -479,7 +480,38 @@ export function JobReviewClient({
 
       {/* Polish-9.12: primary deliverables (composite + non-clip
           variants) render first. Source clips from Kling multi-clip
-          jobs are tucked into a collapsible section below. */}
+          jobs are tucked into a collapsible section below.
+          Polish-28.2.11 Commit 84: "Download all as ZIP" button shows
+          only when there are 2+ primary variants (single-variant
+          jobs like polish28 use the per-card Download button). */}
+      {variants.filter((v) => !v.isClipPart).length >= 2 && (
+        <div className="mb-3 flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={downloadingAll}
+            onClick={async () => {
+              setDownloadingAll(true);
+              try {
+                await downloadAllVariantsAsZip(
+                  variants
+                    .filter((v) => !v.isClipPart)
+                    .map((v) => ({ id: v.id, fileUrl: v.fileUrl, format: v.format ?? '' })),
+                  jobId,
+                );
+              } finally {
+                setDownloadingAll(false);
+              }
+            }}
+          >
+            <Download className="mr-1 h-4 w-4" />
+            {downloadingAll
+              ? 'Zipping…'
+              : `Download all (${variants.filter((v) => !v.isClipPart).length}) as ZIP`}
+          </Button>
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-1 lg:grid-cols-2">
         {variants
           .filter((v) => !v.isClipPart)
@@ -863,6 +895,39 @@ export function JobReviewClient({
   );
 }
 
+/** Polish-28.2.11 Commit 84: browser-side zip bundler for the
+ *  "Download all" action. jszip is pure JS, ~100KB, no server work. */
+async function downloadAllVariantsAsZip(
+  variants: Array<{ id: string; fileUrl: string; format: string }>,
+  jobId: string,
+): Promise<void> {
+  const { default: JSZip } = await import('jszip');
+  const zip = new JSZip();
+  await Promise.all(
+    variants.map(async (v, i) => {
+      try {
+        const res = await fetch(v.fileUrl);
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const isVideo = /\.(mp4|webm|mov|m4v)$/i.test(v.fileUrl.split('?')[0] ?? '');
+        const ext = isVideo ? 'mp4' : 'png';
+        zip.file(`variant-${i + 1}-${v.id.slice(0, 8)}.${ext}`, blob);
+      } catch {
+        // Skip failed entries — user still gets the ones that worked.
+      }
+    }),
+  );
+  const zipBlob = await zip.generateAsync({ type: 'blob' });
+  const objectUrl = URL.createObjectURL(zipBlob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = `job-${jobId.slice(0, 8)}-variants.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(objectUrl);
+}
+
 async function downloadVariantImage(fileUrl: string, filename: string) {
   // Cross-origin <a download> is ignored by browsers without
   // Content-Disposition. Fetch as a blob, then trigger a same-origin
@@ -1109,6 +1174,23 @@ function VariantCard({ variant, isPending, conceptType, onApprove, onReject }: V
         <p className="text-fg-muted text-xs">
           {variant.aspectRatio} · {formatDateTime(new Date(variant.createdAtIso))}
         </p>
+        {/* Polish-28.2.11 Commit 84: per-card Download button visible
+            for every variant (image OR video). Fetches as blob so the
+            filename actually lands as .mp4/.png on disk instead of
+            opening in a new tab. */}
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onDownload}
+            disabled={downloading}
+            className="flex-1"
+          >
+            <Download className="mr-1 h-4 w-4" />
+            {downloading ? 'Downloading…' : `Download ${isImage ? 'image' : 'video'}`}
+          </Button>
+        </div>
         <div className="flex gap-2">
           <Button
             type="button"
