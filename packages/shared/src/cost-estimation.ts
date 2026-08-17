@@ -156,7 +156,16 @@ export type PipelineType =
   // Clone + HeyGen Avatar IV image-to-video lip-sync. Users pay
   // direct via BYOK; platform variable cost = $0. Per-30s BYOK
   // cost ~$2.23 (Avatar IV 1080p dominates at ~$2.00).
-  | 'polish28_clone_ugc';
+  | 'polish28_clone_ugc'
+  // Polish-28.3.0 Commit 85: variations mode. Per-job Claude
+  // generates N distinct personas + N script variations from the
+  // source ad; each variant renders as a fresh Nano Banana character
+  // + matched HeyGen voice + HeyGen native TTS. Meta A/B testing
+  // pattern: launch 5-10 distinct spokespeople all pitching the same
+  // offer to measure which demographic converts. Drops Replicate
+  // BYOK — no source-frame extraction needed since characters are
+  // generated fresh from persona text.
+  | 'polish28_variations_ugc';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -549,6 +558,37 @@ function estimateByPipeline(
       breakdown.push({
         item: `Storage (${variantCount} × $${P28_STORAGE_FFMPEG.toFixed(2)})`,
         cost: round4(variantCount * P28_STORAGE_FFMPEG),
+      });
+      break;
+    }
+    case 'polish28_variations_ugc': {
+      // Polish-28.3.0 Commit 85: variations pipeline. Same providers
+      // as clone mode EXCEPT no Replicate (no source-frame extract —
+      // characters are generated fresh from persona text). Claude
+      // gets an extra batch call for persona+script generation (~$0.05).
+      const V28_CLAUDE_BATCH = 0.05; // single batch call for all N personas+scripts
+      const V28_NANO_BANANA_PRO = 0.13;
+      const V28_HEYGEN_AVATAR_IV_PER_SEC = (0.5 / 60) * 8;
+      const V28_STORAGE = 0.02;
+      const targetSecondsV28 = targetSecondsHint ?? 30;
+      const perVideoHeygenV28 = V28_HEYGEN_AVATAR_IV_PER_SEC * targetSecondsV28;
+      breakdown.push({
+        item: `Claude persona+script batch (1 call, produces ${variantCount} pairs)`,
+        cost: round4(V28_CLAUDE_BATCH),
+      });
+      breakdown.push({
+        item: `Nano Banana Pro character (${variantCount} × $${V28_NANO_BANANA_PRO.toFixed(2)})`,
+        cost: round4(variantCount * V28_NANO_BANANA_PRO),
+      });
+      breakdown.push({
+        item:
+          `HeyGen Avatar IV lip-sync 1080p + native TTS (${targetSecondsV28}s) ` +
+          `(${variantCount} × $${perVideoHeygenV28.toFixed(2)})`,
+        cost: round4(variantCount * perVideoHeygenV28),
+      });
+      breakdown.push({
+        item: `Storage (${variantCount} × $${V28_STORAGE.toFixed(2)})`,
+        cost: round4(variantCount * V28_STORAGE),
       });
       break;
     }

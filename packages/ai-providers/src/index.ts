@@ -332,6 +332,7 @@ export {
   uploadHeygenAudioAsset,
   fetchHeygenVoices,
   matchHeygenVoiceForPersona,
+  type HeygenVoice,
   submitHeygenAvatarIvGeneration,
   checkHeygenAvatarIvStatus,
   isTerminalAvatarIvStatus,

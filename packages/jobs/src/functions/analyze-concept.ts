@@ -217,7 +217,8 @@ export const analyzeConcept = inngest.createFunction(
         picked === 'polish23_higgsfield_veo_lite' ||
         picked === 'polish25_makeugc' ||
         picked === 'polish26_heygen' ||
-        picked === 'polish28_clone_ugc';
+        picked === 'polish28_clone_ugc' ||
+        picked === 'polish28_variations_ugc';
       const visionSystemPrompt = usesPolish23Vision
         ? POLISH23_VISION_SYSTEM_PROMPT
         : UGC_DECONSTRUCTOR_SYSTEM_PROMPT;
@@ -420,6 +421,9 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   // dispatches this event; typing the union keeps analyze-concept
   // in lockstep with pipeline-descriptors.ts.
   | 'generation/polish28-clone-ugc.requested'
+  // Polish-28.3.0 Commit 85: variations pipeline (N distinct
+  // persona+script+char+voice per job, A/B testing pattern).
+  | 'generation/polish28-variations-ugc.requested'
 > {
   try {
     const db = getDb();

@@ -25,6 +25,7 @@ import { generateStaticOpenaiImageVariants } from './generate-static-openai-imag
 // character clone + ElevenLabs Instant Voice Clone + HeyGen Avatar IV
 // image-to-video lip-sync). Rebuild successor to the Polish-25/26 nuke.
 import { generatePolish28CloneUgc } from './generate-polish28-clone-ugc';
+import { generatePolish28VariationsUgc } from './generate-polish28-variations-ugc';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -109,6 +110,7 @@ export const functions = [
   generateStaticOpenaiImageVariants,
   // Polish-28.0.0 Commit 64: BYOK cloned-UGC pipeline worker.
   generatePolish28CloneUgc,
+  generatePolish28VariationsUgc,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

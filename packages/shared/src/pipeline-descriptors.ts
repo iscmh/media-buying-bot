@@ -48,7 +48,11 @@ export interface PipelineDescriptor {
     | 'generation/polish26-heygen.requested'
     // Polish-28.0.0 Commit 64: BYOK-only cloned-UGC pipeline
     // (Nano Banana Pro + ElevenLabs IVC + HeyGen Avatar IV).
-    | 'generation/polish28-clone-ugc.requested';
+    | 'generation/polish28-clone-ugc.requested'
+    // Polish-28.3.0 Commit 85: variations pipeline. Claude batches
+    // N distinct persona+script pairs from the source ad, each
+    // rendered as fresh Nano Banana + matched HeyGen voice + native TTS.
+    | 'generation/polish28-variations-ugc.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -171,6 +175,16 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     // replicate (fofr/toolkit frame extract).
     requiredProviders: ['claude', 'gemini', 'heygen', 'replicate'],
   },
+  polish28_variations_ugc: {
+    pipeline: 'polish28_variations_ugc',
+    label: 'Instant UGC (Variations)',
+    providerChoice: 'clone_ugc',
+    format: 'polish28_variations_ugc',
+    workerEvent: 'generation/polish28-variations-ugc.requested',
+    // Polish-28.3.0 Commit 85: no Replicate — characters generated
+    // fresh from persona text, no source-frame extract step. 3-BYOK.
+    requiredProviders: ['claude', 'gemini', 'heygen'],
+  },
 };
 
 export function describePipeline(pipeline: PipelineType): PipelineDescriptor {
@@ -238,4 +252,7 @@ export const ALL_PIPELINES: PipelineType[] = [
   // is registered in packages/jobs/src/functions/index.ts; user-facing
   // via the "Instant UGC (Cloned)" card on the generate form.
   'polish28_clone_ugc',
+  // Polish-28.3.0 Commit 85: variations mode — N distinct spokespeople,
+  // A/B testing pattern. Now the default under Instant UGC.
+  'polish28_variations_ugc',
 ];
