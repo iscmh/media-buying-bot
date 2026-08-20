@@ -1,0 +1,27 @@
+{
+  "name": "@mbb/deal-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram bot that polls the HVD Reina del Mar booking engine for a 3 adults + 1 child (12) holiday and alerts on price drops.",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "scan": "tsx src/index.ts scan --once",
+    "discover": "tsx src/discover.ts",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "playwright": "^1.49.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
