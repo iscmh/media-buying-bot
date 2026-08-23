@@ -81,35 +81,60 @@ persona pool, but VARY within that pool.
 
 # SCRIPT REQUIREMENTS
 
-Each script:
+The scripts should be LIGHT variations of the source — close cousins,
+not rewrites. The operator wants A/B tests where the OFFER, HOOK, and
+STRUCTURE are held constant while the PERSONA voice varies subtly.
+Aggressive script rewrites destroy the signal a test is meant to
+measure (which persona converts on THIS message). Stay conservative.
+
+Each script MUST:
 
 1. FIRST-PERSON monologue only. This persona is speaking to camera.
    Never introduce a second speaker.
 
-2. Preserves the SOURCE offer, hook, and CTA — same product, same
-   promise, same call-to-action.
+2. Preserve the source ad's structural beats VERBATIM where possible:
+   - Same hook opening (rephrase only if it would sound unnatural in
+     this persona's voice — e.g. an elderly persona wouldn't say
+     "yo what's up guys")
+   - Same offer / product / promise / stat / proof point
+   - Same CTA (identical wording preferred — the CTA is what you're
+     A/B-testing against, don't drift it across variants)
+   - Same emotional arc (skeptical → surprised → convinced, or
+     whatever the source uses)
 
-3. VARIES the phrasing, opening line, examples used, and emotional
-   tone from the source AND from every other variation in the batch.
-   No two scripts should read as the same script with a synonym pass —
-   they should feel like 5 different real people wrote them.
+3. Vary ONLY these per-persona details:
+   - Vocal rhythm + filler words natural to the persona ("uhm", "like",
+     "so" for younger; "you know", "well" for older)
+   - Contractions vs full words (younger use more contractions)
+   - 1-2 phrase substitutions if a source phrase is age/gender-coded
+     ("dude" → "friend" for older; "back in my day" → "recently" for
+     younger)
+   - Sentence rhythm — shorter/punchier for young energetic personas,
+     longer/measured for older reflective ones
 
-4. Length: TARGET 900-1400 chars each (aim ~1200). HARD LIMIT 2200
-   chars — anything longer gets auto-truncated at the last sentence
-   boundary before the cap, so overshoot risks losing the CTA.
+4. Do NOT invent new anecdotes, examples, or claims. If the source
+   says "I lost 15 pounds in 3 weeks," the variant says the same thing.
+   Changing the number breaks the A/B test.
 
-5. No appearance descriptions of the speaker (avatar handles that
+5. Do NOT change the CTA URL, product name, discount code, offer
+   terms, or any specific number/fact from the source. Copy them
+   character-for-character.
+
+6. Length: match source length ±20% (aim within 200 chars of source
+   script). HARD LIMIT 2200 chars — anything longer gets auto-truncated.
+
+7. No appearance descriptions of the speaker (avatar handles that
    visually). Do not say "as a [gender]", "as a [ethnicity]", "in my
-   [decade]", "as a bald guy", etc. This is the same appearance-leak
-   guard the Polish-25 condenser uses.
+   [decade]", "as a bald guy", etc.
 
-6. No nested quotes / third-party attribution patterns ("She told me
+8. No nested quotes / third-party attribution patterns ("She told me
    'X'"). Paraphrase in indirect speech.
 
-7. Natural TTS pacing. No complex bracketed dialogue.
+9. Natural TTS pacing. No complex bracketed dialogue.
 
-8. Same-niche jargon is fine and encouraged — a fitness offer's scripts
-   should sound like fitness people wrote them.
+RULE OF THUMB: if the operator ran the source script and your variant
+side-by-side, 70-80% of the words should be IDENTICAL. Only the
+phrasing that would sound wrong in this persona's mouth changes.
 
 # EDGE CASES
 

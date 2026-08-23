@@ -132,18 +132,11 @@ async function ProvidersTab({ userId }: { userId: string }) {
   const aiByProvider = new Map(aiRows.map((r) => [r.provider as AIProviderName, r]));
 
   const REQUIRED_TOOLS: ToolProviderName[] = ['claude', 'gemini'];
-  // Polish-28.0.0 Commit 64: ElevenLabs + HeyGen unhidden — required
-  // BYOK for the Polish-28 cloned-UGC pipeline (ElevenLabs Instant
-  // Voice Clone + HeyGen Avatar IV image-to-video). Kept hidden from
-  // the Commit-63 blocklist: hedra / wavespeed_ai / makeugc /
-  // replicate / kie_ai — those pipelines remain nuked and their DB
-  // rows are preserved for rollback.
-  const HIDDEN_LEGACY_AI_PROVIDERS = new Set<AIProviderName>([
-    'hedra',
-    'wavespeed_ai',
-    'makeugc',
-    'replicate',
-  ]);
+  // Polish-28.3.5 Commit 90: `replicate` UNHIDDEN — Polish-28 clone
+  // mode's source-frame extract runs on fofr/toolkit via Replicate,
+  // so users picking "Instant UGC (Cloned)" need this connection.
+  // Still hidden: hedra / wavespeed_ai / makeugc (dead pipelines).
+  const HIDDEN_LEGACY_AI_PROVIDERS = new Set<AIProviderName>(['hedra', 'wavespeed_ai', 'makeugc']);
   const HIDDEN_LEGACY_TOOL_PROVIDERS = new Set<ToolProviderName>(['kie_ai']);
   const OPTIONAL_TOOLS = TOOL_PROVIDERS_ORDER.filter(
     (p) => !REQUIRED_TOOLS.includes(p) && !HIDDEN_LEGACY_TOOL_PROVIDERS.has(p),

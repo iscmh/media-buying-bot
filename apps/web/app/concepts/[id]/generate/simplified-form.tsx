@@ -47,6 +47,12 @@ import {
 
 interface Props {
   conceptId: string;
+  /** Polish-28.3.5 Commit 90: threaded from page.tsx so pipeline
+   *  picker cards can gate on concept type — UGC cards only for
+   *  UGC concepts, Static Ad card only for static concepts.
+   *  Was previously showing all cards on every concept type,
+   *  which confused users on UGC uploads. */
+  conceptType: 'static' | 'ugc';
   /** Optional preview URL — signed Supabase URL for UGC sources, fileUrl for static. */
   sourcePreviewUrl: string | null;
   /** Detected source duration (seconds), if known. Seeds the duration picker via snap. */
@@ -85,6 +91,7 @@ interface Props {
  */
 export function SimplifiedGenerationForm({
   conceptId,
+  conceptType,
   sourcePreviewUrl,
   detectedSourceSeconds,
   connectedProviders,
@@ -369,63 +376,60 @@ export function SimplifiedGenerationForm({
         </section>
       )}
 
-      {/* Polish-28.3.0 Commit 86: PRIMARY variations card. Dispatches
-          the polish28_variations_ugc pipeline — N distinct personas +
-          N script variations from the source ad's offer. Meta A/B-test
-          pattern. 3-BYOK (no Replicate). */}
-      <Polish28VariationsPickerCard
-        picked={polish28VariationsSelected}
-        disabled={isPending}
-        missingKeys={polish28VariationsMissingKeys}
-        onPick={() => {
-          setPolish28VariationsSelected(true);
-          setPolish28Selected(false);
-          setStaticOpenaiSelected(false);
-          setPolish26Selected(false);
-          setPolish23Selected(false);
-          setModelId(null);
-        }}
-      />
+      {/* Polish-28.3.5 Commit 90: gate cards by conceptType so a UGC
+          concept only sees UGC pipelines and a static concept only
+          sees the static pipeline. Prior behavior showed all cards
+          on every concept, confusing users. */}
+      {conceptType === 'ugc' && (
+        <>
+          {/* PRIMARY variations card — N distinct personas per job. 3-BYOK. */}
+          <Polish28VariationsPickerCard
+            picked={polish28VariationsSelected}
+            disabled={isPending}
+            missingKeys={polish28VariationsMissingKeys}
+            onPick={() => {
+              setPolish28VariationsSelected(true);
+              setPolish28Selected(false);
+              setStaticOpenaiSelected(false);
+              setPolish26Selected(false);
+              setPolish23Selected(false);
+              setModelId(null);
+            }}
+          />
 
-      {/* Polish-28.0.0 Commit 64: SECONDARY "Instant UGC (Cloned)" card.
-          Dispatches the polish28_clone_ugc pipeline — one video that
-          replicates the source ad's exact actor. Kept alongside the
-          variations card in Commit 86 for the "clone this specific ad"
-          use case. 4-BYOK (Claude + Gemini + HeyGen + Replicate). */}
-      <Polish28PickerCard
-        picked={polish28Selected}
-        disabled={isPending}
-        missingKeys={polish28MissingKeys}
-        onPick={() => {
-          setPolish28Selected(true);
-          setPolish28VariationsSelected(false);
-          setStaticOpenaiSelected(false);
-          setPolish26Selected(false);
-          setPolish23Selected(false);
-          setModelId(null);
-        }}
-      />
+          {/* SECONDARY clone card — one video that replicates the source actor. 4-BYOK. */}
+          <Polish28PickerCard
+            picked={polish28Selected}
+            disabled={isPending}
+            missingKeys={polish28MissingKeys}
+            onPick={() => {
+              setPolish28Selected(true);
+              setPolish28VariationsSelected(false);
+              setStaticOpenaiSelected(false);
+              setPolish26Selected(false);
+              setPolish23Selected(false);
+              setModelId(null);
+            }}
+          />
+        </>
+      )}
 
-      {/* Polish-25.3 Commit 18b: Static ad picker. Rendered next to
-          Instant UGC. Reveals a low/medium/high quality selector when
-          picked. Card body describes the reference-image edit flow so
-          the operator understands what OpenAI does (vs. the video-
-          only Instant UGC card). Mutually exclusive with Polish-25 +
-          Polish-23 + modelId. */}
-      <StaticOpenaiPickerCard
-        picked={staticOpenaiSelected}
-        disabled={isPending}
-        quality={staticOpenaiQuality}
-        onPick={() => {
-          setStaticOpenaiSelected(true);
-          setPolish26Selected(false);
-          setPolish23Selected(false);
-          setPolish28Selected(false);
-          setPolish28VariationsSelected(false);
-          setModelId(null);
-        }}
-        onQualityChange={setStaticOpenaiQuality}
-      />
+      {conceptType === 'static' && (
+        <StaticOpenaiPickerCard
+          picked={staticOpenaiSelected}
+          disabled={isPending}
+          quality={staticOpenaiQuality}
+          onPick={() => {
+            setStaticOpenaiSelected(true);
+            setPolish26Selected(false);
+            setPolish23Selected(false);
+            setPolish28Selected(false);
+            setPolish28VariationsSelected(false);
+            setModelId(null);
+          }}
+          onQualityChange={setStaticOpenaiQuality}
+        />
+      )}
 
       {/* Polish-25.2 Commit 12: model picker hidden for MVP. Only
           Instant UGC is user-visible. Alternate pipelines

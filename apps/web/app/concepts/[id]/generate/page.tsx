@@ -102,6 +102,7 @@ export default async function GenerateRequestPage({ params }: Props) {
 
       <SimplifiedGenerationForm
         conceptId={concept.id}
+        conceptType={concept.contentType}
         sourcePreviewUrl={sourcePreviewUrl}
         detectedSourceSeconds={detectedSourceSeconds}
         connectedProviders={connectedProviders}

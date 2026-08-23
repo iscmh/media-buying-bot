@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.3.4';
+export const POLISH_VERSION = '28.3.5';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.3.4';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.3.4 Commit 89 - parse Supabase 413-wrapped-in-400 file-size errors and show clean "file too large" message (dashboard action still required: raise bucket file-size limit)';
+  'Polish-28.3.5 Commit 90 - unhide Replicate in connections + gate picker cards on conceptType + variations script prompt rewritten for close-cousin variants (not full rewrites)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
