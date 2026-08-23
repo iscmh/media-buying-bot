@@ -44,6 +44,19 @@ export interface ClaudeMessagesInput {
   /** Defaults to 4096; bump for variant generators that emit big JSON arrays. */
   maxTokens?: number;
   generationJobId?: string;
+  /**
+   * Polish-28.3.6 Commit 91: opt-in prompt caching for large static
+   * system-prompt blocks (e.g. the ~100K-token PSYWAR corpus). When
+   * `cacheSystemPrompt: true`, we send the system prompt as a
+   * structured array with a `cache_control: { type: 'ephemeral' }`
+   * marker on it, which tells Anthropic to cache it. First call
+   * pays full input tokens ($15/M for Opus); subsequent calls
+   * within the ~5-min cache TTL pay ~10% ($1.50/M) for the cached
+   * portion. Also toggles the `anthropic-beta: prompt-caching-2024-07-31`
+   * header. Backwards-compatible: default `undefined` = string mode
+   * (old behavior).
+   */
+  cacheSystemPrompt?: boolean;
 }
 
 export interface ClaudeMessagesResult {
@@ -62,23 +75,43 @@ export interface ClaudeMessagesResult {
  */
 export async function callClaude(input: ClaudeMessagesInput): Promise<ClaudeMessagesResult> {
   const url = `${CLAUDE_BASE}/messages`;
-  const body = {
+  // Polish-28.3.6 Commit 91: when cacheSystemPrompt is on, we swap
+  // the string system prompt for a structured array containing one
+  // text block with `cache_control: ephemeral`. That's Anthropic's
+  // opt-in prompt-caching mechanism — the marked block plus
+  // everything above it in the request gets cached for ~5min.
+  const body: Record<string, unknown> = {
     model: DEFAULT_CLAUDE_MODEL,
     max_tokens: input.maxTokens ?? 4096,
-    system: input.systemPrompt,
+    system: input.cacheSystemPrompt
+      ? [
+          {
+            type: 'text',
+            text: input.systemPrompt,
+            cache_control: { type: 'ephemeral' },
+          },
+        ]
+      : input.systemPrompt,
     messages: [{ role: 'user' as const, content: input.userMessage }],
   };
+
+  const headers: Record<string, string> = {
+    'x-api-key': input.apiKey,
+    'anthropic-version': '2023-06-01',
+    'content-type': 'application/json',
+  };
+  if (input.cacheSystemPrompt) {
+    // Prompt caching is GA now but the beta header remains supported
+    // and avoids version-mismatch quirks on older API tiers.
+    headers['anthropic-beta'] = 'prompt-caching-2024-07-31';
+  }
 
   const result = await callProvider<ClaudeResponse>({
     userId: input.userId,
     provider: 'claude',
     url,
     method: 'POST',
-    headers: {
-      'x-api-key': input.apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
+    headers,
     body,
     timeoutMs: CLAUDE_TIMEOUT_MS,
     requestBodyForLog: {
@@ -86,6 +119,7 @@ export async function callClaude(input: ClaudeMessagesInput): Promise<ClaudeMess
       max_tokens: body.max_tokens,
       system_prompt_chars: input.systemPrompt.length,
       user_message_chars: input.userMessage.length,
+      cache_system_prompt: input.cacheSystemPrompt ?? false,
     },
     generationJobId: input.generationJobId,
   });

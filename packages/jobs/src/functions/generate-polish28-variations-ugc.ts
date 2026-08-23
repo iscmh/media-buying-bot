@@ -77,6 +77,7 @@ import {
   parsePolish28VariationsResponse,
   type Polish28VariationEntry,
 } from '../lib/polish28-variations-prompt';
+import { POLISH28_PSYWAR_CORPUS } from '../lib/polish28-psywar-corpus';
 import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
 
 console.log(
@@ -229,7 +230,25 @@ export const generatePolish28VariationsUgc = inngest.createFunction(
         const r = await callClaude({
           userId: jobUserId,
           apiKey: keys.claude!,
-          systemPrompt: POLISH28_VARIATIONS_SYSTEM_PROMPT,
+          // Polish-28.3.6 Commit 91: prepend the full Psywar-branded
+          // PSYWAR corpus (sections 28 + 29, ~416KB / ~100K tokens)
+          // to the system prompt VERBATIM per operator directive
+          // (no summarization, no folding). cacheSystemPrompt:true
+          // marks the whole system block as cacheable — first call
+          // pays full input cost, subsequent calls within the ~5min
+          // cache TTL pay ~10% for the cached portion. Corpus goes
+          // BEFORE the instruction prompt so both get cached together.
+          systemPrompt:
+            `# PSYWAR REFERENCE CORPUS (verbatim, do not summarize)\n\n` +
+            `The following is the operator's Psywar-branded direct-response marketing\n` +
+            `archive. Absorb its principles fully before generating variations. The\n` +
+            `variation instructions follow below the corpus.\n\n` +
+            `----- BEGIN PSYWAR CORPUS -----\n\n` +
+            POLISH28_PSYWAR_CORPUS +
+            `\n\n----- END PSYWAR CORPUS -----\n\n` +
+            `# VARIATION GENERATION INSTRUCTIONS\n\n` +
+            POLISH28_VARIATIONS_SYSTEM_PROMPT,
+          cacheSystemPrompt: true,
           userMessage: userPrompt,
           maxTokens: 8000,
           generationJobId: jobId,
