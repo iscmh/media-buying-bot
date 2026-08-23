@@ -8,6 +8,7 @@ import {
 import { inngest } from '../client';
 import { logInngestFailure } from '../error-hook';
 import { MissingProviderKeyError, loadDecryptedKeys } from '../lib/load-keys';
+import { wrapWithPsywarCorpus } from '../lib/polish28-psywar-corpus';
 import { downloadAsBase64, uploadGeneratedImage } from '../lib/storage';
 
 /**
@@ -202,7 +203,12 @@ export const generateStaticVariants = inngest.createFunction(
       const claude = await callClaude({
         userId,
         apiKey,
-        systemPrompt: STATIC_WINNER_IMPORT_SYSTEM_PROMPT,
+        // Polish-28.3.7 Commit 92: prepend PSYWAR corpus + enable
+        // prompt caching. Same wrapping the variations worker uses so
+        // Claude's ephemeral cache is shared across the two pipelines
+        // when the same user fires jobs back-to-back.
+        systemPrompt: wrapWithPsywarCorpus(STATIC_WINNER_IMPORT_SYSTEM_PROMPT),
+        cacheSystemPrompt: true,
         userMessage,
         maxTokens: 4096,
         generationJobId: jobId,

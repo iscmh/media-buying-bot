@@ -8,7 +8,36 @@
  * repeat calls cheap. Regenerate this file by re-extracting sections
  * 28-29 from the PSYWAR source, escaping backslash/backtick/dollar-brace,
  * and wrapping in a template literal.
+ *
+ * Polish-28.3.7 Commit 92: same corpus reused by the static-ad copywriter
+ * (both static_gemini + static_openai workers). Use `wrapWithPsywarCorpus`
+ * so all three worker call-sites share the same delimiter framing —
+ * changing the framing in one place changes it everywhere, and the
+ * prepended corpus text is byte-identical across workers so Claude's
+ * prompt cache can be shared across pipeline types when the same user
+ * fires jobs in rapid succession.
  */
+
+/**
+ * Prepend the PSYWAR corpus (with delimiter framing) to a pipeline-
+ * specific instruction prompt. Callers MUST also set
+ * `cacheSystemPrompt: true` on the callClaude invocation so the whole
+ * system block is marked cacheable.
+ */
+export function wrapWithPsywarCorpus(instructionPrompt: string): string {
+  return (
+    `# PSYWAR REFERENCE CORPUS (verbatim, do not summarize)\n\n` +
+    `The following is the operator's Psywar-branded direct-response marketing\n` +
+    `archive. Absorb its principles fully before generating output. The\n` +
+    `pipeline-specific instructions follow below the corpus.\n\n` +
+    `----- BEGIN PSYWAR CORPUS -----\n\n` +
+    POLISH28_PSYWAR_CORPUS +
+    `\n\n----- END PSYWAR CORPUS -----\n\n` +
+    `# PIPELINE INSTRUCTIONS\n\n` +
+    instructionPrompt
+  );
+}
+
 export const POLISH28_PSYWAR_CORPUS = `
 ## 28. Psywar.ai Grand Magic Games redacted version.pdf
 

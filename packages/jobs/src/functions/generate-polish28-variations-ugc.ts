@@ -77,7 +77,7 @@ import {
   parsePolish28VariationsResponse,
   type Polish28VariationEntry,
 } from '../lib/polish28-variations-prompt';
-import { POLISH28_PSYWAR_CORPUS } from '../lib/polish28-psywar-corpus';
+import { wrapWithPsywarCorpus } from '../lib/polish28-psywar-corpus';
 import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
 
 console.log(
@@ -238,16 +238,7 @@ export const generatePolish28VariationsUgc = inngest.createFunction(
           // pays full input cost, subsequent calls within the ~5min
           // cache TTL pay ~10% for the cached portion. Corpus goes
           // BEFORE the instruction prompt so both get cached together.
-          systemPrompt:
-            `# PSYWAR REFERENCE CORPUS (verbatim, do not summarize)\n\n` +
-            `The following is the operator's Psywar-branded direct-response marketing\n` +
-            `archive. Absorb its principles fully before generating variations. The\n` +
-            `variation instructions follow below the corpus.\n\n` +
-            `----- BEGIN PSYWAR CORPUS -----\n\n` +
-            POLISH28_PSYWAR_CORPUS +
-            `\n\n----- END PSYWAR CORPUS -----\n\n` +
-            `# VARIATION GENERATION INSTRUCTIONS\n\n` +
-            POLISH28_VARIATIONS_SYSTEM_PROMPT,
+          systemPrompt: wrapWithPsywarCorpus(POLISH28_VARIATIONS_SYSTEM_PROMPT),
           cacheSystemPrompt: true,
           userMessage: userPrompt,
           maxTokens: 8000,

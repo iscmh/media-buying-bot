@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.3.6';
+export const POLISH_VERSION = '28.3.7';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.3.6';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.3.6 Commit 91 - embed full Psywar sections 28+29 verbatim in variations system prompt + prompt caching (first call ~$1.80 in cached tokens, subsequent within 5min ~$0.20)';
+  'Polish-28.3.7 Commit 92 - extend PSYWAR corpus + prompt caching to both static-ad workers (static_gemini + static_openai) via shared wrapWithPsywarCorpus helper';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
