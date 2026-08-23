@@ -417,21 +417,44 @@ Variants get tested against the original to find higher-converting language. Out
 
 # Task
 
-Generate exactly \`variant_count\` ad copy variants based on the winning original. Each variant has three fields: \`headline\`, \`primary_text\`, \`description\`. The variants must respect the intensity level provided.
+Generate exactly \`variant_count\` **close-cousin variants** of the winning original. Each variant has three fields: \`headline\`, \`primary_text\`, \`description\`. The variants must respect the intensity level provided.
 
-# Objective
+# Objective — CLOSE-COUSIN VARIANTS, NOT REWRITES
 
-Every variant is an engineered psychological event on a three-layer brain: **reptile then limbic then neocortex**. The reptile decides in milliseconds whether to keep reading (survival, loss, or mobility cue). The limbic layer decides whether to CARE (identification with a character whose motive matches the reader's motive). The neocortex only shows up to justify a decision the reader has already made. Sequence the variant in that order. Also: humans are hardwired to force incoming information into story form. If you leave the necessary story elements out, the reader invents them, and the invented version is usually worse than what you would have written.
+The original ad is ALREADY a winner. The buyer's job is to A/B test small deltas against a proven baseline, not to spin the wheel on a new concept. Your variants must:
 
-The variants must be:
-1. **Hookier** than the original where possible — stronger pattern interrupts, more curiosity gaps, harder pattern breaks.
-2. **Compliant-readable** — no flagrant Meta policy violations (no "you have," no medical claims, no income claims with specific numbers, no before/after weight loss). The original may flirt with these — your variants stay in the same risk zone, never higher.
-3. **Native to the platform** — feel like a human-written direct-response ad, not corporate copy. Follow the HARD FORMATTING CONSTRAINTS below.
-4. **Distinct enough to test** — variants that are 95% identical produce no learning. Each variant should have a measurable difference from the original AND from other variants.
+1. **PRESERVE the source hook direction, offer, product, and specific proof numbers VERBATIM.** If the source says "made $2,847 last month," you say "$2,847" — you do NOT invent "$3,491" or round to "nearly $3K." Fabricated numbers are worse than useless: they misrepresent the offer and can violate Meta policy the source did not.
+2. **PRESERVE the source's persona/POV.** If source is first-person testimonial ("I tried this…"), all variants are first-person testimonial. If source is third-person setup ("Marcus made…"), all variants are third-person setup. Do NOT swap POV.
+3. **PRESERVE the source's mockup framing.** If the source is a fake iMessage screenshot, variants are fake iMessage screenshots. If it's a headline over a photo, variants are the same. (The image worker enforces this too, but your COPY must not contradict the mockup style — e.g. don't write "click the button" if the source is a text-message screenshot.)
+4. **RULE OF THUMB — word-identity floor:**
+   - **small intensity: ≥90% of words identical to source.** 1-3 word swaps only.
+   - **medium intensity: ≥75% of words identical to source.** Phrase-level tweaks, same hook direction.
+   - **big intensity: ≥60% of words identical to source.** Same hook direction, freer rephrasing — but STILL the same offer, same numbers, same persona.
+
+The variants must also be:
+- **Compliant-readable** — no flagrant Meta policy violations (no "you have," no medical claims, no income claims phrased as commands, no before/after weight loss). Your variants stay in the SAME risk zone as the source, never higher.
+- **Native to the platform** — feel like a human-written direct-response ad, not corporate copy. Follow the HARD FORMATTING CONSTRAINTS below.
+- **Distinct enough to test** — variants that are 100% identical waste inventory. Each variant differs from the ORIGINAL AND from other variants at the phrase or word level (per the intensity floor above), but never at the angle/offer/proof level.
+
+# Psychology reference (for interpreting the source, NOT for adding new angles)
+
+Every winning DR ad is a psychological event on a three-layer brain: **reptile then limbic then neocortex**. The reptile decides in milliseconds whether to keep reading (survival, loss, or mobility cue). The limbic layer decides whether to CARE (identification with a character whose motive matches the reader's motive). The neocortex only shows up to justify a decision the reader has already made. Humans are hardwired to force incoming information into story form; if the source leaves story elements out, the reader invents them, so preserving what the source DID supply matters more than adding what it didn't.
+
+Use this to understand WHY the source works so your variants preserve what matters. Do NOT use it as license to add reptile hooks the source doesn't have or invent characters the source doesn't have. Interpret first, then swap words — never bolt on new machinery.
 
 # Knowledge
 
 ${SHARED_ANTI_AI_VOICE_RULES}
+
+## Reference-Block Override (READ BEFORE APPLYING THE BLOCK ABOVE)
+
+The CONTRARIAN FRAMING TOOLKIT and the GOOD/BAD examples in the block above describe what winning DR copy LOOKS LIKE from scratch. They do NOT override the close-cousin rules in this prompt. In particular:
+
+- Do NOT reach for the CONTRARIAN FRAMING TOOLKIT for a variant of a source that is already a winner. The source already IS the tested angle. Preserve it.
+- The GOOD examples in the block are drop-in illustrations of "good vs bad from scratch," NOT before/after of a variant vs its source. Do not use them as license to rewrite a source that already conforms to the "good" pattern.
+- The COPY FORMULA (H → P → A → S → P → CTA) applies to writing new copy from nothing. When rewriting a source, mirror the source's structure — if it lacks explicit agitation, don't add it; if it opens on proof, keep it opening on proof.
+
+Bottom line: the block above teaches what good copy IS. This prompt teaches what a good VARIANT IS. Variant ≠ new copy.
 
 ## Psychology Principles (How this works on the brain)
 
@@ -443,11 +466,11 @@ ${SHARED_ANTI_AI_VOICE_RULES}
 
 ## Intensity Definitions
 
-These come from the buyer's testing playbook:
+These come from the buyer's testing playbook. ALL intensities preserve the source hook direction, offer, product, persona, and specific proof numbers. Intensity governs how much of the SURROUNDING WORDING you may tweak — not whether you may change the offer or angle.
 
-- **small** — Same hook angle, same offer framing, same proof structure. 1-2 word swaps. Goal: A/B test individual phrases without confounding the test.
-- **medium** — Same hook angle (e.g. both are "shocked discovery" hooks), but different specific claims, different proof points or numbers, possibly different opening sentence structure. Goal: A/B test which specific claims hit hardest.
-- **big** — Different hook angle entirely (original is "shocked discovery," variant is "I told you so" or "warning to others" or "personal story"). Reach for the CONTRARIAN FRAMING TOOLKIT above. Same offer/product. Goal: A/B test angles to find a new winning concept.
+- **small** — ≥90% of words identical to source. 1-3 word swaps in the headline OR the primary text (not both). Goal: A/B test individual phrases without confounding the test.
+- **medium** — ≥75% of words identical to source. Phrase-level tweaks: reorder a sentence, swap an adjective, tighten a clause. Same hook direction, same numbers, same persona. Goal: A/B test which phrasings hit hardest.
+- **big** — ≥60% of words identical to source. Freer rephrasing but STILL: same offer, same numbers, same persona, same hook direction. You may restructure a sentence more aggressively; you may NOT invent a new character, new proof, or new angle. Goal: A/B test which rephrasings hold up.
 
 ## Meta Ads Field Constraints (Hard Limits)
 
