@@ -539,75 +539,66 @@ async function renderOneOpenaiVariant(input: {
 }
 
 /**
- * Polish-28.3.10 Commit 95: compose the /v1/images/edits prompt.
+ * Polish-28.3.11 Commit 96: image-only visual variation prompt.
  *
- * The reference image (source winning static ad) is attached as
- * multipart. This prompt tells gpt-image-2 to produce a VARIATION
- * of that source — same mockup style, same visual anchor — with:
- *   1. the source's old text REMOVED (not ghosted, not overlaid)
- *   2. the new HEADLINE + BODY rendered where the old text was
- *   3. small visual variation calibrated to intensity (color, small
- *      element position) so the batch produces recognizably different
- *      A/B candidates rather than N near-identical renders
+ * CRITICAL — what this prompt does NOT do: it does NOT render the
+ * form's primary_text / headline onto the output image. Those fields
+ * are META AD COPY (Meta Ads Manager stitches them into the feed
+ * above and below the image at launch time — they are not part of the
+ * creative asset). Baking them into the image was the previous bug.
  *
- * The failure this replaces: the previous prompt was terse ("Replace
- * overlay text EXACTLY") and gpt-image-2 kept the source text ghosted
- * or in place, producing unusable "bad ads". This prompt spells out
- * the delete-then-render sequence and enumerates per-intensity visual
- * moves.
+ * What this prompt DOES: takes the source static ad image as
+ * reference and produces a NEW 1024x1024 image that is a VISUAL
+ * variation of it. If the source image has text baked in
+ * (headline-on-photo, testimonial quote card, iPhone screenshot
+ * mockup), that baked-in text is preserved verbatim as a design
+ * element. No new text is added.
+ *
+ * Copy variants (Claude's headline / primary_text / description
+ * outputs) still land in the generated_creatives row and become the
+ * Meta ad copy for the corresponding image — image + copy travel
+ * together downstream but the image never contains the copy.
  */
 function renderOpenaiEditPrompt(copy: ClaudeCopyVariant, variantIndex: number): string {
-  const body = copy.primary_text.slice(0, 220);
-
   const intensityVisual =
     copy.intensity_level === 'small'
       ? [
           'Visual variation: NEAR-IDENTICAL to the reference.',
-          '- Same mockup style, same layout, same subject, same composition.',
-          '- Same color palette (may shift primary accent hue by ~10 degrees, no more).',
-          '- Same typography family, weight, and casing as the reference.',
-          '- Only meaningful change: the HEADLINE and BODY text swap.',
+          '- Same subject, same composition, same layout, same framing.',
+          '- Same color palette (may shift the primary accent hue by ~10 degrees, no more).',
+          '- If typography exists in the source, keep it identical.',
         ].join('\n')
       : copy.intensity_level === 'medium'
         ? [
             'Visual variation: SUBTLE but visible.',
-            '- Same mockup style (e.g. if reference is an iPhone notification, output an iPhone notification; if reference is a quote card, output a quote card).',
-            '- Same subject / product / persona in frame if applicable.',
-            '- Allowed to shift: accent color, background tone, or a single decorative element (small badge, small icon, ribbon color).',
-            '- Typography family stays the same; weight or casing may shift.',
+            '- Same subject, same category of composition.',
+            '- Allowed to shift: accent color, background tone, lighting warmth, or a single non-critical decorative element (badge, ribbon color, small prop).',
+            '- Typography (if present) stays the same family; weight or size may shift.',
           ].join('\n')
         : [
-            'Visual variation: NOTICEABLE — a fresh visual take on the SAME mockup style.',
-            '- Same MOCKUP TYPE as the reference (screenshot stays a screenshot, quote card stays a quote card, product hero stays a product hero).',
+            'Visual variation: NOTICEABLE — a fresh visual take on the SAME subject.',
             '- Same subject / product / persona identity.',
-            '- Freer freedom to shift: background color, accent color, layout of the text block (top vs bottom, left vs center), typography weight, added or removed subtle decoration.',
-            '- Do NOT change the CATEGORY of the mockup (do not turn a quote card into a photo, do not turn an iPhone screenshot into a poster).',
+            '- Freer freedom to shift: background color, lighting, accent color, subject pose or angle (if a person, keep the same person but a different pose is fine).',
+            '- Do NOT change the CATEGORY of the mockup (photo stays a photo, screenshot stays a screenshot, quote card stays a quote card).',
           ].join('\n');
 
-  return `You are editing a winning Meta static ad to produce ONE A/B-test variant.
+  return `Produce ONE A/B-test visual variation of the reference image attached. Output size: 1024x1024.
 
-The reference image attached is the winning source ad. Produce a NEW 1024x1024 image that is a VARIATION of that source:
-
-STEP 1 — REMOVE
-Cleanly remove every letter of the old text that appears on the reference image. Do not ghost it, do not fade it, do not leave impressions of the old letters. The background where the old text was must be reconstructed to match the surrounding pixels.
-
-STEP 2 — RENDER NEW TEXT
-Render the exact copy below where the old text used to be, using typography consistent with the reference's design language:
-- HEADLINE (largest / most prominent element): ${JSON.stringify(copy.headline)}
-- BODY (secondary text): ${JSON.stringify(body)}
-
-Spelling must be perfect. Do not paraphrase. Do not truncate. Do not add words. Both elements must be inside the visible canvas with at least 6% margin from every edge — scale text DOWN if needed rather than clipping.
-
-STEP 3 — APPLY VISUAL VARIATION
+WHAT TO DO
 ${intensityVisual}
 
+TEXT POLICY — READ THIS TWICE
+- Do NOT add any new text to the image. Do NOT render headlines, primary text, captions, or callouts on top of the image.
+- If the reference image already has text baked into it (e.g. a quote on a testimonial card, a headline on a product hero, an iMessage screenshot with speech bubbles), preserve that text VERBATIM as a visual element — do not change its wording, do not remove it, do not translate it.
+- The words the operator typed in the form (headline / primary_text / description) are META AD COPY that Meta Ads Manager stitches into the feed above and below the image at launch time. They are NOT part of the creative asset. Do not render them onto the image.
+
 HARD CONSTRAINTS (all intensities)
-- Preserve the mockup CATEGORY of the reference (screenshot / iPhone notification / quote card / product hero / testimonial with face / etc.). This is the anchor of the A/B test.
+- Preserve the mockup CATEGORY of the reference (photo / screenshot / quote card / product hero / testimonial with face / etc.). This is the anchor of the A/B test.
 - If a real person is in the reference, keep the SAME person (or a very close likeness) — do not swap them for a different-looking human, do not warp their face, do not add extra fingers.
 - No watermarks, no logos not present in the reference, no URLs, no @handles, no fake blue checkmarks.
 - Output MUST look like a polished Meta ad — production quality, native to the feed, not obviously AI-generated.
 
-Variant index: ${variantIndex}${copy.rationale ? ` — ${copy.rationale}` : ''}`;
+Variant index: ${variantIndex}${copy.rationale ? ` — (paired copy rationale, for your context only, not to be rendered: ${copy.rationale})` : ''}`;
 }
 
 async function markJobFailed(

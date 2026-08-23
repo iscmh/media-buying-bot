@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.3.10';
+export const POLISH_VERSION = '28.3.11';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.3.10';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.3.10 Commit 95 - static-ad IMAGE prompt rewritten (Claude copy was already varying fine; images were ugly because the terse edit prompt let gpt-image-2 ghost the source text). New three-step edit prompt: REMOVE old text cleanly, RENDER new headline+body, APPLY per-intensity visual variation while preserving mockup category';
+  'Polish-28.3.11 Commit 96 - CRITICAL FIX: stop baking form primary_text/headline INTO the static image. Those are Meta Ad Copy (feed text above/below the image), not part of the creative asset. Image prompt now does pure visual variation of the source; copy variants still land in DB as separate ad-copy fields';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
