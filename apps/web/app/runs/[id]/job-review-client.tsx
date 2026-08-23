@@ -13,7 +13,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { BetaBanner } from '@/components/shell/beta-banner';
 import { MetaRejectionGuidance } from '@/app/launched/_components/meta-rejection-guidance';
@@ -25,6 +24,13 @@ import {
   launchApprovedAction,
   refreshMetaPagesAction,
 } from './actions';
+import {
+  LaunchConfigForm,
+  defaultLaunchConfig,
+  toMetaISO,
+  validateLaunchConfig,
+  type LaunchConfig,
+} from './launch-config-form';
 
 interface Variant {
   id: string;
@@ -185,39 +191,45 @@ export function JobReviewClient({
   // Polish-3.5: launch is always live. The mock back door survives in
   // the server action for tests / CLI; the UI never reaches it.
   const mode = 'live' as const;
-  const [pageId, setPageId] = React.useState<string>(launchSnapshot.defaultPageId ?? '');
-  const [offerUrl, setOfferUrl] = React.useState(launchSnapshot.defaultOfferUrl);
-  // Polish-25.2 Commit 15: gate Launch button on OfferUrlSchema.
-  // "https//foo.com" passes the HTML `type="url"` check in some
-  // browsers but fails Meta's stricter URL parser; catching it here
-  // saves a Meta API call + a rejected_by_meta row.
-  const offerUrlValid = isValidOfferUrl(offerUrl);
-  const [countries, setCountries] = React.useState<string[]>(launchSnapshot.defaultCountries);
-  const [ageMin, setAgeMin] = React.useState(launchSnapshot.defaultAgeMin);
-  const [ageMax, setAgeMax] = React.useState(launchSnapshot.defaultAgeMax);
-  // Polish-25.2 Commit 16b: named preset dropdown. Empty string =
-  // "Custom (default)" — inline form is authoritative. Selecting a
-  // preset overwrites the inline fields with the preset's values.
-  // We DON'T track budget/goal/placement locally on the dialog —
-  // those live on launchSnapshot and applying a preset only
-  // rewrites the fields the dialog exposes (countries + age range).
-  // The rest is documented in the preset chip so operators see
-  // what a preset covers.
+
+  // Polish-28.4.1 Commit 99: one launch-config object drives the whole
+  // sectioned form. Every field the launch UI exposes lives here;
+  // parent threads it into launchApprovedAction on submit.
+  const [launchConfig, setLaunchConfig] = React.useState<LaunchConfig>(() =>
+    defaultLaunchConfig({
+      defaultOfferUrl: launchSnapshot.defaultOfferUrl,
+      defaultPageId: launchSnapshot.defaultPageId ?? '',
+      defaultCountries: launchSnapshot.defaultCountries,
+      defaultAgeMin: launchSnapshot.defaultAgeMin,
+      defaultAgeMax: launchSnapshot.defaultAgeMax,
+      defaultPerAdBudgetUsd: launchSnapshot.perAdBudgetUsd,
+    }),
+  );
+  const patchConfig = React.useCallback(
+    (patch: Partial<LaunchConfig>) => setLaunchConfig((prev) => ({ ...prev, ...patch })),
+    [],
+  );
+  const configIssues = validateLaunchConfig(launchConfig);
+  const offerUrlValid = isValidOfferUrl(launchConfig.offerUrl);
+
+  // Polish-25.2 Commit 16b: named preset dropdown. Applying a preset
+  // patches only the fields presets currently store (targeting +
+  // ages); every other field on launchConfig sticks.
   const [presetId, setPresetId] = React.useState<string>('');
   function applyPreset(id: string) {
     setPresetId(id);
     if (!id) return;
     const p = launchPresets.find((x) => x.id === id);
     if (!p) return;
-    setCountries(p.targetingCountries);
-    setAgeMin(p.ageMin);
-    setAgeMax(p.ageMax);
-    setShowCustomizeTargeting(true);
+    patchConfig({
+      targetingCountries: p.targetingCountries,
+      ageMin: p.ageMin,
+      ageMax: p.ageMax,
+    });
   }
   const [pages, setPages] = React.useState(launchSnapshot.metaPages);
   const [pagesRefreshing, setPagesRefreshing] = React.useState(false);
   const [pagesError, setPagesError] = React.useState<string | null>(null);
-  const [showCustomizeTargeting, setShowCustomizeTargeting] = React.useState(false);
   const [showTripleAck, setShowTripleAck] = React.useState(false);
   const [ack1, setAck1] = React.useState(false);
   const [ack2, setAck2] = React.useState(false);
@@ -234,7 +246,12 @@ export function JobReviewClient({
   const undecidedCount = total - approvedCount - rejectedCount - launchedCount;
   const allDecided = undecidedCount === 0;
   const launchableCount = variants.filter((v) => v.status === 'approved').length;
-  const totalBudgetIfLaunched = launchableCount * launchSnapshot.perAdBudgetUsd;
+  // Polish-28.4.1 Commit 99: exposure depends on CBO vs ABO. CBO puts
+  // ONE campaign daily budget across the whole batch; ABO multiplies
+  // per-ad budget by count.
+  const totalBudgetIfLaunched = launchConfig.budgetOptimizationEnabled
+    ? launchConfig.campaignDailyBudgetUsd
+    : launchableCount * launchConfig.perAdDailyBudgetUsd;
   const exceedsCap = totalBudgetIfLaunched > launchSnapshot.remainingUsd;
   const exceedsFirstLaunchCap =
     isFirstLiveLaunch && totalBudgetIfLaunched > launchSnapshot.firstLaunchCapUsd;
@@ -303,8 +320,8 @@ export function JobReviewClient({
         setPagesError(result.errorMessage ?? 'Could not refresh pages.');
       }
       setPages(result.pages);
-      if (!pageId && result.pages.length > 0) {
-        setPageId(result.pages[0]!.pageId);
+      if (!launchConfig.pageId && result.pages.length > 0) {
+        patchConfig({ pageId: result.pages[0]!.pageId });
       }
     } finally {
       setPagesRefreshing(false);
@@ -323,14 +340,70 @@ export function JobReviewClient({
         }
         setAcknowledged(true);
       }
+      const isManual = launchConfig.placementMode === 'manual';
       const result = await launchApprovedAction({
         jobId,
         mode,
-        pageId: pageId || undefined,
-        offerUrl: offerUrl || undefined,
-        targetingCountries: countries,
-        ageMin,
-        ageMax,
+        pageId: launchConfig.pageId || undefined,
+        offerUrl: launchConfig.offerUrl || undefined,
+        targetingCountries: launchConfig.targetingCountries,
+        ageMin: launchConfig.ageMin,
+        ageMax: launchConfig.ageMax,
+        // Polish-28.4.1 Commit 99: full launch config forwarded to the
+        // worker. Optional fields sent as undefined when the section
+        // doesn't apply (CBO off → no campaign budget; bid strategy =
+        // Highest volume → no bid amount; Advantage+ placements → no
+        // per-platform positions; etc).
+        campaignName: launchConfig.campaignName || undefined,
+        campaignObjective: launchConfig.campaignObjective,
+        specialAdCategories:
+          launchConfig.specialAdCategories.length > 0
+            ? launchConfig.specialAdCategories
+            : undefined,
+        budgetOptimizationEnabled: launchConfig.budgetOptimizationEnabled,
+        campaignDailyBudgetUsd: launchConfig.budgetOptimizationEnabled
+          ? launchConfig.campaignDailyBudgetUsd
+          : undefined,
+        perAdBudgetUsd: launchConfig.budgetOptimizationEnabled
+          ? undefined
+          : launchConfig.perAdDailyBudgetUsd,
+        optimizationGoal: launchConfig.optimizationGoal,
+        placementType: launchConfig.placementMode,
+        billingEvent: launchConfig.billingEvent,
+        bidStrategy: launchConfig.bidStrategy,
+        bidAmountUsd:
+          launchConfig.bidStrategy === 'LOWEST_COST_WITHOUT_CAP'
+            ? undefined
+            : launchConfig.bidAmountUsd,
+        startTime: toMetaISO(launchConfig.startTime) || undefined,
+        endTime: toMetaISO(launchConfig.endTime) || undefined,
+        locales: launchConfig.locales.length > 0 ? launchConfig.locales : undefined,
+        includedCustomAudienceIds:
+          launchConfig.includedCustomAudienceIds.length > 0
+            ? launchConfig.includedCustomAudienceIds
+            : undefined,
+        excludedCustomAudienceIds:
+          launchConfig.excludedCustomAudienceIds.length > 0
+            ? launchConfig.excludedCustomAudienceIds
+            : undefined,
+        publisherPlatforms: isManual ? launchConfig.publisherPlatforms : undefined,
+        facebookPositions: isManual ? launchConfig.facebookPositions : undefined,
+        instagramPositions: isManual ? launchConfig.instagramPositions : undefined,
+        audienceNetworkPositions: isManual ? launchConfig.audienceNetworkPositions : undefined,
+        messengerPositions: isManual ? launchConfig.messengerPositions : undefined,
+        pixelId:
+          launchConfig.conversionLocation === 'WEBSITE' &&
+          (launchConfig.campaignObjective === 'OUTCOME_SALES' ||
+            launchConfig.campaignObjective === 'OUTCOME_LEADS')
+            ? launchConfig.pixelId || undefined
+            : undefined,
+        customEventType:
+          launchConfig.conversionLocation === 'WEBSITE' &&
+          (launchConfig.campaignObjective === 'OUTCOME_SALES' ||
+            launchConfig.campaignObjective === 'OUTCOME_LEADS')
+            ? launchConfig.customEventType || undefined
+            : undefined,
+        callToActionType: launchConfig.callToActionType,
       });
       if (!result.ok) {
         setLaunchError(result.errorMessage ?? 'Launch failed.');
@@ -559,7 +632,7 @@ export function JobReviewClient({
       )}
 
       <Dialog open={showLaunchDialog} onOpenChange={setShowLaunchDialog}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Launch ads to Meta</DialogTitle>
             <DialogDescription>
@@ -622,140 +695,41 @@ export function JobReviewClient({
             </div>
           )}
 
-          {/* Launch settings */}
-          <>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="pageId">Facebook Page</Label>
-                <button
-                  type="button"
-                  onClick={refreshPages}
-                  disabled={pagesRefreshing}
-                  className="text-primary text-xs underline-offset-4 hover:underline disabled:opacity-50"
-                >
-                  {pagesRefreshing ? 'Refreshing…' : 'Refresh pages'}
-                </button>
-              </div>
-              {pages.length === 0 ? (
-                <p className="text-fg-muted text-xs">
-                  No pages cached yet. Click &quot;Refresh pages&quot; to fetch from Meta.
-                </p>
-              ) : (
-                <select
-                  id="pageId"
-                  value={pageId}
-                  onChange={(e) => setPageId(e.target.value)}
-                  className="border-input bg-background h-10 w-full rounded-md border px-3 text-sm"
-                >
-                  <option value="">Select a page</option>
-                  {pages.map((p) => (
-                    <option key={p.pageId} value={p.pageId}>
-                      {p.pageName} ({p.pageId})
-                    </option>
-                  ))}
-                </select>
-              )}
-              {pagesError && (
-                <p className="text-xs text-[color:var(--accent-negative)]">{pagesError}</p>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="offerUrl">Offer URL</Label>
-              <Input
-                id="offerUrl"
-                type="url"
-                value={offerUrl}
-                onChange={(e) => setOfferUrl(e.target.value)}
-                placeholder="https://your-offer.example/landing"
-                aria-invalid={offerUrl.length > 0 && !offerUrlValid}
-              />
-              {offerUrl.length > 0 && !offerUrlValid ? (
-                <p className="text-xs text-[color:var(--accent-negative)]">
-                  Enter a full URL starting with <code className="font-mono">http://</code> or{' '}
-                  <code className="font-mono">https://</code>. Meta will reject anything shorter and
-                  the ad won&apos;t launch.
-                </p>
-              ) : (
-                <p className="text-fg-muted text-xs">
-                  Where clicks send users. Pre-filled from the concept&apos;s offer URL.
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label>Targeting</Label>
-                <button
-                  type="button"
-                  onClick={() => setShowCustomizeTargeting((v) => !v)}
-                  className="text-primary text-xs underline-offset-4 hover:underline"
-                >
-                  {showCustomizeTargeting ? 'Hide' : 'Customize'}
-                </button>
-              </div>
-              <p className="text-fg-muted text-xs">
-                {countries.join(', ')} · Age {ageMin}-{ageMax} · {launchSnapshot.optimizationGoal} ·{' '}
-                {launchSnapshot.placementType}
-              </p>
-              {showCustomizeTargeting && (
-                <div className="bg-bg-surface space-y-3 rounded-md border p-3">
-                  <div>
-                    <Label className="text-xs">Countries</Label>
-                    <Input
-                      type="text"
-                      value={countries.join(', ')}
-                      onChange={(e) =>
-                        setCountries(
-                          e.target.value
-                            .split(',')
-                            .map((c) => c.trim().toUpperCase())
-                            .filter(Boolean),
-                        )
-                      }
-                      placeholder="US, CA, GB"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-xs">Min age</Label>
-                      <Input
-                        type="number"
-                        min={13}
-                        max={65}
-                        value={ageMin}
-                        onChange={(e) => setAgeMin(Number(e.target.value) || 13)}
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Max age</Label>
-                      <Input
-                        type="number"
-                        min={13}
-                        max={65}
-                        value={ageMax}
-                        onChange={(e) => setAgeMax(Number(e.target.value) || 65)}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </>
+          {/* Polish-28.4.1 Commit 99: full Meta-Ads-Manager-parity form. */}
+          <LaunchConfigForm
+            value={launchConfig}
+            onChange={patchConfig}
+            pages={pages.map((p) => ({ pageId: p.pageId, pageName: p.pageName }))}
+            onRefreshPages={refreshPages}
+            pagesRefreshing={pagesRefreshing}
+            pagesError={pagesError}
+            approvedCount={launchableCount}
+          />
 
           {/* Budget + cap summary */}
           <div className="bg-bg-elevated space-y-1 rounded-md border p-3 text-sm">
             <p>
               Variants to launch: <strong>{launchableCount}</strong>
             </p>
-            <p>
-              Per-ad daily budget: <strong>${launchSnapshot.perAdBudgetUsd.toFixed(2)}</strong>
-            </p>
+            {launchConfig.budgetOptimizationEnabled ? (
+              <p>
+                Campaign daily budget (CBO):{' '}
+                <strong>${launchConfig.campaignDailyBudgetUsd.toFixed(2)}</strong>
+              </p>
+            ) : (
+              <p>
+                Per-ad daily budget: <strong>${launchConfig.perAdDailyBudgetUsd.toFixed(2)}</strong>
+              </p>
+            )}
             {/* Polish-3.5: show the budget in the ad account's currency
                 so non-USD accounts can see exactly what Meta receives. */}
             {launchSnapshot.accountCurrency !== 'USD' && (
               <BudgetPreview
-                usdAmount={launchSnapshot.perAdBudgetUsd}
+                usdAmount={
+                  launchConfig.budgetOptimizationEnabled
+                    ? launchConfig.campaignDailyBudgetUsd
+                    : launchConfig.perAdDailyBudgetUsd
+                }
                 currency={launchSnapshot.accountCurrency}
                 connectionMin={launchSnapshot.minDailyBudgetMinor}
               />
@@ -789,6 +763,18 @@ export function JobReviewClient({
             )}
           </div>
 
+          {configIssues.length > 0 && (
+            <ul
+              className="border-[color:var(--accent-warning)]/40 bg-[color:var(--accent-warning)]/5 space-y-0.5 rounded-md border p-2.5 text-xs"
+              role="note"
+            >
+              {configIssues.map((issue) => (
+                <li key={issue} className="text-fg">
+                  · {issue}
+                </li>
+              ))}
+            </ul>
+          )}
           {launchError && (
             <p className="text-sm text-[color:var(--accent-negative)]" role="alert">
               {launchError}
@@ -811,9 +797,8 @@ export function JobReviewClient({
                 launchPending ||
                 exceedsCap ||
                 exceedsFirstLaunchCap ||
-                !pageId ||
                 !offerUrlValid ||
-                countries.length === 0
+                configIssues.length > 0
               }
             >
               {launchPending ? 'Launching…' : 'Launch (paused in Meta, activate manually)'}

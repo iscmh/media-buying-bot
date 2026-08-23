@@ -263,6 +263,8 @@ export interface LaunchApprovedInput {
   budgetOptimizationEnabled?: boolean;
   campaignDailyBudgetUsd?: number;
   optimizationGoal?: string;
+  /** Polish-28.4.1 Commit 99: 'advantage_plus' | 'manual'. */
+  placementType?: string;
   billingEvent?: string;
   bidStrategy?: string;
   bidAmountUsd?: number;
@@ -475,6 +477,7 @@ async function launchApprovedActionImpl(input: LaunchApprovedInput): Promise<Lau
     budgetOptimizationEnabled: input.budgetOptimizationEnabled,
     campaignDailyBudgetUsd: input.campaignDailyBudgetUsd,
     optimizationGoal: input.optimizationGoal,
+    placementType: input.placementType,
     billingEvent: input.billingEvent,
     bidStrategy: input.bidStrategy,
     bidAmountUsd: input.bidAmountUsd,

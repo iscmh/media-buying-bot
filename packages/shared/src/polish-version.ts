@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.0';
+export const POLISH_VERSION = '28.4.1';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.0';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.0 Commit 98 - Meta launch backend un-hardcoded (objective, special ad categories, CBO, bid strategy + cap, billing event, schedule, locales, custom audiences, placements matrix, pixel + conversion event, CTA type). All fields optional inputs with pre-98 defaults, so old callers still work. UI wire-up ships in Commit 99';
+  'Polish-28.4.1 Commit 99 - full Meta-Ads-Manager-parity launch UI. Sectioned form (Campaign / Conversion / Ad set / Destination / Targeting / Placements / Schedule) with progressive disclosure. Cross-field validation (bid amount required for cost/bid caps, pixel required for SALES/LEADS over Website, at least one platform for manual placements). Backwards-compatible defaults keep the one-click path working.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

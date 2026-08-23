@@ -91,6 +91,7 @@ export async function sendMetaLaunchEvent(input: {
   budgetOptimizationEnabled?: boolean;
   campaignDailyBudgetUsd?: number;
   optimizationGoal?: string;
+  placementType?: string;
   billingEvent?: string;
   bidStrategy?: string;
   bidAmountUsd?: number;
@@ -126,6 +127,7 @@ export async function sendMetaLaunchEvent(input: {
       budgetOptimizationEnabled: input.budgetOptimizationEnabled,
       campaignDailyBudgetUsd: input.campaignDailyBudgetUsd,
       optimizationGoal: input.optimizationGoal,
+      placementType: input.placementType,
       billingEvent: input.billingEvent,
       bidStrategy: input.bidStrategy,
       bidAmountUsd: input.bidAmountUsd,

@@ -186,7 +186,8 @@ export const metaAdLauncher = inngest.createFunction(
         dailyBudgetUsd,
         optimizationGoal: (event.data.optimizationGoal ??
           settings.defaultOptimizationGoal) as MetaOptimizationGoal,
-        placementType: settings.defaultPlacementType as MetaPlacementType,
+        placementType: (event.data.placementType ??
+          settings.defaultPlacementType) as MetaPlacementType,
         pageId: pageId ?? 'dry_run_page_id',
         targetingCountries: event.data.targetingCountries ?? settings.defaultTargetingCountries,
         ageMin: event.data.ageMin ?? settings.defaultAgeMin,

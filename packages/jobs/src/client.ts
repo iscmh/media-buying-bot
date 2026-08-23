@@ -34,6 +34,8 @@ export type Events = {
       budgetOptimizationEnabled?: boolean;
       campaignDailyBudgetUsd?: number;
       optimizationGoal?: string;
+      /** Polish-28.4.1 Commit 99: 'advantage_plus' | 'manual'. */
+      placementType?: string;
       billingEvent?: string;
       bidStrategy?: string;
       bidAmountUsd?: number;

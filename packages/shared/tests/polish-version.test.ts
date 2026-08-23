@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 28.4.0 (Polish-28.4.0 Commit 98 — Meta launch backend un-hardcoded; UI wire-up ships in Commit 99)', () => {
+  it('is currently 28.4.1 (Polish-28.4.1 Commit 99 — full Meta-Ads-Manager-parity launch UI)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.4.0');
+    expect(POLISH_VERSION).toBe('28.4.1');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {
