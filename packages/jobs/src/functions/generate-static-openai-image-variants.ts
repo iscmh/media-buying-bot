@@ -539,34 +539,75 @@ async function renderOneOpenaiVariant(input: {
 }
 
 /**
- * Compose the /v1/images/edits prompt. Frames the call as an
- * overlay-copy replacement + persona-consistent visual variation.
- * Similar spirit to the Gemini Nano Banana system instruction —
- * OpenAI's edits endpoint respects "edit the image" framing.
+ * Polish-28.3.10 Commit 95: compose the /v1/images/edits prompt.
+ *
+ * The reference image (source winning static ad) is attached as
+ * multipart. This prompt tells gpt-image-2 to produce a VARIATION
+ * of that source — same mockup style, same visual anchor — with:
+ *   1. the source's old text REMOVED (not ghosted, not overlaid)
+ *   2. the new HEADLINE + BODY rendered where the old text was
+ *   3. small visual variation calibrated to intensity (color, small
+ *      element position) so the batch produces recognizably different
+ *      A/B candidates rather than N near-identical renders
+ *
+ * The failure this replaces: the previous prompt was terse ("Replace
+ * overlay text EXACTLY") and gpt-image-2 kept the source text ghosted
+ * or in place, producing unusable "bad ads". This prompt spells out
+ * the delete-then-render sequence and enumerates per-intensity visual
+ * moves.
  */
 function renderOpenaiEditPrompt(copy: ClaudeCopyVariant, variantIndex: number): string {
-  const secondary = copy.primary_text.slice(0, 160);
-  const intensityHint =
+  const body = copy.primary_text.slice(0, 220);
+
+  const intensityVisual =
     copy.intensity_level === 'small'
-      ? 'Minimal visual change — keep composition + persona + colors identical, only swap the overlay text.'
+      ? [
+          'Visual variation: NEAR-IDENTICAL to the reference.',
+          '- Same mockup style, same layout, same subject, same composition.',
+          '- Same color palette (may shift primary accent hue by ~10 degrees, no more).',
+          '- Same typography family, weight, and casing as the reference.',
+          '- Only meaningful change: the HEADLINE and BODY text swap.',
+        ].join('\n')
       : copy.intensity_level === 'medium'
-        ? 'Moderate visual shift — same persona and setting, allow small palette or framing adjustments.'
-        : 'Fresh persona or angle for the same offer — keep the product visible and the mockup style consistent.';
-  return `You are editing a winning static ad creative. Replace its overlay text with the exact copy below and apply the persona shift described.
+        ? [
+            'Visual variation: SUBTLE but visible.',
+            '- Same mockup style (e.g. if reference is an iPhone notification, output an iPhone notification; if reference is a quote card, output a quote card).',
+            '- Same subject / product / persona in frame if applicable.',
+            '- Allowed to shift: accent color, background tone, or a single decorative element (small badge, small icon, ribbon color).',
+            '- Typography family stays the same; weight or casing may shift.',
+          ].join('\n')
+        : [
+            'Visual variation: NOTICEABLE — a fresh visual take on the SAME mockup style.',
+            '- Same MOCKUP TYPE as the reference (screenshot stays a screenshot, quote card stays a quote card, product hero stays a product hero).',
+            '- Same subject / product / persona identity.',
+            '- Freer freedom to shift: background color, accent color, layout of the text block (top vs bottom, left vs center), typography weight, added or removed subtle decoration.',
+            '- Do NOT change the CATEGORY of the mockup (do not turn a quote card into a photo, do not turn an iPhone screenshot into a poster).',
+          ].join('\n');
 
-REQUIREMENTS
-- Replace overlay text EXACTLY as given (no paraphrasing, no invented words).
-- Preserve the mockup style (screenshot / notification / iPhone popup / product hero — match whatever the reference shows).
-- Text fits inside the visible canvas with at least 8% safe margin from all edges. If longer than the original, scale font DOWN.
-- Keep the offer / brand / product recognizable.
+  return `You are editing a winning Meta static ad to produce ONE A/B-test variant.
 
-PRIMARY OVERLAY (headline): ${JSON.stringify(copy.headline)}
-SECONDARY OVERLAY (body): ${JSON.stringify(secondary)}
+The reference image attached is the winning source ad. Produce a NEW 1024x1024 image that is a VARIATION of that source:
 
-VARIATION INTENSITY: ${copy.intensity_level} — ${intensityHint}
-${copy.rationale ? `RATIONALE: ${copy.rationale}` : ''}
+STEP 1 — REMOVE
+Cleanly remove every letter of the old text that appears on the reference image. Do not ghost it, do not fade it, do not leave impressions of the old letters. The background where the old text was must be reconstructed to match the surrounding pixels.
 
-Variant index: ${variantIndex}`;
+STEP 2 — RENDER NEW TEXT
+Render the exact copy below where the old text used to be, using typography consistent with the reference's design language:
+- HEADLINE (largest / most prominent element): ${JSON.stringify(copy.headline)}
+- BODY (secondary text): ${JSON.stringify(body)}
+
+Spelling must be perfect. Do not paraphrase. Do not truncate. Do not add words. Both elements must be inside the visible canvas with at least 6% margin from every edge — scale text DOWN if needed rather than clipping.
+
+STEP 3 — APPLY VISUAL VARIATION
+${intensityVisual}
+
+HARD CONSTRAINTS (all intensities)
+- Preserve the mockup CATEGORY of the reference (screenshot / iPhone notification / quote card / product hero / testimonial with face / etc.). This is the anchor of the A/B test.
+- If a real person is in the reference, keep the SAME person (or a very close likeness) — do not swap them for a different-looking human, do not warp their face, do not add extra fingers.
+- No watermarks, no logos not present in the reference, no URLs, no @handles, no fake blue checkmarks.
+- Output MUST look like a polished Meta ad — production quality, native to the feed, not obviously AI-generated.
+
+Variant index: ${variantIndex}${copy.rationale ? ` — ${copy.rationale}` : ''}`;
 }
 
 async function markJobFailed(
