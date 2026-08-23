@@ -90,14 +90,36 @@ export const INVITE_CODE_DEFAULT_TTL_DAYS = 30;
 export const INVITE_CODE_LENGTH = 8;
 
 /**
- * Phase 4a: Meta optimization goals we support at launch time. Values
- * match Meta's Marketing API enum literals exactly so we can pass
- * straight through once BOT_DRY_RUN flips off.
+ * Phase 4a → Polish-28.4.0 Commit 98: Meta optimization goals surfaced
+ * in the launch UI. Values match Meta's Marketing API enum literals
+ * exactly so we can pass straight through. The full-launch UI exposes
+ * these against the campaign objective (each objective admits a subset
+ * — SALES → OFFSITE_CONVERSIONS/VALUE, LEADS → LEAD_GENERATION, etc).
+ * Kept as a flat union so the ad-set body serializer stays trivial;
+ * cross-field validation lives in the frontend + action layer.
  */
 export const META_OPTIMIZATION_GOALS = [
-  'CONVERSIONS',
+  // Traffic
   'LINK_CLICKS',
   'LANDING_PAGE_VIEWS',
+  // Sales / conversions
+  'OFFSITE_CONVERSIONS',
+  'CONVERSIONS',
+  'VALUE',
+  // Leads
+  'LEAD_GENERATION',
+  'QUALITY_LEAD',
+  // Engagement
+  'POST_ENGAGEMENT',
+  'PAGE_LIKES',
+  'THRUPLAY',
+  'VIDEO_VIEWS',
+  'TWO_SECOND_CONTINUOUS_VIDEO_VIEWS',
+  // Awareness / reach
+  'REACH',
+  'IMPRESSIONS',
+  'AD_RECALL_LIFT',
+  // Back-compat outcome-only pseudo-goals (kept so old rows deserialize).
   'OUTCOME_TRAFFIC',
   'OUTCOME_SALES',
 ] as const;

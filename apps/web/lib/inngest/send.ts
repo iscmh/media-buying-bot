@@ -82,6 +82,31 @@ export async function sendMetaLaunchEvent(input: {
   ageMin?: number;
   ageMax?: number;
   perAdBudgetUsd?: number;
+  // Polish-28.4.0 Commit 98: full launch config forwarded from the
+  // launch UI. All optional so pre-Commit-98 callers (Telegram bot,
+  // API v1) keep working with the old shape.
+  campaignName?: string;
+  campaignObjective?: string;
+  specialAdCategories?: string[];
+  budgetOptimizationEnabled?: boolean;
+  campaignDailyBudgetUsd?: number;
+  optimizationGoal?: string;
+  billingEvent?: string;
+  bidStrategy?: string;
+  bidAmountUsd?: number;
+  startTime?: string;
+  endTime?: string;
+  locales?: number[];
+  includedCustomAudienceIds?: string[];
+  excludedCustomAudienceIds?: string[];
+  publisherPlatforms?: string[];
+  facebookPositions?: string[];
+  instagramPositions?: string[];
+  audienceNetworkPositions?: string[];
+  messengerPositions?: string[];
+  pixelId?: string;
+  customEventType?: string;
+  callToActionType?: string;
 }): Promise<void> {
   await inngest.send({
     name: 'meta/launch.requested',
@@ -95,6 +120,28 @@ export async function sendMetaLaunchEvent(input: {
       ageMin: input.ageMin,
       ageMax: input.ageMax,
       perAdBudgetUsd: input.perAdBudgetUsd,
+      campaignName: input.campaignName,
+      campaignObjective: input.campaignObjective,
+      specialAdCategories: input.specialAdCategories,
+      budgetOptimizationEnabled: input.budgetOptimizationEnabled,
+      campaignDailyBudgetUsd: input.campaignDailyBudgetUsd,
+      optimizationGoal: input.optimizationGoal,
+      billingEvent: input.billingEvent,
+      bidStrategy: input.bidStrategy,
+      bidAmountUsd: input.bidAmountUsd,
+      startTime: input.startTime,
+      endTime: input.endTime,
+      locales: input.locales,
+      includedCustomAudienceIds: input.includedCustomAudienceIds,
+      excludedCustomAudienceIds: input.excludedCustomAudienceIds,
+      publisherPlatforms: input.publisherPlatforms,
+      facebookPositions: input.facebookPositions,
+      instagramPositions: input.instagramPositions,
+      audienceNetworkPositions: input.audienceNetworkPositions,
+      messengerPositions: input.messengerPositions,
+      pixelId: input.pixelId,
+      customEventType: input.customEventType,
+      callToActionType: input.callToActionType,
     },
   });
 }

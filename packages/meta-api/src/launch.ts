@@ -92,6 +92,17 @@ export interface MetaCreateResult<T extends string> {
 // =========================================================================
 // Campaign
 // =========================================================================
+/**
+ * Polish-28.4.0 Commit 98: Meta special-ad-category set. Required by
+ * Meta for regulated verticals (credit, employment, housing, political).
+ * Send [] for None. Multiple categories may apply per campaign.
+ */
+export type MetaSpecialAdCategory =
+  | 'CREDIT'
+  | 'EMPLOYMENT'
+  | 'HOUSING'
+  | 'ISSUES_ELECTIONS_POLITICS';
+
 export interface CreateCampaignInput {
   userId: string;
   /** Phase 4b BYOC: user-side decrypted access token. Empty/'' for mock. */
@@ -101,6 +112,33 @@ export interface CreateCampaignInput {
   objective: string; // e.g. 'OUTCOME_SALES' / 'OUTCOME_TRAFFIC'
   mode: LaunchMode;
   generationJobId?: string;
+  /**
+   * Polish-28.4.0 Commit 98: user-selected special ad category (or []
+   * for None). Defaults to []. Meta rejects budget/targeting fields
+   * outside a narrow whitelist when this is set, so surfacing the
+   * choice explicitly protects users from surprise rejections.
+   */
+  specialAdCategories?: readonly MetaSpecialAdCategory[];
+  /**
+   * Polish-28.4.0 Commit 98: CBO toggle. When true, campaign carries
+   * its OWN daily_budget and Meta redistributes across ad sets. When
+   * false (default), each ad set carries its own daily_budget (ABO —
+   * current behavior since Phase 4b hotfix).
+   */
+  budgetOptimizationEnabled?: boolean;
+  /**
+   * Polish-28.4.0 Commit 98: required only when budgetOptimizationEnabled
+   * is true. Ignored in ABO mode (ad-set-level daily_budget carries
+   * spend then).
+   */
+  campaignDailyBudgetUsd?: number;
+  /**
+   * Polish-28.4.0 Commit 98: currency of the ad account. Passed
+   * through to convert campaignDailyBudgetUsd → minor units.
+   */
+  accountCurrency?: string;
+  /** Per-account override for Meta's minimum daily budget (minor units). */
+  minDailyBudgetMinor?: number | null;
 }
 
 export async function createCampaign(
@@ -109,18 +147,51 @@ export async function createCampaign(
   const effective = effectiveLaunchMode(input.mode);
   const t0 = Date.now();
   const endpoint = `/${input.adAccountId}/campaigns`;
-  const body = {
+  const specialAdCategories = [...(input.specialAdCategories ?? [])];
+  const cboEnabled = input.budgetOptimizationEnabled === true;
+
+  const body: Record<string, unknown> = {
     name: input.name,
     objective: input.objective,
     status: FORCED_STATUS_PAUSED,
-    special_ad_categories: [] as string[],
-    // Phase 4b hotfix: Meta requires this flag whenever a campaign's
-    // ad sets carry their own daily_budget (which is exactly our model
-    // — one daily_budget per ad set). False = each ad set spends its
-    // own budget independently. Without it Meta rejects the campaign
-    // create with error code 100, subcode 4834011.
-    is_adset_budget_sharing_enabled: false,
+    special_ad_categories: specialAdCategories,
+    // Phase 4b hotfix (still relevant for ABO): Meta requires this flag
+    // whenever a campaign's ad sets carry their own daily_budget. In CBO
+    // mode we flip it to true and put the daily_budget on the campaign.
+    is_adset_budget_sharing_enabled: cboEnabled,
   };
+
+  if (cboEnabled) {
+    const currency = input.accountCurrency ?? 'USD';
+    const cboBudget = input.campaignDailyBudgetUsd ?? 0;
+    if (cboBudget <= 0) {
+      return {
+        ok: false,
+        id: '',
+        idKey: 'campaign_id' as const,
+        dryRun: false,
+        callerMode: input.mode,
+        errorMessage:
+          'CBO enabled but campaignDailyBudgetUsd is missing/zero. Pass a positive daily budget.',
+      };
+    }
+    const budgetCheck = checkBudgetMeetsMetaMinimum({
+      usdAmount: cboBudget,
+      currency,
+      connectionMin: input.minDailyBudgetMinor ?? null,
+    });
+    if (!budgetCheck.ok) {
+      return {
+        ok: false,
+        id: '',
+        idKey: 'campaign_id' as const,
+        dryRun: false,
+        callerMode: input.mode,
+        errorMessage: budgetCheck.reason,
+      };
+    }
+    body['daily_budget'] = budgetCheck.minor;
+  }
 
   if (effective === 'mock') {
     const id = dryRunId('campaign');
@@ -158,12 +229,34 @@ export async function createCampaign(
 // =========================================================================
 // Ad set
 // =========================================================================
+/** Polish-28.4.0 Commit 98: Meta bid strategies. */
+export type MetaBidStrategy = 'LOWEST_COST_WITHOUT_CAP' | 'COST_CAP' | 'BID_CAP';
+
+/** Polish-28.4.0 Commit 98: Meta billing events. */
+export type MetaBillingEvent =
+  | 'IMPRESSIONS'
+  | 'LINK_CLICKS'
+  | 'THRUPLAY'
+  | 'PAGE_LIKES'
+  | 'POST_ENGAGEMENT';
+
+/**
+ * Polish-28.4.0 Commit 98: publisher platforms toggled via Advanced
+ * placements. All four Meta family platforms.
+ */
+export type MetaPublisherPlatform = 'facebook' | 'instagram' | 'audience_network' | 'messenger';
+
 export interface CreateAdSetInput {
   userId: string;
   accessToken: string;
   adAccountId: string;
   campaignId: string;
   name: string;
+  /**
+   * Per-adset daily budget in USD. Ignored (Meta rejects) when the
+   * parent campaign is in CBO mode — budget lives on the campaign in
+   * that case.
+   */
   dailyBudgetUsd: number;
   optimizationGoal: MetaOptimizationGoal;
   placementType: MetaPlacementType;
@@ -173,14 +266,67 @@ export interface CreateAdSetInput {
   ageMax?: number;
   mode: LaunchMode;
   generationJobId?: string;
-  /**
-   * Polish-3.5: ISO currency the ad account is denominated in. Drives
-   * USD→account-currency conversion before computing daily_budget in
-   * minor units. Defaults to USD when unknown.
-   */
   accountCurrency?: string;
-  /** Per-account override for Meta's minimum daily budget (minor units). */
   minDailyBudgetMinor?: number | null;
+  /**
+   * Polish-28.4.0 Commit 98: skip putting daily_budget on the ad set
+   * (used when CBO is on at the campaign level). Meta rejects a
+   * daily_budget on both objects.
+   */
+  cboEnabled?: boolean;
+  /**
+   * Polish-28.4.0 Commit 98: bid strategy. Defaults to
+   * LOWEST_COST_WITHOUT_CAP (Highest volume). COST_CAP / BID_CAP
+   * require bidAmountUsd.
+   */
+  bidStrategy?: MetaBidStrategy;
+  /**
+   * Polish-28.4.0 Commit 98: only used with COST_CAP or BID_CAP. USD;
+   * converted to minor units in the ad account's currency at the
+   * boundary.
+   */
+  bidAmountUsd?: number;
+  /**
+   * Polish-28.4.0 Commit 98: billing event. Defaults to IMPRESSIONS
+   * (matches all objectives that don't require a specific one).
+   */
+  billingEvent?: MetaBillingEvent;
+  /**
+   * Polish-28.4.0 Commit 98: ISO-8601 UTC start / end. Meta accepts
+   * unset start (campaign starts on approval); unset end runs until
+   * killed.
+   */
+  startTime?: string;
+  endTime?: string;
+  /**
+   * Polish-28.4.0 Commit 98: Meta locale IDs (numeric codes from
+   * /search?type=adlocale). Empty = target all languages.
+   */
+  locales?: number[];
+  /**
+   * Polish-28.4.0 Commit 98: existing custom-audience IDs to include /
+   * exclude. Currently accepted as free-text IDs — the picker with
+   * live audience-list fetch is a Polish-28.5 v2.
+   */
+  includedCustomAudienceIds?: string[];
+  excludedCustomAudienceIds?: string[];
+  /**
+   * Polish-28.4.0 Commit 98: manual-placement overrides. When
+   * placementType='manual', pass the platform-level toggles + per-
+   * platform position arrays. Ignored when placementType='advantage_plus'.
+   */
+  publisherPlatforms?: MetaPublisherPlatform[];
+  facebookPositions?: string[];
+  instagramPositions?: string[];
+  audienceNetworkPositions?: string[];
+  messengerPositions?: string[];
+  /**
+   * Polish-28.4.0 Commit 98: pixel_id + conversion event for
+   * OUTCOME_SALES / OUTCOME_LEADS (Meta requires promoted_object when
+   * optimizing for OFFSITE_CONVERSIONS). Only sent when both are set.
+   */
+  pixelId?: string;
+  customEventType?: string;
 }
 
 export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateResult<'ad_set_id'>> {
@@ -188,60 +334,139 @@ export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateRe
   const t0 = Date.now();
   const endpoint = `/${input.adAccountId}/adsets`;
 
-  const targeting =
-    input.placementType === 'advantage_plus'
-      ? {
-          geo_locations: { countries: input.targetingCountries ?? ['US'] },
-          age_min: input.ageMin ?? 18,
-          age_max: input.ageMax ?? 65,
-          targeting_automation: { advantage_audience: 1 },
-        }
-      : {
-          geo_locations: { countries: input.targetingCountries ?? ['US'] },
-          age_min: input.ageMin ?? 18,
-          age_max: input.ageMax ?? 65,
-          facebook_positions: ['feed'],
-          instagram_positions: ['stream'],
-        };
-
-  // Phase 4b: hardcoded LINK_CLICKS — compatible with OUTCOME_TRAFFIC.
-  // Settings field reserved for future per-launch picker once we support
-  // more campaign objectives. Passing CONVERSIONS / etc. here against an
-  // OUTCOME_TRAFFIC campaign returns HTTP 400 from Meta.
-  void input.optimizationGoal;
-
-  // Polish-3.5: Meta's daily_budget is in the ad account's currency, in
-  // MINOR units. Default to USD-cents when no currency is supplied so
-  // existing callers keep working. Pre-flight against the account's
-  // minimum daily budget — failing here surfaces a clear, actionable
-  // error instead of Meta's generic "Invalid parameter" 4xx.
-  const currency = input.accountCurrency ?? 'USD';
-  const budgetCheck = checkBudgetMeetsMetaMinimum({
-    usdAmount: input.dailyBudgetUsd,
-    currency,
-    connectionMin: input.minDailyBudgetMinor ?? null,
-  });
-  if (!budgetCheck.ok) {
-    return {
-      ok: false,
-      id: '',
-      idKey: 'ad_set_id' as const,
-      dryRun: false,
-      callerMode: input.mode,
-      errorMessage: budgetCheck.reason,
+  const geoLocations = { countries: input.targetingCountries ?? ['US'] };
+  const ageBounds = {
+    age_min: input.ageMin ?? 18,
+    age_max: input.ageMax ?? 65,
+  };
+  // Placement / audience-automation resolution. Advantage+ turns on
+  // audience automation AND leaves publisher_platforms / positions
+  // unset so Meta chooses. Manual sets explicit platforms + positions.
+  let placementBits: Record<string, unknown>;
+  if (input.placementType === 'advantage_plus') {
+    placementBits = { targeting_automation: { advantage_audience: 1 } };
+  } else {
+    const platforms = input.publisherPlatforms ?? ['facebook', 'instagram'];
+    placementBits = {
+      publisher_platforms: platforms,
+      // Only include per-platform position arrays when the platform is
+      // enabled AND the caller supplied specific positions — otherwise
+      // omit so Meta picks the default set for that platform.
+      ...(platforms.includes('facebook') && input.facebookPositions?.length
+        ? { facebook_positions: input.facebookPositions }
+        : platforms.includes('facebook')
+          ? { facebook_positions: ['feed'] }
+          : {}),
+      ...(platforms.includes('instagram') && input.instagramPositions?.length
+        ? { instagram_positions: input.instagramPositions }
+        : platforms.includes('instagram')
+          ? { instagram_positions: ['stream'] }
+          : {}),
+      ...(platforms.includes('audience_network') && input.audienceNetworkPositions?.length
+        ? { audience_network_positions: input.audienceNetworkPositions }
+        : {}),
+      ...(platforms.includes('messenger') && input.messengerPositions?.length
+        ? { messenger_positions: input.messengerPositions }
+        : {}),
     };
   }
-  const dailyBudgetMinor = budgetCheck.minor;
+  const targeting: Record<string, unknown> = {
+    geo_locations: geoLocations,
+    ...ageBounds,
+    ...placementBits,
+    ...(input.locales?.length ? { locales: input.locales } : {}),
+    ...(input.includedCustomAudienceIds?.length
+      ? { custom_audiences: input.includedCustomAudienceIds.map((id) => ({ id })) }
+      : {}),
+    ...(input.excludedCustomAudienceIds?.length
+      ? { excluded_custom_audiences: input.excludedCustomAudienceIds.map((id) => ({ id })) }
+      : {}),
+  };
 
-  const body = {
+  // Polish-28.4.0 Commit 98: use the caller-provided optimization goal
+  // when set. Defaults to LINK_CLICKS (pre-Commit-98 behavior). Meta
+  // rejects mismatched objective+goal pairs at the API layer — that
+  // validation stays in the frontend / action layer, not here.
+  const optimizationGoal = input.optimizationGoal ?? 'LINK_CLICKS';
+  const bidStrategy = input.bidStrategy ?? 'LOWEST_COST_WITHOUT_CAP';
+  const billingEvent = input.billingEvent ?? 'IMPRESSIONS';
+
+  // Polish-3.5: Meta's daily_budget is in the ad account's currency, in
+  // MINOR units. Skip the ad-set budget entirely when CBO is on.
+  const currency = input.accountCurrency ?? 'USD';
+  let dailyBudgetMinor: number | undefined;
+  if (input.cboEnabled !== true) {
+    const budgetCheck = checkBudgetMeetsMetaMinimum({
+      usdAmount: input.dailyBudgetUsd,
+      currency,
+      connectionMin: input.minDailyBudgetMinor ?? null,
+    });
+    if (!budgetCheck.ok) {
+      return {
+        ok: false,
+        id: '',
+        idKey: 'ad_set_id' as const,
+        dryRun: false,
+        callerMode: input.mode,
+        errorMessage: budgetCheck.reason,
+      };
+    }
+    dailyBudgetMinor = budgetCheck.minor;
+  }
+
+  // Bid-cap / cost-cap require bid_amount in minor units. Convert from
+  // USD → minor via checkBudgetMeetsMetaMinimum (reuses the same
+  // FX + minor-units math and validates against Meta's minimum).
+  let bidAmountMinor: number | undefined;
+  if (bidStrategy !== 'LOWEST_COST_WITHOUT_CAP') {
+    if (!input.bidAmountUsd || input.bidAmountUsd <= 0) {
+      return {
+        ok: false,
+        id: '',
+        idKey: 'ad_set_id' as const,
+        dryRun: false,
+        callerMode: input.mode,
+        errorMessage: `Bid strategy ${bidStrategy} requires a positive bidAmountUsd.`,
+      };
+    }
+    const bidCheck = checkBudgetMeetsMetaMinimum({
+      usdAmount: input.bidAmountUsd,
+      currency,
+      connectionMin: null,
+    });
+    if (!bidCheck.ok) {
+      return {
+        ok: false,
+        id: '',
+        idKey: 'ad_set_id' as const,
+        dryRun: false,
+        callerMode: input.mode,
+        errorMessage: bidCheck.reason,
+      };
+    }
+    bidAmountMinor = bidCheck.minor;
+  }
+
+  const body: Record<string, unknown> = {
     name: input.name,
     campaign_id: input.campaignId,
-    daily_budget: dailyBudgetMinor,
-    billing_event: 'IMPRESSIONS',
-    optimization_goal: 'LINK_CLICKS',
-    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    billing_event: billingEvent,
+    optimization_goal: optimizationGoal,
+    bid_strategy: bidStrategy,
     targeting,
     status: FORCED_STATUS_PAUSED,
+    ...(dailyBudgetMinor !== undefined ? { daily_budget: dailyBudgetMinor } : {}),
+    ...(bidAmountMinor !== undefined ? { bid_amount: bidAmountMinor } : {}),
+    ...(input.startTime ? { start_time: input.startTime } : {}),
+    ...(input.endTime ? { end_time: input.endTime } : {}),
+    ...(input.pixelId && input.customEventType
+      ? {
+          promoted_object: {
+            pixel_id: input.pixelId,
+            custom_event_type: input.customEventType,
+          },
+        }
+      : {}),
   };
 
   if (effective === 'mock') {
@@ -670,6 +895,28 @@ export type CreativeMedia =
   | { kind: 'image'; imageHash: string }
   | { kind: 'video'; videoId: string; thumbnailUrl: string };
 
+/**
+ * Polish-28.4.0 Commit 98: Meta CTA button types. Not exhaustive —
+ * covers what real DR ads use. Add here + expose in UI as needed.
+ */
+export type MetaCallToActionType =
+  | 'LEARN_MORE'
+  | 'SHOP_NOW'
+  | 'SIGN_UP'
+  | 'SUBSCRIBE'
+  | 'GET_OFFER'
+  | 'DOWNLOAD'
+  | 'GET_QUOTE'
+  | 'CONTACT_US'
+  | 'APPLY_NOW'
+  | 'BOOK_TRAVEL'
+  | 'WATCH_MORE'
+  | 'LISTEN_NOW'
+  | 'INSTALL_APP'
+  | 'USE_APP'
+  | 'PLAY_GAME'
+  | 'ORDER_NOW';
+
 export interface CreateAdCreativeInput {
   userId: string;
   accessToken: string;
@@ -686,6 +933,13 @@ export interface CreateAdCreativeInput {
   pageId: string;
   mode: LaunchMode;
   generationJobId?: string;
+  /**
+   * Polish-28.4.0 Commit 98: CTA button type. Defaults to LEARN_MORE
+   * (pre-Commit-98 hardcoded value). Same value applies to both image
+   * (link_data.call_to_action) and video (video_data.call_to_action)
+   * paths.
+   */
+  callToActionType?: MetaCallToActionType;
 }
 
 export async function createAdCreative(
@@ -709,6 +963,7 @@ export async function createAdCreative(
   //          image_url here, must pre-upload via /adimages).
   //   Video: video_data { video_id, image_url, call_to_action,
   //          link_description }. image_url is the thumbnail.
+  const ctaType = input.callToActionType ?? 'LEARN_MORE';
   let objectStorySpec: Record<string, unknown>;
   if (media.kind === 'image') {
     objectStorySpec = {
@@ -719,7 +974,7 @@ export async function createAdCreative(
         message: input.primaryText,
         name: input.headline,
         description: input.description ?? undefined,
-        call_to_action: { type: 'LEARN_MORE' },
+        call_to_action: { type: ctaType },
       },
     };
   } else {
@@ -733,7 +988,7 @@ export async function createAdCreative(
         title: input.headline,
         link_description: input.description ?? undefined,
         call_to_action: {
-          type: 'LEARN_MORE',
+          type: ctaType,
           // Video CTAs need link.value on the call_to_action itself, not
           // on a sibling link field like link_data has.
           value: { link: input.destinationUrl },

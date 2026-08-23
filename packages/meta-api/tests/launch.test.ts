@@ -81,17 +81,42 @@ describe('Phase 4a mock Meta CRUD — DRY_RUN gating', () => {
     ).toBe(false);
   });
 
-  it('Phase 4b hotfix: createAdSet HARDCODES optimization_goal=LINK_CLICKS', async () => {
+  it('Polish-28.4.0 Commit 98: createAdSet passes through caller-provided optimization_goal', async () => {
+    // Pre-Commit-98 this was hardcoded to LINK_CLICKS to protect users
+    // who left the default CONVERSIONS in settings from mismatching an
+    // OUTCOME_TRAFFIC campaign. The full launch UI now surfaces the
+    // objective + optimization goal picker, so the worker is expected
+    // to send a valid pair and Meta's 4xx surfaces if not.
     await createAdSet({
       userId: 'u',
       accessToken: '',
       adAccountId: 'act_123',
       campaignId: 'dry_run_campaign_abc',
-      name: 'opt-goal hardcode test',
+      name: 'opt-goal pass-through test',
       dailyBudgetUsd: 5,
-      // User picked CONVERSIONS in settings — incompatible with our
-      // OUTCOME_TRAFFIC campaign. Hardcode must override it.
-      optimizationGoal: 'CONVERSIONS',
+      optimizationGoal: 'OFFSITE_CONVERSIONS',
+      placementType: 'advantage_plus',
+      mode: 'mock',
+    });
+    const call = vi.mocked(logMetaApiCall).mock.calls[0]![0]!;
+    expect((call.requestBody as { optimization_goal?: string }).optimization_goal).toBe(
+      'OFFSITE_CONVERSIONS',
+    );
+  });
+
+  it('Polish-28.4.0 Commit 98: createAdSet falls back to LINK_CLICKS when optimizationGoal undefined', async () => {
+    // Back-compat guard: existing callers that pass a garbage / missing
+    // optimizationGoal (e.g. the currently-shipping tiny modal) still
+    // get the pre-Commit-98 default so no in-flight launch breaks.
+    await createAdSet({
+      userId: 'u',
+      accessToken: '',
+      adAccountId: 'act_123',
+      campaignId: 'dry_run_campaign_abc',
+      name: 'opt-goal default test',
+      dailyBudgetUsd: 5,
+      // @ts-expect-error deliberately undefined to exercise the fallback
+      optimizationGoal: undefined,
       placementType: 'advantage_plus',
       mode: 'mock',
     });

@@ -254,6 +254,31 @@ export interface LaunchApprovedInput {
   ageMax?: number;
   /** Per-ad daily budget override; clamped server-side. */
   perAdBudgetUsd?: number;
+  // Polish-28.4.0 Commit 98: full launch config from the sectioned
+  // launch UI. All optional — pre-98 callers keep working with the
+  // old shape and get the same behavior as before.
+  campaignName?: string;
+  campaignObjective?: string;
+  specialAdCategories?: string[];
+  budgetOptimizationEnabled?: boolean;
+  campaignDailyBudgetUsd?: number;
+  optimizationGoal?: string;
+  billingEvent?: string;
+  bidStrategy?: string;
+  bidAmountUsd?: number;
+  startTime?: string;
+  endTime?: string;
+  locales?: number[];
+  includedCustomAudienceIds?: string[];
+  excludedCustomAudienceIds?: string[];
+  publisherPlatforms?: string[];
+  facebookPositions?: string[];
+  instagramPositions?: string[];
+  audienceNetworkPositions?: string[];
+  messengerPositions?: string[];
+  pixelId?: string;
+  customEventType?: string;
+  callToActionType?: string;
 }
 
 // Polish-25.7 Commit 46: wrapped below via withErrorLogging so any
@@ -441,6 +466,31 @@ async function launchApprovedActionImpl(input: LaunchApprovedInput): Promise<Lau
     ageMin: input.ageMin,
     ageMax: input.ageMax,
     perAdBudgetUsd: perAdBudget,
+    // Polish-28.4.0 Commit 98: forward the full launch config to the
+    // worker. Everything optional — worker falls back to pre-98
+    // defaults per field.
+    campaignName: input.campaignName,
+    campaignObjective: input.campaignObjective,
+    specialAdCategories: input.specialAdCategories,
+    budgetOptimizationEnabled: input.budgetOptimizationEnabled,
+    campaignDailyBudgetUsd: input.campaignDailyBudgetUsd,
+    optimizationGoal: input.optimizationGoal,
+    billingEvent: input.billingEvent,
+    bidStrategy: input.bidStrategy,
+    bidAmountUsd: input.bidAmountUsd,
+    startTime: input.startTime,
+    endTime: input.endTime,
+    locales: input.locales,
+    includedCustomAudienceIds: input.includedCustomAudienceIds,
+    excludedCustomAudienceIds: input.excludedCustomAudienceIds,
+    publisherPlatforms: input.publisherPlatforms,
+    facebookPositions: input.facebookPositions,
+    instagramPositions: input.instagramPositions,
+    audienceNetworkPositions: input.audienceNetworkPositions,
+    messengerPositions: input.messengerPositions,
+    pixelId: input.pixelId,
+    customEventType: input.customEventType,
+    callToActionType: input.callToActionType,
   });
 
   revalidatePath(`/runs/${input.jobId}`);

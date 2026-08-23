@@ -25,6 +25,31 @@ export type Events = {
       ageMin?: number;
       ageMax?: number;
       perAdBudgetUsd?: number;
+      // Polish-28.4.0 Commit 98: full launch config from the launch UI.
+      // Every field optional — the worker falls back to the pre-98
+      // hardcoded defaults / user_settings values when unset.
+      campaignName?: string;
+      campaignObjective?: string;
+      specialAdCategories?: string[];
+      budgetOptimizationEnabled?: boolean;
+      campaignDailyBudgetUsd?: number;
+      optimizationGoal?: string;
+      billingEvent?: string;
+      bidStrategy?: string;
+      bidAmountUsd?: number;
+      startTime?: string;
+      endTime?: string;
+      locales?: number[];
+      includedCustomAudienceIds?: string[];
+      excludedCustomAudienceIds?: string[];
+      publisherPlatforms?: string[];
+      facebookPositions?: string[];
+      instagramPositions?: string[];
+      audienceNetworkPositions?: string[];
+      messengerPositions?: string[];
+      pixelId?: string;
+      customEventType?: string;
+      callToActionType?: string;
     };
   };
   'performance/poll.scheduled': {

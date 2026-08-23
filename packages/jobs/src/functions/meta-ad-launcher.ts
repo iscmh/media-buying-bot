@@ -184,7 +184,8 @@ export const metaAdLauncher = inngest.createFunction(
         adAccountId: effectiveAdAccountId,
         accessToken,
         dailyBudgetUsd,
-        optimizationGoal: settings.defaultOptimizationGoal as MetaOptimizationGoal,
+        optimizationGoal: (event.data.optimizationGoal ??
+          settings.defaultOptimizationGoal) as MetaOptimizationGoal,
         placementType: settings.defaultPlacementType as MetaPlacementType,
         pageId: pageId ?? 'dry_run_page_id',
         targetingCountries: event.data.targetingCountries ?? settings.defaultTargetingCountries,
@@ -196,6 +197,30 @@ export const metaAdLauncher = inngest.createFunction(
         accountCurrency: metaConn?.accountCurrency ?? null,
         minDailyBudgetMinor: metaConn?.minDailyBudgetMinor ?? null,
         liveLaunchCount: settings.liveLaunchCount,
+        // Polish-28.4.0 Commit 98: full launch config forwarded from
+        // the launch UI. All optional — unset fields fall through to
+        // the pre-98 defaults inside the Meta API layer.
+        campaignName: event.data.campaignName,
+        campaignObjective: event.data.campaignObjective,
+        specialAdCategories: event.data.specialAdCategories,
+        budgetOptimizationEnabled: event.data.budgetOptimizationEnabled,
+        campaignDailyBudgetUsd: event.data.campaignDailyBudgetUsd,
+        billingEvent: event.data.billingEvent,
+        bidStrategy: event.data.bidStrategy,
+        bidAmountUsd: event.data.bidAmountUsd,
+        startTime: event.data.startTime,
+        endTime: event.data.endTime,
+        locales: event.data.locales,
+        includedCustomAudienceIds: event.data.includedCustomAudienceIds,
+        excludedCustomAudienceIds: event.data.excludedCustomAudienceIds,
+        publisherPlatforms: event.data.publisherPlatforms,
+        facebookPositions: event.data.facebookPositions,
+        instagramPositions: event.data.instagramPositions,
+        audienceNetworkPositions: event.data.audienceNetworkPositions,
+        messengerPositions: event.data.messengerPositions,
+        pixelId: event.data.pixelId,
+        customEventType: event.data.customEventType,
+        callToActionType: event.data.callToActionType,
       };
     });
 
@@ -281,16 +306,30 @@ export const metaAdLauncher = inngest.createFunction(
             let createdCampaignId: string | null = null;
             let createdAdSetId: string | null = null;
             try {
+              // Polish-28.4.0 Commit 98: campaign objective now comes
+              // from the launch UI (`campaignObjective`). Fall back to
+              // the pre-98 coercion when unset so old callers (Telegram
+              // bot, API v1) keep working: use optimizationGoal if it's
+              // an OUTCOME_* pseudo-goal, else OUTCOME_TRAFFIC.
+              const objective =
+                ctx.campaignObjective ??
+                (ctx.optimizationGoal.startsWith('OUTCOME_')
+                  ? ctx.optimizationGoal
+                  : 'OUTCOME_TRAFFIC');
+              const campaignName = ctx.campaignName ?? `${baseName} — campaign`;
               const campaign = await createCampaign({
                 userId,
                 accessToken: ctx.accessToken,
                 adAccountId: ctx.adAccountId,
-                name: `${baseName} — campaign`,
-                objective: ctx.optimizationGoal.startsWith('OUTCOME_')
-                  ? ctx.optimizationGoal
-                  : 'OUTCOME_TRAFFIC',
+                name: campaignName,
+                objective,
                 mode: callerMode,
                 generationJobId,
+                specialAdCategories: ctx.specialAdCategories as never,
+                budgetOptimizationEnabled: ctx.budgetOptimizationEnabled,
+                campaignDailyBudgetUsd: ctx.campaignDailyBudgetUsd,
+                accountCurrency: ctx.accountCurrency ?? undefined,
+                minDailyBudgetMinor: ctx.minDailyBudgetMinor ?? undefined,
               });
               if (!campaign.ok) {
                 throw new MetaCreateError(
@@ -317,6 +356,23 @@ export const metaAdLauncher = inngest.createFunction(
                 minDailyBudgetMinor: ctx.minDailyBudgetMinor ?? undefined,
                 mode: callerMode,
                 generationJobId,
+                // Polish-28.4.0 Commit 98: full launch config pass-through.
+                cboEnabled: ctx.budgetOptimizationEnabled,
+                bidStrategy: ctx.bidStrategy as never,
+                bidAmountUsd: ctx.bidAmountUsd,
+                billingEvent: ctx.billingEvent as never,
+                startTime: ctx.startTime,
+                endTime: ctx.endTime,
+                locales: ctx.locales,
+                includedCustomAudienceIds: ctx.includedCustomAudienceIds,
+                excludedCustomAudienceIds: ctx.excludedCustomAudienceIds,
+                publisherPlatforms: ctx.publisherPlatforms as never,
+                facebookPositions: ctx.facebookPositions,
+                instagramPositions: ctx.instagramPositions,
+                audienceNetworkPositions: ctx.audienceNetworkPositions,
+                messengerPositions: ctx.messengerPositions,
+                pixelId: ctx.pixelId,
+                customEventType: ctx.customEventType,
               });
               if (!adSet.ok) {
                 throw new MetaCreateError(
@@ -431,6 +487,7 @@ export const metaAdLauncher = inngest.createFunction(
                 pageId: ctx.pageId,
                 mode: callerMode,
                 generationJobId,
+                callToActionType: ctx.callToActionType as never,
               });
               if (!creative.ok) {
                 throw new MetaCreateError(

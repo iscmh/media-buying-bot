@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.3.12';
+export const POLISH_VERSION = '28.4.0';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.3.12';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.3.12 Commit 97 - static-ad picker exposes small/medium/big variation intensity (was hardcoded medium). Overrides the default intensity form field when static-openai pipeline is picked';
+  'Polish-28.4.0 Commit 98 - Meta launch backend un-hardcoded (objective, special ad categories, CBO, bid strategy + cap, billing event, schedule, locales, custom audiences, placements matrix, pixel + conversion event, CTA type). All fields optional inputs with pre-98 defaults, so old callers still work. UI wire-up ships in Commit 99';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
