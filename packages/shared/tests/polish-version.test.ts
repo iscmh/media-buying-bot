@@ -18,12 +18,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 28.3.11 (Polish-28.3.11 Commit 96 — stop baking form copy into static image; image = visual variation only)', () => {
+  it('is currently 28.3.12 (Polish-28.3.12 Commit 97 — expose small/medium/big variation intensity picker on the static-ad card)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('28.3.11');
+    expect(POLISH_VERSION).toBe('28.3.12');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

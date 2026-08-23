@@ -273,6 +273,15 @@ export interface SimplifiedFormState {
    */
   staticOpenaiSelected?: boolean;
   staticOpenaiQuality?: StaticOpenaiQuality;
+  /**
+   * Polish-28.3.12 Commit 97: visual-variation intensity for the
+   * static-ad edit. Persisted onto the job row's `intensity` column
+   * (previously hardcoded to 'medium'). Consumed by
+   * generate-static-openai-image-variants.ts to calibrate the per-
+   * intensity visual-change bullets in the /v1/images/edits prompt.
+   * Only surfaced when staticOpenaiSelected is true.
+   */
+  staticOpenaiIntensity?: 'small' | 'medium' | 'big';
 }
 
 /**
@@ -396,6 +405,12 @@ export function buildSubmissionFormData(input: {
     // job.metadata.static_openai_quality (see actions.ts).
     fd.set('pipeline', STATIC_OPENAI_PIPELINE_ID);
     fd.set('staticOpenaiQuality', input.state.staticOpenaiQuality ?? STATIC_OPENAI_DEFAULT_QUALITY);
+    // Polish-28.3.12 Commit 97: user-selectable intensity for the
+    // per-variant visual variation. Overrides the default 'medium'
+    // set at the top of this function.
+    if (input.state.staticOpenaiIntensity) {
+      fd.set('intensity', input.state.staticOpenaiIntensity);
+    }
     return fd;
   }
   if (input.state.polish23Selected === true) {

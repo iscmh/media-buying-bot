@@ -146,6 +146,13 @@ export function SimplifiedGenerationForm({
   const [staticOpenaiQuality, setStaticOpenaiQuality] = React.useState<StaticOpenaiQuality>(
     STATIC_OPENAI_DEFAULT_QUALITY,
   );
+  // Polish-28.3.12 Commit 97: user-selectable visual-variation
+  // intensity for the static ad. Default 'medium' matches the old
+  // hardcoded value so existing flows unchanged if the operator
+  // doesn't touch the picker.
+  const [staticOpenaiIntensity, setStaticOpenaiIntensity] = React.useState<
+    'small' | 'medium' | 'big'
+  >('medium');
   const [variantCount, setVariantCount] = React.useState<number>(SIMPLIFIED_DEFAULT_VARIANTS);
 
   const [error, setError] = React.useState<string | null>(null);
@@ -167,6 +174,7 @@ export function SimplifiedGenerationForm({
     polish28VariationsSelected,
     staticOpenaiSelected,
     staticOpenaiQuality,
+    staticOpenaiIntensity,
   };
   const canSubmit = canSubmitState(state);
 
@@ -419,6 +427,7 @@ export function SimplifiedGenerationForm({
           picked={staticOpenaiSelected}
           disabled={isPending}
           quality={staticOpenaiQuality}
+          intensity={staticOpenaiIntensity}
           onPick={() => {
             setStaticOpenaiSelected(true);
             setPolish26Selected(false);
@@ -428,6 +437,7 @@ export function SimplifiedGenerationForm({
             setModelId(null);
           }}
           onQualityChange={setStaticOpenaiQuality}
+          onIntensityChange={setStaticOpenaiIntensity}
         />
       )}
 
@@ -637,25 +647,34 @@ interface StaticOpenaiPickerCardProps {
   picked: boolean;
   disabled: boolean;
   quality: StaticOpenaiQuality;
+  intensity: 'small' | 'medium' | 'big';
   onPick: () => void;
   onQualityChange: (q: StaticOpenaiQuality) => void;
+  onIntensityChange: (i: 'small' | 'medium' | 'big') => void;
 }
 
 /**
  * Static ad picker card. Reveals a low/medium/high quality
- * selector when picked so the operator can trade cost vs.
- * fidelity before submitting. Copy explains what the pipeline
- * actually does (reference-image edit via OpenAI gpt-image-2 +
- * Claude overlay-copy rewrite) so the operator understands the
- * flow without reading docs.
+ * selector and a small/medium/big intensity selector when picked
+ * so the operator can trade cost vs. fidelity AND choose how far
+ * the visual variation should drift from the source before
+ * submitting.
  */
 function StaticOpenaiPickerCard({
   picked,
   disabled,
   quality,
+  intensity,
   onPick,
   onQualityChange,
+  onIntensityChange,
 }: StaticOpenaiPickerCardProps) {
+  const intensityBlurbs: Record<'small' | 'medium' | 'big', string> = {
+    small: 'Near-identical to source. Tiny color shift, same composition.',
+    medium:
+      'Subtle but visible. Accent color / background tone / one decorative element may shift.',
+    big: 'Noticeable rework, same mockup category. Freer color, layout, subject pose.',
+  };
   return (
     <div
       className={cn(
@@ -731,6 +750,40 @@ function StaticOpenaiPickerCard({
           <p className="text-fg-subtle mt-2 text-[11px]">
             Medium is the recommended default. Matches Instant UGC per-variant cost.
           </p>
+
+          <div className="mt-4">
+            <div className="text-fg-subtle mb-1.5 text-[10px] font-semibold uppercase tracking-wider">
+              Variation intensity
+            </div>
+            <div
+              className="flex flex-wrap gap-2"
+              role="radiogroup"
+              aria-label="Variation intensity"
+            >
+              {(['small', 'medium', 'big'] as const).map((i) => (
+                <button
+                  key={i}
+                  type="button"
+                  role="radio"
+                  aria-checked={intensity === i}
+                  onClick={() => onIntensityChange(i)}
+                  disabled={disabled}
+                  className={cn(
+                    'min-w-[6rem] flex-1 rounded-md border px-3 py-2 text-xs transition-colors',
+                    intensity === i
+                      ? 'border-fg bg-fg/10 text-fg font-medium'
+                      : 'border-border text-fg-muted hover:border-fg/50 hover:text-fg',
+                    disabled && 'cursor-not-allowed',
+                  )}
+                >
+                  <div className="capitalize">{i}</div>
+                </button>
+              ))}
+            </div>
+            <p className="text-fg-subtle mt-2 text-[11px] leading-relaxed">
+              {intensityBlurbs[intensity]}
+            </p>
+          </div>
         </div>
       )}
     </div>
