@@ -50,10 +50,11 @@ A single JSON array of exactly N objects. Each object shape:
                                      // their own slots above.
     },
     "script": string                 // The monologue THIS persona speaks.
-                                     // First-person UGC style. 900-1400
-                                     // chars. Preserves the source ad's
-                                     // hook + offer + CTA in this persona's
-                                     // voice.
+                                     // First-person UGC style. Target
+                                     // 900-1400 chars. HARD LIMIT 2200
+                                     // — anything over gets truncated
+                                     // at the last sentence boundary
+                                     // before the cap.
   }
 
 Emit ONE valid JSON array. NO surrounding text, NO markdown code fences,
@@ -93,7 +94,9 @@ Each script:
    No two scripts should read as the same script with a synonym pass —
    they should feel like 5 different real people wrote them.
 
-4. Length: 900-1400 chars each. Target ~1200. Stay under 1500.
+4. Length: TARGET 900-1400 chars each (aim ~1200). HARD LIMIT 2200
+   chars — anything longer gets auto-truncated at the last sentence
+   boundary before the cap, so overshoot risks losing the CTA.
 
 5. No appearance descriptions of the speaker (avatar handles that
    visually). Do not say "as a [gender]", "as a [ethnicity]", "in my
@@ -222,9 +225,39 @@ export function parsePolish28VariationsResponse(rawText: string): {
       errors.push(`[${i}] script missing or too short (need >=200 chars)`);
       return;
     }
-    if (s.length > 1500) {
-      errors.push(`[${i}] script over 1500 chars (got ${s.length})`);
-      return;
+    // Polish-28.3.2 Commit 87: raised hard cap 1500 -> 2200 (real
+    // HeyGen Avatar IV native TTS accepts much longer; the old 1500
+    // was a leftover from the MakeUGC voice_script cap). Also
+    // auto-truncate rather than reject — Claude drifts on length
+    // and rejecting a whole entry over ~100 chars overshoot means
+    // zero variants ship. Truncate at the last sentence boundary
+    // before the cap so we preserve the CTA structure.
+    const HARD_SCRIPT_CAP = 2200;
+    let finalScript = s.trim();
+    if (finalScript.length > HARD_SCRIPT_CAP) {
+      const truncated = finalScript.slice(0, HARD_SCRIPT_CAP);
+      // Try to break at the last sentence terminator (. ! ?) before the cap.
+      const lastSentenceEnd = Math.max(
+        truncated.lastIndexOf('. '),
+        truncated.lastIndexOf('! '),
+        truncated.lastIndexOf('? '),
+        truncated.lastIndexOf('.\n'),
+        truncated.lastIndexOf('!\n'),
+        truncated.lastIndexOf('?\n'),
+      );
+      if (lastSentenceEnd > HARD_SCRIPT_CAP * 0.7) {
+        finalScript = truncated.slice(0, lastSentenceEnd + 1).trim();
+      } else {
+        // No good sentence boundary — hard-truncate + trailing period
+        finalScript =
+          truncated
+            .trim()
+            .replace(/[,;:]?\s*\S*$/, '')
+            .trim() + '.';
+      }
+      errors.push(
+        `[${i}] script auto-truncated ${s.length} -> ${finalScript.length} chars (soft warn, entry kept)`,
+      );
     }
     entries.push({
       persona: {
@@ -233,7 +266,7 @@ export function parsePolish28VariationsResponse(rawText: string): {
         ethnicity: eth.trim(),
         look: look.trim(),
       },
-      script: s.trim(),
+      script: finalScript,
     });
   });
   return { entries, errors };
