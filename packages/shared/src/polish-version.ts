@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.3.2';
+export const POLISH_VERSION = '28.3.3';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.3.2';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.3.2 Commit 87 - raise variations script cap 1500 -> 2200 + auto-truncate at sentence boundary (Claude overshot; whole batch was being rejected)';
+  'Polish-28.3.3 Commit 88 - concept upload: infer MIME from extension when browser gives empty file.type + surface Supabase error body on 400 (was silent HTTP 400 with no diagnostic)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -126,11 +126,26 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
         }
 
         // 2. Direct PUT to Supabase Storage. Bypasses Vercel's 4.5 MB cap.
+        // Polish-28.3.3 Commit 88: infer MIME from file extension when
+        // the browser gives us an empty file.type (Safari, some file
+        // pickers do this for .mov / .webm). Supabase rejects
+        // application/octet-stream on buckets with allowed_mime_types
+        // set, which was likely the source of the operator's 400.
+        const inferredMime =
+          file.type ||
+          (file.name.match(/\.(mp4)$/i) ? 'video/mp4' : null) ||
+          (file.name.match(/\.(mov)$/i) ? 'video/quicktime' : null) ||
+          (file.name.match(/\.(webm)$/i) ? 'video/webm' : null) ||
+          (file.name.match(/\.(png)$/i) ? 'image/png' : null) ||
+          (file.name.match(/\.(jpe?g)$/i) ? 'image/jpeg' : null) ||
+          (file.name.match(/\.(webp)$/i) ? 'image/webp' : null) ||
+          'application/octet-stream';
+
         let uploadResponse: Response | undefined;
         try {
           uploadResponse = await fetch(signed.uploadUrl, {
             method: 'PUT',
-            headers: { 'Content-Type': file.type || 'application/octet-stream' },
+            headers: { 'Content-Type': inferredMime },
             body: file,
           });
         } catch (netErr) {
@@ -141,10 +156,24 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
         }
         if (!uploadResponse || !uploadResponse.ok) {
           const status = uploadResponse?.status;
+          // Polish-28.3.3 Commit 88: surface Supabase's actual error body
+          // instead of just the HTTP code. Prior message was
+          // 'Upload failed (HTTP 400)' with no clue why.
+          let bodyExcerpt = '';
+          try {
+            const text = uploadResponse ? await uploadResponse.text() : '';
+            bodyExcerpt = text.slice(0, 400);
+          } catch {
+            // ignore
+          }
           if (status === 413) {
             setError(`File too large (max ${contentType === 'static' ? '10 MB' : '100 MB'}).`);
           } else {
-            setError(`Upload failed${status ? ` (HTTP ${status})` : ''}.`);
+            setError(
+              `Upload failed${status ? ` (HTTP ${status})` : ''}` +
+                (bodyExcerpt ? ` — ${bodyExcerpt}` : '') +
+                ` [sent Content-Type: ${inferredMime}, file.name: ${file.name}, size: ${file.size}B]`,
+            );
           }
           return;
         }
