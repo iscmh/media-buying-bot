@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.3.3';
+export const POLISH_VERSION = '28.3.4';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.3.3';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.3.3 Commit 88 - concept upload: infer MIME from extension when browser gives empty file.type + surface Supabase error body on 400 (was silent HTTP 400 with no diagnostic)';
+  'Polish-28.3.4 Commit 89 - parse Supabase 413-wrapped-in-400 file-size errors and show clean "file too large" message (dashboard action still required: raise bucket file-size limit)';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

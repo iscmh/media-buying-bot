@@ -156,18 +156,40 @@ function ConceptUploadForm({ contentType }: { contentType: 'static' | 'ugc' }) {
         }
         if (!uploadResponse || !uploadResponse.ok) {
           const status = uploadResponse?.status;
-          // Polish-28.3.3 Commit 88: surface Supabase's actual error body
-          // instead of just the HTTP code. Prior message was
-          // 'Upload failed (HTTP 400)' with no clue why.
           let bodyExcerpt = '';
+          let innerStatusCode = '';
+          let innerCode = '';
           try {
             const text = uploadResponse ? await uploadResponse.text() : '';
             bodyExcerpt = text.slice(0, 400);
+            // Polish-28.3.4 Commit 89: Supabase Storage wraps the real
+            // status in a 400 envelope for size-limit rejections —
+            // outer HTTP 400 but inner {statusCode:"413", code:
+            // "EntityTooLarge"}. Parse the inner body so we can show
+            // the correct "file too large" message instead of a
+            // generic "HTTP 400".
+            try {
+              const parsedBody = JSON.parse(text) as {
+                statusCode?: string | number;
+                code?: string;
+                message?: string;
+              };
+              innerStatusCode = String(parsedBody?.statusCode ?? '');
+              innerCode = String(parsedBody?.code ?? '');
+            } catch {
+              // Non-JSON body — bodyExcerpt above still surfaces the raw text
+            }
           } catch {
             // ignore
           }
-          if (status === 413) {
-            setError(`File too large (max ${contentType === 'static' ? '10 MB' : '100 MB'}).`);
+          const isTooLarge =
+            status === 413 || innerStatusCode === '413' || innerCode === 'EntityTooLarge';
+          if (isTooLarge) {
+            const sizeMb = Math.round((file.size / 1_000_000) * 10) / 10;
+            setError(
+              `File too large: your file is ${sizeMb} MB but the Supabase bucket's file-size limit is set below that. ` +
+                `Ask the operator to raise the ${contentType === 'static' ? '"concepts"' : '"concepts"'} bucket limit in the Supabase dashboard, or upload a smaller file.`,
+            );
           } else {
             setError(
               `Upload failed${status ? ` (HTTP ${status})` : ''}` +
