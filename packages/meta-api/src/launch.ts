@@ -344,8 +344,24 @@ export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateRe
   const endpoint = `/${input.adAccountId}/adsets`;
 
   const geoLocations = { countries: input.targetingCountries ?? ['US'] };
+  // Polish-28.4.6 Commit 104: age_min hard cap in Advantage+ Audience mode.
+  // Meta rejects any age_min > 24 when targeting_automation.advantage_audience
+  // is enabled, with error_subcode 1870188. Their own docs + UI say "up to 25"
+  // but the API is strict-less-than: sending 25 gets the Romanian error
+  // "opţiunea pentru vârsta minimă a audienţei poate fi setată la maximum 25"
+  // even though 25 SHOULD be allowed. Their web UI silently clamps at 24 for
+  // the same reason. We do the same here — operator's intent (25) preserved
+  // as closely as possible while satisfying Meta's actual behavior.
+  const advantagePlusOn =
+    input.advantageAudienceEnabled === true || input.placementType === 'advantage_plus';
+  const ADVANTAGE_PLUS_AGE_MIN_CAP = 24;
+  const requestedAgeMin = input.ageMin ?? 18;
+  const ageMinFinal =
+    advantagePlusOn && requestedAgeMin > ADVANTAGE_PLUS_AGE_MIN_CAP
+      ? ADVANTAGE_PLUS_AGE_MIN_CAP
+      : requestedAgeMin;
   const ageBounds = {
-    age_min: input.ageMin ?? 18,
+    age_min: ageMinFinal,
     age_max: input.ageMax ?? 65,
   };
   // Placement / audience-automation resolution. Advantage+ turns on

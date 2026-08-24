@@ -68,16 +68,39 @@ interface Pattern {
 const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other' | 'safety_layer'>, Pattern[]> = {
   meta_api_required_field: [
     {
+      // Polish-28.4.6 Commit 104: Advantage+ Audience age_min ceiling.
+      // subcode 1870188 fires when age_min > 24 with advantage_audience=1.
+      // Needles catch both English + Romanian variants of the title.
       needles: [
-        // English + Romanian for the advantage_audience required-field error.
-        // Meta promoted this from optional to required mid-2026. Any ad-set
-        // create that doesn't set targeting_automation.advantage_audience
-        // to 0 or 1 gets rejected with this message.
+        'advantage+ audience',
+        'audienţă advantage+',
+        'audienta advantage+',
+        'vârsta minimă a audienţei',
+        'varsta minima a audientei',
+        'minimum audience age',
+        'audience age can be set',
+        'audience age option can be set',
+      ],
+      guidance: {
+        title: 'Meta caps age_min at 24 in Advantage+ Audience mode',
+        diagnosis:
+          "Meta's Advantage+ Audience feature rejects any age_min > 24 (error_subcode 1870188), even though their docs say 'up to 25'. Their own Ads Manager UI silently clamps at 24 for this reason.",
+        fixes: [
+          'Confirm /api/health shows POLISH_VERSION 28.4.6 or higher — that release auto-clamps age_min at 24 when Advantage+ Audience is on.',
+          'If you need a higher age floor, turn Advantage+ Audience OFF in the launch form and use manual targeting instead.',
+          'Retry the launch — the auto-clamp fires at the Meta API boundary, transparent to the operator.',
+        ],
+      },
+    },
+    {
+      needles: [
+        // Advantage_audience required-field error (Commit 102). Kept
+        // separate from the age-cap needle above so both patterns can
+        // route to distinct guidance.
         'advantage_audience',
+        'targeting_automation',
         'audienţă advantage',
         'audienta advantage',
-        'advantage audience',
-        'targeting_automation',
       ],
       guidance: {
         title: 'Meta requires the Advantage Audience field to be set explicitly',

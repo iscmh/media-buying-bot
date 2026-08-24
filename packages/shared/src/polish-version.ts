@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.5';
+export const POLISH_VERSION = '28.4.6';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.5';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.5 Commit 103 - Meta rejection observability: concatenate error_user_title + error_user_msg so the full diagnosis reaches the operator (was previously only surfacing the "Instead, add X" second sentence). Also render the full raw Meta response in a collapsible details block on rejected launched-ads so opaque errors can be inspected + copy-pasted to support. Corrected the age-restriction guidance to acknowledge content-based restrictions (pharma / GLP-1 / alcohol) as a cause alongside Special Ad Category enforcement.';
+  'Polish-28.4.6 Commit 104 - REAL META LAUNCH FIX #2: clamp age_min at 24 when Advantage+ Audience is on. Meta rejects age_min > 24 in Advantage+ Audience mode with error_subcode 1870188, even though their docs say "up to 25" — Meta UI silently clamps. New needle pattern catches the exact error text going forward.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
