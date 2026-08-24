@@ -30,7 +30,7 @@ type Tab = 'providers' | 'meta' | 'telegram';
 const VALID_TABS: readonly Tab[] = ['providers', 'meta', 'telegram'];
 
 interface Props {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; oauth_error?: string; oauth?: string }>;
 }
 
 /**
@@ -59,7 +59,7 @@ interface Props {
  */
 export default async function SettingsConnectionsPage({ searchParams }: Props) {
   const { userId } = await requireOnboardingComplete();
-  const { tab: tabParam } = await searchParams;
+  const { tab: tabParam, oauth_error: oauthError } = await searchParams;
   const tab: Tab = (VALID_TABS as readonly string[]).includes(tabParam ?? '')
     ? (tabParam as Tab)
     : 'providers';
@@ -84,7 +84,7 @@ export default async function SettingsConnectionsPage({ searchParams }: Props) {
       {tab === 'meta' && (
         <>
           <BetaBanner />
-          <MetaTab userId={userId} />
+          <MetaTab userId={userId} oauthError={oauthError ?? null} />
         </>
       )}
       {tab === 'telegram' && <TelegramTab userId={userId} />}
@@ -250,7 +250,12 @@ async function ProvidersTab({ userId }: { userId: string }) {
   );
 }
 
-async function MetaTab({ userId }: { userId: string }) {
+async function MetaTab({ userId, oauthError }: { userId: string; oauthError?: string | null }) {
+  // Polish-28.4.9 Commit 107: enable the "Log in with Meta" button when
+  // the deploy has both env vars set. Read on the server so a client
+  // component can't reach into env; only the boolean crosses the
+  // boundary.
+  const oauthEnabled = Boolean(process.env['META_APP_ID'] && process.env['META_APP_SECRET']);
   const db = getDb();
   const conn = await db.query.metaConnections.findFirst({
     where: and(eq(schema.metaConnections.userId, userId), isNull(schema.metaConnections.deletedAt)),
@@ -267,7 +272,7 @@ async function MetaTab({ userId }: { userId: string }) {
   });
 
   if (!conn) {
-    return <MetaTokenPasteForm />;
+    return <MetaTokenPasteForm oauthEnabled={oauthEnabled} oauthError={oauthError ?? null} />;
   }
 
   const missingMetadata =
