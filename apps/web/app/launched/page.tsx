@@ -329,7 +329,10 @@ export default async function LaunchedAdsPage({ searchParams }: Props) {
                                   cryptic Special Ad Category messages ("add a
                                   higher minimum age") into a real fix list +
                                   Meta docs link. */}
-                              <MetaRejectionGuidance errorMessage={row.errorMessage} />
+                              <MetaRejectionGuidance
+                                errorMessage={row.errorMessage}
+                                rawResponse={row.metaResponseRaw}
+                              />
                             </>
                           )}
                         {(isKillReco || isScaleReco) && (

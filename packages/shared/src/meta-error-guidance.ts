@@ -154,15 +154,16 @@ const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other' | 'safety_lay
         'maximalalter',
       ],
       guidance: {
-        title: 'Ad account flagged for Special Ad Categories',
+        title: 'Meta wants a higher minimum age',
         diagnosis:
-          'Meta is telling you this ad account is enrolled in a Special Ad Category (Credit, Employment, Housing, or Social Issues/Politics). That flag restricts your targeting. The error message about "minimum age" is Meta\'s cryptic way of saying it, not the literal fix.',
+          'Meta is telling you to raise the minimum age. Two things can cause this: (1) the ad account is enrolled in a Special Ad Category (Credit / Employment / Housing / Politics), or (2) Meta detected content in your offer that triggers an implicit age floor — pharma (GLP-1, weight loss, supplements), alcohol, gambling, health-adjacent claims. The diagnostic in Settings → Connections → Meta will tell you which. If it says the account has no SAC enforcement, this is content-based.',
         fixes: [
-          'Reduce max age to 55 or lower (Meta enforces this on Special Ad Category accounts).',
-          'Use country-level targeting only. Remove any city, ZIP code, or region-level location.',
-          'Remove all detailed interest + behavior targeting. Advantage+ audience only.',
-          'Set gender to All (Special Ad Categories disallow gender targeting).',
-          "If none of your offers fall under Special Ad Categories, contact Meta support to have the account's flag reviewed.",
+          'FIRST: bump age_min in the launch form to 25 (or 21 if Meta wants a smaller bump) and relaunch. This alone unblocks most content-based restrictions.',
+          'If your account is SAC-enrolled per the diagnostic, also set the matching Special Ad Category in the launch form campaign section.',
+          'Cap max age at 65 (Meta hard cap on age-restricted verticals).',
+          'Use country-level targeting only. Drop city / ZIP / region overrides.',
+          'Advantage+ audience on, no detailed interest / behavior targeting.',
+          'If the error persists after all of the above, your OFFER URL is likely on a Meta domain-block list — swap the landing page domain.',
         ],
         docsUrl: 'https://www.facebook.com/business/help/298000447747885',
       },

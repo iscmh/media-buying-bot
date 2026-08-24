@@ -1207,12 +1207,17 @@ function extractMetaError(body: unknown): { message?: string; code?: number } {
     }
   ).error;
   if (!error) return {};
-  // Polish-3.5: prefer error_user_msg / error_user_title when Meta provides
-  // them — they're the actionable copy ("This page can't be used for ads
-  // because…") vs. the generic "Invalid parameter" Meta returns in
-  // error.message for most 4xx failures.
-  const friendly = error.error_user_msg ?? error.error_user_title;
-  return { message: friendly ?? error.message, code: error.code };
+  // Polish-3.5 → Polish-28.4.5 Commit 103: prefer error_user_title + user_msg
+  // combined when Meta provides them. Meta often puts the DIAGNOSIS in
+  // error_user_title ("Age lower than the required minimum for this
+  // vertical") and the SUGGESTION in error_user_msg ("Instead, add a higher
+  // minimum age…"). Historically we only forwarded user_msg and the
+  // suggestion looked like the whole error — misleading. Concatenate when
+  // both exist, fall back to whichever is set, then error.message.
+  const title = error.error_user_title?.trim();
+  const msg = error.error_user_msg?.trim();
+  const combined = title && msg && title !== msg ? `${title} — ${msg}` : (title ?? msg);
+  return { message: combined ?? error.message, code: error.code };
 }
 
 // =========================================================================

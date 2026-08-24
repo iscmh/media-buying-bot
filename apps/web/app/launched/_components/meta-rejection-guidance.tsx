@@ -17,6 +17,14 @@ import { interpretMetaError, type MetaErrorCategory } from '@mbb/shared';
 
 interface Props {
   errorMessage: string | null | undefined;
+  /**
+   * Polish-28.4.5 Commit 103: full raw response Meta returned when the
+   * launch was rejected. Rendered in a collapsible <details> block so
+   * the operator can copy the exact error_user_title / error_user_msg /
+   * error_subcode / fbtrace_id when the surface message alone doesn't
+   * explain which field Meta objected to.
+   */
+  rawResponse?: unknown;
 }
 
 // Polish-25.7 Commit 43: `safety_layer` is user-actionable (the launch
@@ -34,7 +42,7 @@ const CATEGORY_TONE: Record<MetaErrorCategory, 'warning' | 'destructive' | 'neut
   other: 'neutral',
 };
 
-export function MetaRejectionGuidance({ errorMessage }: Props) {
+export function MetaRejectionGuidance({ errorMessage, rawResponse }: Props) {
   if (!errorMessage) return null;
   const guidance = interpretMetaError(errorMessage);
   const tone = CATEGORY_TONE[guidance.category];
@@ -85,6 +93,16 @@ export function MetaRejectionGuidance({ errorMessage }: Props) {
             Meta docs
             <ExternalLink className="h-3 w-3" aria-hidden />
           </a>
+        )}
+        {rawResponse != null && (
+          <details className="mt-1.5">
+            <summary className="text-fg-muted cursor-pointer text-[11px] hover:text-[color:var(--accent-amber)]">
+              Show raw Meta response
+            </summary>
+            <pre className="bg-bg-elevated mt-1 max-h-64 overflow-auto rounded p-2 font-mono text-[10px] leading-relaxed">
+              {JSON.stringify(rawResponse, null, 2)}
+            </pre>
+          </details>
         )}
       </div>
     </div>

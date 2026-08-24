@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.4';
+export const POLISH_VERSION = '28.4.5';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.4';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.4 Commit 102 - REAL META LAUNCH FIX. Meta made targeting_automation.advantage_audience a required-explicit field on every ad-set create; omitting it returned "you must enable or disable Advantage Audience" (Romanian text) and rejected every launch. Now always sent, driven by the operator-facing Advantage+ Audience toggle. Also plumbed the toggle end-to-end (was previously a dead UI control) + added a needle pattern so the error surfaces with a real diagnosis next time Meta flips a field.';
+  'Polish-28.4.5 Commit 103 - Meta rejection observability: concatenate error_user_title + error_user_msg so the full diagnosis reaches the operator (was previously only surfacing the "Instead, add X" second sentence). Also render the full raw Meta response in a collapsible details block on rejected launched-ads so opaque errors can be inspected + copy-pasted to support. Corrected the age-restriction guidance to acknowledge content-based restrictions (pharma / GLP-1 / alcohol) as a cause alongside Special Ad Category enforcement.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
