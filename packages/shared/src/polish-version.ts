@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.1';
+export const POLISH_VERSION = '28.4.2';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.1';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.1 Commit 99 - full Meta-Ads-Manager-parity launch UI. Sectioned form (Campaign / Conversion / Ad set / Destination / Targeting / Placements / Schedule) with progressive disclosure. Cross-field validation (bid amount required for cost/bid caps, pixel required for SALES/LEADS over Website, at least one platform for manual placements). Backwards-compatible defaults keep the one-click path working.';
+  'Polish-28.4.2 Commit 100 - Meta ad-account diagnostic panel at /settings/connections?tab=meta. Reads account_status, disable_reason, capabilities (Special Ad Category enforcement), funding source, token scope per attached ad account and surfaces color-coded findings. Answers the "why cant I launch, is my account shadowbanned?" question definitively.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

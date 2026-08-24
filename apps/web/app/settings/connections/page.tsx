@@ -19,6 +19,7 @@ import { ToolCard } from '@/app/connections/tools/tool-card';
 import { MetaConnectedSummary } from '@/app/connections/meta/connected-summary';
 import { MetaTokenPasteForm } from './_meta/token-form';
 import { MetaSelectionForm } from './_meta/selection-form';
+import { MetaDiagnosticPanel } from './_meta/diagnostic-panel';
 import { listMetaResources } from './_meta/actions';
 import { TelegramPanel } from './_telegram/telegram-panel';
 
@@ -330,6 +331,13 @@ async function MetaTab({ userId }: { userId: string }) {
           </Link>
         </div>
       </div>
+
+      {/* Polish-28.4.2 Commit 100: on-demand Meta ad-account diagnostic.
+          Answers "why can't I launch?" by reading account_status,
+          disable_reason, capabilities (Special Ad Category enforcement),
+          funding source, and token scope. Read-only — safe to run on
+          demand as many times as needed. */}
+      <MetaDiagnosticPanel />
     </div>
   );
 }

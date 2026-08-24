@@ -43,3 +43,11 @@ export {
   type ScaleAdBudgetInput,
   type LifecycleResult,
 } from './lifecycle';
+export {
+  diagnoseAdAccount,
+  META_ACCOUNT_STATUS,
+  META_DISABLE_REASON,
+  type AdAccountDiagnostic,
+  type DiagnosticFinding,
+  type DiagnosticSeverity,
+} from './diagnostic';
