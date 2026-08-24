@@ -5,7 +5,6 @@ import {
   createAdSet,
   createCampaign,
   deleteAdSet,
-  deleteCampaign,
   effectiveLaunchMode,
   fetchMetaVideoThumbnail,
   pollMetaVideoReady,
@@ -260,7 +259,16 @@ export const metaAdLauncher = inngest.createFunction(
       return { ok: true, launched: 0, failed: 0, reason: 'no approved variants' };
     }
 
-    const plannedBudget = approved.length * ctx.dailyBudgetUsd;
+    // Polish-28.4.7 Commit 105: total-spend calc respects CBO. In CBO
+    // mode Meta redistributes a SINGLE campaign daily budget across all
+    // ad sets, so total exposure = campaignDailyBudgetUsd. In ABO mode
+    // each ad set carries its own daily_budget, so total = N × per-ad.
+    // The pre-105 calc always used N × per-ad, which meant a $10 CBO
+    // launch was rejected at the first-live-launch $10 cap because the
+    // worker computed $10 × 4 = $40.
+    const plannedBudget = ctx.budgetOptimizationEnabled
+      ? (ctx.campaignDailyBudgetUsd ?? 0)
+      : approved.length * ctx.dailyBudgetUsd;
 
     // 3a. Phase-4b first-launch cap (only fires for true-live first session).
     if (effective === 'live') {
@@ -280,6 +288,44 @@ export const metaAdLauncher = inngest.createFunction(
     if (!cap.allowed) {
       await markJobFailed(userId, generationJobId, cap.reason);
       return { ok: false, reason: cap.reason };
+    }
+
+    // Polish-28.4.7 Commit 105: hoist campaign creation OUT of the per-
+    // variant loop so all approved variants share ONE campaign. Media
+    // buyers expect 1 campaign + N ad sets, not N campaigns × 1 ad set
+    // each. Pre-105 fired N create-campaign calls; the operator saw four
+    // separate campaigns in Ads Manager for a 4-variant job. Sharing the
+    // campaign is also what makes CBO meaningful — Meta redistributes
+    // the campaign budget across children. Multi-campaign CBO wouldn't
+    // share at all.
+    const sharedObjective =
+      ctx.campaignObjective ??
+      (ctx.optimizationGoal.startsWith('OUTCOME_') ? ctx.optimizationGoal : 'OUTCOME_TRAFFIC');
+    const sharedCampaignName =
+      ctx.campaignName ?? `MBB ${ctx.nicheTag ?? 'concept'} — job ${shortId(generationJobId)}`;
+    const sharedCampaign = await step.run('create-shared-campaign', async () =>
+      createCampaign({
+        userId,
+        accessToken: ctx.accessToken,
+        adAccountId: ctx.adAccountId,
+        name: sharedCampaignName,
+        objective: sharedObjective,
+        mode: callerMode,
+        generationJobId,
+        specialAdCategories: ctx.specialAdCategories as never,
+        budgetOptimizationEnabled: ctx.budgetOptimizationEnabled,
+        campaignDailyBudgetUsd: ctx.campaignDailyBudgetUsd,
+        accountCurrency: ctx.accountCurrency ?? undefined,
+        minDailyBudgetMinor: ctx.minDailyBudgetMinor ?? undefined,
+      }),
+    );
+    if (!sharedCampaign.ok) {
+      await markJobFailed(
+        userId,
+        generationJobId,
+        sharedCampaign.errorMessage ?? 'createCampaign failed (shared)',
+      );
+      return { ok: false, reason: sharedCampaign.errorMessage ?? 'createCampaign failed' };
     }
 
     // 4. Per-variant launch pipeline.
@@ -302,46 +348,15 @@ export const metaAdLauncher = inngest.createFunction(
           const baseName = `MBB ${ctx.nicheTag ?? 'concept'} v${variantIndex} ${shortId(variant.id)}`;
 
           return step.run(`launch-${variant.id}`, async () => {
-            // Phase 4b hotfix #2: track which Meta objects we've created
-            // so a mid-pipeline failure can roll them back instead of
-            // leaving orphans on the user's ad account.
-            let createdCampaignId: string | null = null;
+            // Polish-28.4.7 Commit 105: campaign is shared across all
+            // variants in this job (see sharedCampaign create above).
+            // Per-variant orphan cleanup now only tracks the ad set —
+            // the shared campaign is intentionally kept even if this
+            // variant's ad set / creative / ad fails, because sibling
+            // variants may still succeed under the same campaign.
             let createdAdSetId: string | null = null;
+            const campaign = sharedCampaign;
             try {
-              // Polish-28.4.0 Commit 98: campaign objective now comes
-              // from the launch UI (`campaignObjective`). Fall back to
-              // the pre-98 coercion when unset so old callers (Telegram
-              // bot, API v1) keep working: use optimizationGoal if it's
-              // an OUTCOME_* pseudo-goal, else OUTCOME_TRAFFIC.
-              const objective =
-                ctx.campaignObjective ??
-                (ctx.optimizationGoal.startsWith('OUTCOME_')
-                  ? ctx.optimizationGoal
-                  : 'OUTCOME_TRAFFIC');
-              const campaignName = ctx.campaignName ?? `${baseName} — campaign`;
-              const campaign = await createCampaign({
-                userId,
-                accessToken: ctx.accessToken,
-                adAccountId: ctx.adAccountId,
-                name: campaignName,
-                objective,
-                mode: callerMode,
-                generationJobId,
-                specialAdCategories: ctx.specialAdCategories as never,
-                budgetOptimizationEnabled: ctx.budgetOptimizationEnabled,
-                campaignDailyBudgetUsd: ctx.campaignDailyBudgetUsd,
-                accountCurrency: ctx.accountCurrency ?? undefined,
-                minDailyBudgetMinor: ctx.minDailyBudgetMinor ?? undefined,
-              });
-              if (!campaign.ok) {
-                throw new MetaCreateError(
-                  campaign.errorMessage ?? 'createCampaign failed',
-                  campaign.metaErrorCode,
-                  campaign.rawResponse,
-                );
-              }
-              createdCampaignId = campaign.id;
-
               const adSet = await createAdSet({
                 userId,
                 accessToken: ctx.accessToken,
@@ -576,40 +591,26 @@ export const metaAdLauncher = inngest.createFunction(
                   ? (err.rawResponse as Record<string, unknown>)
                   : undefined;
 
-              // Phase 4b hotfix #2: best-effort orphan cleanup. If we
-              // created a campaign and/or ad set before the failure,
-              // delete them so the user doesn't see dangling rows in
-              // Ads Manager. Each delete is wrapped — cleanup failures
-              // are logged but never crash the per-variant outcome.
+              // Polish-28.4.7 Commit 105: per-variant orphan cleanup only
+              // deletes THIS variant's ad set. The shared campaign lives
+              // — sibling variants may have succeeded under it, and even
+              // if all fail, a stray empty campaign is a low-cost
+              // annoyance vs the risk of deleting a campaign whose
+              // sibling variant just finished creating.
               const cleanup: {
                 attempted: boolean;
-                campaign: { id: string; ok: boolean; error?: string } | null;
                 adSet: { id: string; ok: boolean; error?: string } | null;
-              } = { attempted: false, campaign: null, adSet: null };
-              if (createdAdSetId || createdCampaignId) {
+              } = { attempted: false, adSet: null };
+              if (createdAdSetId) {
                 cleanup.attempted = true;
-                // Delete ad set first — campaign delete is more likely
-                // to succeed once children are gone.
-                if (createdAdSetId) {
-                  const r = await deleteAdSet({
-                    userId,
-                    accessToken: ctx.accessToken,
-                    objectId: createdAdSetId,
-                    mode: callerMode,
-                    generationJobId,
-                  });
-                  cleanup.adSet = { id: createdAdSetId, ok: r.ok, error: r.errorMessage };
-                }
-                if (createdCampaignId) {
-                  const r = await deleteCampaign({
-                    userId,
-                    accessToken: ctx.accessToken,
-                    objectId: createdCampaignId,
-                    mode: callerMode,
-                    generationJobId,
-                  });
-                  cleanup.campaign = { id: createdCampaignId, ok: r.ok, error: r.errorMessage };
-                }
+                const r = await deleteAdSet({
+                  userId,
+                  accessToken: ctx.accessToken,
+                  objectId: createdAdSetId,
+                  mode: callerMode,
+                  generationJobId,
+                });
+                cleanup.adSet = { id: createdAdSetId, ok: r.ok, error: r.errorMessage };
                 await logAuditEvent({
                   userId,
                   eventType: 'meta_orphan_cleanup',
@@ -617,7 +618,6 @@ export const metaAdLauncher = inngest.createFunction(
                     variant_id: variant.id,
                     generation_job_id: generationJobId,
                     triggering_error: errorMessage,
-                    campaign_cleanup: cleanup.campaign,
                     adset_cleanup: cleanup.adSet,
                     caller_mode: callerMode,
                     effective_mode: effective,
@@ -625,12 +625,11 @@ export const metaAdLauncher = inngest.createFunction(
                 });
               }
 
-              // Decide which Meta IDs to record on the row. If cleanup
-              // succeeded the IDs are gone from Meta — null them out so
-              // /launched doesn't link to a nonexistent campaign. If
-              // cleanup failed we keep the IDs as a forensic breadcrumb.
-              const persistCampaignId =
-                createdCampaignId && cleanup.campaign?.ok ? null : createdCampaignId;
+              // Polish-28.4.7 Commit 105: the shared campaign always
+              // persists on the failed-variant row so the operator can
+              // trace the launch back to it in Ads Manager. Per-variant
+              // ad-set id is nulled only when cleanup succeeded.
+              const persistCampaignId = sharedCampaign.id;
               const persistAdSetId = createdAdSetId && cleanup.adSet?.ok ? null : createdAdSetId;
 
               const db = getDb();

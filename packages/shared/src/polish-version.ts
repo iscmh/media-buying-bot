@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.6';
+export const POLISH_VERSION = '28.4.7';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.6';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.6 Commit 104 - REAL META LAUNCH FIX #2: clamp age_min at 24 when Advantage+ Audience is on. Meta rejects age_min > 24 in Advantage+ Audience mode with error_subcode 1870188, even though their docs say "up to 25" — Meta UI silently clamps. New needle pattern catches the exact error text going forward.';
+  'Polish-28.4.7 Commit 105 - shared campaign across all variants (1 campaign + N ad sets, not N campaigns × 1 ad set). CBO budget cap check now uses campaignDailyBudgetUsd (not N × per-ad); ABO unchanged. Fixes: operator saw 4 separate campaigns in Ads Manager, CBO $10 was rejected as "$40 exceeds cap" because the worker still multiplied per-ad × 4 despite CBO mode.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
