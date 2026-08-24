@@ -35,6 +35,13 @@ async function requireUser() {
 export interface VerifyTokenActionResult {
   ok: boolean;
   errorMessage?: string;
+  /**
+   * Polish-28.4.8 Commit 106: non-blocking advisory when the pasted
+   * token is a personal USER token (triggers Meta's fraud alarm on
+   * first server-side use). ok=true is still returned; the form UI
+   * shows this as an amber banner alongside the "Connected" state.
+   */
+  warning?: string;
 }
 
 export async function verifyMetaTokenAction(formData: FormData): Promise<VerifyTokenActionResult> {
@@ -105,7 +112,7 @@ export async function verifyMetaTokenAction(formData: FormData): Promise<VerifyT
   });
 
   revalidatePath('/settings/connections');
-  return { ok: true };
+  return { ok: true, warning: result.warning };
 }
 
 // ----- list BMs + ad accounts (called from server component, not via form) -----

@@ -93,10 +93,16 @@ async function get<T>(
 
 export interface VerifyTokenResult {
   ok: boolean;
-  /** Set when ok=true. */
   data?: DebugTokenData;
-  /** User-facing error explaining what's wrong + how to fix. */
   errorMessage?: string;
+  /**
+   * Polish-28.4.8 Commit 106: non-blocking advisory the UI surfaces
+   * even when ok=true. Set when the pasted token is a personal USER
+   * token — those trigger Meta's fraud alarm on first server-side use.
+   * We accept the token (personal testing use case) but warn the
+   * operator loudly.
+   */
+  warning?: string;
 }
 
 export async function verifyMetaToken(userId: string, token: string): Promise<VerifyTokenResult> {
@@ -122,11 +128,22 @@ export async function verifyMetaToken(userId: string, token: string): Promise<Ve
   if (missing.length > 0) {
     return {
       ok: false,
-      errorMessage: `Token is missing required permissions: ${missing.join(', ')}. Regenerate the token in Graph API Explorer with all five required scopes selected.`,
+      errorMessage: `Token is missing required permissions: ${missing.join(', ')}. Regenerate the token with all five required scopes selected.`,
     };
   }
 
-  return { ok: true, data: debug };
+  // Polish-28.4.8 Commit 106: warn (but don't reject) on personal USER
+  // tokens. They work for single-operator testing but trigger Meta's
+  // "compromised account" fraud alarm on first server-side API call —
+  // which is why the operator's own account was locked after connect.
+  // System User tokens (Meta Business Manager → Users → System Users)
+  // are the scaled-user path and never trigger the alarm.
+  const warning =
+    debug.type === 'USER'
+      ? 'This is a personal USER access token. It works, but Meta will flag your account as "compromised" the first time we use it from our servers (you may be prompted to reset your Facebook password). For a clean production experience, use a System User token from Business Manager → Users → System Users → Generate New Token. Those are server-to-server tokens Meta expects third-party apps to use; no fraud alarm.'
+      : undefined;
+
+  return { ok: true, data: debug, warning };
 }
 
 function classifyTokenError(code: number | undefined, message: string): string {

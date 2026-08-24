@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.7';
+export const POLISH_VERSION = '28.4.8';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.7';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.7 Commit 105 - shared campaign across all variants (1 campaign + N ad sets, not N campaigns × 1 ad set). CBO budget cap check now uses campaignDailyBudgetUsd (not N × per-ad); ABO unchanged. Fixes: operator saw 4 separate campaigns in Ads Manager, CBO $10 was rejected as "$40 exceeds cap" because the worker still multiplied per-ad × 4 despite CBO mode.';
+  'Polish-28.4.8 Commit 106 - stop Metas fraud alarm during Connect. Old flow told users to paste a personal USER access token from Graph API Explorer, which trips Metas "compromised account" heuristic on first server-side call (forces the operator to reset Facebook password). New flow: recommend System User tokens from Business Manager (server-to-server, no alarm, no expiry) with the personal-token path preserved as a fallback with an amber warning. Backend detects USER vs SYSTEM_USER via /debug_token.type and returns a non-blocking warning the connect UI displays.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

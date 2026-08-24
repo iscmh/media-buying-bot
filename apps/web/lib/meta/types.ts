@@ -11,6 +11,14 @@ export interface DebugTokenData {
   expires_at: number; // unix seconds; 0 means never expires
   is_valid: boolean;
   scopes: string[];
+  /**
+   * Polish-28.4.8 Commit 106: Meta stamps this on /debug_token so the
+   * caller can tell a SYSTEM_USER token (scaled, non-alarming) from a
+   * USER token (personal FB account, triggers Meta's "compromised
+   * account" fraud alarm on first server-side API call).
+   * Reference: https://developers.facebook.com/docs/graph-api/reference/debug_token/
+   */
+  type?: 'USER' | 'SYSTEM_USER' | 'PAGE' | 'APP';
 }
 
 export interface BusinessRow {
