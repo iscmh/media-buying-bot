@@ -281,6 +281,7 @@ export interface LaunchApprovedInput {
   pixelId?: string;
   customEventType?: string;
   callToActionType?: string;
+  advantageAudienceEnabled?: boolean;
 }
 
 // Polish-25.7 Commit 46: wrapped below via withErrorLogging so any
@@ -494,6 +495,7 @@ async function launchApprovedActionImpl(input: LaunchApprovedInput): Promise<Lau
     pixelId: input.pixelId,
     customEventType: input.customEventType,
     callToActionType: input.callToActionType,
+    advantageAudienceEnabled: input.advantageAudienceEnabled,
   });
 
   revalidatePath(`/runs/${input.jobId}`);

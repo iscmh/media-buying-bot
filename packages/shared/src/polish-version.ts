@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.3';
+export const POLISH_VERSION = '28.4.4';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.3';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.3 Commit 101 - fix false-positive Special Ad Category flag in the diagnostic. Regex was matching CAN_SEE_POLITICAL_FLOW (a UI-permission capability every account has) as SAC enforcement. Replaced with an explicit allowlist of real SAC-enforcement capability names.';
+  'Polish-28.4.4 Commit 102 - REAL META LAUNCH FIX. Meta made targeting_automation.advantage_audience a required-explicit field on every ad-set create; omitting it returned "you must enable or disable Advantage Audience" (Romanian text) and rejected every launch. Now always sent, driven by the operator-facing Advantage+ Audience toggle. Also plumbed the toggle end-to-end (was previously a dead UI control) + added a needle pattern so the error surfaces with a real diagnosis next time Meta flips a field.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

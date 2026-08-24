@@ -30,6 +30,7 @@ const CATEGORY_TONE: Record<MetaErrorCategory, 'warning' | 'destructive' | 'neut
   policy_landing: 'warning',
   budget_currency: 'warning',
   permissions: 'destructive',
+  meta_api_required_field: 'warning',
   other: 'neutral',
 };
 

@@ -404,6 +404,7 @@ export function JobReviewClient({
             ? launchConfig.customEventType || undefined
             : undefined,
         callToActionType: launchConfig.callToActionType,
+        advantageAudienceEnabled: launchConfig.advantageAudienceEnabled,
       });
       if (!result.ok) {
         setLaunchError(result.errorMessage ?? 'Launch failed.');

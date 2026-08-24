@@ -327,6 +327,15 @@ export interface CreateAdSetInput {
    */
   pixelId?: string;
   customEventType?: string;
+  /**
+   * Polish-28.4.4 Commit 102: Meta made targeting_automation.
+   * advantage_audience a REQUIRED explicit field on every ad-set
+   * create — not omittable. Sending the ad set without it returns
+   * (translated) "you must enable or disable the Advantage Audience
+   * feature." Default true (matches pre-Commit-102 behavior when
+   * placement was advantage_plus).
+   */
+  advantageAudienceEnabled?: boolean;
 }
 
 export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateResult<'ad_set_id'>> {
@@ -342,9 +351,20 @@ export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateRe
   // Placement / audience-automation resolution. Advantage+ turns on
   // audience automation AND leaves publisher_platforms / positions
   // unset so Meta chooses. Manual sets explicit platforms + positions.
+  //
+  // Polish-28.4.4 Commit 102: Meta made targeting_automation.
+  // advantage_audience REQUIRED on every ad set, regardless of
+  // placement mode. Default: on (1) when advantage_plus placement OR
+  // caller explicitly enabled; off (0) otherwise. Always sent.
+  const advantageAudienceValue =
+    input.advantageAudienceEnabled === false
+      ? 0
+      : input.advantageAudienceEnabled === true || input.placementType === 'advantage_plus'
+        ? 1
+        : 0;
   let placementBits: Record<string, unknown>;
   if (input.placementType === 'advantage_plus') {
-    placementBits = { targeting_automation: { advantage_audience: 1 } };
+    placementBits = {};
   } else {
     const platforms = input.publisherPlatforms ?? ['facebook', 'instagram'];
     placementBits = {
@@ -373,6 +393,9 @@ export async function createAdSet(input: CreateAdSetInput): Promise<MetaCreateRe
   const targeting: Record<string, unknown> = {
     geo_locations: geoLocations,
     ...ageBounds,
+    // Polish-28.4.4 Commit 102: Meta rejects the ad-set create if this
+    // is absent, even in Advantage+ mode. Always send.
+    targeting_automation: { advantage_audience: advantageAudienceValue },
     ...placementBits,
     ...(input.locales?.length ? { locales: input.locales } : {}),
     ...(input.includedCustomAudienceIds?.length

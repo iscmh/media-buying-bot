@@ -42,6 +42,7 @@ export type MetaErrorCategory =
   | 'policy_landing'
   | 'budget_currency'
   | 'permissions'
+  | 'meta_api_required_field'
   | 'other';
 
 export interface MetaErrorGuidance {
@@ -65,6 +66,30 @@ interface Pattern {
 // `safety_layer` is dispatched by prefix in interpretMetaError() rather
 // than needle-matched here, so it's excluded from this map.
 const CATEGORY_PATTERNS: Record<Exclude<MetaErrorCategory, 'other' | 'safety_layer'>, Pattern[]> = {
+  meta_api_required_field: [
+    {
+      needles: [
+        // English + Romanian for the advantage_audience required-field error.
+        // Meta promoted this from optional to required mid-2026. Any ad-set
+        // create that doesn't set targeting_automation.advantage_audience
+        // to 0 or 1 gets rejected with this message.
+        'advantage_audience',
+        'audienţă advantage',
+        'audienta advantage',
+        'advantage audience',
+        'targeting_automation',
+      ],
+      guidance: {
+        title: 'Meta requires the Advantage Audience field to be set explicitly',
+        diagnosis:
+          "Meta made targeting_automation.advantage_audience a required field on every ad-set create — it can't be omitted. Polish-28.4.4 Commit 102 always sends this now; if you still see the error, you're on an older deploy.",
+        fixes: [
+          'Confirm /api/health shows POLISH_VERSION 28.4.4 or higher.',
+          'Retry the launch. The Advantage Audience toggle in the launch form drives the value we send.',
+        ],
+      },
+    },
+  ],
   special_ad_category: [
     {
       // English + Romanian + Spanish + Portuguese + French + German

@@ -108,6 +108,7 @@ export async function sendMetaLaunchEvent(input: {
   pixelId?: string;
   customEventType?: string;
   callToActionType?: string;
+  advantageAudienceEnabled?: boolean;
 }): Promise<void> {
   await inngest.send({
     name: 'meta/launch.requested',
@@ -144,6 +145,7 @@ export async function sendMetaLaunchEvent(input: {
       pixelId: input.pixelId,
       customEventType: input.customEventType,
       callToActionType: input.callToActionType,
+      advantageAudienceEnabled: input.advantageAudienceEnabled,
     },
   });
 }

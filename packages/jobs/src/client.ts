@@ -52,6 +52,8 @@ export type Events = {
       pixelId?: string;
       customEventType?: string;
       callToActionType?: string;
+      /** Polish-28.4.4 Commit 102: always-explicit Advantage Audience toggle. */
+      advantageAudienceEnabled?: boolean;
     };
   };
   'performance/poll.scheduled': {

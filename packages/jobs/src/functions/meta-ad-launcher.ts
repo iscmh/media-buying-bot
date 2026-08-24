@@ -222,6 +222,7 @@ export const metaAdLauncher = inngest.createFunction(
         pixelId: event.data.pixelId,
         customEventType: event.data.customEventType,
         callToActionType: event.data.callToActionType,
+        advantageAudienceEnabled: event.data.advantageAudienceEnabled,
       };
     });
 
@@ -374,6 +375,7 @@ export const metaAdLauncher = inngest.createFunction(
                 messengerPositions: ctx.messengerPositions,
                 pixelId: ctx.pixelId,
                 customEventType: ctx.customEventType,
+                advantageAudienceEnabled: ctx.advantageAudienceEnabled,
               });
               if (!adSet.ok) {
                 throw new MetaCreateError(
