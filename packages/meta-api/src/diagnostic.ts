@@ -202,13 +202,26 @@ export async function diagnoseAdAccount(input: {
   const disableLabel = META_DISABLE_REASON[disableCode] ?? `Unknown (${disableCode})`;
 
   const capabilities = Array.isArray(acct.capabilities) ? acct.capabilities : [];
-  // Meta stamps these when the account is under Special Ad Category
-  // enforcement. Not the same as declaring a category on your campaign;
-  // this is Meta having decided the ACCOUNT itself has to abide by SAC
-  // rules regardless of what you say per-campaign.
+  // Meta stamps these ONLY when the account is under Special Ad Category
+  // enforcement — the ACCOUNT itself has to abide by SAC rules
+  // regardless of what you say per-campaign. Explicit allowlist because
+  // a substring match on "POLITICAL" was firing on CAN_SEE_POLITICAL_FLOW
+  // (a UI-permission capability every account has, unrelated to SAC
+  // enforcement) and false-flagging clean accounts.
+  const SAC_ENFORCEMENT_CAPS: ReadonlyArray<string> = [
+    'SPECIAL_AD_CATEGORY_LEGACY',
+    'SPECIAL_AD_CATEGORY_ENFORCED',
+    'SPECIAL_AD_CATEGORY_CREDIT',
+    'SPECIAL_AD_CATEGORY_HOUSING',
+    'SPECIAL_AD_CATEGORY_EMPLOYMENT',
+    'SPECIAL_AD_CATEGORY_ISSUES_ELECTIONS_POLITICS',
+    'CREDIT_ADS_ENFORCED',
+    'HOUSING_ADS_ENFORCED',
+    'EMPLOYMENT_ADS_ENFORCED',
+    'POLITICAL_ADS_ENFORCED',
+  ];
   const sacCapabilities = capabilities.filter(
-    (c) =>
-      typeof c === 'string' && /special.*ad.*category|CREDIT|HOUSING|EMPLOYMENT|POLITICAL/i.test(c),
+    (c): c is string => typeof c === 'string' && SAC_ENFORCEMENT_CAPS.includes(c),
   );
   const isEnrolledInSpecialAdCategory = sacCapabilities.length > 0;
 

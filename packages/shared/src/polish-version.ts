@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.2';
+export const POLISH_VERSION = '28.4.3';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.2';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.2 Commit 100 - Meta ad-account diagnostic panel at /settings/connections?tab=meta. Reads account_status, disable_reason, capabilities (Special Ad Category enforcement), funding source, token scope per attached ad account and surfaces color-coded findings. Answers the "why cant I launch, is my account shadowbanned?" question definitively.';
+  'Polish-28.4.3 Commit 101 - fix false-positive Special Ad Category flag in the diagnostic. Regex was matching CAN_SEE_POLITICAL_FLOW (a UI-permission capability every account has) as SAC enforcement. Replaced with an explicit allowlist of real SAC-enforcement capability names.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
