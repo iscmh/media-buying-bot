@@ -86,7 +86,14 @@ export default async function JobReviewPage({ params }: Props) {
   const concept =
     conceptIds.length > 0
       ? await db.query.concepts.findFirst({
-          where: eq(schema.concepts.id, conceptIds[0]!),
+          // Polish-28.4.10 Commit 108: ownership check. The concept
+          // lookup was previously scoped by id only, which meant a
+          // job's concept row could be read even if the concept
+          // belonged to a different user (data leak). Not exploitable
+          // via URL guessing because `job` is already ownership-
+          // scoped above, but tightening the query anyway so a
+          // future refactor can't reintroduce the leak.
+          where: and(eq(schema.concepts.id, conceptIds[0]!), eq(schema.concepts.userId, userId)),
           columns: { contentType: true, offerUrl: true },
         })
       : null;

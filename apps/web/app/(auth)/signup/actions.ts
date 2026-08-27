@@ -37,10 +37,12 @@ export async function validateInviteCodeAction(code: string): Promise<ValidateRe
     maxAge: COOKIE_MAX_AGE_SECONDS,
     sameSite: 'lax',
     httpOnly: true,
-    // 'secure' would block the cookie in plain-HTTP dev (Phase 1
-    // /signup is served from localhost). NEXT_PUBLIC_SITE_URL flips it
-    // on in production.
-    secure: process.env.NEXT_PUBLIC_SITE_URL?.startsWith('https://') ?? false,
+    // Polish-28.4.10 Commit 108: gate `secure` on NODE_ENV, not the
+    // presence of a NEXT_PUBLIC_SITE_URL prefix. The prior check meant
+    // that if the env var was ever absent in prod the cookie shipped
+    // over plain HTTP — a real infra-config footgun. NODE_ENV is set
+    // by Next during the build; production === secure cookie.
+    secure: process.env.NODE_ENV === 'production',
   });
   return { ok: true, inviteCodeId: result.inviteCodeId };
 }

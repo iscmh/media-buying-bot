@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.9';
+export const POLISH_VERSION = '28.4.10';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.9';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.9 Commit 107 - one-click Log in with Meta OAuth. Adds /api/auth/meta/start (CSRF-safe redirect) + /api/auth/meta/callback (code exchange, long-lived-token upgrade, verify, encrypt, upsert). Feature-flagged on META_APP_ID + META_APP_SECRET being set. Connect page rewritten: OAuth button primary, System User + Graph API Explorer paths collapsed under an Advanced toggle. Fraud-alarm-free for Meta App testers today (up to ~100 users in Dev mode); once Meta App Review approves scopes any user can log in.';
+  'Polish-28.4.10 Commit 108 - launch-readiness fast fixes from the ship audit. Variant-count input holds a raw string (users can retype without min-clamp-on-keystroke); iOS numeric keyboard on the field. /runs/[id] concept lookup tightened with a userId ownership filter (belt-and-suspenders — job was already scoped, but tightening the concept query guards future refactors). Whop signup cookies secure-flag now keys on NODE_ENV=production instead of NEXT_PUBLIC_SITE_URL presence, so missing env in prod cant ship the cookie over HTTP.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -154,6 +154,14 @@ export function SimplifiedGenerationForm({
     'small' | 'medium' | 'big'
   >('medium');
   const [variantCount, setVariantCount] = React.useState<number>(SIMPLIFIED_DEFAULT_VARIANTS);
+  // Polish-28.4.10 Commit 108: mirror the input's raw string so users
+  // can clear the field and retype without the picker jumping back to
+  // the min value on every keystroke. Committed value is the parsed
+  // clamped number in `variantCount`; the raw string only exists for
+  // typing UX.
+  const [variantCountRaw, setVariantCountRaw] = React.useState<string>(
+    String(SIMPLIFIED_DEFAULT_VARIANTS),
+  );
 
   const [error, setError] = React.useState<string | null>(null);
   const [liveAck, setLiveAck] = React.useState(initialLiveAck);
@@ -456,14 +464,28 @@ export function SimplifiedGenerationForm({
           Generate
         </label>
         <div className="mt-1 flex items-center gap-2">
+          {/* Polish-28.4.10 Commit 108: hold the raw string in local
+              state so the user can clear the field and retype. The old
+              controlled-number approach clamped-on-keystroke, forcing
+              "1" whenever the field went empty — meaning users
+              couldn't blank the input to type a new value. */}
           <input
             id="variant-count"
             type="number"
+            inputMode="numeric"
             min={SIMPLIFIED_MIN_VARIANTS}
             max={SIMPLIFIED_MAX_VARIANTS}
             step={1}
-            value={variantCount}
-            onChange={(e) => setVariantCount(clampVariantCount(Number(e.target.value)))}
+            value={variantCountRaw}
+            onChange={(e) => setVariantCountRaw(e.target.value)}
+            onBlur={() => {
+              const parsed = Number(variantCountRaw);
+              const clamped = Number.isFinite(parsed)
+                ? clampVariantCount(parsed)
+                : SIMPLIFIED_DEFAULT_VARIANTS;
+              setVariantCount(clamped);
+              setVariantCountRaw(String(clamped));
+            }}
             disabled={isPending}
             className="border-input bg-bg-elevated text-fg focus:ring-ring h-9 w-20 rounded-md border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-offset-1"
           />
