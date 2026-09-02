@@ -524,17 +524,34 @@ export interface SubmitSeedanceVideoInput {
 export async function submitSeedanceVideo(
   input: SubmitSeedanceVideoInput,
 ): Promise<SubmitJobResult> {
-  const body = {
+  // Polish-29.0.14 Commit 123 diagnostic: Dreamina rejected the
+  // camelCase `aspectRatio` field with `Parameter aspectRatio not
+  // supported` on the first live i2v run. useapi.net's other Dreamina
+  // params are snake_case in the docs (aspect_ratio, image_url) so
+  // the switch is the likely fix. Also send both `image` AND
+  // `image_url` for i2v — Dreamina's endpoint has drifted on which
+  // one it accepts and useapi.net proxies the raw body through.
+  // Same story for `resolution` → `resolution` (kept as-is; only
+  // meaningful on CA-region accounts, and there's no evidence the
+  // name is wrong — just guarding scope of the change).
+  const body: Record<string, unknown> = {
     account: input.account,
     prompt: input.prompt,
     model: input.model ?? 'seedance-2.5',
     duration: input.durationSeconds ?? 5,
-    aspectRatio: input.aspectRatio ?? '9:16',
+    aspect_ratio: input.aspectRatio ?? '9:16',
     resolution: input.resolution ?? '720p',
-    ...(input.referenceImage
-      ? { image: input.referenceImage.assetId ?? input.referenceImage.url }
-      : {}),
   };
+  if (input.referenceImage) {
+    const ref = input.referenceImage.assetId ?? input.referenceImage.url;
+    if (ref) {
+      body.image = ref;
+      // Send the URL variant too when we have one — cheap belt-and-
+      // suspenders while we don't yet have confirmation of the exact
+      // field name Dreamina wants for i2v.
+      if (input.referenceImage.url) body.image_url = input.referenceImage.url;
+    }
+  }
 
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
@@ -548,7 +565,7 @@ export async function submitSeedanceVideo(
       account_hash: hashAccount(input.account),
       model: body.model,
       duration: body.duration,
-      aspect_ratio: body.aspectRatio,
+      aspect_ratio: body.aspect_ratio,
       resolution: body.resolution,
       prompt_chars: input.prompt.length,
       has_reference: Boolean(input.referenceImage),

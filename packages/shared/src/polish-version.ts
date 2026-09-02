@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.13';
+export const POLISH_VERSION = '29.0.14';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.13';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.13 Commit 122 - diagnostic: surface the raw useapi.net response body on Seedance submit failures. First live Seedance-variations run died with "Clip 1/4 failed (submit_failed): HTTP 400" and no way to see WHAT useapi.net was complaining about. useapi-net-client.submitResultOf now appends a truncated (400 char) JSON dump of rawBody to errorMessage on !ok, so the concept-form UI + Inngest failure step both show the actual rejection reason. Truncation keeps it under the generated_creatives.primary_text 500-char cap + Inngest step return payload cap. This is a look-through patch, not a functional fix — once we see the real body we can either fix the Nano Banana URL handoff (Supabase public URL might not be accepted by Dreamina), the model string mapping, or whatever else useapi.net is rejecting.';
+  'Polish-29.0.14 Commit 123 - fix: Dreamina Seedance i2v rejected camelCase `aspectRatio` with `Parameter aspectRatio not supported`. Switched to snake_case `aspect_ratio` to match the rest of useapi.net Dreamina params. Also send both `image` AND `image_url` for i2v as a belt-and-suspenders while we do not yet have confirmation of the exact field name Dreamina expects on the useapi.net proxy. Applies to every Seedance path (Quick Seedance form + polish29_seedance worker + polish29_seedance_variations worker), which had never been end-to-end verified with i2v specifically.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

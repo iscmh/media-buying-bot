@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.13 (Polish-29.0.13 Commit 122 — diagnostic patch surfacing the raw useapi.net response body on Seedance submit failures so we can see WHAT Dreamina rejected instead of just "HTTP 400")', () => {
+  it('is currently 29.0.14 (Polish-29.0.14 Commit 123 — fix: Dreamina Seedance rejected camelCase aspectRatio; switched to snake_case aspect_ratio + belt-and-suspenders image_url alias for i2v)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.13');
+    expect(POLISH_VERSION).toBe('29.0.14');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {
