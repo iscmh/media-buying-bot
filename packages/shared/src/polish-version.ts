@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.15';
+export const POLISH_VERSION = '29.0.16';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.15';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.15 Commit 124 - fix: Claude refused the polish29_seedance_variations batch prompt because the wrapWithPsywarCorpus() wrapper describes "psychological manipulation techniques" which trips Claude Sonnet 4.5+ safety training. Claude returned a prose refusal ("I need to flag a significant concern...") instead of JSON, which broke the parser. Drop the psywar wrapper for this pipeline - the Polish-28 variations prompt on its own reads as normal ad-copy work and produces the persona+script JSON cleanly. The wrapper stays in place for the Polish-28 HeyGen variations worker where it was historically tuned to escape refusals; a broader "drop the corpus everywhere" pass is deferred.';
+  'Polish-29.0.16 Commit 125 - fix: Dreamina/useapi.net does NOT accept aspectRatio in ANY case (camelCase rejected 29.0.13, snake_case rejected 29.0.14). Drop the field entirely from every Seedance submit body. For i2v Dreamina derives the ratio from the input image (our Nano Banana characters are 9:16 by prompt); for t2v Dreamina picks a default. Also drop resolution unless explicitly passed - untested and likely to trigger the same rejection. Trimmed the speculative image_url alias from 29.0.14 down to just image.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

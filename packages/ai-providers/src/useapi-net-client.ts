@@ -524,33 +524,28 @@ export interface SubmitSeedanceVideoInput {
 export async function submitSeedanceVideo(
   input: SubmitSeedanceVideoInput,
 ): Promise<SubmitJobResult> {
-  // Polish-29.0.14 Commit 123 diagnostic: Dreamina rejected the
-  // camelCase `aspectRatio` field with `Parameter aspectRatio not
-  // supported` on the first live i2v run. useapi.net's other Dreamina
-  // params are snake_case in the docs (aspect_ratio, image_url) so
-  // the switch is the likely fix. Also send both `image` AND
-  // `image_url` for i2v — Dreamina's endpoint has drifted on which
-  // one it accepts and useapi.net proxies the raw body through.
-  // Same story for `resolution` → `resolution` (kept as-is; only
-  // meaningful on CA-region accounts, and there's no evidence the
-  // name is wrong — just guarding scope of the change).
+  // Polish-29.0.16 Commit 125: Dreamina's useapi.net proxy does NOT
+  // accept aspectRatio in ANY case (camelCase 29.0.13 got "Parameter
+  // aspectRatio not supported"; snake_case 29.0.14 got "Parameter
+  // aspect_ratio not supported"). The field is simply unsupported on
+  // this endpoint. For i2v that's fine — Dreamina derives ratio from
+  // the input image (our Nano Banana characters are 9:16 by prompt).
+  // For t2v Dreamina picks a default (typically 16:9); the Quick
+  // Seedance form's aspect selector is decorative today, though we
+  // keep the input field on SubmitSeedanceVideoInput so callers can
+  // add it back once Dreamina supports it. Same story for resolution:
+  // untested and might trigger the same rejection, so drop it too
+  // unless the caller EXPLICITLY passed one.
   const body: Record<string, unknown> = {
     account: input.account,
     prompt: input.prompt,
     model: input.model ?? 'seedance-2.5',
     duration: input.durationSeconds ?? 5,
-    aspect_ratio: input.aspectRatio ?? '9:16',
-    resolution: input.resolution ?? '720p',
   };
+  if (input.resolution) body.resolution = input.resolution;
   if (input.referenceImage) {
     const ref = input.referenceImage.assetId ?? input.referenceImage.url;
-    if (ref) {
-      body.image = ref;
-      // Send the URL variant too when we have one — cheap belt-and-
-      // suspenders while we don't yet have confirmation of the exact
-      // field name Dreamina wants for i2v.
-      if (input.referenceImage.url) body.image_url = input.referenceImage.url;
-    }
+    if (ref) body.image = ref;
   }
 
   const result = await callProvider<RawSubmitBody>({
@@ -565,7 +560,6 @@ export async function submitSeedanceVideo(
       account_hash: hashAccount(input.account),
       model: body.model,
       duration: body.duration,
-      aspect_ratio: body.aspect_ratio,
       resolution: body.resolution,
       prompt_chars: input.prompt.length,
       has_reference: Boolean(input.referenceImage),
