@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.16 (Polish-29.0.16 Commit 125 — fix: drop aspectRatio entirely from Seedance submits; Dreamina/useapi.net does not accept it in any case)', () => {
+  it('is currently 29.0.17 (Polish-29.0.17 Commit 126 — align Seedance i2v with Dreamina docs: rename to firstFrameRef, upload character PNG to Dreamina first to get an imageRef, ratio field for t2v)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.16');
+    expect(POLISH_VERSION).toBe('29.0.17');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

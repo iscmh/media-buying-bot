@@ -51,6 +51,7 @@ import {
   cloneCharacterReferenceImage,
   composeNanoBananaCharacterClonePrompt,
   submitReplicateConcat,
+  uploadUseapiAsset,
 } from '@mbb/ai-providers';
 import { getDb, InsufficientCreditsError, schema } from '@mbb/db';
 import { getCreditModel, POLISH_VERSION } from '@mbb/shared';
@@ -580,18 +581,41 @@ async function renderOneVariation(
     if (!r.ok || !r.imageBase64) {
       throw new Error(`Nano Banana character failed: ${r.errorMessage ?? 'unknown'}`);
     }
+    const mimeType = r.imageMimeType ?? 'image/png';
     const uploaded = await uploadGeneratedImage({
       userId,
       jobId,
       variantIndex: index,
       imageBase64: r.imageBase64,
-      mimeType: r.imageMimeType ?? 'image/png',
+      mimeType,
       filenamePrefix: `polish29-var${index}-character-`,
     });
     return safeInngestStepReturn({
       publicUrl: uploaded.publicUrl,
-      mimeType: r.imageMimeType ?? 'image/png',
+      mimeType,
+      base64: r.imageBase64,
     });
+  });
+
+  // 1b. Polish-29.0.17 Commit 126: upload the Nano Banana PNG to
+  //     Dreamina to obtain the imageRef that Seedance i2v requires
+  //     under firstFrameRef. Raw HTTP URLs are not accepted here —
+  //     Dreamina must hold the image itself.
+  const dreaminaAsset = await guardedStepRun(step, `char-upload-${stepSuffix}`, async () => {
+    const bytes = new Uint8Array(Buffer.from(character.base64, 'base64'));
+    const r = await uploadUseapiAsset({
+      userId,
+      service: 'dreamina',
+      bytes,
+      contentType: character.mimeType,
+      filename: `polish29-var${index}-character.png`,
+    });
+    if (!r.ok || !r.assetId) {
+      throw new Error(
+        `Dreamina asset upload failed for character PNG: ${r.errorMessage ?? 'no imageRef in response'}`,
+      );
+    }
+    return safeInngestStepReturn({ imageRef: r.assetId });
   });
 
   // 2. Split the script into M clip-length segments.
@@ -623,8 +647,13 @@ async function renderOneVariation(
           modelId,
           dreaminaAccount,
           prompt: clipPrompt,
-          referenceImage: { url: character.publicUrl },
-          aspectRatio,
+          // Polish-29.0.17 Commit 126: pass Dreamina's imageRef under
+          // assetId so useapi-net-client maps it to firstFrameRef.
+          // The Supabase publicUrl is retained on `character` for the
+          // audit trail + generated_creatives.character_reference_url
+          // but is NOT sent to Dreamina (they can't fetch it).
+          referenceImage: { assetId: dreaminaAsset.imageRef },
+          // Ratio auto-derived from firstFrameRef image; don't send it.
           durationSeconds: SEEDANCE_CLIP_SECONDS,
           generationJobId: jobId,
         });

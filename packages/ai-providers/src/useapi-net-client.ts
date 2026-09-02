@@ -272,9 +272,19 @@ export interface UploadAssetResult {
  * (not `callProvider`) because the body is binary — the chokepoint's
  * JSON path doesn't fit multipart. Timing + status still audit-logged
  * inline.
+ *
+ * Polish-29.0.17 Commit 126: the Dreamina asset upload endpoint is
+ * /dreamina/assets/account (per docs), not /dreamina/assets. google-flow
+ * remains on /assets (matches its docs). Response for Dreamina is an
+ * imageRef string like "CA:user@example.com-image:w685:h900:s86866-
+ * uri:tos-useast5-i-wopfjsm1ax-tx/abc123" which is what the video
+ * submit body wants under firstFrameRef.
  */
 export async function uploadUseapiAsset(input: UploadAssetInput): Promise<UploadAssetResult> {
-  const url = `${USEAPI_BASE}/${input.service}/assets`;
+  const url =
+    input.service === 'dreamina'
+      ? `${USEAPI_BASE}/dreamina/assets/account`
+      : `${USEAPI_BASE}/${input.service}/assets`;
   const t0 = Date.now();
   try {
     const form = new FormData();
@@ -315,15 +325,20 @@ export async function uploadUseapiAsset(input: UploadAssetInput): Promise<Upload
     }
     const body = (parsed ?? {}) as {
       assetId?: string;
+      // Polish-29.0.17 Commit 126: Dreamina's asset upload returns
+      // `imageRef` at the top level (per docs), not `assetId`. Accept
+      // either — the video submit's firstFrameRef param takes whichever
+      // string was returned.
+      imageRef?: string;
       url?: string;
-      asset?: { id?: string; url?: string };
+      asset?: { id?: string; url?: string; imageRef?: string };
     };
-    const assetId = body.assetId ?? body.asset?.id;
+    const assetId = body.assetId ?? body.imageRef ?? body.asset?.id ?? body.asset?.imageRef;
     const assetUrl = body.url ?? body.asset?.url;
     if (!assetId && !assetUrl) {
       return {
         ok: false,
-        errorMessage: `Upload response contained no asset id or url (${latencyMs}ms)`,
+        errorMessage: `Upload response contained no asset id or url (${latencyMs}ms). Raw: ${JSON.stringify(body).slice(0, 300)}`,
       };
     }
     return { ok: true, assetId, assetUrl };
@@ -495,6 +510,14 @@ export interface SubmitSeedanceVideoInput {
   userId: string;
   account: string;
   prompt: string;
+  /**
+   * Polish-29.0.17 Commit 126: for image-to-video mode, `assetId` must
+   * be the `imageRef` string returned by uploadDreaminaImage (which
+   * POSTs to /dreamina/assets/account). Raw HTTP URLs no longer work —
+   * Dreamina requires their own reference token. The `url` field is
+   * kept in the type for backwards compat with the SubmitInput
+   * interface shape but is IGNORED here.
+   */
   referenceImage?: { assetId?: string; url?: string };
   /** 'seedance-2.5' | 'seedance-2.0'. Default 2.5. */
   /**
@@ -524,18 +547,15 @@ export interface SubmitSeedanceVideoInput {
 export async function submitSeedanceVideo(
   input: SubmitSeedanceVideoInput,
 ): Promise<SubmitJobResult> {
-  // Polish-29.0.16 Commit 125: Dreamina's useapi.net proxy does NOT
-  // accept aspectRatio in ANY case (camelCase 29.0.13 got "Parameter
-  // aspectRatio not supported"; snake_case 29.0.14 got "Parameter
-  // aspect_ratio not supported"). The field is simply unsupported on
-  // this endpoint. For i2v that's fine — Dreamina derives ratio from
-  // the input image (our Nano Banana characters are 9:16 by prompt).
-  // For t2v Dreamina picks a default (typically 16:9); the Quick
-  // Seedance form's aspect selector is decorative today, though we
-  // keep the input field on SubmitSeedanceVideoInput so callers can
-  // add it back once Dreamina supports it. Same story for resolution:
-  // untested and might trigger the same rejection, so drop it too
-  // unless the caller EXPLICITLY passed one.
+  // Polish-29.0.17 Commit 126: aligned with the real Dreamina API docs
+  // (finally). Correct field names:
+  //   - `ratio`         NOT aspectRatio / aspect_ratio / image
+  //   - `firstFrameRef` NOT image / image_url — value is an imageRef
+  //     string returned by POST /dreamina/assets/account (raw URLs
+  //     won't work; must upload the character PNG to Dreamina first
+  //     and pass THEIR reference token here).
+  //   - When firstFrameRef is present, `ratio` MUST NOT be sent —
+  //     Dreamina auto-detects ratio from the reference image.
   const body: Record<string, unknown> = {
     account: input.account,
     prompt: input.prompt,
@@ -543,9 +563,12 @@ export async function submitSeedanceVideo(
     duration: input.durationSeconds ?? 5,
   };
   if (input.resolution) body.resolution = input.resolution;
-  if (input.referenceImage) {
-    const ref = input.referenceImage.assetId ?? input.referenceImage.url;
-    if (ref) body.image = ref;
+  // firstFrameRef wins over ratio (ratio is auto-derived from image).
+  const firstFrameRef = input.referenceImage?.assetId;
+  if (firstFrameRef) {
+    body.firstFrameRef = firstFrameRef;
+  } else if (input.aspectRatio) {
+    body.ratio = input.aspectRatio;
   }
 
   const result = await callProvider<RawSubmitBody>({

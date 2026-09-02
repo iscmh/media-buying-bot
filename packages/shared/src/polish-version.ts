@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.16';
+export const POLISH_VERSION = '29.0.17';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.16';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.16 Commit 125 - fix: Dreamina/useapi.net does NOT accept aspectRatio in ANY case (camelCase rejected 29.0.13, snake_case rejected 29.0.14). Drop the field entirely from every Seedance submit body. For i2v Dreamina derives the ratio from the input image (our Nano Banana characters are 9:16 by prompt); for t2v Dreamina picks a default. Also drop resolution unless explicitly passed - untested and likely to trigger the same rejection. Trimmed the speculative image_url alias from 29.0.14 down to just image.';
+  'Polish-29.0.17 Commit 126 - fix: align Seedance submit with the REAL Dreamina docs (user pasted the API reference). Three corrections in one commit: (1) correct t2v ratio field is `ratio` (not aspectRatio / aspect_ratio / image); (2) correct i2v reference field is `firstFrameRef` (not image / image_url); (3) firstFrameRef value MUST be an imageRef string returned by POST /dreamina/assets/account - raw HTTP URLs are rejected. Adds a pre-Seedance upload step in the polish29 variations worker: after Nano Banana generates the character PNG, upload it to Dreamina to get the imageRef, then pass THAT to Seedance under firstFrameRef. When firstFrameRef is present ratio is auto-detected from the image and MUST NOT be sent. Also fixed the asset upload URL for Dreamina (/dreamina/assets/account not /dreamina/assets) and taught the response parser to read `imageRef` in addition to `assetId`.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
