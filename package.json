@@ -20,6 +20,8 @@
     "db:generate": "pnpm --filter @mbb/db generate",
     "db:migrate": "pnpm --filter @mbb/db migrate",
     "db:push": "pnpm --filter @mbb/db push",
+    "useapi:register": "node scripts/useapi-register-account.mjs",
+    "useapi:list": "node scripts/useapi-register-account.mjs --list",
     "prepare": "husky"
   },
   "devDependencies": {
