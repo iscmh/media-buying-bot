@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.2 (Polish-29.0.2 Commit 111 — Whop webhook credit grants: signup trial, PRO monthly, top-up packs; all idempotent via payment.id)', () => {
+  it('is currently 29.0.3 (Polish-29.0.3 Commit 112 — credit router: withCreditReservation gates BYOK vs credits per model call; getModelCostPreview for frontend badge)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.2');
+    expect(POLISH_VERSION).toBe('29.0.3');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

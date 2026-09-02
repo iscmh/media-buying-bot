@@ -358,6 +358,26 @@ export {
   type CallProviderResult,
 } from './chokepoint';
 
+// Polish-29.0.2 Commit 112: credit router — gates credit ledger
+// around individual model calls. Every credit-billed provider client
+// wraps its call with `withCreditReservation`; BYOK models pass
+// through unchanged. `getModelCostPreview` powers the pre-submit
+// "This will cost 40 credits" badge on the frontend.
+export {
+  getModelCostPreview,
+  withCreditReservation,
+  defaultResultOk,
+  type CreditRouterOutcome,
+  type ModelCostPreview,
+  type ResultOk,
+  type WithCreditReservationOptions,
+} from './credit-router';
+// Convenience re-export so consumers of `@mbb/ai-providers` don't need
+// a second import from `@mbb/db` just to catch the credits error.
+// Kept out of credit-router.ts itself to avoid a TDZ interaction with
+// vitest's `vi.mock('@mbb/db', ...)` in the router's unit tests.
+export { InsufficientCreditsError } from '@mbb/db';
+
 // Polish-29.0.0 Commit 110: useapi.net multi-service client
 // (Google Flow + Dreamina to start; Kling / Runway / PixVerse /
 // MiniMax slot in on the same shape as accounts are registered).

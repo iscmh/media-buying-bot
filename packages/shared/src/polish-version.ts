@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.2';
+export const POLISH_VERSION = '29.0.3';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.2';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.2 Commit 111 - Whop webhook credit grants. Grants free-trial credits (100) on first login, monthly PRO credits (2500) on each Whop payment.succeeded for the sub product, and top-up pack credits (500/2500/10000+bonus) on payment.succeeded for pack SKUs. Every grant is idempotent via addCreditsIdempotent keyed on Whop payment.id (renewals get fresh credits, retries do not). Adds packages/db credit helpers, apps/web/lib/whop/credit-grants.ts, and extends the existing /api/webhooks/whop dispatch. Commit 112: provider router that decides BYOK vs credits per model; Commit 113: frontend credit UX (balance widget, cost preview, savings badge).';
+  'Polish-29.0.3 Commit 112 - credit router. Every credit-billed provider call now wraps in withCreditReservation({userId, modelId, generationJobId}, () => submitX(...)): BYOK passes through unchanged, credits path reserves up-front (throws InsufficientCreditsError before the provider is even hit), consumes on success, releases on thrown-error or {ok:false}. getModelCostPreview(modelId) powers the frontend "This will cost 40 credits" badge without a ledger read. Ships packages/ai-providers/src/credit-router.ts + 15 tests covering all four state machine legs (BYOK, spend, release-on-failure, release-on-error). Commit 113 lands the frontend UX (balance widget, cost preview, savings badge, top-up modal).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
