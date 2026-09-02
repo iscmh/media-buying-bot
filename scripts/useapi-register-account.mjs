@@ -226,31 +226,45 @@ async function registerGoogleFlow({ token, cookieFile, label }) {
     console.error('Google Flow registration requires --cookie-file');
     printUsageAndExit(2);
   }
-  const raw = readFileSync(cookieFile, 'utf8').trim();
-  if (!raw) {
+  const raw = readFileSync(cookieFile, 'utf8');
+  if (!raw.trim()) {
     console.error(`Cookie file is empty: ${cookieFile}`);
     process.exit(2);
   }
-  const cookiesArray = normalizeCookiesToArray(raw);
-  console.log(
-    `Registering Google Flow account with cookies from ${cookieFile} (${raw.length} raw → ${cookiesArray.length} cookie entries: ${cookiesArray.map((c) => c.name).join(', ')})…`,
-  );
-  if (cookiesArray.length === 0) {
-    console.error(
-      `Parsed 0 cookies from ${cookieFile}. Check the file — it should be either\n` +
-        `  - a Cookie-Editor JSON export (starts with '['), or\n` +
-        `  - a DevTools 'Storage → Cookies' table paste (tab-separated rows), or\n` +
-        `  - a flat 'name=v; name2=v2' Cookie header string.`,
+  // If the file is already Netscape (starts with '# Netscape'), send it
+  // through verbatim. Extensions like 'Get cookies.txt LOCALLY' produce
+  // exactly this format and preserve HttpOnly/scoped cookies (LSID etc.)
+  // that Cookie-Editor sometimes misses.
+  let netscape;
+  let debugNames;
+  if (raw.trimStart().toLowerCase().startsWith('# netscape')) {
+    netscape = raw.endsWith('\n') ? raw : raw + '\n';
+    debugNames = raw
+      .split('\n')
+      .filter((l) => l && !l.startsWith('#'))
+      .map((l) => l.split('\t')[5])
+      .filter(Boolean);
+    console.log(
+      `Registering Google Flow account with Netscape cookies.txt passthrough from ${cookieFile} (${raw.length} bytes, ${debugNames.length} cookies: ${debugNames.join(', ')})…`,
     );
-    process.exit(2);
+  } else {
+    const cookiesArray = normalizeCookiesToArray(raw.trim());
+    if (cookiesArray.length === 0) {
+      console.error(
+        `Parsed 0 cookies from ${cookieFile}. Expected either:\n` +
+          `  - A Netscape cookies.txt file (starts with '# Netscape'), from 'Get cookies.txt LOCALLY' extension, or\n` +
+          `  - A Cookie-Editor JSON export (starts with '['), or\n` +
+          `  - A DevTools 'Storage → Cookies' table paste (tab-separated rows), or\n` +
+          `  - A flat 'name=v; name2=v2' Cookie header string.`,
+      );
+      process.exit(2);
+    }
+    debugNames = cookiesArray.map((c) => c.name);
+    console.log(
+      `Registering Google Flow account with cookies from ${cookieFile} (${raw.length} raw → ${cookiesArray.length} cookie entries: ${debugNames.join(', ')})…`,
+    );
+    netscape = buildNetscapeFile(cookiesArray);
   }
-  // Empirically (see --diagnose output on 2026-09-02) useapi.net's
-  // Google Flow parser accepts the Netscape cookies.txt file format
-  // ONLY. JSON array (stringified or not), raw Cookie header, and
-  // raw Cookie-Editor JSON all get 'No cookies could be parsed'.
-  // Netscape format got past the parser and returned the real
-  // requirement: "Missing required cookies: HSID, LSID, SID, SSID".
-  const netscape = buildNetscapeFile(cookiesArray);
   const { status, body } = await callUseapi({
     method: 'POST',
     path: `/google-flow/accounts`,
