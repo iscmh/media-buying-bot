@@ -606,6 +606,7 @@ async function renderOneVariation(
     const r = await uploadUseapiAsset({
       userId,
       service: 'dreamina',
+      account: dreaminaAccount,
       bytes,
       contentType: character.mimeType,
       filename: `polish29-var${index}-character.png`,

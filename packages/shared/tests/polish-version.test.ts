@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.18 (Polish-29.0.18 Commit 127 — fix: Dreamina asset upload uses raw bytes with image mime as Content-Type, not multipart)', () => {
+  it('is currently 29.0.19 (Polish-29.0.19 Commit 128 — fix: Dreamina asset upload URL takes the account email as the last path segment, not the literal string `account`)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.18');
+    expect(POLISH_VERSION).toBe('29.0.19');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

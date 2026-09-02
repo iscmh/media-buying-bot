@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.18';
+export const POLISH_VERSION = '29.0.19';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.18';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.18 Commit 127 - fix: Dreamina asset upload rejects multipart/form-data. Sends raw image bytes with the media mime as Content-Type instead. Live 29.0.17 run reached the new Dreamina character-upload step (progress!) and returned: `Content-Type (multipart/form-data) not supported. Valid values: image/jpeg, image/png, image/webp, video/mp4, ...`. uploadUseapiAsset now branches by service - dreamina posts raw bytes with Content-Type: image/png (or whatever the ref mime is), google-flow still uses multipart (its docs match that shape).';
+  'Polish-29.0.19 Commit 128 - fix: Dreamina asset upload URL takes the account email as the last path segment. Docs said POST /v1/dreamina/assets/account and I read `account` literally; useapi.net answered `Unable to find configuration for account account`. The trailing word IS a URL placeholder for the registered account email. URL now built as /dreamina/assets/{encodeURIComponent(email)}. UploadAssetInput gains an `account` field; dreamina uploads require it (early-returns with a clear error if missing), google-flow ignores it.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

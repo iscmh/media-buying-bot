@@ -257,6 +257,15 @@ export interface UploadAssetInput {
   contentType: string;
   /** File name hint (some services key their asset browser on this). */
   filename?: string;
+  /**
+   * Polish-29.0.19 Commit 128: Dreamina's docs list POST /dreamina/
+   * assets/account — the trailing `account` is a URL placeholder for
+   * the specific registered account email, NOT a literal string.
+   * Without it useapi.net answers "Unable to find configuration for
+   * account account". Required for the dreamina service; ignored
+   * (currently) for google-flow.
+   */
+  account?: string;
 }
 
 export interface UploadAssetResult {
@@ -281,9 +290,17 @@ export interface UploadAssetResult {
  * submit body wants under firstFrameRef.
  */
 export async function uploadUseapiAsset(input: UploadAssetInput): Promise<UploadAssetResult> {
+  if (input.service === 'dreamina' && !input.account) {
+    return {
+      ok: false,
+      errorMessage:
+        'Dreamina asset upload requires `account` (registered Dreamina email). ' +
+        'The URL path takes the account as its last segment.',
+    };
+  }
   const url =
     input.service === 'dreamina'
-      ? `${USEAPI_BASE}/dreamina/assets/account`
+      ? `${USEAPI_BASE}/dreamina/assets/${encodeURIComponent(input.account!)}`
       : `${USEAPI_BASE}/${input.service}/assets`;
   const t0 = Date.now();
   try {
