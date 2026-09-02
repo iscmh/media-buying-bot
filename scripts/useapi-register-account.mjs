@@ -81,6 +81,9 @@ function parseArgs(argv) {
       case '--list':
         args.list = true;
         break;
+      case '--diagnose':
+        args.diagnose = true;
+        break;
       case '-h':
       case '--help':
         printUsageAndExit(0);
@@ -162,6 +165,62 @@ async function registerDreamina({ token, email, password, region, label }) {
   process.exit(status >= 200 && status < 300 ? 0 : 1);
 }
 
+async function diagnoseGoogleFlow({ token, cookieFile }) {
+  const raw = readFileSync(cookieFile, 'utf8').trim();
+  const arr = normalizeCookiesToArray(raw);
+  console.log(
+    `Diagnose: trying every plausible cookies-field shape against POST /google-flow/accounts`,
+  );
+  console.log(`(${arr.length} cookies parsed from ${cookieFile})\n`);
+
+  // Build every plausible shape and try each one.
+  const headerStr = arr.map((c) => `${c.name}=${c.value}`).join('; ');
+  const netscape =
+    '# Netscape HTTP Cookie File\n' +
+    arr
+      .map(
+        (c) =>
+          [
+            c.domain || '.labs.google',
+            c.hostOnly ? 'FALSE' : 'TRUE',
+            c.path || '/',
+            c.secure ? 'TRUE' : 'FALSE',
+            String(Math.floor(c.expirationDate || Date.now() / 1000 + 86400 * 30)),
+            c.name,
+            c.value,
+          ].join('\t'),
+      )
+      .join('\n') +
+    '\n';
+  const jsonArrayString = JSON.stringify(arr);
+  const rawFileContent = raw;
+
+  const shapes = [
+    { name: 'A. cookies: <JSON array string>', body: { cookies: jsonArrayString } },
+    { name: 'B. cookies: <raw file content>', body: { cookies: rawFileContent } },
+    { name: 'C. cookies: <Cookie header string>', body: { cookies: headerStr } },
+    { name: 'D. cookies: <Netscape file text>', body: { cookies: netscape } },
+    { name: 'E. cookies: <JSON array actual>', body: { cookies: arr } },
+    { name: 'F. cookie (singular): <JSON array string>', body: { cookie: jsonArrayString } },
+    { name: 'G. cookie (singular): <Cookie header>', body: { cookie: headerStr } },
+  ];
+
+  for (const s of shapes) {
+    const { status, body } = await callUseapi({
+      method: 'POST',
+      path: `/google-flow/accounts`,
+      token,
+      body: s.body,
+    });
+    const msg =
+      typeof body === 'object' && body && 'error' in body
+        ? `HTTP ${status} · ${body.error}`
+        : `HTTP ${status} · ${JSON.stringify(body).slice(0, 200)}`;
+    console.log(`  ${s.name}\n    → ${msg}\n`);
+  }
+  process.exit(0);
+}
+
 async function registerGoogleFlow({ token, cookieFile, label }) {
   if (!cookieFile) {
     console.error('Google Flow registration requires --cookie-file');
@@ -220,6 +279,19 @@ async function main() {
 
   if (args.list) {
     await listAccounts({ service: args.service, token: args.token });
+    return;
+  }
+
+  if (args.diagnose) {
+    if (args.service !== 'google-flow') {
+      console.error('--diagnose is only implemented for --service google-flow');
+      process.exit(2);
+    }
+    if (!args.cookieFile) {
+      console.error('--diagnose requires --cookie-file');
+      process.exit(2);
+    }
+    await diagnoseGoogleFlow({ token: args.token, cookieFile: args.cookieFile });
     return;
   }
 
