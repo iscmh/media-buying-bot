@@ -52,7 +52,10 @@ export interface PipelineDescriptor {
     // Polish-28.3.0 Commit 85: variations pipeline. Claude batches
     // N distinct persona+script pairs from the source ad, each
     // rendered as fresh Nano Banana + matched HeyGen voice + native TTS.
-    | 'generation/polish28-variations-ugc.requested';
+    | 'generation/polish28-variations-ugc.requested'
+    // Polish-29.0.6 Commit 115: credit-backed Seedance via useapi.net →
+    // Dreamina. First credits-mode worker.
+    | 'generation/polish29-seedance.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -185,6 +188,20 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     // fresh from persona text, no source-frame extract step. 3-BYOK.
     requiredProviders: ['claude', 'gemini', 'heygen'],
   },
+  polish29_seedance: {
+    pipeline: 'polish29_seedance',
+    label: 'Seedance (credits)',
+    // No provider choice — credits-mode goes through the shared
+    // useapi.net client, not per-user BYOK.
+    providerChoice: 'openai',
+    format: 'polish29_seedance',
+    workerEvent: 'generation/polish29-seedance.requested',
+    // requiredProviders empty — Seedance uses the platform-side
+    // USEAPI_NET_API_TOKEN + registered Dreamina account, not user
+    // BYOK keys. The credit balance check runs at reserve time (
+    // seedance-credit-flow.ts) so nothing to gate at pipeline pick.
+    requiredProviders: [],
+  },
 };
 
 export function describePipeline(pipeline: PipelineType): PipelineDescriptor {
@@ -255,4 +272,6 @@ export const ALL_PIPELINES: PipelineType[] = [
   // Polish-28.3.0 Commit 85: variations mode — N distinct spokespeople,
   // A/B testing pattern. Now the default under Instant UGC.
   'polish28_variations_ugc',
+  // Polish-29.0.6 Commit 115: credit-backed Seedance via useapi.net.
+  'polish29_seedance',
 ];

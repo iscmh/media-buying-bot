@@ -99,6 +99,66 @@ export async function testScaleAction(
   };
 }
 
+/**
+ * Polish-29.0.6 Commit 115: fire a real Seedance credit-backed job
+ * from the admin dashboard. Creates a generation_jobs row with the
+ * prompt + dreamina account in metadata, then dispatches the
+ * `generation/polish29-seedance.requested` event. The worker
+ * (packages/jobs/src/functions/generate-polish29-seedance.ts) does
+ * the reserve → submit → poll → consume/release cycle.
+ *
+ * Use this to verify end-to-end BEFORE shipping the public generate
+ * form. Balance must be ≥ 40 credits (Seedance 2.5 cost).
+ */
+export async function testSeedanceGeneration(input: {
+  prompt: string;
+  dreaminaAccount: string;
+}): Promise<TestActionResult> {
+  const userId = await requireAdminUserId();
+  const promptTrimmed = input.prompt.trim();
+  const accountTrimmed = input.dreaminaAccount.trim();
+  if (!promptTrimmed) return { ok: false, message: 'Prompt is required.' };
+  if (!accountTrimmed) return { ok: false, message: 'Dreamina account is required.' };
+  if (promptTrimmed.length > 2000) {
+    return { ok: false, message: 'Prompt too long (>2000 chars). Trim it and retry.' };
+  }
+
+  const db = getDb();
+  const [job] = await db
+    .insert(schema.generationJobs)
+    .values({
+      userId,
+      pickedPipeline: 'polish29_seedance',
+      format: 'polish29_seedance',
+      status: 'queued',
+      mode: 'live',
+      variantCount: 1,
+      providerChoice: 'useapi_net',
+      metadata: {
+        source: 'admin_test_action',
+        seedance_prompt: promptTrimmed,
+        dreamina_account: accountTrimmed,
+      },
+    })
+    .returning({ id: schema.generationJobs.id });
+  if (!job) return { ok: false, message: 'Could not create generation_jobs row.' };
+
+  await inngest.send({
+    name: 'generation/polish29-seedance.requested',
+    data: {
+      jobId: job.id,
+      userId,
+      dreaminaAccount: accountTrimmed,
+      prompt: promptTrimmed,
+    },
+  });
+
+  return {
+    ok: true,
+    message: `Seedance job ${job.id.slice(0, 8)} dispatched. Watch Inngest for generate-polish29-seedance run; job row updates status + video URL in metadata.polish29_seedance.`,
+  };
+}
+
 export async function testDailySummary(): Promise<TestActionResult> {
   const userId = await requireAdminUserId();
 

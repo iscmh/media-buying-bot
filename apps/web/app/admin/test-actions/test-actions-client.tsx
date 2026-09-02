@@ -4,7 +4,12 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { testKillAction, testScaleAction, testDailySummary } from './actions';
+import {
+  testDailySummary,
+  testKillAction,
+  testScaleAction,
+  testSeedanceGeneration,
+} from './actions';
 
 interface Ad {
   id: string;
@@ -19,6 +24,11 @@ export function TestActionsClient({ ads }: { ads: Ad[] }) {
   const [scaleBudget, setScaleBudget] = React.useState(15);
   const [result, setResult] = React.useState<{ ok: boolean; message: string } | null>(null);
   const [pending, setPending] = React.useState(false);
+  // Polish-29.0.6 Commit 115 — Seedance credit-flow smoke test inputs.
+  const [seedancePrompt, setSeedancePrompt] = React.useState(
+    'A cinematic 5-second hero shot of a golden retriever running along a sunlit beach at dawn.',
+  );
+  const [dreaminaAccount, setDreaminaAccount] = React.useState('US:isaacisverygoatedtho@gmail.com');
 
   async function runAction(fn: () => Promise<{ ok: boolean; message: string }>) {
     setPending(true);
@@ -98,6 +108,53 @@ export function TestActionsClient({ ads }: { ads: Ad[] }) {
             onClick={() => runAction(() => testScaleAction(selectedAdId, scaleBudget))}
           >
             {pending ? 'Running...' : 'Test Scale'}
+          </Button>
+        </div>
+
+        <div className="bg-bg-elevated space-y-3 rounded-md border p-4 sm:col-span-3">
+          <p className="text-fg text-sm font-medium">
+            Test Seedance Generation (credits) — Polish-29.0.6
+          </p>
+          <p className="text-fg-muted text-xs">
+            Fires a real credit-backed Seedance job via useapi.net (Dreamina). Reserves 40 credits
+            up-front, submits to Seedance 2.5, polls until done, consumes on success or refunds on
+            failure. Watch Inngest for the <code>generate-polish29-seedance</code> run and the
+            generation_jobs row's <code>metadata.polish29_seedance</code> for the video URL.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <div className="space-y-1 sm:col-span-2">
+              <Label htmlFor="seedancePrompt">Prompt</Label>
+              <Input
+                id="seedancePrompt"
+                value={seedancePrompt}
+                onChange={(e) => setSeedancePrompt(e.target.value)}
+                placeholder="A cinematic 5-second hero shot of…"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="dreaminaAccount">Dreamina account</Label>
+              <Input
+                id="dreaminaAccount"
+                value={dreaminaAccount}
+                onChange={(e) => setDreaminaAccount(e.target.value)}
+                placeholder="US:you@example.com"
+                className="font-mono"
+              />
+            </div>
+          </div>
+          <Button
+            size="sm"
+            disabled={pending || !seedancePrompt.trim() || !dreaminaAccount.trim()}
+            onClick={() =>
+              runAction(() =>
+                testSeedanceGeneration({
+                  prompt: seedancePrompt,
+                  dreaminaAccount,
+                }),
+              )
+            }
+          >
+            {pending ? 'Dispatching…' : 'Fire Seedance job'}
           </Button>
         </div>
 

@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.5';
+export const POLISH_VERSION = '29.0.6';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.5';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.5 Commit 114 - seedance credit flow helper. Ships packages/jobs/src/lib/seedance-credit-flow.ts, a self-contained async function runSeedanceCreditedJob({userId, modelId, dreaminaAccount, prompt, ...}) that wraps reserve/submit/poll/consume/release around a full Seedance generation. Reserves up front (throws InsufficientCreditsError before ever hitting useapi.net), consumes on success, releases on any of five failure modes (submit_failed / poll_failed / poll_timeout / no_video_url / thrown). Reference pattern for future generation workers to adopt; also directly callable from admin test-actions so ops can fire a live end-to-end check without shipping frontend. 9 tests lock down every state-machine leg.';
+  'Polish-29.0.6 Commit 115 - Seedance credit-backed generation live end-to-end. Registers generate-polish29-seedance Inngest worker that wraps runSeedanceCreditedJob (Commit 114) with job-status lifecycle + errorMessage translation. Adds a polish29_seedance PipelineType descriptor + cost-estimator branch (40 credits @ $0.02 = $0.80/clip). Extends admin /admin/test-actions with a Seedance smoke-test card (prompt + dreamina account inputs, one button) so the full stack can be exercised without shipping a public form. First credits-mode pipeline registered end-to-end; Commit 116 will onboard-rewrite for it.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

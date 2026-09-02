@@ -78,24 +78,26 @@ describe('Polish-20 Commit 4: defaultPipeline throws — no pipeline-level defau
   });
 });
 
-describe('Polish-20 Commit 4 → Polish-26 Commit 61: ALL_PIPELINES coverage', () => {
-  it('covers legacy survivors + Polish-23 + Polish-25 + Polish-25.3 + Polish-26 pipelines', () => {
-    // Polish-23 Commit 1 added polish23_higgsfield_veo_lite.
-    // Polish-25 Commit 2 added polish25_makeugc.
-    // Polish-25.3 Commit 18b added static_openai_image.
-    // Polish-26 Commit 61 added polish26_heygen — the new
-    // HeyGen v3 PAYG managed backend that supersedes
-    // polish25_makeugc as the primary Instant UGC pipeline (see
-    // packages/shared/src/polish-version.ts for the migration
-    // rationale). MakeUGC descriptor stays for admin/fallback.
+describe('Polish-20 Commit 4 → Polish-29 Commit 115: ALL_PIPELINES coverage', () => {
+  it('covers legacy survivors + Polish-25.3 + Polish-28 + Polish-29 pipelines', () => {
+    // Polish-27.0.0 Commit 63 narrowed ALL_PIPELINES to REGISTERED
+    // pipelines only (dispatch-coverage tripwire would otherwise
+    // fail). polish23_higgsfield_veo_lite / polish25_makeugc /
+    // polish26_heygen are still in DESCRIPTORS (their descriptor
+    // entries stay for forensics) but not in ALL_PIPELINES until
+    // their workers get re-registered.
+    // Polish-28.0.0 Commit 64 added polish28_clone_ugc.
+    // Polish-28.3.0 Commit 85 added polish28_variations_ugc.
+    // Polish-29.0.6 Commit 115 added polish29_seedance (first
+    // credits-mode pipeline).
     const expected: PipelineType[] = [
       'heygen_avatar_talking_head',
       'sora_2_single_shot',
       'nano_banana_static_image',
-      'polish23_higgsfield_veo_lite',
-      'polish25_makeugc',
       'static_openai_image',
-      'polish26_heygen',
+      'polish28_clone_ugc',
+      'polish28_variations_ugc',
+      'polish29_seedance',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
   });

@@ -424,6 +424,10 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   // Polish-28.3.0 Commit 85: variations pipeline (N distinct
   // persona+script+char+voice per job, A/B testing pattern).
   | 'generation/polish28-variations-ugc.requested'
+  // Polish-29.0.6 Commit 115: credit-backed Seedance via useapi.net.
+  // Descriptor now dispatches this event; typing the union keeps
+  // analyze-concept in lockstep with pipeline-descriptors.ts.
+  | 'generation/polish29-seedance.requested'
 > {
   try {
     const db = getDb();

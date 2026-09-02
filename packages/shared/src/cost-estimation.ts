@@ -165,7 +165,14 @@ export type PipelineType =
   // offer to measure which demographic converts. Drops Replicate
   // BYOK — no source-frame extraction needed since characters are
   // generated fresh from persona text.
-  | 'polish28_variations_ugc';
+  | 'polish28_variations_ugc'
+  // Polish-29.0.6 Commit 115: credit-backed Seedance via useapi.net →
+  // Dreamina. First credits-mode pipeline; platform reserves 40 credits
+  // ($0.80 at $0.02/credit) up front, consumes on success, refunds on
+  // failure. Retail equivalent ~$4.50 per Seedance 2.5 clip → ~82%
+  // user-facing savings vs direct Dreamina API. See
+  // seedance-credit-flow.ts + generate-polish29-seedance.ts.
+  | 'polish29_seedance';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -589,6 +596,23 @@ function estimateByPipeline(
       breakdown.push({
         item: `Storage (${variantCount} × $${V28_STORAGE.toFixed(2)})`,
         cost: round4(variantCount * V28_STORAGE),
+      });
+      break;
+    }
+    case 'polish29_seedance': {
+      // Polish-29.0.6 Commit 115: credit-backed Seedance. The
+      // estimate here is the CREDIT dollar cost (40 credits *
+      // $0.02 = $0.80 per clip), NOT the useapi.net-side vendor
+      // cost. The frontend renders this as "Costs 40 credits
+      // ($0.80)" via CostPreviewBadge; the estimator surfaces it
+      // as an ordinary dollar-cost line so the shared cost
+      // rollup keeps working.
+      const P29_CREDITS_PER_CLIP = 40;
+      const P29_CREDIT_UNIT_USD = 0.02;
+      const P29_PER_CLIP_USD = P29_CREDITS_PER_CLIP * P29_CREDIT_UNIT_USD;
+      breakdown.push({
+        item: `Seedance 2.5 via credits (${variantCount} × ${P29_CREDITS_PER_CLIP} credits @ $${P29_CREDIT_UNIT_USD.toFixed(2)})`,
+        cost: round4(variantCount * P29_PER_CLIP_USD),
       });
       break;
     }
