@@ -172,16 +172,25 @@ async function registerGoogleFlow({ token, cookieFile, label }) {
     console.error(`Cookie file is empty: ${cookieFile}`);
     process.exit(2);
   }
-  const cookie = normalizeCookieString(raw);
+  const cookiesArray = normalizeCookiesToArray(raw);
   console.log(
-    `Registering Google Flow account with cookies from ${cookieFile} (${raw.length} raw → ${cookie.length} normalized chars)…`,
+    `Registering Google Flow account with cookies from ${cookieFile} (${raw.length} raw → ${cookiesArray.length} cookie entries: ${cookiesArray.map((c) => c.name).join(', ')})…`,
   );
+  if (cookiesArray.length === 0) {
+    console.error(
+      `Parsed 0 cookies from ${cookieFile}. Check the file — it should be either\n` +
+        `  - a Cookie-Editor JSON export (starts with '['), or\n` +
+        `  - a DevTools 'Storage → Cookies' table paste (tab-separated rows), or\n` +
+        `  - a flat 'name=v; name2=v2' Cookie header string.`,
+    );
+    process.exit(2);
+  }
   const { status, body } = await callUseapi({
     method: 'POST',
     path: `/google-flow/accounts`,
     token,
     body: {
-      cookies: cookie,
+      cookies: cookiesArray,
       ...(label ? { label } : {}),
     },
   });
@@ -228,32 +237,27 @@ async function main() {
 }
 
 /**
- * useapi.net's Google Flow expects cookies as the JSON array format
- * that browser extensions like Cookie-Editor / EditThisCookie export
- * — one object per cookie with at least { name, value, domain }. A
- * plain Cookie header ('a=b; c=d') gets rejected with "No cookies
- * could be parsed from input".
+ * useapi.net's Google Flow expects `cookies` in the request body as an
+ * ACTUAL JSON array (not a stringified one), Cookie-Editor style:
+ *   [{ name, value, domain, path, secure, httpOnly, sameSite }, ...]
  *
- * This helper accepts THREE input formats and always normalizes to a
- * JSON-stringified array of cookie objects:
- *   1. JSON array already (from Cookie-Editor export)  — passthrough
- *   2. DevTools 'Storage → Cookies' table paste, tab-separated rows —
- *      convert each row (name<TAB>value<TAB>domain<TAB>path<TAB>expiry
- *      <TAB>size<TAB>secure<TAB>httpOnly<TAB>sameSite) to a cookie obj
- *   3. Flat Cookie header ('a=b; c=d') — split on '; ', domain defaults
- *      to '.labs.google' (Google-Flow-specific — good enough for MVP)
+ * Accepts three input flavors and always returns an array:
+ *   1. JSON array already (from Cookie-Editor export)  — parsed & used
+ *   2. DevTools 'Storage → Cookies' tab-separated table — parsed
+ *   3. Flat 'a=b; c=d' Cookie header — parsed, domain defaults to
+ *      '.labs.google'
  */
-function normalizeCookieString(raw) {
+function normalizeCookiesToArray(raw) {
   const trimmed = raw.trim();
-  if (!trimmed) return '';
+  if (!trimmed) return [];
 
   // Case 1 — already a JSON array from Cookie-Editor / EditThisCookie.
   if (trimmed.startsWith('[')) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return JSON.stringify(parsed);
+      if (Array.isArray(parsed)) return parsed;
     } catch {
-      // Fall through to other parsers.
+      // Fall through.
     }
   }
 
@@ -275,10 +279,10 @@ function normalizeCookieString(raw) {
         path: path || '/',
         secure: name.startsWith('__Secure-') || name.startsWith('__Host-'),
         httpOnly: true,
-        sameSite: 'lax',
+        sameSite: 'Lax',
       });
     }
-    return JSON.stringify(cookies);
+    return cookies;
   }
 
   // Case 3 — flat 'name=value; name2=value2' cookie header.
@@ -296,10 +300,10 @@ function normalizeCookieString(raw) {
       path: '/',
       secure: name.startsWith('__Secure-') || name.startsWith('__Host-'),
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'Lax',
     });
   }
-  return JSON.stringify(cookies);
+  return cookies;
 }
 
 main().catch((err) => {
