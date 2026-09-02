@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.6';
+export const POLISH_VERSION = '29.0.7';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.6';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.6 Commit 115 - Seedance credit-backed generation live end-to-end. Registers generate-polish29-seedance Inngest worker that wraps runSeedanceCreditedJob (Commit 114) with job-status lifecycle + errorMessage translation. Adds a polish29_seedance PipelineType descriptor + cost-estimator branch (40 credits @ $0.02 = $0.80/clip). Extends admin /admin/test-actions with a Seedance smoke-test card (prompt + dreamina account inputs, one button) so the full stack can be exercised without shipping a public form. First credits-mode pipeline registered end-to-end; Commit 116 will onboard-rewrite for it.';
+  'Polish-29.0.7 Commit 116 - user-facing Quick Seedance video generator. Adds /generate/seedance route (icon-rail Sparkles nav item), single-prompt form with aspect-ratio + duration pickers, live CostPreviewBadge showing "40 credits ($0.80) save 82%" that turns red if balance is short, and startSeedanceGeneration server action that fail-fast balance-checks then dispatches the polish29_seedance event. Every user can now hit the credit-backed Seedance path without touching admin. Platform routes to USEAPI_NET_DEFAULT_DREAMINA_ACCOUNT; per-user account round-robin is a future commit when we scale past one Dreamina Pro sub. Commit 117 kills the connect-a-key onboarding wall next.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -11,6 +11,7 @@ import {
   Plug,
   Rocket,
   Settings,
+  Sparkles,
   Workflow,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -40,6 +41,15 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  // Polish-29.0.7 Commit 116: Quick Seedance — the one-prompt credit-
+  // backed video generator. Sits above Concepts so first-time users
+  // discover the fastest path to a first output.
+  {
+    href: '/generate/seedance',
+    label: 'Quick video',
+    icon: Sparkles,
+    matchPrefix: '/generate/seedance',
+  },
   { href: '/concepts', label: 'Concepts', icon: FileVideo, matchPrefix: '/concepts' },
   { href: '/runs', label: 'Runs', icon: Workflow, matchPrefix: '/runs' },
   { href: '/pending', label: 'Pending', icon: ListTodo, matchPrefix: '/pending' },
