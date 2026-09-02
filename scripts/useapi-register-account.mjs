@@ -180,7 +180,7 @@ async function registerGoogleFlow({ token, cookieFile, label }) {
     path: `/google-flow/accounts`,
     token,
     body: {
-      cookie,
+      cookies: cookie,
       ...(label ? { label } : {}),
     },
   });

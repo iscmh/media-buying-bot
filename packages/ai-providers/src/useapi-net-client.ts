@@ -194,7 +194,7 @@ export async function registerGoogleFlowAccount(input: {
     method: 'POST',
     headers: authHeaders(),
     body: {
-      cookie: input.account.cookieHeader,
+      cookies: input.account.cookieHeader,
       label: input.account.label,
     },
     // Do NOT log the cookie header — it's a session credential.
