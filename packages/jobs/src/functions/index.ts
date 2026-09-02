@@ -30,6 +30,12 @@ import { generatePolish28VariationsUgc } from './generate-polish28-variations-ug
 // via useapi.net → Dreamina. First credits-mode worker end-to-end;
 // wraps the tested seedance-credit-flow helper.
 import { generatePolish29Seedance } from './generate-polish29-seedance';
+// Polish-29.0.10 Commit 119: credit-backed multi-clip Seedance
+// VARIATIONS. Feed a winning creative → N cloned-character variants,
+// each M × 8s Seedance clips concatenated to source-ad length. Uses
+// Nano Banana Pro for character anchor + Claude batch for N distinct
+// persona+script pairs + Replicate ffmpeg concat for the composite.
+import { generatePolish29SeedanceVariations } from './generate-polish29-seedance-variations';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -96,6 +102,12 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // credit-costed models run through the shared reserve/consume/
   // release flow.
   'generation/polish29-seedance.requested',
+  // Polish-29.0.10 Commit 119: credit-backed multi-clip Seedance
+  // variations. Feed a winning creative → N cloned-character variants
+  // matching the source ad's length. The video render itself pays in
+  // credits; Claude + Gemini + Replicate BYOK cover the char ref,
+  // persona+script batch, and clip concat.
+  'generation/polish29-seedance-variations.requested',
 ] as const);
 
 export const functions = [
@@ -126,6 +138,8 @@ export const functions = [
   generatePolish28VariationsUgc,
   // Polish-29.0.6 Commit 115: credit-backed Seedance worker.
   generatePolish29Seedance,
+  // Polish-29.0.10 Commit 119: multi-clip Seedance variations worker.
+  generatePolish29SeedanceVariations,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

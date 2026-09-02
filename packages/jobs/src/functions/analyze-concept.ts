@@ -428,6 +428,10 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   // Descriptor now dispatches this event; typing the union keeps
   // analyze-concept in lockstep with pipeline-descriptors.ts.
   | 'generation/polish29-seedance.requested'
+  // Polish-29.0.10 Commit 119: credit-backed multi-clip Seedance
+  // variations. Descriptor lookup returns this event for the
+  // polish29_seedance_variations pipeline.
+  | 'generation/polish29-seedance-variations.requested'
 > {
   try {
     const db = getDb();

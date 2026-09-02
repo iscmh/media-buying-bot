@@ -55,7 +55,12 @@ export interface PipelineDescriptor {
     | 'generation/polish28-variations-ugc.requested'
     // Polish-29.0.6 Commit 115: credit-backed Seedance via useapi.net →
     // Dreamina. First credits-mode worker.
-    | 'generation/polish29-seedance.requested';
+    | 'generation/polish29-seedance.requested'
+    // Polish-29.0.10 Commit 119: credit-backed multi-clip Seedance
+    // variations. Same shape as polish28_variations_ugc but the video
+    // render pays in credits (per-clip reserve via
+    // runSeedanceCreditedJob) instead of HeyGen BYOK.
+    | 'generation/polish29-seedance-variations.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -202,6 +207,21 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     // seedance-credit-flow.ts) so nothing to gate at pipeline pick.
     requiredProviders: [],
   },
+  polish29_seedance_variations: {
+    pipeline: 'polish29_seedance_variations',
+    label: 'Seedance variations (credits)',
+    // Same "no provider choice" story as polish29_seedance — the
+    // video render pays in credits via the platform-side useapi.net
+    // token + registered Dreamina account. Character reference,
+    // persona+script batch, and clip concat still need BYOK.
+    providerChoice: 'clone_ugc',
+    format: 'polish29_seedance_variations',
+    workerEvent: 'generation/polish29-seedance-variations.requested',
+    // Claude (persona+script batch), Gemini (Nano Banana Pro
+    // character), Replicate (ffmpeg concat). Seedance itself pays
+    // in credits so no useapi.net key is required here.
+    requiredProviders: ['claude', 'gemini', 'replicate'],
+  },
 };
 
 export function describePipeline(pipeline: PipelineType): PipelineDescriptor {
@@ -274,4 +294,8 @@ export const ALL_PIPELINES: PipelineType[] = [
   'polish28_variations_ugc',
   // Polish-29.0.6 Commit 115: credit-backed Seedance via useapi.net.
   'polish29_seedance',
+  // Polish-29.0.10 Commit 119: credit-backed multi-clip Seedance
+  // variations. Feed a winning creative → N cloned-character variants
+  // each matching the source ad's length.
+  'polish29_seedance_variations',
 ];

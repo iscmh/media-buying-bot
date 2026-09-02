@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.9';
+export const POLISH_VERSION = '29.0.10';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.9';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.9 Commit 118 - Seedance model selector: 2.0 Fast / 2.0 / 2.5. Extends credit-pricing with seedance-2-0-ugc (20 cr, $0.40) + seedance-2-0-fast-ugc (10 cr, $0.20) alongside the existing seedance-2-5-ugc (40 cr, $0.80). Wraps useapi.net submitSeedanceVideo model union with 2.0-fast/2.0-mini/1.5-pro. Threads a chosen credit-model id through the Quick Seedance form -> server action -> Inngest event -> credit-flow helper. Quick Seedance form now surfaces a 3-card model picker with per-tier cost + low-balance warning. Commit 119 wires this into the variations concept flow so uploaded winning creatives spawn N Seedance-rendered variants.';
+  'Polish-29.0.10 Commit 119 - credit-backed multi-clip Seedance VARIATIONS. Feed a winning creative -> Claude batches N distinct persona+script pairs -> each variant renders as one Nano Banana Pro character PNG threaded into M ~8s Seedance i2v clips (image ref locked + persona-lock text prefix) -> Replicate ffmpeg-concat stitches to a single composite matching the source ad length. First credit-backed pipeline that clones the polish28_variations_ugc shape but pays the video render in credits (per-clip reserve via runSeedanceCreditedJob) instead of HeyGen BYOK. Requires Claude + Gemini + Replicate BYOK for the character/script/concat sides. Registers a new worker (generate-polish29-seedance-variations), event (generation/polish29-seedance-variations.requested), pipeline (polish29_seedance_variations), descriptor + estimator branch. Cost example: 5 variants x 4 clips x 20 credits (Seedance 2.0) = 400 credits = $8 in credits (~82% cheaper than direct Dreamina retail).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

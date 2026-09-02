@@ -172,7 +172,16 @@ export type PipelineType =
   // failure. Retail equivalent ~$4.50 per Seedance 2.5 clip → ~82%
   // user-facing savings vs direct Dreamina API. See
   // seedance-credit-flow.ts + generate-polish29-seedance.ts.
-  | 'polish29_seedance';
+  | 'polish29_seedance'
+  // Polish-29.0.10 Commit 119: credit-backed multi-clip Seedance
+  // VARIATIONS. Feed a winning creative → Claude batches N distinct
+  // persona+script pairs → each variant renders as Nano Banana
+  // character PNG + M ~8s Seedance clips (image ref locked, prompt
+  // persona-locked) → Replicate ffmpeg concat → one composite per
+  // variant matching source ad length. First credit-backed pipeline
+  // that mirrors the polish28_variations_ugc shape but pays the
+  // video render in credits instead of HeyGen BYOK.
+  | 'polish29_seedance_variations';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -613,6 +622,49 @@ function estimateByPipeline(
       breakdown.push({
         item: `Seedance 2.5 via credits (${variantCount} × ${P29_CREDITS_PER_CLIP} credits @ $${P29_CREDIT_UNIT_USD.toFixed(2)})`,
         cost: round4(variantCount * P29_PER_CLIP_USD),
+      });
+      break;
+    }
+    case 'polish29_seedance_variations': {
+      // Polish-29.0.10 Commit 119: multi-clip Seedance variations.
+      // Per-variant = M clips × per-clip credit dollar cost. Model
+      // tier chosen at request time (Seedance 2.0 Fast / 2.0 / 2.5)
+      // so we surface the mid-tier default (Seedance 2.0 = 20
+      // credits) as the estimator baseline. Actual credit spend at
+      // reserve time uses the runtime metadata.model_id from the
+      // job row. Plus a Claude batch, N × Nano Banana Pro
+      // characters, N × Replicate concat.
+      const V29_CLAUDE_BATCH = 0.05;
+      const V29_NANO_BANANA = 0.13;
+      const V29_REPLICATE_CONCAT = 0.02;
+      const V29_STORAGE = 0.02;
+      // Duration → clip count. 8s per Seedance clip; 30s → 4 clips.
+      const target29 = targetSecondsHint ?? 30;
+      const clipCount = Math.max(2, Math.min(10, Math.round(target29 / 8)));
+      const V29_CREDIT_UNIT_USD = 0.02;
+      const V29_CREDITS_PER_CLIP_DEFAULT = 20; // Seedance 2.0 tier baseline
+      const V29_PER_CLIP_USD = V29_CREDITS_PER_CLIP_DEFAULT * V29_CREDIT_UNIT_USD;
+      breakdown.push({
+        item: `Claude persona+script batch (1 call, produces ${variantCount} pairs)`,
+        cost: round4(V29_CLAUDE_BATCH),
+      });
+      breakdown.push({
+        item: `Nano Banana Pro character (${variantCount} × $${V29_NANO_BANANA.toFixed(2)})`,
+        cost: round4(variantCount * V29_NANO_BANANA),
+      });
+      breakdown.push({
+        item:
+          `Seedance clips (${variantCount} variants × ${clipCount} clips × ` +
+          `${V29_CREDITS_PER_CLIP_DEFAULT} credits @ $${V29_CREDIT_UNIT_USD.toFixed(2)})`,
+        cost: round4(variantCount * clipCount * V29_PER_CLIP_USD),
+      });
+      breakdown.push({
+        item: `Replicate ffmpeg-concat (${variantCount} × $${V29_REPLICATE_CONCAT.toFixed(2)})`,
+        cost: round4(variantCount * V29_REPLICATE_CONCAT),
+      });
+      breakdown.push({
+        item: `Storage (${variantCount} × $${V29_STORAGE.toFixed(2)})`,
+        cost: round4(variantCount * V29_STORAGE),
       });
       break;
     }

@@ -78,7 +78,7 @@ describe('Polish-20 Commit 4: defaultPipeline throws — no pipeline-level defau
   });
 });
 
-describe('Polish-20 Commit 4 → Polish-29 Commit 115: ALL_PIPELINES coverage', () => {
+describe('Polish-20 Commit 4 → Polish-29 Commit 119: ALL_PIPELINES coverage', () => {
   it('covers legacy survivors + Polish-25.3 + Polish-28 + Polish-29 pipelines', () => {
     // Polish-27.0.0 Commit 63 narrowed ALL_PIPELINES to REGISTERED
     // pipelines only (dispatch-coverage tripwire would otherwise
@@ -90,6 +90,8 @@ describe('Polish-20 Commit 4 → Polish-29 Commit 115: ALL_PIPELINES coverage', 
     // Polish-28.3.0 Commit 85 added polish28_variations_ugc.
     // Polish-29.0.6 Commit 115 added polish29_seedance (first
     // credits-mode pipeline).
+    // Polish-29.0.10 Commit 119 added polish29_seedance_variations
+    // (credit-backed multi-clip Seedance variations flow).
     const expected: PipelineType[] = [
       'heygen_avatar_talking_head',
       'sora_2_single_shot',
@@ -98,6 +100,7 @@ describe('Polish-20 Commit 4 → Polish-29 Commit 115: ALL_PIPELINES coverage', 
       'polish28_clone_ugc',
       'polish28_variations_ugc',
       'polish29_seedance',
+      'polish29_seedance_variations',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
   });
