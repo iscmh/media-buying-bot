@@ -167,13 +167,14 @@ async function registerGoogleFlow({ token, cookieFile, label }) {
     console.error('Google Flow registration requires --cookie-file');
     printUsageAndExit(2);
   }
-  const cookie = readFileSync(cookieFile, 'utf8').trim();
-  if (!cookie) {
+  const raw = readFileSync(cookieFile, 'utf8').trim();
+  if (!raw) {
     console.error(`Cookie file is empty: ${cookieFile}`);
     process.exit(2);
   }
+  const cookie = normalizeCookieString(raw);
   console.log(
-    `Registering Google Flow account with cookies from ${cookieFile} (${cookie.length} chars)…`,
+    `Registering Google Flow account with cookies from ${cookieFile} (${raw.length} raw → ${cookie.length} normalized chars)…`,
   );
   const { status, body } = await callUseapi({
     method: 'POST',
@@ -224,6 +225,38 @@ async function main() {
     cookieFile: args.cookieFile,
     label: args.label,
   });
+}
+
+/**
+ * Accept the DevTools "Storage → Cookies" table paste (tab-separated
+ * rows: name<TAB>value<TAB>domain<TAB>path<TAB>...) AND the already-
+ * flat `name=value; name2=value2` cookie header. Auto-detects by
+ * looking for tabs and `=` inside the first non-empty line.
+ *
+ * Returns a proper Cookie header: `name1=value1; name2=value2; ...`.
+ */
+function normalizeCookieString(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  // Already looks like a flat cookie header: no tabs, has key=value pairs
+  // separated by ;.
+  if (!trimmed.includes('\t') && trimmed.includes('=') && !trimmed.includes('\n')) {
+    return trimmed;
+  }
+  const pairs = [];
+  for (const rawLine of trimmed.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const parts = line.split('\t').map((p) => p.trim());
+    // DevTools table rows always start with name<TAB>value<TAB>...
+    if (parts.length < 2) continue;
+    const [name, value] = parts;
+    if (!name || value == null) continue;
+    // Skip header-ish rows if any.
+    if (name.toLowerCase() === 'name' && value.toLowerCase() === 'value') continue;
+    pairs.push(`${name}=${value}`);
+  }
+  return pairs.join('; ');
 }
 
 main().catch((err) => {
