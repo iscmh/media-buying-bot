@@ -23,6 +23,18 @@ import { getDb } from './client';
 import { creditReservations, creditsBalance, creditTransactions, fraudSignals } from './schema';
 
 // -----------------------------------------------------------------
+// Types shared by helpers below
+// -----------------------------------------------------------------
+
+export type AddCreditsType =
+  | 'signup_trial'
+  | 'purchase'
+  | 'sub_monthly_topup'
+  | 'sub_bonus'
+  | 'admin_adjust'
+  | 'refund_on_fail';
+
+// -----------------------------------------------------------------
 // Errors
 // -----------------------------------------------------------------
 
@@ -78,13 +90,7 @@ export async function getCreditBalance(userId: string): Promise<{
 export async function addCredits(input: {
   userId: string;
   credits: number;
-  type:
-    | 'signup_trial'
-    | 'purchase'
-    | 'sub_monthly_topup'
-    | 'sub_bonus'
-    | 'admin_adjust'
-    | 'refund_on_fail';
+  type: AddCreditsType;
   refId?: string;
   description?: string;
   metadata?: Record<string, unknown>;
@@ -131,6 +137,56 @@ export async function addCredits(input: {
   });
 
   return { balance };
+}
+
+/**
+ * Polish-29.0.2 Commit 111: idempotent variant of addCredits.
+ *
+ * A (userId, type, refId) tuple grants exactly once. Whop webhook
+ * deliveries retry on any non-2xx, so the same `payment.succeeded`
+ * event can hit our /api/webhooks/whop endpoint multiple times —
+ * each retry MUST NOT re-grant credits. The outer webhook is
+ * already idempotent on whop_events.whop_event_id, but that's a
+ * belt-and-suspenders defense at the storage layer: this helper is
+ * the suspenders at the credit-ledger layer, so a bug (or manual
+ * replay) upstream can't drain the runway.
+ *
+ * refId contract:
+ *   sub_monthly_topup → Whop payment.id (unique per renewal charge)
+ *   purchase          → Whop payment.id (unique per pack purchase)
+ *   signup_trial      → user_id (unique per user — grants once, ever)
+ *   sub_bonus         → whatever caller passes, must be unique
+ *
+ * Returns granted=false when the type+refId+userId already exists;
+ * caller can log 'already granted' and move on without an error.
+ */
+export async function addCreditsIdempotent(input: {
+  userId: string;
+  credits: number;
+  type: AddCreditsType;
+  /** REQUIRED — this is the idempotency key. */
+  refId: string;
+  description?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<{ balance: number; granted: boolean }> {
+  if (!input.refId) {
+    throw new Error(`addCreditsIdempotent requires a non-empty refId (type=${input.type})`);
+  }
+  const db = getDb();
+  const existing = await db.query.creditTransactions.findFirst({
+    where: and(
+      eq(creditTransactions.userId, input.userId),
+      eq(creditTransactions.type, input.type),
+      eq(creditTransactions.refId, input.refId),
+    ),
+    columns: { id: true, balanceAfter: true },
+  });
+  if (existing) {
+    const current = await getCreditBalance(input.userId);
+    return { balance: current.balance, granted: false };
+  }
+  const { balance } = await addCredits(input);
+  return { balance, granted: true };
 }
 
 /**

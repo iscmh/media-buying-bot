@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.1';
+export const POLISH_VERSION = '29.0.2';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.1';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.1 Commit 110 - useapi.net client wrapper. Adds packages/ai-providers/src/useapi-net-client.ts with one bearer-token surface for Google Flow (Veo, Nano Banana) + Dreamina (Seedance, Seedream): account registration, asset upload, video/image submit, and shared job polling. Chokepoint provider list gains useapi_net so every call is audit-logged uniformly with the rest of the AI stack. Commit 111 wires the Whop webhook + credit top-up on top; Commit 112 the provider router that decides BYOK vs credits per model.';
+  'Polish-29.0.2 Commit 111 - Whop webhook credit grants. Grants free-trial credits (100) on first login, monthly PRO credits (2500) on each Whop payment.succeeded for the sub product, and top-up pack credits (500/2500/10000+bonus) on payment.succeeded for pack SKUs. Every grant is idempotent via addCreditsIdempotent keyed on Whop payment.id (renewals get fresh credits, retries do not). Adds packages/db credit helpers, apps/web/lib/whop/credit-grants.ts, and extends the existing /api/webhooks/whop dispatch. Commit 112: provider router that decides BYOK vs credits per model; Commit 113: frontend credit UX (balance widget, cost preview, savings badge).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

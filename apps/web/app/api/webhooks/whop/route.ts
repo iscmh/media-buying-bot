@@ -13,6 +13,12 @@ import {
   productIdToPlanTier,
   type WhopMembershipSummary,
 } from '@/lib/whop/client';
+import {
+  grantProMonthlyForPayment,
+  grantTopupPackForPayment,
+  isProSubscriptionProduct,
+  resolveTopupPackForProductId,
+} from '@/lib/whop/credit-grants';
 import { verifyWhopSignature } from '@/lib/whop/signature';
 
 /**
@@ -230,13 +236,83 @@ async function handlePaymentSucceeded(
   // from the admin approval flow. Use it to mark the application paid.
   const appId =
     typeof m.metadata.application_id === 'string' ? (m.metadata.application_id as string) : null;
-  if (!appId) return;
-  const db = getDb();
-  await db
-    .update(schema.applications)
-    .set({ status: 'paid', paidAt: new Date() })
-    .where(eq(schema.applications.id, appId));
-  void data;
+  if (appId) {
+    const db = getDb();
+    await db
+      .update(schema.applications)
+      .set({ status: 'paid', paidAt: new Date() })
+      .where(eq(schema.applications.id, appId));
+  }
+
+  // Polish-29.0.2 Commit 111: credit grants triggered by payment.
+  // Whop pattern:
+  //   - initial signup: one membership.went_valid + one payment.succeeded
+  //     for the same charge (both fire; we grant on payment).
+  //   - monthly renewal: only payment.succeeded fires; new payment.id.
+  //   - top-up pack purchase: one payment.succeeded with the pack's
+  //     product_id; no membership.
+  //
+  // Payment id is the idempotency key so retries + parallel handlers
+  // never double-grant. userId is resolved by joining membership.email
+  // → users.email; if the user hasn't signed up yet the credits are
+  // deferred (subscription row keeps pending_email; user reconciles
+  // when they later sign up — followup ticket).
+  const payment = extractPayment(data);
+  if (!payment.id || !payment.productId) return;
+
+  const userId = await lookupUserIdByEmail(m.email);
+  if (!userId) {
+    // No user yet. Log-level warning at most; the sub row will carry
+    // pending_email so we can reconcile on signup.
+    return;
+  }
+
+  if (isProSubscriptionProduct(payment.productId)) {
+    await grantProMonthlyForPayment({
+      userId,
+      whopPaymentId: payment.id,
+      whopMembershipId: m.id || null,
+      whopProductId: payment.productId,
+    });
+    return;
+  }
+
+  const pack = resolveTopupPackForProductId(payment.productId);
+  if (pack) {
+    await grantTopupPackForPayment({
+      userId,
+      whopPaymentId: payment.id,
+      pack,
+    });
+    return;
+  }
+  // Unknown product — payment landed but we don't grant. Operator
+  // can hand-adjust with admin_adjust if legit.
+}
+
+/**
+ * Pull the payment id + product id out of a Whop payment.succeeded
+ * payload. Whop's schema has shifted between versions; accept a few
+ * common shapes so a future rev doesn't silently break credit grants.
+ */
+function extractPayment(data: Record<string, unknown>): {
+  id: string | null;
+  productId: string | null;
+} {
+  const id =
+    (typeof data.id === 'string' && data.id) ||
+    (typeof (data.payment as { id?: string } | undefined)?.id === 'string' &&
+      (data.payment as { id: string }).id) ||
+    (typeof data.payment_id === 'string' && data.payment_id) ||
+    null;
+  const productId =
+    (typeof data.product_id === 'string' && data.product_id) ||
+    (typeof (data.product as { id?: string } | undefined)?.id === 'string' &&
+      (data.product as { id: string }).id) ||
+    (typeof (data.plan as { product_id?: string } | undefined)?.product_id === 'string' &&
+      (data.plan as { product_id: string }).product_id) ||
+    null;
+  return { id, productId };
 }
 
 async function handlePaymentFailed(m: WhopMembershipSummary): Promise<void> {

@@ -2,6 +2,7 @@ import { eq, sql } from 'drizzle-orm';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getDb, logAuditEvent, schema } from '@mbb/db';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
+import { grantSignupTrial } from '@/lib/whop/credit-grants';
 
 /**
  * OAuth + email-confirm callback. Supabase posts here with `?code=...`.
@@ -38,6 +39,13 @@ export async function GET(request: NextRequest) {
     if (inviteCookie?.value) {
       await redeemOAuthInviteCode(inviteCookie.value);
     }
+
+    // Polish-29.0.2 Commit 111 — grant the free-trial credits on
+    // first login. Idempotent via addCreditsIdempotent(refId=userId),
+    // so every subsequent auth callback (session refresh, re-login)
+    // hits the fast path and no-ops.
+    await grantSignupTrialForCurrentUser();
+
     const response = NextResponse.redirect(`${origin}${next}`);
     // Clear regardless — single-use either way.
     response.cookies.set(INVITE_COOKIE, '', { path: '/', maxAge: 0 });
@@ -126,5 +134,22 @@ async function redeemOAuthInviteCode(inviteCodeId: string): Promise<void> {
     // Swallow — the user is already authenticated. An admin can fix
     // the missing redemption manually if needed.
     console.error('[auth-callback] redeemOAuthInviteCode failed', err);
+  }
+}
+
+/**
+ * Polish-29.0.2 Commit 111 — free-trial credits on first login.
+ * Best-effort: never block the auth flow on a credit-ledger issue.
+ */
+async function grantSignupTrialForCurrentUser(): Promise<void> {
+  try {
+    const supabase = await getSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    await grantSignupTrial(user.id);
+  } catch (err) {
+    console.error('[auth-callback] grantSignupTrialForCurrentUser failed', err);
   }
 }

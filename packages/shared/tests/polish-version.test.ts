@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.1 (Polish-29.0.1 Commit 110 — useapi.net client wrapper: bearer-token surface + account registration + submit/poll for Google Flow & Dreamina)', () => {
+  it('is currently 29.0.2 (Polish-29.0.2 Commit 111 — Whop webhook credit grants: signup trial, PRO monthly, top-up packs; all idempotent via payment.id)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.1');
+    expect(POLISH_VERSION).toBe('29.0.2');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

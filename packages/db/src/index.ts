@@ -109,6 +109,7 @@ export {
 
 export {
   addCredits,
+  addCreditsIdempotent,
   consumeReservation,
   expireStaleReservations,
   getCreditBalance,
@@ -116,4 +117,5 @@ export {
   releaseReservation,
   reserveCredits,
   ReservationNotFoundError,
+  type AddCreditsType,
 } from './credits';
