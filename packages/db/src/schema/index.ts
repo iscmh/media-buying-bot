@@ -27,3 +27,4 @@ export * from './error-log';
 export * from './api-keys';
 export * from './api-request-log';
 export * from './heygen-avatar-index';
+export * from './credits';

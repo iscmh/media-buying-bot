@@ -29,4 +29,5 @@ export * from './polish23-character-lock';
 export * from './polish23-vision-analysis';
 export * from './persona-synthesizer';
 export * from './redact';
+export * from './credit-pricing';
 export * as env from './env';

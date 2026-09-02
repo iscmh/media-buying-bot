@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '28.4.10';
+export const POLISH_VERSION = '29.0.0';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '28.4.10';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-28.4.10 Commit 108 - launch-readiness fast fixes from the ship audit. Variant-count input holds a raw string (users can retype without min-clamp-on-keystroke); iOS numeric keyboard on the field. /runs/[id] concept lookup tightened with a userId ownership filter (belt-and-suspenders — job was already scoped, but tightening the concept query guards future refactors). Whop signup cookies secure-flag now keys on NODE_ENV=production instead of NEXT_PUBLIC_SITE_URL presence, so missing env in prod cant ship the cookie over HTTP.';
+  'Polish-29.0.0 Commit 109 - credit system foundations. Adds credit_pricing (single source of truth for credit costs + retail savings % per model), 4 DB tables (credits_balance / credit_transactions / credit_reservations / fraud_signals), and the runtime spend flow (reserveCredits, consumeReservation, releaseReservation, addCredits, expireStaleReservations). No user-facing surface yet — Commit 110 will wire the Whop webhook + useapi.net wrapper on top of this foundation.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

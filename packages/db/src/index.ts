@@ -106,3 +106,14 @@ export {
   RATE_LIMIT_WINDOW_SECONDS,
   type RateLimitCheck,
 } from './api-rate-limit';
+
+export {
+  addCredits,
+  consumeReservation,
+  expireStaleReservations,
+  getCreditBalance,
+  InsufficientCreditsError,
+  releaseReservation,
+  reserveCredits,
+  ReservationNotFoundError,
+} from './credits';
