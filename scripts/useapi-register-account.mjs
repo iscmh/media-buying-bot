@@ -228,35 +228,78 @@ async function main() {
 }
 
 /**
- * Accept the DevTools "Storage → Cookies" table paste (tab-separated
- * rows: name<TAB>value<TAB>domain<TAB>path<TAB>...) AND the already-
- * flat `name=value; name2=value2` cookie header. Auto-detects by
- * looking for tabs and `=` inside the first non-empty line.
+ * useapi.net's Google Flow expects cookies as the JSON array format
+ * that browser extensions like Cookie-Editor / EditThisCookie export
+ * — one object per cookie with at least { name, value, domain }. A
+ * plain Cookie header ('a=b; c=d') gets rejected with "No cookies
+ * could be parsed from input".
  *
- * Returns a proper Cookie header: `name1=value1; name2=value2; ...`.
+ * This helper accepts THREE input formats and always normalizes to a
+ * JSON-stringified array of cookie objects:
+ *   1. JSON array already (from Cookie-Editor export)  — passthrough
+ *   2. DevTools 'Storage → Cookies' table paste, tab-separated rows —
+ *      convert each row (name<TAB>value<TAB>domain<TAB>path<TAB>expiry
+ *      <TAB>size<TAB>secure<TAB>httpOnly<TAB>sameSite) to a cookie obj
+ *   3. Flat Cookie header ('a=b; c=d') — split on '; ', domain defaults
+ *      to '.labs.google' (Google-Flow-specific — good enough for MVP)
  */
 function normalizeCookieString(raw) {
   const trimmed = raw.trim();
   if (!trimmed) return '';
-  // Already looks like a flat cookie header: no tabs, has key=value pairs
-  // separated by ;.
-  if (!trimmed.includes('\t') && trimmed.includes('=') && !trimmed.includes('\n')) {
-    return trimmed;
+
+  // Case 1 — already a JSON array from Cookie-Editor / EditThisCookie.
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return JSON.stringify(parsed);
+    } catch {
+      // Fall through to other parsers.
+    }
   }
-  const pairs = [];
-  for (const rawLine of trimmed.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const parts = line.split('\t').map((p) => p.trim());
-    // DevTools table rows always start with name<TAB>value<TAB>...
-    if (parts.length < 2) continue;
-    const [name, value] = parts;
-    if (!name || value == null) continue;
-    // Skip header-ish rows if any.
-    if (name.toLowerCase() === 'name' && value.toLowerCase() === 'value') continue;
-    pairs.push(`${name}=${value}`);
+
+  // Case 2 — DevTools table paste: tab-separated rows.
+  if (trimmed.includes('\t')) {
+    const cookies = [];
+    for (const rawLine of trimmed.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const parts = line.split('\t').map((p) => p.trim());
+      if (parts.length < 2) continue;
+      const [name, value, domain, path] = parts;
+      if (!name || value == null) continue;
+      if (name.toLowerCase() === 'name' && value.toLowerCase() === 'value') continue;
+      cookies.push({
+        name,
+        value,
+        domain: domain || '.labs.google',
+        path: path || '/',
+        secure: name.startsWith('__Secure-') || name.startsWith('__Host-'),
+        httpOnly: true,
+        sameSite: 'lax',
+      });
+    }
+    return JSON.stringify(cookies);
   }
-  return pairs.join('; ');
+
+  // Case 3 — flat 'name=value; name2=value2' cookie header.
+  const cookies = [];
+  for (const pair of trimmed.split(/;\s*/)) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const name = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1).trim();
+    if (!name) continue;
+    cookies.push({
+      name,
+      value,
+      domain: '.labs.google',
+      path: '/',
+      secure: name.startsWith('__Secure-') || name.startsWith('__Host-'),
+      httpOnly: true,
+      sameSite: 'lax',
+    });
+  }
+  return JSON.stringify(cookies);
 }
 
 main().catch((err) => {
