@@ -32,12 +32,24 @@ import { getSupabaseServerClient } from '@/lib/supabase/server';
 
 export interface StartSeedanceGenerationInput {
   prompt: string;
+  /**
+   * Credit-pricing model id. Polish-29.0.9 Commit 118:
+   * 'seedance-2-5-ugc' (40 cr) | 'seedance-2-0-ugc' (20 cr)
+   * | 'seedance-2-0-fast-ugc' (10 cr). Defaults to 'seedance-2-5-ugc'.
+   */
+  modelId?: string;
   aspectRatio?: '9:16' | '1:1' | '16:9';
   durationSeconds?: 5 | 8;
   resolution?: '720p' | '1080p';
   /** Optional — attach the run to a concept so the row shows up in the concept view. */
   conceptId?: string;
 }
+
+const ALLOWED_MODEL_IDS = new Set([
+  'seedance-2-5-ugc',
+  'seedance-2-0-ugc',
+  'seedance-2-0-fast-ugc',
+]);
 
 export interface StartSeedanceGenerationResult {
   ok: boolean;
@@ -46,7 +58,7 @@ export interface StartSeedanceGenerationResult {
   runHref?: string;
 }
 
-const MODEL_ID = 'seedance-2-5-ugc';
+const DEFAULT_MODEL_ID = 'seedance-2-5-ugc';
 const MAX_PROMPT_CHARS = 2000;
 
 export async function startSeedanceGeneration(
@@ -70,13 +82,15 @@ export async function startSeedanceGeneration(
   // Fail-fast balance check. reserveCredits (inside the worker) is
   // still the source of truth — this is just to spare the user a
   // "job created → immediately failed" bounce when they're clearly short.
-  const preview = getModelCostPreview(MODEL_ID);
+  const modelId =
+    input.modelId && ALLOWED_MODEL_IDS.has(input.modelId) ? input.modelId : DEFAULT_MODEL_ID;
+  const preview = getModelCostPreview(modelId);
   if (!preview) return { ok: false, errorMessage: 'Model not configured.' };
   const balance = await getCreditBalance(user.id);
   if (balance.balance < preview.credits) {
     return {
       ok: false,
-      errorMessage: `Not enough credits — Seedance costs ${preview.credits}, you have ${balance.balance}. Top up on /settings/credits and try again.`,
+      errorMessage: `Not enough credits — ${preview.displayName} costs ${preview.credits}, you have ${balance.balance}. Top up on /settings/credits and try again.`,
     };
   }
 
@@ -104,6 +118,7 @@ export async function startSeedanceGeneration(
       metadata: {
         source: 'quick_seedance_form',
         seedance_prompt: prompt,
+        seedance_model_id: modelId,
         seedance_aspect_ratio: input.aspectRatio ?? '9:16',
         seedance_duration_seconds: input.durationSeconds ?? 5,
         seedance_resolution: input.resolution ?? '720p',
@@ -122,6 +137,7 @@ export async function startSeedanceGeneration(
       userId: user.id,
       dreaminaAccount,
       prompt,
+      modelId,
       aspectRatio: input.aspectRatio,
       durationSeconds: input.durationSeconds,
       resolution: input.resolution,

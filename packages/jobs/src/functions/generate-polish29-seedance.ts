@@ -49,6 +49,11 @@ export interface Polish29SeedanceEventPayload {
   userId: string;
   dreaminaAccount: string;
   prompt: string;
+  /**
+   * Credit-pricing model id. Polish-29.0.9 Commit 118: supports
+   * 'seedance-2-5-ugc' / 'seedance-2-0-ugc' / 'seedance-2-0-fast-ugc'.
+   * Defaults to 'seedance-2-5-ugc' when omitted.
+   */
   modelId?: string;
   durationSeconds?: 5 | 8;
   aspectRatio?: '9:16' | '1:1' | '16:9';

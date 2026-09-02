@@ -497,7 +497,21 @@ export interface SubmitSeedanceVideoInput {
   prompt: string;
   referenceImage?: { assetId?: string; url?: string };
   /** 'seedance-2.5' | 'seedance-2.0'. Default 2.5. */
-  model?: 'seedance-2.5' | 'seedance-2.0';
+  /**
+   * Seedance model variant. Dreamina exposes several; useapi.net
+   * proxies each through the same /dreamina/videos endpoint.
+   *   - 'seedance-2.5'        — top-tier quality, slowest
+   *   - 'seedance-2.0'        — balanced default
+   *   - 'seedance-2.0-fast'   — cheapest, fastest, lower fidelity
+   *   - 'seedance-2.0-mini'   — 480p budget option
+   *   - 'seedance-1.5-pro'    — legacy pro tier
+   */
+  model?:
+    | 'seedance-2.5'
+    | 'seedance-2.0'
+    | 'seedance-2.0-fast'
+    | 'seedance-2.0-mini'
+    | 'seedance-1.5-pro';
   /** Duration in seconds. Seedance 2.5 caps at ~30s per useapi.net. */
   durationSeconds?: number;
   aspectRatio?: '9:16' | '1:1' | '16:9';

@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.8';
+export const POLISH_VERSION = '29.0.9';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.8';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.8 Commit 117 - kill the connect-a-key onboarding wall. Trims ONBOARDING_STEPS from tos->risk->keys to tos->risk since the default video path (credit-backed Seedance, Commits 114-116) needs zero BYOK keys. New signups get 100 free trial credits, accept ToS + Risk, then land on /dashboard where the Quick Video nav takes them straight to /generate/seedance. Zero-friction time-to-first-video. BYOK stays as an opt-in surface at /settings/connections for users who want the premium HeyGen / OpenAI / Claude / ElevenLabs pipelines. Legacy /onboarding/keys redirects to /settings/connections so old bookmarks do not 404.';
+  'Polish-29.0.9 Commit 118 - Seedance model selector: 2.0 Fast / 2.0 / 2.5. Extends credit-pricing with seedance-2-0-ugc (20 cr, $0.40) + seedance-2-0-fast-ugc (10 cr, $0.20) alongside the existing seedance-2-5-ugc (40 cr, $0.80). Wraps useapi.net submitSeedanceVideo model union with 2.0-fast/2.0-mini/1.5-pro. Threads a chosen credit-model id through the Quick Seedance form -> server action -> Inngest event -> credit-flow helper. Quick Seedance form now surfaces a 3-card model picker with per-tier cost + low-balance warning. Commit 119 wires this into the variations concept flow so uploaded winning creatives spawn N Seedance-rendered variants.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

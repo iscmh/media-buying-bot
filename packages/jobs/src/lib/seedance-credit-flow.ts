@@ -39,7 +39,13 @@ import { getCreditModel } from '@mbb/shared';
 
 export interface RunSeedanceCreditedJobInput {
   userId: string;
-  /** Credit-pricing model id (defaults to 'seedance-2-5-ugc'). */
+  /**
+   * Credit-pricing model id. Defaults to 'seedance-2-5-ugc'.
+   * Recognized: 'seedance-2-5-ugc' | 'seedance-2-0-ugc' | 'seedance-2-0-fast-ugc'.
+   * The corresponding Dreamina-side model string is picked by
+   * dreaminaModelForCreditModelId() so callers only specify the
+   * credit-pricing id.
+   */
   modelId?: string;
   /** Registered Dreamina account (email — see /accounts registration). */
   dreaminaAccount: string;
@@ -97,6 +103,31 @@ export type RunSeedanceCreditedJobResult =
 const DEFAULT_MAX_POLL_ATTEMPTS = 60;
 const DEFAULT_POLL_INTERVAL_MS = 5000;
 
+/**
+ * Polish-29.0.9 Commit 118: map a credit-pricing model id to the
+ * Dreamina-side model string that useapi.net expects. Keeping this
+ * in one function so a future rename (e.g. dropping "-ugc" suffix)
+ * only touches one place.
+ */
+type DreaminaSeedanceModel = NonNullable<Parameters<typeof submitSeedanceVideo>[0]['model']>;
+
+function dreaminaModelForCreditModelId(creditModelId: string): DreaminaSeedanceModel {
+  switch (creditModelId) {
+    case 'seedance-2-5-ugc':
+      return 'seedance-2.5';
+    case 'seedance-2-0-ugc':
+      return 'seedance-2.0';
+    case 'seedance-2-0-fast-ugc':
+      return 'seedance-2.0-fast';
+    default:
+      // Unknown credit-model id — default to 2.5. The pre-flight
+      // getCreditModel() call in runSeedanceCreditedJob already
+      // throws for genuinely-unknown ids, so this default only
+      // matters for future additions that don't have a mapping yet.
+      return 'seedance-2.5';
+  }
+}
+
 export async function runSeedanceCreditedJob(
   input: RunSeedanceCreditedJobInput,
 ): Promise<RunSeedanceCreditedJobResult> {
@@ -139,6 +170,7 @@ export async function runSeedanceCreditedJob(
       account: input.dreaminaAccount,
       prompt: input.prompt,
       referenceImage: input.referenceImage,
+      model: dreaminaModelForCreditModelId(model.id),
       durationSeconds: input.durationSeconds,
       aspectRatio: input.aspectRatio,
       resolution: input.resolution,

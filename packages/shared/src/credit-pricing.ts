@@ -101,13 +101,40 @@ export const CREDIT_MODELS: readonly CreditModel[] = [
     id: 'seedance-2-5-ugc',
     displayName: 'Seedance 2.5',
     description:
-      'ByteDance Seedance 2.5 lip-synced UGC video, up to 30 seconds. Great quality, our default UGC engine.',
+      'ByteDance Seedance 2.5 — top-tier quality, best character consistency. Slowest / most expensive of the Seedance tier.',
     provider: 'useapi.seedance',
     mode: 'credits',
     credits: 40,
     retailUsdPerAction: 4.5,
     family: 'ugc',
+    qualityTier: 'premium',
+  },
+  // Polish-29.0.9 Commit 118: Seedance 2.0 as the balanced tier.
+  // Same useapi.net/Dreamina proxy, cheaper credit cost, still
+  // supports i2v reference frames for character continuity.
+  {
+    id: 'seedance-2-0-ugc',
+    displayName: 'Seedance 2.0',
+    description:
+      'ByteDance Seedance 2.0 — balanced quality / cost. The default for most users. Half the credits of 2.5, still great character consistency.',
+    provider: 'useapi.seedance',
+    mode: 'credits',
+    credits: 20,
+    retailUsdPerAction: 2.25,
+    family: 'ugc',
     qualityTier: 'balanced',
+  },
+  {
+    id: 'seedance-2-0-fast-ugc',
+    displayName: 'Seedance 2.0 Fast',
+    description:
+      'ByteDance Seedance 2.0 Fast — cheapest Seedance tier. Fast turnaround, lower fidelity. Best when iterating on prompts before committing to 2.5.',
+    provider: 'useapi.seedance',
+    mode: 'credits',
+    credits: 10,
+    retailUsdPerAction: 1.2,
+    family: 'ugc',
+    qualityTier: 'value',
   },
   {
     id: 'heygen-avatar-iv',

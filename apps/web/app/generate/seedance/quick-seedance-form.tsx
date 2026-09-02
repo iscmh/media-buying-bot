@@ -15,9 +15,35 @@ import { startSeedanceGeneration } from './actions';
  * Commit 113 renders inline next to Generate and turns red if the
  * balance is short so the user sees the ask before submitting.
  */
+const MODEL_OPTIONS = [
+  {
+    id: 'seedance-2-0-fast-ugc',
+    label: 'Seedance 2.0 Fast',
+    credits: 10,
+    priceUsd: 0.2,
+    description: 'Cheapest — for prompt iteration.',
+  },
+  {
+    id: 'seedance-2-0-ugc',
+    label: 'Seedance 2.0',
+    credits: 20,
+    priceUsd: 0.4,
+    description: 'Balanced default.',
+  },
+  {
+    id: 'seedance-2-5-ugc',
+    label: 'Seedance 2.5',
+    credits: 40,
+    priceUsd: 0.8,
+    description: 'Top quality.',
+  },
+] as const;
+
 export function QuickSeedanceForm({ initialBalance }: { initialBalance: number }) {
   const router = useRouter();
   const [prompt, setPrompt] = React.useState('');
+  const [modelId, setModelId] =
+    React.useState<(typeof MODEL_OPTIONS)[number]['id']>('seedance-2-0-ugc');
   const [aspectRatio, setAspectRatio] = React.useState<'9:16' | '1:1' | '16:9'>('9:16');
   const [durationSeconds, setDurationSeconds] = React.useState<5 | 8>(5);
   const [pending, setPending] = React.useState(false);
@@ -34,6 +60,7 @@ export function QuickSeedanceForm({ initialBalance }: { initialBalance: number }
     try {
       const result = await startSeedanceGeneration({
         prompt,
+        modelId,
         aspectRatio,
         durationSeconds,
       });
@@ -72,6 +99,41 @@ export function QuickSeedanceForm({ initialBalance }: { initialBalance: number }
             Describe the video you want in one prompt. Seedance 2.5 handles it end-to-end.
           </span>
           <span className="tabular-nums">{prompt.length} / 2000</span>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label>Model</Label>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {MODEL_OPTIONS.map((option) => {
+            const selected = option.id === modelId;
+            const affordable = initialBalance >= option.credits;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setModelId(option.id)}
+                className={
+                  'flex flex-col items-start gap-1 rounded-lg border px-3 py-2 text-left transition ' +
+                  (selected
+                    ? 'border-fg bg-bg-surface'
+                    : 'border-border bg-bg hover:border-fg-muted') +
+                  (affordable ? '' : ' opacity-60')
+                }
+              >
+                <span className="text-fg text-sm font-semibold">{option.label}</span>
+                <span className="text-fg-muted text-xs tabular-nums">
+                  {option.credits} credits · ${option.priceUsd.toFixed(2)}
+                  {!affordable && (
+                    <span className="ml-1 text-red-600 dark:text-red-400">— low balance</span>
+                  )}
+                </span>
+                <span className="text-fg-muted text-[11px] leading-tight">
+                  {option.description}
+                </span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -128,7 +190,7 @@ export function QuickSeedanceForm({ initialBalance }: { initialBalance: number }
         <Button type="submit" disabled={pending || !prompt.trim()}>
           {pending ? 'Starting…' : 'Generate video'}
         </Button>
-        <CostPreviewBadge modelId="seedance-2-5-ugc" balance={initialBalance} />
+        <CostPreviewBadge modelId={modelId} balance={initialBalance} />
         <span className="text-fg-muted ml-auto text-xs">
           Credits are reserved when you click Generate and refunded automatically if the generation
           fails.
