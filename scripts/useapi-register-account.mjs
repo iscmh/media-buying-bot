@@ -148,6 +148,11 @@ async function registerDreamina({ token, email, password, region, label }) {
     console.error(`--region must be 'us' or 'ca' (got ${region})`);
     process.exit(2);
   }
+  if (label) {
+    console.log(
+      `(note: --label ignored — useapi.net's /dreamina/accounts does not accept a label parameter)`,
+    );
+  }
   console.log(`Registering Dreamina account: ${email} (region=${region})…`);
   const { status, body } = await callUseapi({
     method: 'POST',
@@ -157,7 +162,6 @@ async function registerDreamina({ token, email, password, region, label }) {
       email,
       password,
       region,
-      ...(label ? { label } : {}),
     },
   });
   console.log(`POST /dreamina/accounts → HTTP ${status}`);
