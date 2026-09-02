@@ -32,45 +32,18 @@
  * render the "This will cost 40 credits" preview before submission.
  */
 
-import { getCreditModel, userDollarCost, type CreditModel } from '@mbb/shared';
+import { getCreditModel } from '@mbb/shared';
 import { consumeReservation, releaseReservation, reserveCredits } from '@mbb/db';
 
-// -----------------------------------------------------------------
-// Public preview helpers (safe to import from any surface)
-// -----------------------------------------------------------------
-
-export interface ModelCostPreview {
-  modelId: string;
-  displayName: string;
-  mode: CreditModel['mode'];
-  /** 0 when BYOK. */
-  credits: number;
-  /** 0 when BYOK. */
-  userDollarCost: number;
-  retailUsdPerAction: number | null;
-}
-
-/**
- * Cost preview for a single call of the given model. Used by the
- * frontend to render "Costs 40 credits ($0.80)" and gate submission
- * on balance. Never throws — an unknown model id returns null so the
- * UI can hide the badge instead of crashing.
- */
-export function getModelCostPreview(modelId: string): ModelCostPreview | null {
-  try {
-    const model = getCreditModel(modelId);
-    return {
-      modelId: model.id,
-      displayName: model.displayName,
-      mode: model.mode,
-      credits: model.mode === 'credits' ? model.credits : 0,
-      userDollarCost: userDollarCost(model),
-      retailUsdPerAction: model.retailUsdPerAction,
-    };
-  } catch {
-    return null;
-  }
-}
+// Polish-29.0.12 Commit 121: getModelCostPreview + ModelCostPreview
+// moved to @mbb/shared/credit-pricing.ts. This file kept the SERVER-only
+// withCreditReservation helper (imports @mbb/db); the pure preview
+// lookup had no reason to live here and forced every client importer to
+// drag postgres + node:crypto into the browser bundle. Callers should
+// import from '@mbb/shared' directly. The re-export below keeps the
+// old '@mbb/ai-providers' entry point working for the transitional
+// window without dragging the router file into client bundles that
+// only need the preview helper.
 
 // -----------------------------------------------------------------
 // Router — gates credit spend around an actual model call

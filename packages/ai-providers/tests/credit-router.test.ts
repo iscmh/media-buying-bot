@@ -38,15 +38,18 @@ vi.mock('@mbb/db', () => {
   };
 });
 
- 
 const { InsufficientCreditsError } = await import('@mbb/db');
 
 import {
   defaultResultOk,
-  getModelCostPreview,
   withCreditReservation,
   type CreditRouterOutcome,
 } from '../src/credit-router';
+// Polish-29.0.12 Commit 121: getModelCostPreview relocated to
+// @mbb/shared/credit-pricing.ts (see credit-router.ts header for the
+// client-bundle rationale). Test re-imports from the new home so the
+// coverage stays green through the move.
+import { getModelCostPreview } from '@mbb/shared';
 
 beforeEach(() => {
   reserveCredits.mockReset();

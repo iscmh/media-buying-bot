@@ -361,14 +361,19 @@ export {
 // Polish-29.0.2 Commit 112: credit router — gates credit ledger
 // around individual model calls. Every credit-billed provider client
 // wraps its call with `withCreditReservation`; BYOK models pass
-// through unchanged. `getModelCostPreview` powers the pre-submit
-// "This will cost 40 credits" badge on the frontend.
+// through unchanged.
+//
+// Polish-29.0.12 Commit 121: getModelCostPreview + ModelCostPreview
+// relocated to @mbb/shared/credit-pricing.ts so client components can
+// import them without dragging @mbb/db + postgres + node:crypto into
+// the browser bundle. Client callers must switch to `@mbb/shared`.
+// This barrel no longer re-exports them from `./credit-router` because
+// even a `export {}` line would pull the router module (and its @mbb/db
+// import) into any client bundle that touches @mbb/ai-providers.
 export {
-  getModelCostPreview,
   withCreditReservation,
   defaultResultOk,
   type CreditRouterOutcome,
-  type ModelCostPreview,
   type ResultOk,
   type WithCreditReservationOptions,
 } from './credit-router';

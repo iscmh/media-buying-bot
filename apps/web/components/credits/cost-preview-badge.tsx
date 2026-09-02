@@ -1,5 +1,4 @@
-import { getModelCostPreview } from '@mbb/ai-providers';
-import { savingsPct } from '@mbb/shared';
+import { getModelCostPreview, savingsPct } from '@mbb/shared';
 import { Coins } from 'lucide-react';
 
 /**

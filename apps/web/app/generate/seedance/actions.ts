@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { getCreditBalance, getDb, schema } from '@mbb/db';
-import { getModelCostPreview } from '@mbb/ai-providers';
+import { getModelCostPreview } from '@mbb/shared';
 import { inngest } from '@mbb/jobs';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 

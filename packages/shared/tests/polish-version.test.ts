@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.11 (Polish-29.0.11 Commit 120 — concept-form picker card for the credit-backed Seedance variations flow, with a 3-way model tier selector)', () => {
+  it('is currently 29.0.12 (Polish-29.0.12 Commit 121 — hotfix moves getModelCostPreview from @mbb/ai-providers to @mbb/shared to break the client-bundle drag of @mbb/db + postgres + node:crypto that had failed every Vercel build since Commit 117)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.11');
+    expect(POLISH_VERSION).toBe('29.0.12');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

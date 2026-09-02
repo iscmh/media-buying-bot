@@ -314,6 +314,47 @@ export function usdToCredits(usd: number): number {
 }
 
 /**
+ * Polish-29.0.12 Commit 121: moved out of @mbb/ai-providers/credit-router
+ * so client components (cost-preview-badge, form pickers) can render the
+ * preview without dragging @mbb/db + postgres + node:crypto into the
+ * browser bundle. The router file still houses the SERVER-only
+ * withCreditReservation() helper — this pure read-side lookup belongs
+ * with the rest of the pricing catalog.
+ */
+export interface ModelCostPreview {
+  modelId: string;
+  displayName: string;
+  mode: CreditModel['mode'];
+  /** 0 when BYOK. */
+  credits: number;
+  /** 0 when BYOK. */
+  userDollarCost: number;
+  retailUsdPerAction: number | null;
+}
+
+/**
+ * Cost preview for a single call of the given model. Used by the
+ * frontend to render "Costs 40 credits ($0.80)" and gate submission
+ * on balance. Never throws — an unknown model id returns null so the
+ * UI can hide the badge instead of crashing.
+ */
+export function getModelCostPreview(modelId: string): ModelCostPreview | null {
+  try {
+    const model = getCreditModel(modelId);
+    return {
+      modelId: model.id,
+      displayName: model.displayName,
+      mode: model.mode,
+      credits: model.mode === 'credits' ? model.credits : 0,
+      userDollarCost: userDollarCost(model),
+      retailUsdPerAction: model.retailUsdPerAction,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fixed top-up packs sold on Whop. The volume-discount pack gives a
  * bonus (not a per-credit discount) so the base credit price stays
  * consistent across all in-app displays.

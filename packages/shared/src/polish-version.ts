@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.11';
+export const POLISH_VERSION = '29.0.12';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.11';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.11 Commit 120 - concept-form picker card for the Polish-29 Seedance variations flow. Adds a "Cloned UGC (credits, Seedance)" card next to the existing "Instant UGC (Variations)" card on the /concepts/[id]/generate form, gated on Claude + Gemini + Replicate BYOK. Card exposes a 3-way Seedance tier picker (2.0 Fast / 2.0 / 2.5) with per-tier credit cost + $ estimate. When picked, threads the chosen tier through job.metadata.polish29_model_id (a bespoke slot so analyze-concept dispatch stays on the pickedPipeline path and does not accidentally reroute through video-variant on the metadata.model_id branch). Worker refactored to read modelId + aspectRatio + dreaminaAccount via a metadata/env fallback chain since analyze-concept only forwards {jobId, userId, mode} on fan-out. Cost preview mirrors the shared estimator branch (5 variants x 4 clips x 20 cr = $8 for Seedance 2.0).';
+  'Polish-29.0.12 Commit 121 - hotfix: server-only modules dragged into client bundle via cost-preview-badge. Root cause introduced in Commit 116 - the client CostPreviewBadge component imported getModelCostPreview from @mbb/ai-providers, which co-locates that pure lookup with withCreditReservation (which imports @mbb/db and transitively postgres + node:crypto + net + tls + perf_hooks). Every Vercel prod build since Commit 117 died in webpack with UnhandledSchemeError node:crypto / Module not found net-tls-perf_hooks, silently exiting 1 with no error surfaced to the top of the log. Fix: move getModelCostPreview + ModelCostPreview type to @mbb/shared/credit-pricing.ts (pure catalog lookup, no ledger, no DB), drop the re-export from @mbb/ai-providers barrel, retarget the 2 callers (cost-preview-badge.tsx + generate/seedance/actions.ts) plus the credit-router test.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
