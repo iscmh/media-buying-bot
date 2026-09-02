@@ -244,16 +244,19 @@ async function registerGoogleFlow({ token, cookieFile, label }) {
     );
     process.exit(2);
   }
-  // useapi.net's server calls `.trim()` on the `cookies` field —
-  // proven empirically by their 500 'cookies.trim is not a function'
-  // when we sent an array. So `cookies` MUST be a string. Send the
-  // Cookie-Editor JSON export as a stringified array.
+  // Empirically (see --diagnose output on 2026-09-02) useapi.net's
+  // Google Flow parser accepts the Netscape cookies.txt file format
+  // ONLY. JSON array (stringified or not), raw Cookie header, and
+  // raw Cookie-Editor JSON all get 'No cookies could be parsed'.
+  // Netscape format got past the parser and returned the real
+  // requirement: "Missing required cookies: HSID, LSID, SID, SSID".
+  const netscape = buildNetscapeFile(cookiesArray);
   const { status, body } = await callUseapi({
     method: 'POST',
     path: `/google-flow/accounts`,
     token,
     body: {
-      cookies: JSON.stringify(cookiesArray),
+      cookies: netscape,
       ...(label ? { label } : {}),
     },
   });
@@ -384,6 +387,31 @@ function normalizeCookiesToArray(raw) {
     });
   }
   return cookies;
+}
+
+/**
+ * Serialize an array of Cookie-Editor cookie objects to Netscape
+ * cookies.txt format. useapi.net's Google Flow parser accepts this
+ * shape (verified 2026-09-02 via --diagnose).
+ *
+ * Netscape line:
+ *   <domain>  <includeSubdomains>  <path>  <secure>  <expiry>  <name>  <value>
+ * All tabs, one cookie per line, plus a '# Netscape HTTP Cookie File'
+ * header. Session cookies get an expiry ~30 days from now (Netscape
+ * format has no session marker).
+ */
+function buildNetscapeFile(cookies) {
+  const lines = ['# Netscape HTTP Cookie File'];
+  const defaultExp = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30;
+  for (const c of cookies) {
+    const domain = c.domain || '.google.com';
+    const includeSubdomains = c.hostOnly ? 'FALSE' : 'TRUE';
+    const path = c.path || '/';
+    const secure = c.secure ? 'TRUE' : 'FALSE';
+    const expiry = Math.floor(c.expirationDate || defaultExp);
+    lines.push([domain, includeSubdomains, path, secure, expiry, c.name, c.value].join('\t'));
+  }
+  return lines.join('\n') + '\n';
 }
 
 main().catch((err) => {
