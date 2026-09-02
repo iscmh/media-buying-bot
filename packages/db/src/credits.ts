@@ -18,7 +18,7 @@
  *      reservations can't oversell.
  */
 
-import { and, eq, isNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, lte, sql } from 'drizzle-orm';
 import { getDb } from './client';
 import { creditReservations, creditsBalance, creditTransactions, fraudSignals } from './schema';
 
@@ -73,6 +73,42 @@ export async function getCreditBalance(userId: string): Promise<{
     lifetimePurchased: row?.lifetimePurchased ?? 0,
     lifetimeSpent: row?.lifetimeSpent ?? 0,
   };
+}
+
+/**
+ * Polish-29.0.3 Commit 113: paginated credit-transactions read for
+ * the settings/credits history view. Newest first. `limit` capped at
+ * 200 so a curious user hitting a raw URL can't page-scan the whole
+ * ledger in one hit.
+ */
+export interface CreditHistoryEntry {
+  id: string;
+  delta: number;
+  type: string;
+  description: string | null;
+  balanceAfter: number;
+  createdAt: Date;
+  metadata: unknown;
+}
+
+export async function getCreditHistory(userId: string, limit = 50): Promise<CreditHistoryEntry[]> {
+  const capped = Math.min(Math.max(1, limit), 200);
+  const db = getDb();
+  const rows = await db
+    .select({
+      id: creditTransactions.id,
+      delta: creditTransactions.delta,
+      type: creditTransactions.type,
+      description: creditTransactions.description,
+      balanceAfter: creditTransactions.balanceAfter,
+      createdAt: creditTransactions.createdAt,
+      metadata: creditTransactions.metadata,
+    })
+    .from(creditTransactions)
+    .where(eq(creditTransactions.userId, userId))
+    .orderBy(desc(creditTransactions.createdAt))
+    .limit(capped);
+  return rows;
 }
 
 // -----------------------------------------------------------------

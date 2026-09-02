@@ -113,9 +113,11 @@ export {
   consumeReservation,
   expireStaleReservations,
   getCreditBalance,
+  getCreditHistory,
   InsufficientCreditsError,
   releaseReservation,
   reserveCredits,
   ReservationNotFoundError,
   type AddCreditsType,
+  type CreditHistoryEntry,
 } from './credits';

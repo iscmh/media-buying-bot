@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { and, desc, eq, isNull, ne } from 'drizzle-orm';
-import { getDb, schema } from '@mbb/db';
+import { getCreditBalance, getDb, schema } from '@mbb/db';
 import { getSupabaseServerClient } from '@/lib/supabase/server';
 import { IconRail } from './icon-rail';
 import { TopToolbar, type Breadcrumb } from './top-toolbar';
@@ -46,48 +46,58 @@ export async function AppShell({ crumbs, action, contentClass, children }: Props
   // Fetch everything the shell needs in one round-trip: role, launched-ad
   // existence (to decide whether to show the Launched nav item), and the
   // recent-items lists that feed the command palette.
-  const [userRow, launchedRow, recentConceptsRaw, recentJobsRaw, recentLaunchedRaw] =
-    await Promise.all([
-      db.query.users.findFirst({
-        where: eq(schema.users.id, user.id),
-        columns: { role: true },
-      }),
-      db.query.launchedAds.findFirst({
-        where: and(
-          eq(schema.launchedAds.userId, user.id),
-          ne(schema.launchedAds.status, 'launch_failed'),
-        ),
-        columns: { id: true },
-      }),
-      db.query.concepts.findMany({
-        where: and(eq(schema.concepts.userId, user.id), isNull(schema.concepts.deletedAt)),
-        columns: { id: true, name: true, createdAt: true },
-        orderBy: (t, { desc: d }) => [d(t.createdAt)],
-        limit: 30,
-      }),
-      db.query.generationJobs.findMany({
-        where: eq(schema.generationJobs.userId, user.id),
-        columns: { id: true, status: true, requestedAt: true },
-        orderBy: (t, { desc: d }) => [d(t.requestedAt)],
-        limit: 30,
-      }),
-      db
-        .select({
-          id: schema.launchedAds.id,
-          status: schema.launchedAds.status,
-          launchedAt: schema.launchedAds.launchedAt,
-          generationJobId: schema.launchedAds.generationJobId,
-          headline: schema.generatedCreatives.headline,
-        })
-        .from(schema.launchedAds)
-        .leftJoin(
-          schema.generatedCreatives,
-          eq(schema.launchedAds.generatedCreativeId, schema.generatedCreatives.id),
-        )
-        .where(eq(schema.launchedAds.userId, user.id))
-        .orderBy(desc(schema.launchedAds.launchedAt))
-        .limit(30),
-    ]);
+  const [
+    userRow,
+    launchedRow,
+    recentConceptsRaw,
+    recentJobsRaw,
+    recentLaunchedRaw,
+    creditBalanceRow,
+  ] = await Promise.all([
+    db.query.users.findFirst({
+      where: eq(schema.users.id, user.id),
+      columns: { role: true },
+    }),
+    db.query.launchedAds.findFirst({
+      where: and(
+        eq(schema.launchedAds.userId, user.id),
+        ne(schema.launchedAds.status, 'launch_failed'),
+      ),
+      columns: { id: true },
+    }),
+    db.query.concepts.findMany({
+      where: and(eq(schema.concepts.userId, user.id), isNull(schema.concepts.deletedAt)),
+      columns: { id: true, name: true, createdAt: true },
+      orderBy: (t, { desc: d }) => [d(t.createdAt)],
+      limit: 30,
+    }),
+    db.query.generationJobs.findMany({
+      where: eq(schema.generationJobs.userId, user.id),
+      columns: { id: true, status: true, requestedAt: true },
+      orderBy: (t, { desc: d }) => [d(t.requestedAt)],
+      limit: 30,
+    }),
+    db
+      .select({
+        id: schema.launchedAds.id,
+        status: schema.launchedAds.status,
+        launchedAt: schema.launchedAds.launchedAt,
+        generationJobId: schema.launchedAds.generationJobId,
+        headline: schema.generatedCreatives.headline,
+      })
+      .from(schema.launchedAds)
+      .leftJoin(
+        schema.generatedCreatives,
+        eq(schema.launchedAds.generatedCreativeId, schema.generatedCreatives.id),
+      )
+      .where(eq(schema.launchedAds.userId, user.id))
+      .orderBy(desc(schema.launchedAds.launchedAt))
+      .limit(30),
+    // Polish-29.0.3 Commit 113 — balance for the always-visible pill
+    // in the top toolbar. One tiny row lookup; the shell already
+    // rides this Promise.all so no extra round-trip.
+    getCreditBalance(user.id),
+  ]);
 
   const isAdmin = userRow?.role === 'admin';
   const showLaunched = !!launchedRow;
@@ -123,6 +133,7 @@ export async function AppShell({ crumbs, action, contentClass, children }: Props
           recentConcepts={recentConcepts}
           recentJobs={recentJobs}
           recentLaunched={recentLaunched}
+          creditBalance={creditBalanceRow.balance}
         />
         <main
           className={

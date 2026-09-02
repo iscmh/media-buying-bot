@@ -6,6 +6,7 @@ import { ChevronRight, Search } from 'lucide-react';
 import { CommandPalette, useCommandPaletteKeys } from './command-palette';
 import { MobileMenuButton, MobileNavDrawer } from './icon-rail';
 import { SecondaryNavSheet } from './secondary-nav-sheet';
+import { BalancePill } from '@/components/credits/balance-pill';
 import { cn } from '@/lib/utils';
 
 export interface Breadcrumb {
@@ -28,6 +29,8 @@ interface Props {
     launchedAt: Date | string | null;
     generationJobId?: string | null;
   }>;
+  /** Polish-29.0.3 Commit 113 — current credit balance for the pill. */
+  creditBalance: number;
 }
 
 /**
@@ -51,6 +54,7 @@ export function TopToolbar({
   recentConcepts,
   recentJobs,
   recentLaunched,
+  creditBalance,
 }: Props) {
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
@@ -100,6 +104,7 @@ export function TopToolbar({
         </button>
 
         <div className="flex shrink-0 items-center gap-2">
+          <BalancePill balance={creditBalance} />
           {action}
           <SecondaryNavSheet email={email} isAdmin={isAdmin} />
         </div>

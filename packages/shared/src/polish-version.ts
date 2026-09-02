@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.3';
+export const POLISH_VERSION = '29.0.4';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.3';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.3 Commit 112 - credit router. Every credit-billed provider call now wraps in withCreditReservation({userId, modelId, generationJobId}, () => submitX(...)): BYOK passes through unchanged, credits path reserves up-front (throws InsufficientCreditsError before the provider is even hit), consumes on success, releases on thrown-error or {ok:false}. getModelCostPreview(modelId) powers the frontend "This will cost 40 credits" badge without a ledger read. Ships packages/ai-providers/src/credit-router.ts + 15 tests covering all four state machine legs (BYOK, spend, release-on-failure, release-on-error). Commit 113 lands the frontend UX (balance widget, cost preview, savings badge, top-up modal).';
+  'Polish-29.0.4 Commit 113 - frontend credit UX. Adds always-visible BalancePill in the top toolbar (amber below 200 credits, red below 20), a dedicated /settings/credits page with balance summary + top-up buttons + last-50 transaction history, a CostPreviewBadge that reads getModelCostPreview and renders "40 credits ($0.80) - save 82%" (or the BYOK equivalent), and a startTopupCheckout server action wiring the three Whop top-up SKUs to hosted checkout. Balance rides the same AppShell Promise.all so no extra round-trip per page. Commit 114 will thread the badge into the actual generate forms once each form is ready to adopt the credit router.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
