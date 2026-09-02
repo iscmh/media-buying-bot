@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.14 (Polish-29.0.14 Commit 123 — fix: Dreamina Seedance rejected camelCase aspectRatio; switched to snake_case aspect_ratio + belt-and-suspenders image_url alias for i2v)', () => {
+  it('is currently 29.0.15 (Polish-29.0.15 Commit 124 — fix: drop wrapWithPsywarCorpus from polish29_seedance_variations; the "psychological manipulation techniques" framing was triggering Claude refusals that broke the JSON parser)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.14');
+    expect(POLISH_VERSION).toBe('29.0.15');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

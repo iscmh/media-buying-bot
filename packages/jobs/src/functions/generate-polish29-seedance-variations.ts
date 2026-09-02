@@ -70,7 +70,12 @@ import {
   parsePolish28VariationsResponse,
   type Polish28VariationEntry,
 } from '../lib/polish28-variations-prompt';
-import { wrapWithPsywarCorpus } from '../lib/polish28-psywar-corpus';
+// Polish-29.0.15 Commit 124: intentionally NOT importing
+// wrapWithPsywarCorpus. Its "psychological manipulation techniques"
+// framing triggers Claude Sonnet 4.5+ refusals (observed on 29.0.14 —
+// Claude returned a prose safety flag instead of JSON, which broke the
+// parser). The Polish-28 variations prompt on its own reads as normal
+// ad-copy work and produces the persona+script JSON cleanly.
 import { runSeedanceCreditedJob } from '../lib/seedance-credit-flow';
 import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
 
@@ -405,7 +410,7 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
       const r = await callClaude({
         userId: jobUserId,
         apiKey: keys.claude,
-        systemPrompt: wrapWithPsywarCorpus(POLISH28_VARIATIONS_SYSTEM_PROMPT),
+        systemPrompt: POLISH28_VARIATIONS_SYSTEM_PROMPT,
         cacheSystemPrompt: true,
         userMessage: userPrompt,
         maxTokens: 8000,

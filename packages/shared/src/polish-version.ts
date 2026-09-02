@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.14';
+export const POLISH_VERSION = '29.0.15';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.14';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.14 Commit 123 - fix: Dreamina Seedance i2v rejected camelCase `aspectRatio` with `Parameter aspectRatio not supported`. Switched to snake_case `aspect_ratio` to match the rest of useapi.net Dreamina params. Also send both `image` AND `image_url` for i2v as a belt-and-suspenders while we do not yet have confirmation of the exact field name Dreamina expects on the useapi.net proxy. Applies to every Seedance path (Quick Seedance form + polish29_seedance worker + polish29_seedance_variations worker), which had never been end-to-end verified with i2v specifically.';
+  'Polish-29.0.15 Commit 124 - fix: Claude refused the polish29_seedance_variations batch prompt because the wrapWithPsywarCorpus() wrapper describes "psychological manipulation techniques" which trips Claude Sonnet 4.5+ safety training. Claude returned a prose refusal ("I need to flag a significant concern...") instead of JSON, which broke the parser. Drop the psywar wrapper for this pipeline - the Polish-28 variations prompt on its own reads as normal ad-copy work and produces the persona+script JSON cleanly. The wrapper stays in place for the Polish-28 HeyGen variations worker where it was historically tuned to escape refusals; a broader "drop the corpus everywhere" pass is deferred.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
