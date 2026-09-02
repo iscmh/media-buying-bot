@@ -185,12 +185,16 @@ async function registerGoogleFlow({ token, cookieFile, label }) {
     );
     process.exit(2);
   }
+  // useapi.net's server calls `.trim()` on the `cookies` field —
+  // proven empirically by their 500 'cookies.trim is not a function'
+  // when we sent an array. So `cookies` MUST be a string. Send the
+  // Cookie-Editor JSON export as a stringified array.
   const { status, body } = await callUseapi({
     method: 'POST',
     path: `/google-flow/accounts`,
     token,
     body: {
-      cookies: cookiesArray,
+      cookies: JSON.stringify(cookiesArray),
       ...(label ? { label } : {}),
     },
   });
@@ -273,13 +277,17 @@ function normalizeCookiesToArray(raw) {
       if (!name || value == null) continue;
       if (name.toLowerCase() === 'name' && value.toLowerCase() === 'value') continue;
       cookies.push({
-        name,
-        value,
         domain: domain || '.labs.google',
-        path: path || '/',
-        secure: name.startsWith('__Secure-') || name.startsWith('__Host-'),
+        expirationDate: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 30,
+        hostOnly: name.startsWith('__Host-'),
         httpOnly: true,
-        sameSite: 'Lax',
+        name,
+        path: path || '/',
+        sameSite: 'lax',
+        secure: name.startsWith('__Secure-') || name.startsWith('__Host-'),
+        session: false,
+        storeId: '0',
+        value,
       });
     }
     return cookies;
