@@ -165,6 +165,88 @@ export function estimatePolish28VariationsCostPerVariantUsd(): { usd: number } {
   // storage 0.02 + amortized Claude batch (~$0.05 / N variants) = ~2.15.
   return { usd: 2.15 };
 }
+
+/**
+ * Polish-29.0.10 Commit 120: credit-backed multi-clip Seedance
+ * variations picker. Feeds a winning creative → N cloned-character
+ * variants matching source ad length. Video render pays in credits
+ * (per-clip reserve); Claude + Gemini + Replicate BYOK cover the
+ * persona+script batch, Nano Banana character PNG, and Replicate
+ * ffmpeg concat respectively.
+ */
+export const POLISH29_VARIATIONS_PIPELINE_ID = 'polish29_seedance_variations' as const;
+export const POLISH29_VARIATIONS_DISPLAY_NAME = 'Cloned UGC (credits, Seedance)';
+export const POLISH29_VARIATIONS_DESCRIPTION =
+  'Same variations flow as Instant UGC but the video render pays in CREDITS instead of HeyGen. ' +
+  'Cheaper per-variant, no HeyGen key needed. BYOK: Claude + Gemini + Replicate.';
+
+/**
+ * Seedance model tier options for the picker. Credit cost per 8s
+ * clip lands on job.metadata.model_id; the worker resolves the
+ * corresponding Dreamina model string via dreaminaModelForCreditModelId.
+ * Kept as a plain array so the picker can render 3 cards in order.
+ */
+export interface Polish29ModelTier {
+  id: 'seedance-2-0-fast-ugc' | 'seedance-2-0-ugc' | 'seedance-2-5-ugc';
+  displayName: string;
+  creditsPerClip: number;
+  usdPerClip: number;
+  blurb: string;
+}
+export const POLISH29_MODEL_TIERS: Polish29ModelTier[] = [
+  {
+    id: 'seedance-2-0-fast-ugc',
+    displayName: 'Seedance 2.0 Fast',
+    creditsPerClip: 10,
+    usdPerClip: 0.2,
+    blurb: 'Cheapest, fastest. Good for iteration.',
+  },
+  {
+    id: 'seedance-2-0-ugc',
+    displayName: 'Seedance 2.0',
+    creditsPerClip: 20,
+    usdPerClip: 0.4,
+    blurb: 'Balanced quality + cost. Recommended default.',
+  },
+  {
+    id: 'seedance-2-5-ugc',
+    displayName: 'Seedance 2.5',
+    creditsPerClip: 40,
+    usdPerClip: 0.8,
+    blurb: 'Highest quality. Slower + more expensive.',
+  },
+];
+export const POLISH29_DEFAULT_MODEL_ID: Polish29ModelTier['id'] = 'seedance-2-0-ugc';
+
+/**
+ * Cost preview for Polish-29 variations. Duration → clip count math
+ * (8s per clip, 2-10 clip clamp, 30s default when unknown), then
+ * variantCount × clipCount × per-clip credit dollar cost, plus small
+ * BYOK sides (Claude batch + Nano Banana + Replicate concat).
+ * Mirrors the estimator branch in packages/shared/src/cost-estimation.ts
+ * so form + server land on the same number.
+ */
+export function estimatePolish29VariationsCostUsd(input: {
+  variantCount: number;
+  sourceDurationSeconds: number | null;
+  modelId: Polish29ModelTier['id'];
+}): { usd: number; clipCount: number; perClipUsd: number } {
+  const target = input.sourceDurationSeconds ?? SIMPLIFIED_DEFAULT_DURATION_SECONDS;
+  const clipCount = Math.max(2, Math.min(10, Math.round(target / 8)));
+  const tier = POLISH29_MODEL_TIERS.find((t) => t.id === input.modelId) ?? POLISH29_MODEL_TIERS[1]!; // 2.0 fallback
+  const CLAUDE_BATCH = 0.05;
+  const NANO_BANANA = 0.13;
+  const REPLICATE_CONCAT = 0.02;
+  const STORAGE = 0.02;
+  const usd = round4(
+    CLAUDE_BATCH +
+      input.variantCount * NANO_BANANA +
+      input.variantCount * clipCount * tier.usdPerClip +
+      input.variantCount * REPLICATE_CONCAT +
+      input.variantCount * STORAGE,
+  );
+  return { usd, clipCount, perClipUsd: tier.usdPerClip };
+}
 export const POLISH26_DISPLAY_NAME = 'Instant UGC ad';
 export const POLISH26_DESCRIPTION =
   'Pre-cast avatar picked from a 500+ HeyGen library to match your source persona. ' +
@@ -266,6 +348,14 @@ export interface SimplifiedFormState {
    */
   polish28VariationsSelected?: boolean;
   /**
+   * Polish-29.0.10 Commit 120: credit-backed multi-clip Seedance
+   * variations flag. Routes to generation/polish29-seedance-variations
+   * .requested. Mutually exclusive with all other pipeline flags.
+   * Companion field `polish29ModelId` picks the Seedance credit tier.
+   */
+  polish29VariationsSelected?: boolean;
+  polish29ModelId?: Polish29ModelTier['id'];
+  /**
    * Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad flag.
    * Mutually exclusive with polish23Selected / polish25Selected /
    * polish26Selected / modelId. Companion field `staticOpenaiQuality`
@@ -300,6 +390,7 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
     state.polish26Selected === true ||
     state.polish28Selected === true ||
     state.polish28VariationsSelected === true ||
+    state.polish29VariationsSelected === true ||
     state.staticOpenaiSelected === true;
   if (!hasPickedPipeline && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
@@ -369,6 +460,16 @@ export function buildSubmissionFormData(input: {
   // because no metadata.model_id is set. Cleaner than adding
   // polish23 as a synthetic VideoModelId, which would tangle two
   // descriptor systems.
+  if (input.state.polish29VariationsSelected === true) {
+    // Polish-29.0.10 Commit 120: credit-backed Seedance variations.
+    // Threads the picked model tier through job.metadata.model_id so
+    // the worker resolves it via the standard metaModelId fallback
+    // (no bespoke event.data field). aspect_ratio hardcoded 9:16 for
+    // now — most UGC ads are vertical.
+    fd.set('pipeline', POLISH29_VARIATIONS_PIPELINE_ID);
+    fd.set('polish29ModelId', input.state.polish29ModelId ?? POLISH29_DEFAULT_MODEL_ID);
+    return fd;
+  }
   if (input.state.polish28VariationsSelected === true) {
     // Polish-28.3.0 Commit 86: variations pipeline. Checked BEFORE
     // clone branch — if both flags are set (shouldn't happen with

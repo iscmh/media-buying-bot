@@ -218,7 +218,13 @@ export const analyzeConcept = inngest.createFunction(
         picked === 'polish25_makeugc' ||
         picked === 'polish26_heygen' ||
         picked === 'polish28_clone_ugc' ||
-        picked === 'polish28_variations_ugc';
+        picked === 'polish28_variations_ugc' ||
+        // Polish-29.0.10 Commit 120: seedance variations reads
+        // concept.metadata.analysis.persona for its Nano Banana Pro
+        // character-clone prompt AND concept.metadata.analysis.
+        // duration_seconds for the clip-count math — both live in the
+        // POLISH23_VISION output, not the UGC_DECONSTRUCTOR one.
+        picked === 'polish29_seedance_variations';
       const visionSystemPrompt = usesPolish23Vision
         ? POLISH23_VISION_SYSTEM_PROMPT
         : UGC_DECONSTRUCTOR_SYSTEM_PROMPT;

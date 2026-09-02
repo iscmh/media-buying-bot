@@ -124,6 +124,17 @@ export async function createGenerationJobAction(
     rawStaticQuality === 'low' || rawStaticQuality === 'medium' || rawStaticQuality === 'high'
       ? rawStaticQuality
       : null;
+  // Polish-29.0.10 Commit 120: seedance credit tier. Only meaningful
+  // when pipeline = polish29_seedance_variations; persisted onto
+  // job.metadata.model_id so the worker's fallback chain picks it up
+  // without a bespoke event.data field.
+  const rawPolish29ModelId = formData.get('polish29ModelId');
+  const polish29ModelId =
+    rawPolish29ModelId === 'seedance-2-0-fast-ugc' ||
+    rawPolish29ModelId === 'seedance-2-0-ugc' ||
+    rawPolish29ModelId === 'seedance-2-5-ugc'
+      ? rawPolish29ModelId
+      : null;
 
   if (!conceptId) return { ok: false, errorMessage: 'Missing concept id.' };
   if (!VALID_INTENSITY.has(intensity)) {
@@ -282,7 +293,8 @@ export async function createGenerationJobAction(
       ...(sourceDurationSeconds != null ||
       modelId != null ||
       providerId != null ||
-      staticOpenaiQuality != null
+      staticOpenaiQuality != null ||
+      polish29ModelId != null
         ? {
             metadata: {
               ...(sourceDurationSeconds != null
@@ -295,6 +307,14 @@ export async function createGenerationJobAction(
               ...(staticOpenaiQuality != null
                 ? { static_openai_quality: staticOpenaiQuality }
                 : {}),
+              // Polish-29.0.10 Commit 120: seedance credit tier for
+              // the variations pipeline. NOT stored under `model_id`
+              // because analyze-concept's dispatch would route jobs
+              // with metadata.model_id through video-variant. Kept in
+              // its own key so the worker reads it via a bespoke
+              // lookup and pickedPipeline routing stays the source of
+              // truth for the dispatch.
+              ...(polish29ModelId != null ? { polish29_model_id: polish29ModelId } : {}),
             },
           }
         : {}),

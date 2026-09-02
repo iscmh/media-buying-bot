@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.10';
+export const POLISH_VERSION = '29.0.11';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.10';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.10 Commit 119 - credit-backed multi-clip Seedance VARIATIONS. Feed a winning creative -> Claude batches N distinct persona+script pairs -> each variant renders as one Nano Banana Pro character PNG threaded into M ~8s Seedance i2v clips (image ref locked + persona-lock text prefix) -> Replicate ffmpeg-concat stitches to a single composite matching the source ad length. First credit-backed pipeline that clones the polish28_variations_ugc shape but pays the video render in credits (per-clip reserve via runSeedanceCreditedJob) instead of HeyGen BYOK. Requires Claude + Gemini + Replicate BYOK for the character/script/concat sides. Registers a new worker (generate-polish29-seedance-variations), event (generation/polish29-seedance-variations.requested), pipeline (polish29_seedance_variations), descriptor + estimator branch. Cost example: 5 variants x 4 clips x 20 credits (Seedance 2.0) = 400 credits = $8 in credits (~82% cheaper than direct Dreamina retail).';
+  'Polish-29.0.11 Commit 120 - concept-form picker card for the Polish-29 Seedance variations flow. Adds a "Cloned UGC (credits, Seedance)" card next to the existing "Instant UGC (Variations)" card on the /concepts/[id]/generate form, gated on Claude + Gemini + Replicate BYOK. Card exposes a 3-way Seedance tier picker (2.0 Fast / 2.0 / 2.5) with per-tier credit cost + $ estimate. When picked, threads the chosen tier through job.metadata.polish29_model_id (a bespoke slot so analyze-concept dispatch stays on the pickedPipeline path and does not accidentally reroute through video-variant on the metadata.model_id branch). Worker refactored to read modelId + aspectRatio + dreaminaAccount via a metadata/env fallback chain since analyze-concept only forwards {jobId, userId, mode} on fan-out. Cost preview mirrors the shared estimator branch (5 variants x 4 clips x 20 cr = $8 for Seedance 2.0).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

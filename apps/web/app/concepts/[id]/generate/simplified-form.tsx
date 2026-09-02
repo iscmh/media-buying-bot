@@ -23,8 +23,14 @@ import {
   POLISH28_DISPLAY_NAME,
   POLISH28_VARIATIONS_DESCRIPTION,
   POLISH28_VARIATIONS_DISPLAY_NAME,
+  POLISH29_VARIATIONS_DESCRIPTION,
+  POLISH29_VARIATIONS_DISPLAY_NAME,
+  POLISH29_MODEL_TIERS,
+  POLISH29_DEFAULT_MODEL_ID,
   estimatePolish28CostPerVariantUsd,
   estimatePolish28VariationsCostPerVariantUsd,
+  estimatePolish29VariationsCostUsd,
+  type Polish29ModelTier,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
   SIMPLIFIED_MAX_VARIANTS,
@@ -139,6 +145,12 @@ export function SimplifiedGenerationForm({
   // Default primary picker experience — most operators want N distinct
   // spokespeople, not one clone of the source actor.
   const [polish28VariationsSelected, setPolish28VariationsSelected] = React.useState(false);
+  // Polish-29.0.10 Commit 120: credit-backed multi-clip Seedance
+  // variations picker + model tier state. Same variations flow but
+  // pays the video render in credits instead of HeyGen.
+  const [polish29VariationsSelected, setPolish29VariationsSelected] = React.useState(false);
+  const [polish29ModelId, setPolish29ModelId] =
+    React.useState<Polish29ModelTier['id']>(POLISH29_DEFAULT_MODEL_ID);
   // Polish-25.3 Commit 18b: static ad picker + quality tier. Mutually
   // exclusive with polish23Selected + polish26Selected + modelId.
   // Defaults to Medium quality — matches the shipped cost line.
@@ -180,6 +192,8 @@ export function SimplifiedGenerationForm({
     polish26Selected,
     polish28Selected,
     polish28VariationsSelected,
+    polish29VariationsSelected,
+    polish29ModelId,
     staticOpenaiSelected,
     staticOpenaiQuality,
     staticOpenaiIntensity,
@@ -216,6 +230,18 @@ export function SimplifiedGenerationForm({
   const polish28VariationsEstimate = polish28VariationsSelected
     ? { estimateUsd: variantCount * estimatePolish28VariationsCostPerVariantUsd().usd }
     : null;
+  // Polish-29.0.10 Commit 120: credit-backed seedance variations
+  // cost preview. Duration → clip count math (8s per clip) × per-
+  // clip credit dollar cost. See helper for the full breakdown.
+  const polish29VariationsEstimate = polish29VariationsSelected
+    ? {
+        estimateUsd: estimatePolish29VariationsCostUsd({
+          variantCount,
+          sourceDurationSeconds: detectedSourceSeconds,
+          modelId: polish29ModelId,
+        }).usd,
+      }
+    : null;
   // Polish-25.3 Commit 18b: static-openai cost preview per quality
   // tier. Fixed per-variant, no duration scaling (image, not video).
   const staticOpenaiEstimate = staticOpenaiSelected
@@ -223,24 +249,26 @@ export function SimplifiedGenerationForm({
         estimateUsd: variantCount * estimateStaticOpenaiCostPerVariantUsd(staticOpenaiQuality).usd,
       }
     : null;
-  const estimate = polish28VariationsEstimate
-    ? polish28VariationsEstimate
-    : polish28Estimate
-      ? polish28Estimate
-      : staticOpenaiEstimate
-        ? staticOpenaiEstimate
-        : polish26Estimate
-          ? polish26Estimate
-          : polish23Estimate
-            ? polish23Estimate
-            : modelId
-              ? estimateGenerationCost({
-                  conceptType: 'ugc',
-                  variantCount,
-                  videoModelId: modelId,
-                  sourceDurationSeconds: previewSeconds,
-                })
-              : null;
+  const estimate = polish29VariationsEstimate
+    ? polish29VariationsEstimate
+    : polish28VariationsEstimate
+      ? polish28VariationsEstimate
+      : polish28Estimate
+        ? polish28Estimate
+        : staticOpenaiEstimate
+          ? staticOpenaiEstimate
+          : polish26Estimate
+            ? polish26Estimate
+            : polish23Estimate
+              ? polish23Estimate
+              : modelId
+                ? estimateGenerationCost({
+                    conceptType: 'ugc',
+                    variantCount,
+                    videoModelId: modelId,
+                    sourceDurationSeconds: previewSeconds,
+                  })
+                : null;
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate != null && estimate.estimateUsd > remaining;
@@ -291,6 +319,15 @@ export function SimplifiedGenerationForm({
   if (!connectedProviders.heygen.connected) polish28VariationsMissingKeys.push('HeyGen');
   const hasPolish28VariationsKeys = polish28VariationsMissingKeys.length === 0;
 
+  // Polish-29.0.10 Commit 120: seedance-variations gate — 3 BYOK
+  // (Claude + Gemini + Replicate). No HeyGen; video render pays in
+  // credits via the platform-side useapi.net token.
+  const polish29VariationsMissingKeys: string[] = [];
+  if (!connectedProviders.claude.connected) polish29VariationsMissingKeys.push('Claude');
+  if (!connectedProviders.gemini.connected) polish29VariationsMissingKeys.push('Gemini');
+  if (!connectedProviders.replicate.connected) polish29VariationsMissingKeys.push('Replicate');
+  const hasPolish29VariationsKeys = polish29VariationsMissingKeys.length === 0;
+
   // Polish-25.3 Commit 18b: static-openai gate. Needs Claude
   // (copy rewrite) + OpenAI (gpt-image-2). Gemini optional (source
   // vision analysis is skipped for the static path). Missing keys
@@ -305,28 +342,32 @@ export function SimplifiedGenerationForm({
   if (!hasElevenLabsKey) legacyMissingKeys.push('ElevenLabs');
   const hasLegacyKeys = hasHedraKey && hasElevenLabsKey;
 
-  const hasProviderKey = polish28VariationsSelected
-    ? hasPolish28VariationsKeys
-    : polish28Selected
-      ? hasPolish28Keys
-      : staticOpenaiSelected
-        ? hasStaticOpenaiKeys
-        : polish26Selected
-          ? hasPolish26Keys
-          : polish23Selected
-            ? hasPolish23Keys
-            : hasLegacyKeys;
-  const missingKeys = polish28VariationsSelected
-    ? polish28VariationsMissingKeys
-    : polish28Selected
-      ? polish28MissingKeys
-      : staticOpenaiSelected
-        ? staticOpenaiMissingKeys
-        : polish26Selected
-          ? polish26MissingKeys
-          : polish23Selected
-            ? polish23MissingKeys
-            : legacyMissingKeys;
+  const hasProviderKey = polish29VariationsSelected
+    ? hasPolish29VariationsKeys
+    : polish28VariationsSelected
+      ? hasPolish28VariationsKeys
+      : polish28Selected
+        ? hasPolish28Keys
+        : staticOpenaiSelected
+          ? hasStaticOpenaiKeys
+          : polish26Selected
+            ? hasPolish26Keys
+            : polish23Selected
+              ? hasPolish23Keys
+              : hasLegacyKeys;
+  const missingKeys = polish29VariationsSelected
+    ? polish29VariationsMissingKeys
+    : polish28VariationsSelected
+      ? polish28VariationsMissingKeys
+      : polish28Selected
+        ? polish28MissingKeys
+        : staticOpenaiSelected
+          ? staticOpenaiMissingKeys
+          : polish26Selected
+            ? polish26MissingKeys
+            : polish23Selected
+              ? polish23MissingKeys
+              : legacyMissingKeys;
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -405,12 +446,35 @@ export function SimplifiedGenerationForm({
             missingKeys={polish28VariationsMissingKeys}
             onPick={() => {
               setPolish28VariationsSelected(true);
+              setPolish29VariationsSelected(false);
               setPolish28Selected(false);
               setStaticOpenaiSelected(false);
               setPolish26Selected(false);
               setPolish23Selected(false);
               setModelId(null);
             }}
+          />
+
+          {/* Polish-29.0.10 Commit 120: credit-backed sibling — same
+              variations flow but pays the video render in credits.
+              Cheaper per-variant, no HeyGen key needed. */}
+          <Polish29VariationsPickerCard
+            picked={polish29VariationsSelected}
+            disabled={isPending}
+            missingKeys={polish29VariationsMissingKeys}
+            selectedModelId={polish29ModelId}
+            onPick={() => {
+              setPolish29VariationsSelected(true);
+              setPolish28VariationsSelected(false);
+              setPolish28Selected(false);
+              setStaticOpenaiSelected(false);
+              setPolish26Selected(false);
+              setPolish23Selected(false);
+              setModelId(null);
+            }}
+            onModelIdChange={setPolish29ModelId}
+            variantCount={variantCount}
+            detectedSourceSeconds={detectedSourceSeconds}
           />
 
           {/* SECONDARY clone card — one video that replicates the source actor. 4-BYOK. */}
@@ -421,6 +485,7 @@ export function SimplifiedGenerationForm({
             onPick={() => {
               setPolish28Selected(true);
               setPolish28VariationsSelected(false);
+              setPolish29VariationsSelected(false);
               setStaticOpenaiSelected(false);
               setPolish26Selected(false);
               setPolish23Selected(false);
@@ -442,6 +507,7 @@ export function SimplifiedGenerationForm({
             setPolish23Selected(false);
             setPolish28Selected(false);
             setPolish28VariationsSelected(false);
+            setPolish29VariationsSelected(false);
             setModelId(null);
           }}
           onQualityChange={setStaticOpenaiQuality}
@@ -940,5 +1006,122 @@ function Polish28VariationsPickerCard({
         </div>
       )}
     </button>
+  );
+}
+
+// -------------------------------------------------------------------
+// Polish-29.0.10 Commit 120: credit-backed Seedance variations picker
+// -------------------------------------------------------------------
+
+interface Polish29VariationsPickerCardProps {
+  picked: boolean;
+  disabled: boolean;
+  missingKeys: string[];
+  selectedModelId: Polish29ModelTier['id'];
+  onPick: () => void;
+  onModelIdChange: (id: Polish29ModelTier['id']) => void;
+  variantCount: number;
+  detectedSourceSeconds: number | null;
+}
+
+function Polish29VariationsPickerCard({
+  picked,
+  disabled,
+  missingKeys,
+  selectedModelId,
+  onPick,
+  onModelIdChange,
+  variantCount,
+  detectedSourceSeconds,
+}: Polish29VariationsPickerCardProps) {
+  const canPick = missingKeys.length === 0;
+  const estimate = estimatePolish29VariationsCostUsd({
+    variantCount,
+    sourceDurationSeconds: detectedSourceSeconds,
+    modelId: selectedModelId,
+  });
+  return (
+    <div
+      className={cn(
+        'group relative flex w-full flex-col gap-2 rounded-md border p-4 text-left transition-colors',
+        picked ? 'border-fg bg-fg/5' : 'border-border bg-bg-surface hover:border-fg/50',
+        (disabled || !canPick) && 'opacity-60',
+      )}
+    >
+      <button
+        type="button"
+        onClick={onPick}
+        disabled={disabled || !canPick}
+        aria-pressed={picked}
+        className="w-full text-left"
+      >
+        <span
+          className={cn(
+            'absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+            'bg-fg/10 text-fg',
+          )}
+        >
+          Credits
+        </span>
+        {picked && (
+          <CheckCircle2 className="text-fg absolute right-20 top-3 h-4 w-4" aria-hidden="true" />
+        )}
+        <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
+          {POLISH29_VARIATIONS_DISPLAY_NAME}
+        </div>
+        <div className="text-fg-muted mt-1 text-xs leading-relaxed">
+          {POLISH29_VARIATIONS_DESCRIPTION}
+        </div>
+        <div className="text-fg-subtle mt-1 text-[11px]">
+          Output: {variantCount} × 9:16 vertical, {estimate.clipCount} clips each. ~$
+          {estimate.usd.toFixed(2)} total.
+        </div>
+      </button>
+
+      {/* Model tier picker — only enabled when the card itself is picked. */}
+      {picked && canPick && (
+        <div className="border-border-subtle mt-2 grid grid-cols-1 gap-2 border-t pt-3 sm:grid-cols-3">
+          {POLISH29_MODEL_TIERS.map((tier) => {
+            const isTierPicked = tier.id === selectedModelId;
+            return (
+              <button
+                key={tier.id}
+                type="button"
+                onClick={() => onModelIdChange(tier.id)}
+                disabled={disabled}
+                aria-pressed={isTierPicked}
+                className={cn(
+                  'rounded-md border p-2 text-left transition-colors',
+                  isTierPicked
+                    ? 'border-fg bg-fg/5'
+                    : 'border-border bg-bg-surface hover:border-fg/50',
+                  disabled && 'cursor-not-allowed opacity-60',
+                )}
+              >
+                <div className="text-fg text-xs font-semibold">{tier.displayName}</div>
+                <div className="text-fg-subtle mt-0.5 text-[10px] leading-tight">{tier.blurb}</div>
+                <div className="text-fg-muted mt-1 font-mono text-[11px]">
+                  {tier.creditsPerClip} cr/clip (${tier.usdPerClip.toFixed(2)})
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {!canPick && (
+        <div className="mt-2 text-xs text-[color:var(--accent-negative)]">
+          Connect {missingKeys.join(' + ')} at{' '}
+          <Link
+            href="/settings/connections"
+            className="underline underline-offset-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Settings → Connections
+          </Link>{' '}
+          to unlock.
+        </div>
+      )}
+    </div>
   );
 }

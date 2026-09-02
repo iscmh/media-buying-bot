@@ -104,10 +104,26 @@ const ALLOWED_MODEL_IDS = new Set([
 const CONCAT_POLL_INTERVAL_SECONDS = 5;
 const CONCAT_POLL_MAX_ATTEMPTS = 36; // ~3 min
 
+/**
+ * Event payload shape.
+ *
+ * The concept-generate form dispatches through analyze-concept, which
+ * only forwards {jobId, userId, mode}. So pipeline-specific config
+ * (modelId / aspectRatio / dreaminaAccount) is read from:
+ *   - job.metadata.model_id (set by the form's actions.ts when the
+ *     Polish-29 variations card is picked)
+ *   - job.metadata.aspect_ratio (form-controlled; defaults to 9:16)
+ *   - USEAPI_NET_DEFAULT_DREAMINA_ACCOUNT env var (platform-side
+ *     Dreamina account registered on useapi.net; same source the
+ *     Quick Seedance form uses)
+ *
+ * Direct-dispatch API callers (integration tests, Inngest replay from
+ * the dashboard) can override any of these via event.data.
+ */
 export interface Polish29SeedanceVariationsEventPayload {
   jobId: string;
   userId: string;
-  dreaminaAccount: string;
+  dreaminaAccount?: string;
   modelId?: string;
   aspectRatio?: '9:16' | '1:1';
 }
@@ -235,10 +251,6 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
       'userId',
       'polish29-seedance-var:entry',
     );
-    const modelId =
-      data.modelId && ALLOWED_MODEL_IDS.has(data.modelId) ? data.modelId : DEFAULT_MODEL_ID;
-    const model = getCreditModel(modelId);
-    const aspectRatio: '9:16' | '1:1' = data.aspectRatio ?? '9:16';
 
     // ---------- A: load job ----------
     const job = await guardedStepRun(step, 'load-job', async () => {
@@ -265,6 +277,41 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
       1,
       Math.min(MAX_VARIANTS_PER_JOB, job.variantCount ?? 1),
     );
+
+    // Resolve pipeline-specific config: event.data wins (direct API /
+    // Inngest replay), else read from job.metadata (concept-form path),
+    // else env / defaults.
+    const jobMetadata = (job.metadata ?? {}) as Record<string, unknown>;
+    // Prefer the pipeline-specific slot so this worker never fights
+    // analyze-concept's metadata.model_id → video-variant dispatch.
+    // Fall back to model_id if present (direct-dispatch / test paths
+    // sometimes set it there).
+    const metaModelId =
+      typeof jobMetadata['polish29_model_id'] === 'string'
+        ? (jobMetadata['polish29_model_id'] as string)
+        : typeof jobMetadata['model_id'] === 'string'
+          ? (jobMetadata['model_id'] as string)
+          : undefined;
+    const metaAspectRatio =
+      typeof jobMetadata['aspect_ratio'] === 'string'
+        ? (jobMetadata['aspect_ratio'] as string)
+        : undefined;
+    const modelIdCandidate = data.modelId ?? metaModelId ?? DEFAULT_MODEL_ID;
+    const modelId = ALLOWED_MODEL_IDS.has(modelIdCandidate) ? modelIdCandidate : DEFAULT_MODEL_ID;
+    const model = getCreditModel(modelId);
+    const aspectRatioCandidate = data.aspectRatio ?? metaAspectRatio ?? '9:16';
+    const aspectRatio: '9:16' | '1:1' = aspectRatioCandidate === '1:1' ? '1:1' : '9:16';
+    // Dreamina account: platform-side registered account on useapi.net,
+    // NOT a per-user field. Same env var the Quick Seedance form reads.
+    const dreaminaAccount =
+      data.dreaminaAccount ?? process.env['USEAPI_NET_DEFAULT_DREAMINA_ACCOUNT'];
+    if (!dreaminaAccount) {
+      const msg =
+        'USEAPI_NET_DEFAULT_DREAMINA_ACCOUNT env var is unset. An admin needs to register a ' +
+        'Dreamina account on useapi.net and set the env var to that account email.';
+      await markJobFailed(data.jobId, jobUserId, msg, 0);
+      throw new NonRetriableError(msg);
+    }
 
     // ---------- B: mark processing ----------
     await guardedStepRun(step, 'mark-processing', async () => {
@@ -396,7 +443,7 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
           entry,
           jobId: data.jobId,
           userId: jobUserId,
-          dreaminaAccount: data.dreaminaAccount,
+          dreaminaAccount,
           modelId,
           aspectRatio,
           clipsPerVariant,
