@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.4';
+export const POLISH_VERSION = '29.0.5';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.4';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.4 Commit 113 - frontend credit UX. Adds always-visible BalancePill in the top toolbar (amber below 200 credits, red below 20), a dedicated /settings/credits page with balance summary + top-up buttons + last-50 transaction history, a CostPreviewBadge that reads getModelCostPreview and renders "40 credits ($0.80) - save 82%" (or the BYOK equivalent), and a startTopupCheckout server action wiring the three Whop top-up SKUs to hosted checkout. Balance rides the same AppShell Promise.all so no extra round-trip per page. Commit 114 will thread the badge into the actual generate forms once each form is ready to adopt the credit router.';
+  'Polish-29.0.5 Commit 114 - seedance credit flow helper. Ships packages/jobs/src/lib/seedance-credit-flow.ts, a self-contained async function runSeedanceCreditedJob({userId, modelId, dreaminaAccount, prompt, ...}) that wraps reserve/submit/poll/consume/release around a full Seedance generation. Reserves up front (throws InsufficientCreditsError before ever hitting useapi.net), consumes on success, releases on any of five failure modes (submit_failed / poll_failed / poll_timeout / no_video_url / thrown). Reference pattern for future generation workers to adopt; also directly callable from admin test-actions so ops can fire a live end-to-end check without shipping frontend. 9 tests lock down every state-machine leg.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
