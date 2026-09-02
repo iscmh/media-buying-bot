@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.12 (Polish-29.0.12 Commit 121 — hotfix moves getModelCostPreview from @mbb/ai-providers to @mbb/shared to break the client-bundle drag of @mbb/db + postgres + node:crypto that had failed every Vercel build since Commit 117)', () => {
+  it('is currently 29.0.13 (Polish-29.0.13 Commit 122 — diagnostic patch surfacing the raw useapi.net response body on Seedance submit failures so we can see WHAT Dreamina rejected instead of just "HTTP 400")', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.12');
+    expect(POLISH_VERSION).toBe('29.0.13');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

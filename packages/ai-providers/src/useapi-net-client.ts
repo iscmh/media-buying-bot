@@ -638,7 +638,24 @@ function submitResultOf<T extends RawSubmitBody>(
   result: Awaited<ReturnType<typeof callProvider<T>>>,
 ): SubmitJobResult {
   if (!result.ok) {
-    return { ok: false, latencyMs: result.latencyMs, errorMessage: result.errorMessage };
+    // Polish-29.0.13 Commit 122: on failure, append a truncated JSON
+    // dump of the raw response body to errorMessage so the concept-form
+    // "clip failed" UI surfaces the ACTUAL useapi.net rejection reason
+    // (e.g. "unknown account" / "invalid image url") instead of the bare
+    // "HTTP 400". Kept short so it survives the 500-char primary_text
+    // cap on generated_creatives + the Inngest step return payload cap.
+    let bodyHint = '';
+    try {
+      const s = JSON.stringify(result.rawBody).slice(0, 400);
+      if (s && s !== '{}' && s !== 'null') bodyHint = ` :: body=${s}`;
+    } catch {
+      /* rawBody unserializable — skip */
+    }
+    return {
+      ok: false,
+      latencyMs: result.latencyMs,
+      errorMessage: (result.errorMessage ?? `HTTP ${result.status}`) + bodyHint,
+    };
   }
   const jobId =
     result.data.jobid ??
