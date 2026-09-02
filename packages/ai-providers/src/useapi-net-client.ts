@@ -287,25 +287,42 @@ export async function uploadUseapiAsset(input: UploadAssetInput): Promise<Upload
       : `${USEAPI_BASE}/${input.service}/assets`;
   const t0 = Date.now();
   try {
-    const form = new FormData();
-    // Coerce the Uint8Array through a Blob so Node's fetch treats the
-    // part as a file part (not a plain field).
-    // Use a plain ArrayBuffer copy so we always have BlobPart-compatible input.
-    // Uint8Array's underlying buffer might be SharedArrayBuffer in some
-    // runtimes, which Blob's TS signature no longer accepts.
+    // Polish-29.0.18 Commit 127: Dreamina's /assets/account rejected
+    // multipart with "Content-Type (multipart/form-data) not supported.
+    // Valid values: image/jpeg, image/png, image/webp, video/mp4, ...".
+    // It wants raw bytes with the media mime as the Content-Type.
+    // google-flow's /assets endpoint historically wants multipart, so
+    // branch on service. If google-flow ever ships the same raw-body
+    // change, we'll flip it too.
+    const useRawBody = input.service === 'dreamina';
+    // Copy through a plain ArrayBuffer so Node's fetch always accepts
+    // the buffer (Uint8Array over SharedArrayBuffer isn't a BlobPart
+    // in TS's stricter DOM typings).
     const ab = new ArrayBuffer(input.bytes.byteLength);
     new Uint8Array(ab).set(input.bytes);
-    const blob = new Blob([ab], { type: input.contentType });
-    form.append('file', blob, input.filename ?? 'reference.bin');
+
+    let requestBody: ArrayBuffer | FormData;
+    let extraHeaders: Record<string, string>;
+    if (useRawBody) {
+      requestBody = ab;
+      extraHeaders = { 'Content-Type': input.contentType };
+    } else {
+      const form = new FormData();
+      const blob = new Blob([ab], { type: input.contentType });
+      form.append('file', blob, input.filename ?? 'reference.bin');
+      requestBody = form;
+      // Do NOT set content-type — fetch adds the multipart boundary
+      // when it sees a FormData body.
+      extraHeaders = {};
+    }
 
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${getUseapiNetToken()}`,
-        // NB: do NOT set content-type manually — fetch adds the
-        // multipart boundary when it sees a FormData body.
+        ...extraHeaders,
       },
-      body: form,
+      body: requestBody,
       signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
     });
     const latencyMs = Date.now() - t0;

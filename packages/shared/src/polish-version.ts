@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.17';
+export const POLISH_VERSION = '29.0.18';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.17';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.17 Commit 126 - fix: align Seedance submit with the REAL Dreamina docs (user pasted the API reference). Three corrections in one commit: (1) correct t2v ratio field is `ratio` (not aspectRatio / aspect_ratio / image); (2) correct i2v reference field is `firstFrameRef` (not image / image_url); (3) firstFrameRef value MUST be an imageRef string returned by POST /dreamina/assets/account - raw HTTP URLs are rejected. Adds a pre-Seedance upload step in the polish29 variations worker: after Nano Banana generates the character PNG, upload it to Dreamina to get the imageRef, then pass THAT to Seedance under firstFrameRef. When firstFrameRef is present ratio is auto-detected from the image and MUST NOT be sent. Also fixed the asset upload URL for Dreamina (/dreamina/assets/account not /dreamina/assets) and taught the response parser to read `imageRef` in addition to `assetId`.';
+  'Polish-29.0.18 Commit 127 - fix: Dreamina asset upload rejects multipart/form-data. Sends raw image bytes with the media mime as Content-Type instead. Live 29.0.17 run reached the new Dreamina character-upload step (progress!) and returned: `Content-Type (multipart/form-data) not supported. Valid values: image/jpeg, image/png, image/webp, video/mp4, ...`. uploadUseapiAsset now branches by service - dreamina posts raw bytes with Content-Type: image/png (or whatever the ref mime is), google-flow still uses multipart (its docs match that shape).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
