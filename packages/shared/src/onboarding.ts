@@ -1,33 +1,39 @@
 import { z } from 'zod';
 
 /**
- * Polish-25.1 Commit 10a: onboarding trimmed to the 3 steps needed
- * for the Polish-25 creative-generation flow.
+ * Polish-29.0.8 Commit 117: onboarding trimmed to 2 steps.
  *   - tos:   accept terms of service
  *   - risk:  ack the Meta-enforcement risk education
- *   - keys:  paste + verify the 3 required BYOK keys
- *            (Claude / Gemini / MakeUGC)
  *
- * Meta + Telegram are NO LONGER required at signup. They're opt-in
- * surfaces at /settings/connections, prompted at the point of use
- * (Meta when the user hits "Launch to Meta"; Telegram in settings).
- * A signed-up user can generate ads without ever touching either.
+ * `keys` REMOVED: since Polish-29.0.6 the default generation path is
+ * credit-backed Seedance (useapi.net → Dreamina, platform-side
+ * shared account). New signups have 100 free trial credits and can
+ * hit /generate/seedance immediately — zero BYOK keys required.
+ *
+ * BYOK is now an opt-in power-user surface at /settings/connections,
+ * prompted at point-of-use for the specific pipelines that need it
+ * (HeyGen for premium avatar UGC, OpenAI gpt-image-2 for static ads,
+ * Claude for variation scripts, ElevenLabs for TTS). Meta + Telegram
+ * remain point-of-use as they always have been.
+ *
+ * Legacy /onboarding/keys still resolves — it now serves as a
+ * "connect keys later" info page rather than a gate. Existing users
+ * who completed `keys` in the old flow are unaffected; new users
+ * skip straight from `risk` → /dashboard → /generate/seedance.
  */
-export const ONBOARDING_STEPS = ['tos', 'risk', 'keys'] as const;
+export const ONBOARDING_STEPS = ['tos', 'risk'] as const;
 export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
 
 /** Human labels for the wizard progress bar. */
 export const ONBOARDING_STEP_LABELS: Record<OnboardingStep, string> = {
   tos: 'Terms',
   risk: 'Risk',
-  keys: 'Keys',
 };
 
 /** Map step → URL path. Single source of truth for redirects. */
 export const ONBOARDING_STEP_PATHS: Record<OnboardingStep, string> = {
   tos: '/onboarding/tos',
   risk: '/onboarding/risk',
-  keys: '/onboarding/keys',
 };
 
 /**

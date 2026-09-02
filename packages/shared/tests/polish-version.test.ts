@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.7 (Polish-29.0.7 Commit 116 — public /generate/seedance page: prompt/aspect/duration form, cost preview badge, fail-fast balance check, icon-rail Sparkles nav)', () => {
+  it('is currently 29.0.8 (Polish-29.0.8 Commit 117 — onboarding trimmed to tos->risk; keys gate removed since default Seedance path is credits-only)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.7');
+    expect(POLISH_VERSION).toBe('29.0.8');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

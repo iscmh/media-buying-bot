@@ -30,7 +30,10 @@ interface Props {
 const PATH_TO_STEP: Record<string, OnboardingStep> = {
   '/onboarding/tos': 'tos',
   '/onboarding/risk': 'risk',
-  '/onboarding/keys': 'keys',
+  // Polish-29.0.8 Commit 117: /onboarding/keys is now a legacy
+  // redirect (it redirects to /settings/connections). Intentionally
+  // omitted from PATH_TO_STEP — if a user somehow lands there mid-
+  // redirect the progress bar just returns null (unknown pathname).
 };
 
 export function OnboardingProgress({ completed }: Props) {

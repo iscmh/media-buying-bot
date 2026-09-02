@@ -1,7 +1,6 @@
 import { TOS_VERSION, type OnboardingStep } from '@mbb/shared';
-import { and, eq, isNull, inArray } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from './client';
-import { toolConnections } from './schema/connections';
 import { auditLogs } from './schema/logs';
 import { users } from './schema/users';
 
@@ -14,16 +13,17 @@ export interface OnboardingState {
 /**
  * Resolve a user's onboarding progress in one trip.
  *
- * Polish-25.1 Commit 10a: chain trimmed to tos → risk → keys. Meta +
- * Telegram no longer gate signup; they're prompted at point-of-use
- * from /settings/connections and the launch flow.
+ * Polish-29.0.8 Commit 117: chain trimmed to tos → risk. The `keys`
+ * gate is REMOVED — the default video generation path is now
+ * credit-backed Seedance (useapi.net → shared platform Dreamina
+ * account, see /generate/seedance). New signups get 100 free trial
+ * credits at first login and can generate a video before ever
+ * connecting a BYOK key.
  *
- * Polish-25.2 Commit 11: MakeUGC (rebranded "Instant UGC" in the UI)
- * is platform-managed. `keys` is complete when the user has the TWO
- * remaining BYOK keys active + verified: Claude (tool_connections)
- * + Gemini (tool_connections). The MakeUGC key comes from the
- * MAKEUGC_MANAGED_KEY env var at worker submit time (see
- * packages/jobs/src/lib/resolve-makeugc-key.ts).
+ * BYOK remains an opt-in surface at /settings/connections for users
+ * who want the premium HeyGen / OpenAI / Claude / ElevenLabs
+ * pipelines. Their pages independently check for the specific
+ * providers they require; onboarding no longer force-gates it.
  *
  * Read-only. Safe to call from any server component / server action.
  * Bypasses RLS (uses service-role connection) — caller must already
@@ -36,7 +36,7 @@ export interface OnboardingState {
 export async function getOnboardingState(userId: string): Promise<OnboardingState> {
   const db = getDb();
 
-  const [user, riskAck, toolRows] = await Promise.all([
+  const [user, riskAck] = await Promise.all([
     db.query.users.findFirst({
       where: eq(users.id, userId),
       columns: { tosAcceptedAt: true, tosVersion: true },
@@ -48,32 +48,19 @@ export async function getOnboardingState(userId: string): Promise<OnboardingStat
       ),
       columns: { id: true },
     }),
-    db.query.toolConnections.findMany({
-      where: and(
-        eq(toolConnections.userId, userId),
-        eq(toolConnections.status, 'active'),
-        isNull(toolConnections.deletedAt),
-        inArray(toolConnections.provider, ['claude', 'gemini']),
-      ),
-      columns: { provider: true },
-    }),
   ]);
 
   const tosDone = !!user?.tosAcceptedAt && user.tosVersion === TOS_VERSION;
   const riskDone = !!riskAck;
-  const toolProviders = new Set(toolRows.map((r) => r.provider));
-  const keysDone = toolProviders.has('claude') && toolProviders.has('gemini');
 
   const completed: Record<OnboardingStep, boolean> = {
     tos: tosDone,
     risk: riskDone,
-    keys: keysDone,
   };
 
   let nextStep: OnboardingStep | null = null;
   if (!tosDone) nextStep = 'tos';
   else if (!riskDone) nextStep = 'risk';
-  else if (!keysDone) nextStep = 'keys';
 
   return { nextStep, completed };
 }
