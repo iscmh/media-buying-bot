@@ -358,6 +358,39 @@ export {
   type CallProviderResult,
 } from './chokepoint';
 
+// Polish-29.0.0 Commit 110: useapi.net multi-service client
+// (Google Flow + Dreamina to start; Kling / Runway / PixVerse /
+// MiniMax slot in on the same shape as accounts are registered).
+export {
+  getUseapiNetToken,
+  isUseapiNetConfigured,
+  registerGoogleFlowAccount,
+  registerDreaminaAccount,
+  uploadUseapiAsset,
+  checkUseapiJob,
+  submitVeoVideo,
+  submitNanoBananaImage,
+  submitSeedanceVideo,
+  submitSeedreamImage,
+  UseapiNetConfigError,
+  UseapiNetAccountError,
+  UseapiNetJobError,
+  type UseapiService,
+  type UseapiJobStatus,
+  type UseapiJobResult,
+  type GoogleFlowAccountInput,
+  type DreaminaAccountInput,
+  type RegisterAccountResult,
+  type UploadAssetInput,
+  type UploadAssetResult,
+  type CheckJobInput,
+  type SubmitJobResult,
+  type SubmitVeoVideoInput,
+  type SubmitNanoBananaImageInput,
+  type SubmitSeedanceVideoInput,
+  type SubmitSeedreamImageInput,
+} from './useapi-net-client';
+
 export {
   submitReplicateConcat,
   checkReplicateConcat,

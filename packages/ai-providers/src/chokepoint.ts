@@ -52,7 +52,13 @@ export type ProviderName =
   // Polish-25 Commit 1: MakeUGC pay-per-video UGC ad generator.
   // Replaces the Polish-24 HeyGen pivot after avatar-quality
   // rejection. Auth via X-Api-Key on app.makeugc.ai/api/platform.
-  | 'makeugc';
+  | 'makeugc'
+  // Polish-29.0.0 Commit 110: useapi.net multi-service proxy.
+  // Powers the credit-cost side of the pricing (Seedance /
+  // Kling / Nano Banana / Veo / Runway / PixVerse / MiniMax /
+  // Dreamina / Google Flow) via a single bearer-token surface
+  // over api.useapi.net/v1.
+  | 'useapi_net';
 
 export interface CallProviderInput {
   userId: string;

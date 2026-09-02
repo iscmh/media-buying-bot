@@ -42,7 +42,10 @@ export async function logAiProviderApiCall(input: {
     // Polish-23 Commit 1: WaveSpeedAI Higgsfield Soul audit tag.
     | 'wavespeed_ai'
     // Polish-25 Commit 1: MakeUGC pay-per-video UGC ad generator audit tag.
-    | 'makeugc';
+    | 'makeugc'
+    // Polish-29.0.1 Commit 110: useapi.net proxy audit tag. One
+    // bearer-token surface across every credit-costed model.
+    | 'useapi_net';
   endpoint: string;
   method: string;
   requestBody?: Record<string, unknown>;

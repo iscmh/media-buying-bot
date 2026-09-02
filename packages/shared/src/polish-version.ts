@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.0';
+export const POLISH_VERSION = '29.0.1';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.0';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.0 Commit 109 - credit system foundations. Adds credit_pricing (single source of truth for credit costs + retail savings % per model), 4 DB tables (credits_balance / credit_transactions / credit_reservations / fraud_signals), and the runtime spend flow (reserveCredits, consumeReservation, releaseReservation, addCredits, expireStaleReservations). No user-facing surface yet — Commit 110 will wire the Whop webhook + useapi.net wrapper on top of this foundation.';
+  'Polish-29.0.1 Commit 110 - useapi.net client wrapper. Adds packages/ai-providers/src/useapi-net-client.ts with one bearer-token surface for Google Flow (Veo, Nano Banana) + Dreamina (Seedance, Seedream): account registration, asset upload, video/image submit, and shared job polling. Chokepoint provider list gains useapi_net so every call is audit-logged uniformly with the rest of the AI stack. Commit 111 wires the Whop webhook + credit top-up on top; Commit 112 the provider router that decides BYOK vs credits per model.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
