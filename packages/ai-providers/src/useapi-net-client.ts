@@ -217,6 +217,56 @@ export async function registerGoogleFlowAccount(input: {
   return { ok: true, accountId: id };
 }
 
+/**
+ * Polish-29.0.30 Commit 139: fetch a registered Dreamina account's
+ * current credit balance from useapi.net. Used as a pre-flight check
+ * in the polish29 seedance variations worker to fail fast when the
+ * account is dry — before we spend Claude + Nano Banana BYOK $$ on a
+ * generation that will die at the first Seedance submit with ret:1006
+ * "Not enough credits". Returns { ok:false } for network errors or if
+ * useapi.net doesn't recognize the account.
+ */
+export interface DreaminaAccountBalance {
+  ok: true;
+  totalCredits: number;
+  vipCredits: number;
+  giftCredits: number;
+  purchaseCredits: number;
+  region: 'US' | 'CA' | string;
+}
+export type GetDreaminaAccountResult = DreaminaAccountBalance | { ok: false; errorMessage: string };
+export async function getDreaminaAccountBalance(input: {
+  userId: string;
+  account: string;
+}): Promise<GetDreaminaAccountResult> {
+  const url = `${USEAPI_BASE}/dreamina/accounts/${encodeURIComponent(input.account)}`;
+  const result = await callProvider<{
+    account?: string;
+    region?: string;
+    credits?: { total?: number; vip?: number; gift?: number; purchase?: number };
+  }>({
+    userId: input.userId,
+    provider: 'useapi_net',
+    url,
+    method: 'GET',
+    headers: authHeaders(),
+    timeoutMs: ACCOUNTS_TIMEOUT_MS,
+    requestBodyForLog: { account_hash: hashAccount(input.account) },
+  });
+  if (!result.ok) {
+    return { ok: false, errorMessage: result.errorMessage ?? `HTTP ${result.status}` };
+  }
+  const c = result.data.credits ?? {};
+  return {
+    ok: true,
+    totalCredits: c.total ?? 0,
+    vipCredits: c.vip ?? 0,
+    giftCredits: c.gift ?? 0,
+    purchaseCredits: c.purchase ?? 0,
+    region: result.data.region ?? 'unknown',
+  };
+}
+
 export async function registerDreaminaAccount(input: {
   userId: string;
   account: DreaminaAccountInput;

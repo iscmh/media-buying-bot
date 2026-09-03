@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.29';
+export const POLISH_VERSION = '29.0.30';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.29';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.29 Commit 138 - polish: WORDS_PER_CLIP 10 -> 14 (105 wpm natural conversational) + MIN_SCRIPT_WORDS 80 enforced on Claude batch. 29.0.28 fixed the pace-consistency issue (removing SHOT X OF Y metadata worked - all clips now pace uniformly) but overshot: 10 words / 8s ~= 75 wpm was too slow, user said non-human. Real TikTok UGC talk is 110-140 wpm, so 14 words / 8s ~= 105 wpm hits the natural sweet spot. Also: Claude was writing short scripts (30-50 words) because Polish-28 variations prompt says match source length ±20% and the source vision analysis returned a short transcript. Added optional minScriptWords param to composePolish28VariationsUserPrompt; polish29 passes 80, polish28 HeyGen path unchanged (still calls without the param). 80 words / 14 per clip = ~6 clips = ~48s composite. Delivery-block target updated from 75 to 105 wpm.';
+  'Polish-29.0.30 Commit 139 - cost/economics fix: cap Dreamina credit burn per test + preflight balance check. User feedback: "no creds again, we gotta lock in i keep wasting money". 29.0.29 pushed MIN_SCRIPT_WORDS to 80 which made Claude write ~140 word scripts producing 10-clip variations at 350 Dreamina credits each ($3.50/test). Four levers to cut cost per iteration by ~50%: (1) MAX_CLIPS_PER_VARIANT 10 -> 5 (hard cap; 40s composite is on-target for Meta Reels), (2) MIN_SCRIPT_WORDS 80 -> 55 (~4-5 clips at 14 words), (3) new getDreaminaAccountBalance() helper hits GET /dreamina/accounts/{email} and reads credits.total, (4) new preflight-dreamina-balance step at worker start - aborts fast with a clear top-up message if balance < 35 credits (one clip), warns if balance < needed ceiling. Fail-fast avoids blowing Claude + Nano Banana BYOK $$ on runs that will die at Seedance submit with ret:1006. Each test now burns ~175 Dreamina credits ($1.75) instead of $3.50.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

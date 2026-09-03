@@ -391,6 +391,7 @@ export {
   isUseapiNetConfigured,
   registerGoogleFlowAccount,
   registerDreaminaAccount,
+  getDreaminaAccountBalance,
   uploadUseapiAsset,
   checkUseapiJob,
   submitVeoVideo,

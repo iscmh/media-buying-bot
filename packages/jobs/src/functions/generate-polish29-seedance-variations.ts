@@ -50,6 +50,7 @@ import {
   checkReplicateConcat,
   cloneCharacterReferenceImage,
   composeNanoBananaCharacterClonePrompt,
+  getDreaminaAccountBalance,
   submitReplicateConcat,
   uploadUseapiAsset,
 } from '@mbb/ai-providers';
@@ -89,8 +90,16 @@ console.log(
 // -----------------------------------------------------------------
 
 const MAX_VARIANTS_PER_JOB = 10;
-/** Max clips per variation. 10 × 8s = 80s composite cap. */
-const MAX_CLIPS_PER_VARIANT = 10;
+/**
+ * Max clips per variation. Polish-29.0.30 Commit 139: 10 → 5.
+ * A 10-clip variation burns 10 × 35 Dreamina credits = 350 credits per
+ * test run. At $10/1000 credits that's $3.50 of Dreamina spend per
+ * test — brutal for iteration. Capping at 5 clips = 175 credits per
+ * test (~5-6 tests per $10 Dreamina pack). Real UGC ads are 30-40s
+ * anyway, so 5 × 8s = 40s composite is on-target for a typical
+ * Meta Reels/TikTok spec.
+ */
+const MAX_CLIPS_PER_VARIANT = 5;
 /** Min clips per variation. */
 const MIN_CLIPS_PER_VARIANT = 2;
 /** Default clips when source ad duration is unknown. */
@@ -107,14 +116,14 @@ const SEEDANCE_CLIP_SECONDS = 8;
  */
 const WORDS_PER_CLIP = 14;
 /**
- * Polish-29.0.29 Commit 138: minimum Claude-generated script length in
- * words. User feedback: "Claude makes the script too short, its not
- * even an ad." The Polish-28 variations prompt's "match source length
- * ±20%" clause was producing 30-50 word scripts when the source
- * transcript came back short. Forcing an 80-word minimum guarantees
- * a 5-6 clip composite (~40s) at 14 words per clip.
+ * Polish-29.0.30 Commit 139: 80 → 55 words. 80 was pushing Claude
+ * to write ~140 word scripts which produced 10-clip variations
+ * (MAX-capped) → 350 Dreamina credits per test = $3.50/test. 55 words
+ * gives ~4-5 clips at 14 words each = 32-40s composite, 140-175
+ * Dreamina credits per test, ~$1.75/test. Better cost per iteration
+ * while staying above the "just enough to be a real ad" threshold.
  */
-const MIN_SCRIPT_WORDS = 80;
+const MIN_SCRIPT_WORDS = 55;
 const DEFAULT_MODEL_ID = 'seedance-2-0-ugc';
 const ALLOWED_MODEL_IDS = new Set([
   'seedance-2-5-ugc',
@@ -518,6 +527,52 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
         }
         throw err;
       }
+    });
+
+    // ---------- C2: pre-flight Dreamina account balance ----------
+    // Polish-29.0.30 Commit 139: bail BEFORE Claude batch + Nano Banana
+    // BYOK spend when the Dreamina account is out of credits. Each
+    // variation needs at most MAX_CLIPS_PER_VARIANT × 35 Dreamina
+    // credits (35 is the ~observed per-clip Dreamina charge for
+    // Seedance 2.0 720p 8s). With N variations that's the ceiling —
+    // failing fast here avoids blowing ~$0.20 of BYOK $$ on a run
+    // that will only ever succeed at 0/N clips.
+    const APPROX_DREAMINA_CREDITS_PER_CLIP = 35;
+    await guardedStepRun(step, 'preflight-dreamina-balance', async () => {
+      const balance = await getDreaminaAccountBalance({
+        userId: jobUserId,
+        account: dreaminaAccount,
+      });
+      if (!balance.ok) {
+        // Log and continue — a Dreamina API blip shouldn't kill the
+        // run, and the per-clip submit will surface a real error if
+        // credits really are gone.
+        console.warn(
+          `[polish29-seedance-var] Dreamina balance check failed (${balance.errorMessage}) — continuing with generation anyway.`,
+        );
+        return safeInngestStepReturn({ ok: true, skipped: true });
+      }
+      const needed =
+        requestedVariantCount * MAX_CLIPS_PER_VARIANT * APPROX_DREAMINA_CREDITS_PER_CLIP;
+      if (balance.totalCredits < APPROX_DREAMINA_CREDITS_PER_CLIP) {
+        // Not even 1 clip's worth. Fail hard.
+        throw new NonRetriableError(
+          `Dreamina account ${dreaminaAccount} is out of credits (${balance.totalCredits} remaining, need at least ${APPROX_DREAMINA_CREDITS_PER_CLIP} for 1 clip). Top up at dreamina.ai/billing (or wait for daily/monthly refill).`,
+        );
+      }
+      if (balance.totalCredits < needed) {
+        // Enough for SOME clips but not the full render. Warn and
+        // proceed — the resilient per-clip loop from Commit 132 will
+        // salvage what it can.
+        console.warn(
+          `[polish29-seedance-var] Dreamina balance (${balance.totalCredits}) is below the ceiling estimate (${needed}) for ${requestedVariantCount} variations. Some clips may fail with ret:1006. Consider topping up.`,
+        );
+      }
+      return safeInngestStepReturn({
+        ok: true,
+        totalCredits: balance.totalCredits,
+        region: balance.region,
+      });
     });
 
     // ---------- D: load concept + vision-analysis JSON + source duration ----------
