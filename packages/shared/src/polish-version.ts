@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.34';
+export const POLISH_VERSION = '29.0.35';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.34';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.34 Commit 143 - three fixes from live run feedback. User: still slow + random pauses + script cut off mid-word. Fixes: (1) WORDS_PER_CLIP 16 -> 18 (~135 wpm - upper-conversational TikTok pace, DELIVERY block target updated to match), (2) insertNaturalPauses now returns text verbatim - stopped inserting commas entirely since Claudes own punctuation is enough and every insertion cadence created pauses at wrong spots, (3) Claude batch maxTokens 8000 -> 16000. Live script ended at "just open what" because Claude hit the 8k output ceiling before finishing the batch. 5 variations x ~180 word scripts + persona JSON = >8k tokens. 16k is well under Claude Sonnets 64k output cap.';
+  'Polish-29.0.35 Commit 144 - preflight balance check now fails HARD when Dreamina balance cannot cover the full run. Previous warn-but-continue behaviour let user spend BYOK $$ on runs that only partially rendered and left composites cut off mid-story. New behaviour: if balance < variantCount × MAX_CLIPS × 100 credits, throw NonRetriableError with the exact credits short and dollar amount. User always knows to top-up BEFORE clicking Generate.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

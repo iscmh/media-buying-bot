@@ -533,20 +533,18 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
         );
         return safeInngestStepReturn({ ok: true, skipped: true });
       }
+      // Polish-29.0.35 Commit 144: fail HARD if balance can't cover
+      // the full run. Previous "warn but continue" behaviour let user
+      // spend BYOK $$ on runs that only partially rendered and left
+      // composites cut off mid-story (see the "just open what" run).
+      // For a $$-heavy pipeline the right default is "don't start
+      // what you can't finish".
       const needed =
         requestedVariantCount * MAX_CLIPS_PER_VARIANT * APPROX_DREAMINA_CREDITS_PER_CLIP;
-      if (balance.totalCredits < APPROX_DREAMINA_CREDITS_PER_CLIP) {
-        // Not even 1 clip's worth. Fail hard.
-        throw new NonRetriableError(
-          `Dreamina account ${dreaminaAccount} is out of credits (${balance.totalCredits} remaining, need at least ${APPROX_DREAMINA_CREDITS_PER_CLIP} for 1 clip). Top up at dreamina.ai/billing (or wait for daily/monthly refill).`,
-        );
-      }
       if (balance.totalCredits < needed) {
-        // Enough for SOME clips but not the full render. Warn and
-        // proceed — the resilient per-clip loop from Commit 132 will
-        // salvage what it can.
-        console.warn(
-          `[polish29-seedance-var] Dreamina balance (${balance.totalCredits}) is below the ceiling estimate (${needed}) for ${requestedVariantCount} variations. Some clips may fail with ret:1006. Consider topping up.`,
+        const missing = needed - balance.totalCredits;
+        throw new NonRetriableError(
+          `Dreamina balance too low for a full render. Have ${balance.totalCredits} credits, need ~${needed} for ${requestedVariantCount} variation${requestedVariantCount === 1 ? '' : 's'} × ${MAX_CLIPS_PER_VARIANT} clips × ~${APPROX_DREAMINA_CREDITS_PER_CLIP} credits/clip. Short by ${missing} credits (~$${(missing / 100).toFixed(2)} at $10/1000). Top up at dreamina.ai/billing then retry.`,
         );
       }
       return safeInngestStepReturn({
