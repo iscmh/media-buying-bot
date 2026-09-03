@@ -395,6 +395,8 @@ export {
   uploadUseapiAsset,
   checkUseapiJob,
   submitVeoVideo,
+  submitOmniVideo,
+  submitGoogleFlowConcat,
   submitNanoBananaImage,
   submitSeedanceVideo,
   submitSeedreamImage,

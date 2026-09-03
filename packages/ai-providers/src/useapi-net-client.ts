@@ -536,6 +536,180 @@ export interface SubmitJobResult {
   errorMessage?: string;
 }
 
+/**
+ * Polish-29.0.35 Commit 145: Omni 1.1 Flash video generation.
+ *
+ * Google Flow's audio-native talking-head model. Three input modes we
+ * care about:
+ *   - Text-to-video: prompt only, produces a 4-10s clip
+ *   - I2V (first + last frame): startImage = endImage = same still →
+ *     the clip begins and ends on that frame with free motion in the
+ *     middle. This is what the useapi.net blog uses for the seed clip
+ *     of a UGC talking-head chain.
+ *   - V2V edit: pass a `referenceVideo` (mediaGenerationId of a prior
+ *     Omni output). Omni replays the source's motion + speaker's voice
+ *     + camera + framing, but delivers a new line — this is how a
+ *     talking-head chain "extends" without a dedicated /extend endpoint
+ *     (Omni doesn't support POST /videos/extend; only Veo does).
+ *
+ * Credits per Google Flow Pro/Ultra tier (per public docs):
+ *   - 4s  clip: 7 credits (I2V or T2V) / 20 credits (V2V edit)
+ *   - 6s  clip: 10 credits / 20 credits
+ *   - 8s  clip: 12 credits / 20 credits
+ *   - 10s clip: 15 credits / 20 credits
+ *   - 360p variant halves the credit cost
+ *
+ * All modes use the SAME endpoint (POST /google-flow/videos); which
+ * mode Omni picks is determined by which fields are present.
+ */
+export interface SubmitOmniVideoInput {
+  userId: string;
+  account: string;
+  prompt: string;
+  /** Duration seconds. 4 | 6 | 8 | 10. Defaults 4. */
+  durationSeconds?: 4 | 6 | 8 | 10;
+  /** '9:16' | '1:1' | '16:9'. Defaults 9:16 for UGC. */
+  aspectRatio?: '9:16' | '1:1' | '16:9';
+  /** '360p' | '720p'. Defaults 720p. */
+  resolution?: '360p' | '720p';
+  /**
+   * I2V mode — a Nano Banana / Nano Banana 2 mediaGenerationId or a
+   * public URL used as the FIRST frame. Pass alone for i2v-forward
+   * mode, or pair with `endFrame` for the seed-clip pattern where the
+   * clip starts AND ends on this frame.
+   */
+  startFrame?: { assetId?: string; url?: string };
+  /**
+   * I2V mode — end frame. Pair with startFrame for first+last-frame
+   * seeding. If startFrame == endFrame the clip loops seamlessly.
+   */
+  endFrame?: { assetId?: string; url?: string };
+  /**
+   * V2V edit mode — mediaGenerationId of a prior Omni video output.
+   * The new clip inherits that video's motion, voice, framing, and
+   * camera; the prompt supplies the new dialogue. Length matches the
+   * source video's length regardless of `durationSeconds`.
+   */
+  referenceVideo?: { assetId?: string; url?: string };
+  generationJobId?: string;
+  generatedCreativeId?: string;
+}
+
+export async function submitOmniVideo(input: SubmitOmniVideoInput): Promise<SubmitJobResult> {
+  const body: Record<string, unknown> = {
+    account: input.account,
+    prompt: input.prompt,
+    model: 'omni-flash',
+    duration: input.durationSeconds ?? 4,
+    resolution: input.resolution ?? '720p',
+  };
+  // V2V edit takes length from the source video — durationSeconds is
+  // ignored. Aspect ratio also auto-derived from source.
+  const referenceVideoRef = input.referenceVideo?.assetId ?? input.referenceVideo?.url;
+  const startRef = input.startFrame?.assetId ?? input.startFrame?.url;
+  const endRef = input.endFrame?.assetId ?? input.endFrame?.url;
+  if (referenceVideoRef) {
+    body.referenceVideo_1 = referenceVideoRef;
+    // For V2V edit, don't send startFrame/endFrame — Omni auto-derives
+    // ratio and length from the source video.
+  } else if (startRef || endRef) {
+    if (startRef) body.startImage = startRef;
+    if (endRef) body.endImage = endRef;
+    // I2V mode — omni derives ratio from the frames, don't send ratio.
+  } else {
+    // T2V mode — send aspect ratio explicitly.
+    body.aspectRatio = input.aspectRatio ?? '9:16';
+  }
+
+  const result = await callProvider<RawSubmitBody>({
+    userId: input.userId,
+    provider: 'useapi_net',
+    url: `${USEAPI_BASE}/google-flow/videos`,
+    method: 'POST',
+    headers: authHeaders(),
+    body,
+    timeoutMs: SUBMIT_TIMEOUT_MS,
+    requestBodyForLog: {
+      account_hash: hashAccount(input.account),
+      model: 'omni-flash',
+      duration: body.duration,
+      resolution: body.resolution,
+      prompt_chars: input.prompt.length,
+      mode: referenceVideoRef ? 'v2v_edit' : startRef || endRef ? 'i2v' : 't2v',
+      has_start_frame: Boolean(startRef),
+      has_end_frame: Boolean(endRef),
+      has_reference_video: Boolean(referenceVideoRef),
+    },
+    generationJobId: input.generationJobId,
+    generatedCreativeId: input.generatedCreativeId,
+  });
+
+  return submitResultOf(result);
+}
+
+/**
+ * Polish-29.0.35 Commit 145: Google Flow /videos/concatenate.
+ *
+ * Server-side ffmpeg-style join across a list of prior Google Flow
+ * video mediaGenerationIds. Zero credits per useapi.net docs. Optional
+ * per-clip trimStart / trimEnd (seconds) let you drop the "quiet
+ * beats" that pin each Omni clip to its start/end frame — without
+ * trimming a plain join stacks those beats and reads as a freeze.
+ *
+ * Returns the joined video's mediaGenerationId; poll GET /videos/{jobid}
+ * for the finished asset (same as any other Google Flow submit).
+ */
+export interface GoogleFlowConcatSegment {
+  /** mediaGenerationId of a prior Google Flow video output. */
+  videoRef: string;
+  /** Seconds to trim off the start of this segment. Optional. */
+  trimStart?: number;
+  /** Seconds to trim off the end of this segment. Optional. */
+  trimEnd?: number;
+}
+export interface SubmitGoogleFlowConcatInput {
+  userId: string;
+  account: string;
+  segments: GoogleFlowConcatSegment[];
+  generationJobId?: string;
+  generatedCreativeId?: string;
+}
+export async function submitGoogleFlowConcat(
+  input: SubmitGoogleFlowConcatInput,
+): Promise<SubmitJobResult> {
+  if (input.segments.length < 2) {
+    return {
+      ok: false,
+      latencyMs: 0,
+      errorMessage: `Google Flow concat needs at least 2 segments (got ${input.segments.length}).`,
+    };
+  }
+  const body = {
+    account: input.account,
+    videos: input.segments.map((s) => ({
+      video: s.videoRef,
+      ...(s.trimStart != null ? { trimStart: s.trimStart } : {}),
+      ...(s.trimEnd != null ? { trimEnd: s.trimEnd } : {}),
+    })),
+  };
+  const result = await callProvider<RawSubmitBody>({
+    userId: input.userId,
+    provider: 'useapi_net',
+    url: `${USEAPI_BASE}/google-flow/videos/concatenate`,
+    method: 'POST',
+    headers: authHeaders(),
+    body,
+    timeoutMs: SUBMIT_TIMEOUT_MS,
+    requestBodyForLog: {
+      account_hash: hashAccount(input.account),
+      segment_count: input.segments.length,
+    },
+    generationJobId: input.generationJobId,
+    generatedCreativeId: input.generatedCreativeId,
+  });
+  return submitResultOf(result);
+}
+
 export async function submitVeoVideo(input: SubmitVeoVideoInput): Promise<SubmitJobResult> {
   const body = {
     account: input.account,
@@ -575,6 +749,15 @@ export interface SubmitNanoBananaImageInput {
   userId: string;
   account: string;
   prompt: string;
+  /**
+   * Polish-29.0.35 Commit 145: Google Flow ships several image models
+   * on the same /google-flow/images endpoint. Default nano-banana-2-lite
+   * because it's INCLUDED (0 credits) on any Google AI plan and produces
+   * the same 720p seed still the useapi.net UGC-clone tutorial uses.
+   * Nano Banana 2 / Nano Banana Pro are also 0-credit for image gen
+   * per docs — they just have longer render times and higher fidelity.
+   */
+  model?: 'nano-banana-2-lite' | 'nano-banana-2' | 'nano-banana-pro';
   /** Optional reference image(s) for character-lock composites. */
   referenceImages?: Array<{ assetId?: string; url?: string }>;
   aspectRatio?: '9:16' | '1:1' | '16:9';
@@ -590,6 +773,7 @@ export async function submitNanoBananaImage(
   const body = {
     account: input.account,
     prompt: input.prompt,
+    model: input.model ?? 'nano-banana-2-lite',
     aspectRatio: input.aspectRatio ?? '9:16',
     n: input.n ?? 1,
     ...(input.referenceImages && input.referenceImages.length > 0
@@ -607,6 +791,7 @@ export async function submitNanoBananaImage(
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: hashAccount(input.account),
+      model: body.model,
       aspect_ratio: body.aspectRatio,
       n: body.n,
       prompt_chars: input.prompt.length,

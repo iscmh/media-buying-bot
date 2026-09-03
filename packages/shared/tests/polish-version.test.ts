@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.35 (Polish-29.0.35 Commit 144 — preflight fails HARD if Dreamina balance cannot cover the full run, not warn-and-continue)', () => {
+  it('is currently 29.0.36 (Polish-29.0.36 Commit 145 — Google Flow / Omni 1.1 Flash foundation: submitOmniVideo + submitGoogleFlowConcat + widened submitNanoBananaImage model param)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.35');
+    expect(POLISH_VERSION).toBe('29.0.36');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

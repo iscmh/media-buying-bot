@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.35';
+export const POLISH_VERSION = '29.0.36';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.35';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.35 Commit 144 - preflight balance check now fails HARD when Dreamina balance cannot cover the full run. Previous warn-but-continue behaviour let user spend BYOK $$ on runs that only partially rendered and left composites cut off mid-story. New behaviour: if balance < variantCount × MAX_CLIPS × 100 credits, throw NonRetriableError with the exact credits short and dollar amount. User always knows to top-up BEFORE clicking Generate.';
+  'Polish-29.0.36 Commit 145 - Google Flow / Omni 1.1 Flash foundation for the polish30 variations pipeline. User pivoted off Dreamina Seedance after per-clip cost math (65-137 Dreamina credits per 8s clip = ~$1.37) vs Omni 1.1 Flash (7 credits per 4s clip = $0.07, or 20 credits for a V2V extend = $0.20). A full 10s UGC talking-head chain in Omni = 47 Flow credits total = ~$0.47, vs $6-14 for the same length in Seedance. Adds submitOmniVideo (T2V + I2V first+last-frame + V2V edit on /google-flow/videos), submitGoogleFlowConcat (server-side join with per-segment trimStart/trimEnd for cutting the pin-frame beats at joins), widens submitNanoBananaImage with a model param (nano-banana-2-lite / -2 / -pro; default lite = 0-credit on any Google AI plan). Ships as API surface only in useapi-net-client.ts + ai-providers barrel. No worker yet; Commits 146-148 add pricing/descriptor, worker, frontend picker.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
