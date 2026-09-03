@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.31';
+export const POLISH_VERSION = '29.0.32';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.31';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.31 Commit 140 - revert length caps per user push-back. User asked to remove the MAX_CLIPS_PER_VARIANT 5 + MIN_SCRIPT_WORDS 55 caps from 29.0.30. They want full ad-length composites (up to 80s at 10 clips × 8s), cost be damned. Reverted both back to 10 / 80 respectively. KEPT the preflight-dreamina-balance step from Commit 139 - it fails fast when the wallet is empty without capping output length, so no BYOK $$ gets wasted on runs Dreamina will reject with ret:1006.';
+  'Polish-29.0.32 Commit 141 - polish: bump pace slightly + kill dramatic pauses. User feedback: still slow, needs to be a BIT faster, and the pauses its taking are too long, sometimes 3 seconds. Two tweaks: (1) WORDS_PER_CLIP 14 -> 16 (~120 wpm — mid TikTok conversational range instead of 105 wpm slower end), (2) insertNaturalPauses cut back: removed the . -> ... upgrade entirely (ellipses were causing 2-3s dramatic pauses), and dropped added-comma density from every 4th word to every 6th word (fewer micro-pauses). DELIVERY block target bumped from 105 to 120 wpm. Kept everything else from 29.0.29+ (sentence-boundary split, standalone-clip prompt shape, preflight balance check).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

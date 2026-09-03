@@ -103,14 +103,12 @@ const DEFAULT_CLIPS_PER_VARIANT = 4;
 /** Seedance clip length in seconds. 8s = Seedance's per-call max. */
 const SEEDANCE_CLIP_SECONDS = 8;
 /**
- * Words per clip. Polish-29.0.29 Commit 138: 10 → 14.
- * 29.0.28 (10 words / 8s ≈ 75 wpm) was TOO SLOW — user feedback "its
- * non human". The rate ping-pong: 22 was machine-gun robotic, 15 was
- * still fast, 10 was too slow. 14 words / 8s ≈ 105 wpm — the
- * conversational natural-UGC talking rate. Real people on TikTok
- * average 110-140 wpm.
+ * Words per clip. Polish-29.0.32 Commit 141: 14 → 16.
+ * 14 (~105 wpm) was close but user said "still slow, needs to be a
+ * BIT faster". Bumping to 16 (~120 wpm — mid TikTok conversational
+ * range). Fine-tuning, not overhauling.
  */
-const WORDS_PER_CLIP = 14;
+const WORDS_PER_CLIP = 16;
 /**
  * Polish-29.0.31 Commit 140: reverted 55 → 80 per user push-back on
  * the length cap. Claude generates ad-length scripts (~140 words →
@@ -163,31 +161,28 @@ function nowIso(): string {
 }
 
 /**
- * Polish-29.0.26 Commit 135: inject ellipses at natural pause points
- * to slow Seedance TTS delivery.
+ * Polish-29.0.32 Commit 141: cut back on pause insertion — user
+ * feedback: "pauses its taking are too long, sometimes 3 seconds".
  *
- * Seedance reads punctuation as timing hints. A bare 10-word sentence
- * with no punctuation gets rushed through in 3s; the same words with
- * pauses take the full 8s. Rules:
- *   - Every 4th word gets a trailing comma if it doesn't already have
- *     terminal punctuation nearby.
- *   - Any word followed by a period gets an ellipsis instead (bigger
- *     pause than a period on its own).
- *   - Existing commas / ellipses preserved.
+ * Ellipses were the culprit: Seedance treats `...` as a dramatic
+ * 2-3s pause. Regular sentence-end periods and existing commas alone
+ * give natural breathing without dragging. Also reduced added-comma
+ * density from every 4th word → every 6th word so there's fewer
+ * micro-pauses in the delivery.
+ *
+ * Rules now:
+ *   - Existing punctuation preserved verbatim. NO more . → ... upgrade.
+ *   - Every 6th word gets a light trailing comma if the word has no
+ *     punctuation yet (natural rhythm break, not a dramatic pause).
  */
 export function insertNaturalPauses(text: string): string {
   const words = text.split(/\s+/).filter(Boolean);
-  if (words.length <= 3) return text; // too short to need pause insertion
+  if (words.length <= 4) return text; // too short to need pause insertion
   const out: string[] = [];
   for (let i = 0; i < words.length; i++) {
     const w = words[i]!;
-    // Terminal '.' → '...' for a bigger pause
-    if (w.endsWith('.') && !w.endsWith('...')) {
-      out.push(w.slice(0, -1) + '...');
-      continue;
-    }
-    // Every 4th word: add trailing comma if the word has no punctuation yet
-    if (i > 0 && (i + 1) % 4 === 0 && /[a-z0-9]$/i.test(w)) {
+    // Every 6th word: add trailing comma if the word has no punctuation yet.
+    if (i > 0 && (i + 1) % 6 === 0 && /[a-z0-9]$/i.test(w)) {
       out.push(w + ',');
       continue;
     }
@@ -350,7 +345,7 @@ export function composeClipPrompt(input: {
     `- Same person, same clothing, same background, same lighting as the reference image throughout the entire clip.\n`,
     `- Aesthetic: iPhone front-camera talking-head UGC, the kind a real customer would post to TikTok.\n\n`,
     `DELIVERY — HARD RULES:\n`,
-    `- Target speech rate: approximately 105 words per minute — natural conversational pace, the way a real person talks to a friend on their phone.\n`,
+    `- Target speech rate: approximately 120 words per minute — natural conversational pace, the way a real person talks to a friend on their phone. Not slow, not rushed.\n`,
     `- Real pauses between phrases (respect the commas and ellipses in the dialogue below — those are timing markers).\n`,
     `- Warm, sincere, casual tone. Direct to camera.\n`,
     `- Do NOT rush. Do NOT speed up to fit the 8-second clip length — if you finish speaking early, stay silent and hold the frame.\n`,
