@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.20';
+export const POLISH_VERSION = '29.0.21';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.20';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.20 Commit 129 - fix: Dreamina job-poll URL is /dreamina/videos/{jobid} not /dreamina/jobs/{jobid}. Live 29.0.19 run cleared every previous layer (character generated, uploaded to Dreamina CA, Seedance i2v submit accepted, jobid returned) and died on poll_failed: HTTP 404 because the /jobs/ path 404s on Dreamina. Per docs the Dreamina job-status endpoint is /videos/{jobid}. checkUseapiJob branches: dreamina -> /videos/{jobid}; google-flow -> /jobs/{jobid} (which its docs list as a dedicated endpoint).';
+  'Polish-29.0.21 Commit 130 - fix: drop encodeURIComponent from Dreamina poll jobid + surface raw body in poll errors. Live 29.0.20 got past the 404 (Commit 129 fixed the /videos/ vs /jobs/ path) and hit HTTP 400 on the same poll step. Dreamina jobids contain `:` and `@` (e.g. `j0223...-CA:user@example.com-bot:dreamina`) which are technically URL-safe per RFC 3986, and Dreaminas router expects them RAW - percent-encoding to %3A/%40 makes it look up a job with the literal encoded string, returning 400. checkUseapiJob now skips encoding for dreamina and appends a truncated rawBody dump to errorMessage on failure (same trick Commit 122 used for submit) so future 400s show Dreaminas actual rejection reason.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

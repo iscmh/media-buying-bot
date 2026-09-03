@@ -410,7 +410,16 @@ export interface CheckJobInput {
  */
 export async function checkUseapiJob(input: CheckJobInput): Promise<UseapiJobResult> {
   const pathSegment = input.service === 'dreamina' ? 'videos' : 'jobs';
-  const url = `${USEAPI_BASE}/${input.service}/${pathSegment}/${encodeURIComponent(input.jobId)}`;
+  // Polish-29.0.21 Commit 130: don't encodeURIComponent the jobid.
+  // Dreamina jobids look like:
+  //   j0223140530123456789v-u12345-CA:user@example.com-bot:dreamina
+  // The `:` and `@` chars are technically URL-safe (RFC 3986 sub-delims
+  // / unreserved) and Dreamina's router appears to expect them RAW —
+  // percent-encoding them to %3A and %40 causes the router to look up
+  // a job with the literal encoded string, returning HTTP 400. Skip
+  // encoding for dreamina; keep it for other services out of caution.
+  const encodedJobId = input.service === 'dreamina' ? input.jobId : encodeURIComponent(input.jobId);
+  const url = `${USEAPI_BASE}/${input.service}/${pathSegment}/${encodedJobId}`;
   const result = await callProvider<RawJobBody>({
     userId: input.userId,
     provider: 'useapi_net',
@@ -424,10 +433,21 @@ export async function checkUseapiJob(input: CheckJobInput): Promise<UseapiJobRes
   });
 
   if (!result.ok) {
+    // Polish-29.0.21 Commit 130: same rawBody-dump trick as Commit 122
+    // used for submits — append a truncated JSON of the response body
+    // so the runs page shows Dreamina's actual rejection reason instead
+    // of a bare "HTTP 400".
+    let bodyHint = '';
+    try {
+      const s = JSON.stringify(result.rawBody).slice(0, 400);
+      if (s && s !== '{}' && s !== 'null') bodyHint = ` :: body=${s}`;
+    } catch {
+      /* rawBody unserializable — skip */
+    }
     return {
       status: 'failed',
       rawStatus: null,
-      errorMessage: result.errorMessage,
+      errorMessage: (result.errorMessage ?? `HTTP ${result.status}`) + bodyHint,
       raw: {},
     };
   }
