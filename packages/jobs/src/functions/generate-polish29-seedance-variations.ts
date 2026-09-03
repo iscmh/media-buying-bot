@@ -626,11 +626,17 @@ async function renderOneVariation(
   }
   const personaLockPrefix = composePersonaLockPrefix(entry.persona);
 
-  // 3. Render each clip sequentially. Sequential (not parallel) inside
-  //    a variation so an early-clip failure short-circuits before we
-  //    burn credits on the remainder — the concat only makes sense if
-  //    every clip renders.
+  // 3. Render each clip sequentially. Polish-29.0.23 Commit 132:
+  //    CONTINUE past individual clip failures instead of aborting the
+  //    whole variation. Dreamina hits content-moderation false-positives
+  //    on individual clips (fail_code 2039 etc.); losing 1 out of 4
+  //    clips to that shouldn't kill the entire ad. Concat proceeds if
+  //    ≥ MIN_CLIPS_TO_CONCAT succeeded (< that = the composite would be
+  //    too short to be a usable ad).
+  //    InsufficientCreditsError still short-circuits — no point trying
+  //    more clips if the wallet is empty.
   const clipUrls: string[] = [];
+  const clipFailures: Array<{ clipIndex: number; reason: string; errorMessage: string }> = [];
   let creditsSpent = 0;
   let clipsSucceeded = 0;
   for (let clipIndex = 0; clipIndex < clipDialogues.length; clipIndex++) {
@@ -671,6 +677,16 @@ async function renderOneVariation(
       }
     });
     if (clipResult.kind === 'insufficient_credits') {
+      // Balance exhausted — stop, we can't render more clips. If we
+      // already have ≥ MIN clips, fall through to concat them.
+      if (clipsSucceeded >= MIN_CLIPS_PER_VARIANT) {
+        clipFailures.push({
+          clipIndex,
+          reason: 'insufficient_credits',
+          errorMessage: `Needed ${clipResult.required}, had ${clipResult.available}`,
+        });
+        break;
+      }
       return {
         index,
         ok: false,
@@ -682,18 +698,35 @@ async function renderOneVariation(
     }
     const seedance = clipResult.result;
     if (seedance.ok !== true) {
-      return {
-        index,
-        ok: false,
-        errorMessage: `Clip ${clipIndex + 1}/${clipDialogues.length} failed (${seedance.reason}): ${seedance.errorMessage}. ${clipsSucceeded} earlier clips rendered.`,
-        creditsSpent,
-        clipsSucceeded,
-        clipsTotal: clipDialogues.length,
-      };
+      // Log the failure but keep going. Concat step at the end will
+      // decide whether we have enough clips to build the composite.
+      clipFailures.push({
+        clipIndex,
+        reason: seedance.reason,
+        errorMessage: seedance.errorMessage,
+      });
+      continue;
     }
     clipUrls.push(seedance.videoUrl);
     creditsSpent += seedance.creditsSpent;
     clipsSucceeded++;
+  }
+
+  // Gate concat on having enough clips to be a usable ad. Anything below
+  // MIN_CLIPS_PER_VARIANT (currently 2) is too short — fail the variation.
+  if (clipsSucceeded < MIN_CLIPS_PER_VARIANT) {
+    const failureSummary = clipFailures
+      .slice(0, 3)
+      .map((f) => `clip ${f.clipIndex + 1}: ${f.reason} — ${f.errorMessage.slice(0, 120)}`)
+      .join(' | ');
+    return {
+      index,
+      ok: false,
+      errorMessage: `Only ${clipsSucceeded}/${clipDialogues.length} clips rendered — need at least ${MIN_CLIPS_PER_VARIANT} to build a composite. Failures: ${failureSummary}`,
+      creditsSpent,
+      clipsSucceeded,
+      clipsTotal: clipDialogues.length,
+    };
   }
 
   // 4. Concat the M clips via Replicate ffmpeg.
@@ -779,7 +812,9 @@ async function renderOneVariation(
         model_id: modelId,
         credits_spent: creditsSpent,
         clips_total: clipDialogues.length,
+        clips_succeeded: clipsSucceeded,
         clip_urls_dreamina: clipUrls,
+        clip_failures: clipFailures,
         composite_source_url: concatUrl,
         composite_supabase_ok: stored.kind === 'ok',
         composite_supabase_error: stored.kind === 'err' ? stored.errorMessage : null,

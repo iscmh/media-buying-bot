@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.22';
+export const POLISH_VERSION = '29.0.23';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.22';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.22 Commit 131 - fix: normalizeJobBody looks inside body.response.* for Dreamina video URL + rawBody dump on no_video_url. Live 29.0.21 was the biggest jump yet - the poll worked (4 minutes elapsed = Dreamina rendered the full video), Dreamina reported completed, but the parser could not find the video URL because it only checked flat + result.* shapes. Per docs Dreamina wraps outputs in response.* - added response.video.url, response.videos[0], response.downloadUrls[0], response.output, response.url, response.result.url, response.videoUrl to the extraction chain. Also added a body-dump diagnostic in seedance-credit-flow.ts no_video_url branch so if the exact shape is still missed, we see the actual keys next run.';
+  'Polish-29.0.23 Commit 132 - resilience: continue past individual clip failures instead of aborting the whole variation. Live 29.0.22 was a huge win - 2 out of 4 clips actually rendered end-to-end (character upload, imageRef, i2v submit, poll, video URL extraction all worked). Died on clip 3 with Dreamina content-moderation fail_code 2039 and the old worker short-circuited on first-clip failure. Loop now continues past individual clip failures, tracks them in a clipFailures[] array, and gates the concat step on clipsSucceeded >= MIN_CLIPS_PER_VARIANT (2). If enough clips rendered, Replicate ffmpeg stitches whatever we got into a shorter-but-real composite. Failure metadata persisted on generated_creatives.generationMetadata.clip_failures so the runs page shows which clips died and why. InsufficientCreditsError still short-circuits (no point trying more clips with empty wallet) unless we already have enough to concat.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
