@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.28';
+export const POLISH_VERSION = '29.0.29';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.28';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.28 Commit 137 - fix: remove SHOT X OF Y clip-index metadata from Seedance prompts, treat every clip as standalone UGC. User feedback on 29.0.27: sentence-boundary split did not fix it - clip 1 still natural, clips 2+ still sped up. Diagnosis: my SHOT 2 OF 4 - one continuous take language was telling Seedance clip 2+ was a MIDDLE segment in a multi-shot sequence. Middle segments get paced fast (Seedance treats them as continuation). Clip 1 always sounded natural because SHOT 1 OF N reads as an opening beat with time to establish. Fix: rewrote composeClipPrompt to remove ALL clip-index / totalClips / continuous-take language. Every prompt now says the same thing: A single 8-second UGC selfie video. Each Seedance call is an independent generation, so each prompt now looks structurally identical to Seedance. If clip 1 paces naturally, all clips will.';
+  'Polish-29.0.29 Commit 138 - polish: WORDS_PER_CLIP 10 -> 14 (105 wpm natural conversational) + MIN_SCRIPT_WORDS 80 enforced on Claude batch. 29.0.28 fixed the pace-consistency issue (removing SHOT X OF Y metadata worked - all clips now pace uniformly) but overshot: 10 words / 8s ~= 75 wpm was too slow, user said non-human. Real TikTok UGC talk is 110-140 wpm, so 14 words / 8s ~= 105 wpm hits the natural sweet spot. Also: Claude was writing short scripts (30-50 words) because Polish-28 variations prompt says match source length ±20% and the source vision analysis returned a short transcript. Added optional minScriptWords param to composePolish28VariationsUserPrompt; polish29 passes 80, polish28 HeyGen path unchanged (still calls without the param). 80 words / 14 per clip = ~6 clips = ~48s composite. Delivery-block target updated from 75 to 105 wpm.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -98,18 +98,23 @@ const DEFAULT_CLIPS_PER_VARIANT = 4;
 /** Seedance clip length in seconds. 8s = Seedance's per-call max. */
 const SEEDANCE_CLIP_SECONDS = 8;
 /**
- * Words per clip. Polish-29.0.26 Commit 135: 15 → 10.
- * User feedback on the 29.0.24 run: "even faster than before, and only
- * 2 clips". Seedance's TTS gates delivery rate to fit whatever text we
- * give it into the clip duration — 15 words / 8s meant ~112 wpm but
- * Seedance apparently reads it faster (~150+ wpm perceived). Dropping
- * to 10 words / 8s ≈ 75 wpm — deliberately slow, matches how real
- * people speak in UGC ads with pauses between phrases. Bonus: same
- * Claude script now produces MORE clips (10-word chunks vs 15-word
- * chunks = 1.5x more clips per variation) — a 30-word script that was
- * 2 clips becomes 3 clips, a 100-word script becomes 10 clips.
+ * Words per clip. Polish-29.0.29 Commit 138: 10 → 14.
+ * 29.0.28 (10 words / 8s ≈ 75 wpm) was TOO SLOW — user feedback "its
+ * non human". The rate ping-pong: 22 was machine-gun robotic, 15 was
+ * still fast, 10 was too slow. 14 words / 8s ≈ 105 wpm — the
+ * conversational natural-UGC talking rate. Real people on TikTok
+ * average 110-140 wpm.
  */
-const WORDS_PER_CLIP = 10;
+const WORDS_PER_CLIP = 14;
+/**
+ * Polish-29.0.29 Commit 138: minimum Claude-generated script length in
+ * words. User feedback: "Claude makes the script too short, its not
+ * even an ad." The Polish-28 variations prompt's "match source length
+ * ±20%" clause was producing 30-50 word scripts when the source
+ * transcript came back short. Forcing an 80-word minimum guarantees
+ * a 5-6 clip composite (~40s) at 14 words per clip.
+ */
+const MIN_SCRIPT_WORDS = 80;
 const DEFAULT_MODEL_ID = 'seedance-2-0-ugc';
 const ALLOWED_MODEL_IDS = new Set([
   'seedance-2-5-ugc',
@@ -340,7 +345,7 @@ export function composeClipPrompt(input: {
     `- Same person, same clothing, same background, same lighting as the reference image throughout the entire clip.\n`,
     `- Aesthetic: iPhone front-camera talking-head UGC, the kind a real customer would post to TikTok.\n\n`,
     `DELIVERY — HARD RULES:\n`,
-    `- Target speech rate: approximately 75 words per minute. This is DELIBERATELY SLOW — think "casual conversation with a friend", not "reading a script".\n`,
+    `- Target speech rate: approximately 105 words per minute — natural conversational pace, the way a real person talks to a friend on their phone.\n`,
     `- Real pauses between phrases (respect the commas and ellipses in the dialogue below — those are timing markers).\n`,
     `- Warm, sincere, casual tone. Direct to camera.\n`,
     `- Do NOT rush. Do NOT speed up to fit the 8-second clip length — if you finish speaking early, stay silent and hold the frame.\n`,
@@ -555,7 +560,11 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
             `Re-run analyze-concept on this concept before submitting.`,
         );
       }
-      const userPrompt = composePolish28VariationsUserPrompt(rawInput, requestedVariantCount);
+      const userPrompt = composePolish28VariationsUserPrompt(
+        rawInput,
+        requestedVariantCount,
+        MIN_SCRIPT_WORDS,
+      );
       const r = await callClaude({
         userId: jobUserId,
         apiKey: keys.claude,

@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.28 (Polish-29.0.28 Commit 137 — fix: remove SHOT X OF Y metadata from Seedance prompts, treat every clip as standalone UGC)', () => {
+  it('is currently 29.0.29 (Polish-29.0.29 Commit 138 — polish: WORDS_PER_CLIP 10→14 = 105 wpm natural + MIN_SCRIPT_WORDS 80 for ad-length composites)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.28');
+    expect(POLISH_VERSION).toBe('29.0.29');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

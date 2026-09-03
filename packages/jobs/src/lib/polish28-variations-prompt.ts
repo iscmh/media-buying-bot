@@ -152,14 +152,26 @@ phrasing that would sound wrong in this persona's mouth changes.
 export function composePolish28VariationsUserPrompt(
   sourceVisionAnalysisJson: string,
   variantCount: number,
+  /**
+   * Polish-29.0.29 Commit 138: optional minimum script word count.
+   * Polish-29 Seedance variations pass ~80 (= ~5-6 clips × 14 words)
+   * to force Claude to write ad-length scripts even when the source
+   * vision analysis returned a short transcript. Polish-28 HeyGen
+   * variations still call without this param (HeyGen renders a single
+   * video per variant, source-length-matched is fine).
+   */
+  minScriptWords?: number,
 ): string {
   const clampedN = Math.max(1, Math.min(10, variantCount));
+  const lengthNote = minScriptWords
+    ? `\nSCRIPT LENGTH OVERRIDE: each script MUST be at least ${minScriptWords} words. This overrides the "match source length ±20%" rule from the system prompt for THIS request only — the caller is rendering a multi-clip composite ad and needs enough script to fill it. Do not cut the CTA short to hit the minimum; extend the middle (social proof, second benefit, "and here's the thing" beat) to reach the target.\n`
+    : '';
   return `Source-ad vision analysis:
 
 <<<
 ${sourceVisionAnalysisJson}
 >>>
-
+${lengthNote}
 Produce exactly ${clampedN} persona + script variation pairs per the
 constraints in the system prompt. Emit the JSON array only — no
 prose, no code fences.`;
