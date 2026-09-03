@@ -447,6 +447,17 @@ export interface CheckJobInput {
   userId: string;
   service: UseapiService;
   jobId: string;
+  /**
+   * Polish-29.0.43 Commit 152: `/google-flow` splits its poll surface
+   * by resource kind. Video jobs (Omni + Veo) poll at
+   * /google-flow/jobs/{jobid}; image jobs (Nano Banana 2/2-Lite/Pro)
+   * poll at /google-flow/images/{jobid} — hitting /jobs/ with an
+   * image jobid returns `Invalid job ID format` because the video
+   * router's id parser rejects it. Default 'video' keeps the
+   * behaviour of every current caller unchanged; polish30's still
+   * poll passes 'image'. Ignored for non-google-flow services.
+   */
+  resourceKind?: 'video' | 'image';
   generationJobId?: string;
   generatedCreativeId?: string;
 }
@@ -462,9 +473,17 @@ export interface CheckJobInput {
  * because the /jobs/ path 404s on Dreamina. google-flow's docs list
  * a dedicated GET /jobs/{jobid} endpoint so keep it on /jobs. Branch
  * by service.
+ *
+ * Polish-29.0.43 Commit 152: google-flow branches further by resource
+ * kind — see CheckJobInput.resourceKind header for why.
  */
 export async function checkUseapiJob(input: CheckJobInput): Promise<UseapiJobResult> {
-  const pathSegment = input.service === 'dreamina' ? 'videos' : 'jobs';
+  const pathSegment =
+    input.service === 'dreamina'
+      ? 'videos'
+      : input.service === 'google-flow' && input.resourceKind === 'image'
+        ? 'images'
+        : 'jobs';
   // Polish-29.0.21 Commit 130: don't encodeURIComponent the jobid.
   // Dreamina jobids look like:
   //   j0223140530123456789v-u12345-CA:user@example.com-bot:dreamina

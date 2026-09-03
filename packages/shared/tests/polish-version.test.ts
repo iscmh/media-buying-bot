@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.42 (Polish-29.0.42 Commit 151 — second /google-flow/images hotfix: also strip `n` and `aspectRatio`; Nano Banana takes only prompt + model)', () => {
+  it('is currently 29.0.43 (Polish-29.0.43 Commit 152 — Google Flow image poll routes to /google-flow/images/{jobid} not /jobs/; video polls unchanged)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.42');
+    expect(POLISH_VERSION).toBe('29.0.43');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

@@ -280,7 +280,8 @@ async function patchMetadata(jobId: string, patch: Record<string, unknown>): Pro
 }
 
 // -----------------------------------------------------------------
-// Poll helper — Google Flow uses /jobs/{jobid} for all types
+// Poll helper — Google Flow routes video vs image jobs to different
+// poll paths (Polish-29.0.43 Commit 152), so callers pass resourceKind.
 // -----------------------------------------------------------------
 
 async function pollUntilComplete(input: {
@@ -291,6 +292,13 @@ async function pollUntilComplete(input: {
   intervalSeconds: number;
   step: Parameters<Parameters<typeof inngest.createFunction>[2]>[0]['step'];
   stepLabel: string;
+  /**
+   * Polish-29.0.43 Commit 152: image jobs (Nano Banana still) poll
+   * at /google-flow/images/{jobid}; video jobs (Omni seed + extends)
+   * poll at /google-flow/jobs/{jobid}. Default 'video' keeps the
+   * seed-clip + extend call sites unchanged.
+   */
+  resourceKind?: 'video' | 'image';
 }): Promise<
   | { ok: true; videoUrl?: string; imageUrl?: string; mediaGenerationId?: string; attempts: number }
   | { ok: false; errorMessage: string; attempts: number }
@@ -306,6 +314,7 @@ async function pollUntilComplete(input: {
         userId: input.userId,
         service: 'google-flow',
         jobId: input.jobId,
+        resourceKind: input.resourceKind ?? 'video',
         generationJobId: input.generationJobId,
       });
       return safeInngestStepReturn(r);
@@ -684,6 +693,10 @@ async function renderOneVariation(
     generationJobId: jobId,
     step,
     stepLabel: `still-${stepSuffix}`,
+    // Polish-29.0.43 Commit 152: image jobs poll at /google-flow/images/{jobid},
+    // not /google-flow/jobs/{jobid}. Video seed + extends below leave this
+    // defaulted so they still hit /jobs/.
+    resourceKind: 'image',
     maxAttempts: 12,
     intervalSeconds: 5,
   });
