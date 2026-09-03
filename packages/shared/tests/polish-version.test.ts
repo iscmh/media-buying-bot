@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.33 (Polish-29.0.33 Commit 142 — hotfix: APPROX_DREAMINA_CREDITS_PER_CLIP 35→100 after live-observed per-clip charge of 65-100 credits for Seedance 2.0)', () => {
+  it('is currently 29.0.34 (Polish-29.0.34 Commit 143 — WORDS_PER_CLIP 16→18 = 135 wpm, remove all forced-comma insertion, Claude maxTokens 8000→16000)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.33');
+    expect(POLISH_VERSION).toBe('29.0.34');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

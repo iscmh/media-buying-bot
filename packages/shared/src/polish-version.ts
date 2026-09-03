@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.33';
+export const POLISH_VERSION = '29.0.34';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.33';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.33 Commit 142 - hotfix: bump APPROX_DREAMINA_CREDITS_PER_CLIP 35 -> 100. Live evidence: user had 71 Dreamina credits, preflight said OK (71 > 35 threshold), Seedance immediately rejected clip 1 with ret:1006 not enough credits. Actual Dreamina charge for Seedance 2.0 720p 8s is 65-100 credits depending on load and reference image complexity. Bumping the preflight constant to 100 keeps the safety net erring on the abort side - better a warned false-negative than a wasted BYOK spend on a guaranteed rejection.';
+  'Polish-29.0.34 Commit 143 - three fixes from live run feedback. User: still slow + random pauses + script cut off mid-word. Fixes: (1) WORDS_PER_CLIP 16 -> 18 (~135 wpm - upper-conversational TikTok pace, DELIVERY block target updated to match), (2) insertNaturalPauses now returns text verbatim - stopped inserting commas entirely since Claudes own punctuation is enough and every insertion cadence created pauses at wrong spots, (3) Claude batch maxTokens 8000 -> 16000. Live script ended at "just open what" because Claude hit the 8k output ceiling before finishing the batch. 5 variations x ~180 word scripts + persona JSON = >8k tokens. 16k is well under Claude Sonnets 64k output cap.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

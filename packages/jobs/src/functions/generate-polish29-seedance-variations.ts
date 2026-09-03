@@ -103,12 +103,12 @@ const DEFAULT_CLIPS_PER_VARIANT = 4;
 /** Seedance clip length in seconds. 8s = Seedance's per-call max. */
 const SEEDANCE_CLIP_SECONDS = 8;
 /**
- * Words per clip. Polish-29.0.32 Commit 141: 14 → 16.
- * 14 (~105 wpm) was close but user said "still slow, needs to be a
- * BIT faster". Bumping to 16 (~120 wpm — mid TikTok conversational
- * range). Fine-tuning, not overhauling.
+ * Words per clip. Polish-29.0.34 Commit 143: 16 → 18.
+ * User feedback: "still talking slow, needs to be a bit faster".
+ * 18 words / 8s ≈ 135 wpm — upper-conversational, matches typical
+ * TikTok UGC talking rate. Fine dial, not overhaul.
  */
-const WORDS_PER_CLIP = 16;
+const WORDS_PER_CLIP = 18;
 /**
  * Polish-29.0.31 Commit 140: reverted 55 → 80 per user push-back on
  * the length cap. Claude generates ad-length scripts (~140 words →
@@ -161,34 +161,17 @@ function nowIso(): string {
 }
 
 /**
- * Polish-29.0.32 Commit 141: cut back on pause insertion — user
- * feedback: "pauses its taking are too long, sometimes 3 seconds".
+ * Polish-29.0.34 Commit 143: stop inserting any commas at all.
+ * User: "still has some random pauses". Every insertion I've tried
+ * (every 4th, 6th word) creates awkward pauses Claude didn't intend.
+ * Claude's own natural sentence punctuation gives enough rhythm.
+ * Trust the writer.
  *
- * Ellipses were the culprit: Seedance treats `...` as a dramatic
- * 2-3s pause. Regular sentence-end periods and existing commas alone
- * give natural breathing without dragging. Also reduced added-comma
- * density from every 4th word → every 6th word so there's fewer
- * micro-pauses in the delivery.
- *
- * Rules now:
- *   - Existing punctuation preserved verbatim. NO more . → ... upgrade.
- *   - Every 6th word gets a light trailing comma if the word has no
- *     punctuation yet (natural rhythm break, not a dramatic pause).
+ * Kept the function so callers don't need to change shape — just
+ * returns the input verbatim.
  */
 export function insertNaturalPauses(text: string): string {
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length <= 4) return text; // too short to need pause insertion
-  const out: string[] = [];
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i]!;
-    // Every 6th word: add trailing comma if the word has no punctuation yet.
-    if (i > 0 && (i + 1) % 6 === 0 && /[a-z0-9]$/i.test(w)) {
-      out.push(w + ',');
-      continue;
-    }
-    out.push(w);
-  }
-  return out.join(' ');
+  return text;
 }
 
 /**
@@ -345,7 +328,7 @@ export function composeClipPrompt(input: {
     `- Same person, same clothing, same background, same lighting as the reference image throughout the entire clip.\n`,
     `- Aesthetic: iPhone front-camera talking-head UGC, the kind a real customer would post to TikTok.\n\n`,
     `DELIVERY — HARD RULES:\n`,
-    `- Target speech rate: approximately 120 words per minute — natural conversational pace, the way a real person talks to a friend on their phone. Not slow, not rushed.\n`,
+    `- Target speech rate: approximately 135 words per minute — natural upper-conversational pace, like a TikTok creator talking directly to camera. Not slow, not rushed.\n`,
     `- Real pauses between phrases (respect the commas and ellipses in the dialogue below — those are timing markers).\n`,
     `- Warm, sincere, casual tone. Direct to camera.\n`,
     `- Do NOT rush. Do NOT speed up to fit the 8-second clip length — if you finish speaking early, stay silent and hold the frame.\n`,
@@ -624,7 +607,13 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
         systemPrompt: POLISH28_VARIATIONS_SYSTEM_PROMPT,
         cacheSystemPrompt: true,
         userMessage: userPrompt,
-        maxTokens: 8000,
+        // Polish-29.0.34 Commit 143: 8000 → 16000. First live run with
+        // MIN_SCRIPT_WORDS=80 produced a script that stopped mid-word
+        // ("just open what") — Claude's response hit the maxTokens
+        // ceiling before finishing the batch. 5 variations × ~180 word
+        // scripts + persona JSON per entry can easily exceed 8k tokens.
+        // 16k is well under Claude Sonnet 4.5's 64k output cap.
+        maxTokens: 16000,
         generationJobId: data.jobId,
       });
       if (!r.ok || !r.text || r.text.trim().length === 0) {
