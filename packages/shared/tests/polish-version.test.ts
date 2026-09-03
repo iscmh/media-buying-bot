@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.44 (Polish-29.0.44 Commit 153 — stop URL-encoding google-flow jobids; :/@ chars must go raw same as Dreamina)', () => {
+  it('is currently 29.0.45 (Polish-29.0.45 Commit 154 — deep-walk mediaGenerationId extractor + imageUrl fallback + raw-body dump on extract miss)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.44');
+    expect(POLISH_VERSION).toBe('29.0.45');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

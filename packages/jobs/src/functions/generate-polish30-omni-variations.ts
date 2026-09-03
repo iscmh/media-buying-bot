@@ -327,6 +327,27 @@ async function pollUntilComplete(input: {
       // paths per output type; extract from raw.
       const raw = (poll.raw ?? {}) as Record<string, unknown>;
       const media = extractMediaGenerationId(raw);
+      // Polish-29.0.45 Commit 154: dump raw body top-level keys +
+      // (if `media` array present) its first entry shape when the
+      // extractor comes up empty. Prior "no mediaGenerationId in
+      // response" was a black-box error — this makes the actual shape
+      // observable in the run's step log without spamming the whole
+      // payload.
+      if (!media) {
+        const topKeys = Object.keys(raw).slice(0, 20).join(',');
+        const mediaArr = raw['media'];
+        const firstEntry =
+          Array.isArray(mediaArr) && mediaArr[0] && typeof mediaArr[0] === 'object'
+            ? Object.keys(mediaArr[0] as Record<string, unknown>)
+                .slice(0, 20)
+                .join(',')
+            : '(no media[0])';
+        console.log(
+          `[polish30] extractMediaGenerationId returned undefined. ` +
+            `top_keys=${topKeys} media[0]_keys=${firstEntry} ` +
+            `raw_snippet=${JSON.stringify(raw).slice(0, 800)}`,
+        );
+      }
       return {
         ok: true,
         videoUrl: poll.videoUrl,
@@ -352,24 +373,48 @@ async function pollUntilComplete(input: {
  * that later submits reference via referenceVideo_1, startImage, etc.
  * Not the same as the human-facing signed URL that videoUrl/imageUrls
  * extract from normalizeJobBody. Walk the raw shape defensively.
+ *
+ * Polish-29.0.45 Commit 154: added a deep-walk fallback that finds
+ * `mediaGenerationId` at ANY depth in the response tree. useapi.net's
+ * schema drifts between Google Flow submodules and my earlier
+ * hand-typed path list was aspirational — the still-poll shape from
+ * Nano Banana 2 Lite doesn't match the documented Omni video shape.
+ * The walk is bounded and cheap (image response payloads are small).
  */
 function extractMediaGenerationId(raw: Record<string, unknown>): string | undefined {
+  // Fast path: the documented Omni video shape.
   const mediaArr = raw['media'];
-  if (!Array.isArray(mediaArr) || mediaArr.length === 0) return undefined;
-  for (const m of mediaArr) {
-    if (!m || typeof m !== 'object') continue;
-    const mm = m as Record<string, unknown>;
-    const image = mm['image'] as Record<string, unknown> | undefined;
-    const genImg = image?.['generatedImage'] as Record<string, unknown> | undefined;
-    const imgId = genImg?.['mediaGenerationId'];
-    if (typeof imgId === 'string' && imgId) return imgId;
-    const video = mm['video'] as Record<string, unknown> | undefined;
-    const genVid = video?.['generatedVideo'] as Record<string, unknown> | undefined;
-    const vidId = genVid?.['mediaGenerationId'];
-    if (typeof vidId === 'string' && vidId) return vidId;
-    // Fallback: top-level mediaGenerationId on the media entry itself.
-    const flat = mm['mediaGenerationId'];
-    if (typeof flat === 'string' && flat) return flat;
+  if (Array.isArray(mediaArr) && mediaArr.length > 0) {
+    for (const m of mediaArr) {
+      if (!m || typeof m !== 'object') continue;
+      const mm = m as Record<string, unknown>;
+      const image = mm['image'] as Record<string, unknown> | undefined;
+      const genImg = image?.['generatedImage'] as Record<string, unknown> | undefined;
+      const imgId = genImg?.['mediaGenerationId'];
+      if (typeof imgId === 'string' && imgId) return imgId;
+      const video = mm['video'] as Record<string, unknown> | undefined;
+      const genVid = video?.['generatedVideo'] as Record<string, unknown> | undefined;
+      const vidId = genVid?.['mediaGenerationId'];
+      if (typeof vidId === 'string' && vidId) return vidId;
+      const flat = mm['mediaGenerationId'];
+      if (typeof flat === 'string' && flat) return flat;
+    }
+  }
+  // Deep-walk fallback for shapes we haven't hand-typed yet.
+  const stack: unknown[] = [raw];
+  let visited = 0;
+  while (stack.length > 0 && visited < 500) {
+    visited++;
+    const node = stack.pop();
+    if (!node || typeof node !== 'object') continue;
+    if (Array.isArray(node)) {
+      for (const child of node) stack.push(child);
+      continue;
+    }
+    const obj = node as Record<string, unknown>;
+    const direct = obj['mediaGenerationId'];
+    if (typeof direct === 'string' && direct) return direct;
+    for (const key of Object.keys(obj)) stack.push(obj[key]);
   }
   return undefined;
 }
@@ -700,12 +745,25 @@ async function renderOneVariation(
     maxAttempts: 12,
     intervalSeconds: 5,
   });
-  if (!stillPoll.ok || !stillPoll.mediaGenerationId) {
+  if (!stillPoll.ok) {
+    throw new Error(`Nano Banana still poll failed: ${stillPoll.errorMessage}`);
+  }
+  // Polish-29.0.45 Commit 154: fall back to imageUrl when
+  // mediaGenerationId isn't in the response. submitOmniVideo's
+  // startFrame / endFrame accept EITHER an assetId (Google Flow
+  // internal token — one round-trip cheaper because Omni doesn't
+  // re-download) OR a URL (Omni fetches it once, still works).
+  // Nano Banana 2 Lite's poll body shape drifted from what the
+  // Omni docs describe, and until we get the diagnostic dump from
+  // the console.log above, URL-fallback keeps the pipeline moving.
+  const stillMediaId = stillPoll.mediaGenerationId;
+  const stillImageUrl = stillPoll.imageUrl;
+  if (!stillMediaId && !stillImageUrl) {
     throw new Error(
-      `Nano Banana still poll failed: ${stillPoll.ok ? 'no mediaGenerationId in response' : stillPoll.errorMessage}`,
+      `Nano Banana still poll returned neither mediaGenerationId nor imageUrl — check jobs log for raw body shape`,
     );
   }
-  const stillMediaId = stillPoll.mediaGenerationId;
+  const stillFrameRef = stillMediaId ? { assetId: stillMediaId } : { url: stillImageUrl! };
 
   // 2. Seed clip: Omni 1.1 Flash I2V with startFrame = endFrame = still.
   const seedSubmit = await guardedStepRun(step, `seed-submit-${stepSuffix}`, async () => {
@@ -715,8 +773,8 @@ async function renderOneVariation(
       prompt: composeSeedClipPrompt(entry.persona, clipDialogues[0]!),
       durationSeconds: OMNI_CLIP_SECONDS,
       resolution,
-      startFrame: { assetId: stillMediaId },
-      endFrame: { assetId: stillMediaId },
+      startFrame: stillFrameRef,
+      endFrame: stillFrameRef,
       generationJobId: jobId,
     });
     if (!r.ok || !r.jobId) {
