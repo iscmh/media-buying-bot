@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.19 (Polish-29.0.19 Commit 128 — fix: Dreamina asset upload URL takes the account email as the last path segment, not the literal string `account`)', () => {
+  it('is currently 29.0.20 (Polish-29.0.20 Commit 129 — fix: Dreamina job-poll URL is /videos/{jobid} not /jobs/{jobid}; per-service branch in checkUseapiJob)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.19');
+    expect(POLISH_VERSION).toBe('29.0.20');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

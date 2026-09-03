@@ -400,9 +400,17 @@ export interface CheckJobInput {
  * Poll a single useapi.net job. Callers compose with Inngest
  * `step.sleep` between polls; this function does one status check
  * only. Returns `processing` while upstream keeps grinding.
+ *
+ * Polish-29.0.20 Commit 129: Dreamina's poll endpoint is
+ * /dreamina/videos/{jobid} (per docs), NOT /dreamina/jobs/{jobid}.
+ * Live 29.0.19 run advanced all the way to poll and hit HTTP 404
+ * because the /jobs/ path 404s on Dreamina. google-flow's docs list
+ * a dedicated GET /jobs/{jobid} endpoint so keep it on /jobs. Branch
+ * by service.
  */
 export async function checkUseapiJob(input: CheckJobInput): Promise<UseapiJobResult> {
-  const url = `${USEAPI_BASE}/${input.service}/jobs/${encodeURIComponent(input.jobId)}`;
+  const pathSegment = input.service === 'dreamina' ? 'videos' : 'jobs';
+  const url = `${USEAPI_BASE}/${input.service}/${pathSegment}/${encodeURIComponent(input.jobId)}`;
   const result = await callProvider<RawJobBody>({
     userId: input.userId,
     provider: 'useapi_net',

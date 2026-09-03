@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.19';
+export const POLISH_VERSION = '29.0.20';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.19';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.19 Commit 128 - fix: Dreamina asset upload URL takes the account email as the last path segment. Docs said POST /v1/dreamina/assets/account and I read `account` literally; useapi.net answered `Unable to find configuration for account account`. The trailing word IS a URL placeholder for the registered account email. URL now built as /dreamina/assets/{encodeURIComponent(email)}. UploadAssetInput gains an `account` field; dreamina uploads require it (early-returns with a clear error if missing), google-flow ignores it.';
+  'Polish-29.0.20 Commit 129 - fix: Dreamina job-poll URL is /dreamina/videos/{jobid} not /dreamina/jobs/{jobid}. Live 29.0.19 run cleared every previous layer (character generated, uploaded to Dreamina CA, Seedance i2v submit accepted, jobid returned) and died on poll_failed: HTTP 404 because the /jobs/ path 404s on Dreamina. Per docs the Dreamina job-status endpoint is /videos/{jobid}. checkUseapiJob branches: dreamina -> /videos/{jobid}; google-flow -> /jobs/{jobid} (which its docs list as a dedicated endpoint).';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
