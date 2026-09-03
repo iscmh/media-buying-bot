@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.40';
+export const POLISH_VERSION = '29.0.41';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.40';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.40 Commit 149 - port the seedance25-ugc-yapper skill playbook into a shared UGC prose prompt builder used by polish29 (Seedance via Dreamina) and polish30 (Omni via Google Flow). The playbook is provider-agnostic on the parts that matter: flowing prose in subject -> action/event -> scene/environment -> visual style -> camera -> sound order (not bracketed HARD-RULES fields), single camera behaviour per clip (no combined moves), positive statements only (never edit/add/remove/change - those reclassify Seedance task type and read as delta cues on any generator), uneven practical light + deep focus + real skin texture as anti-AI-tell language, and a verbatim constraint tail excluding music/subtitles/watermark/logo/visible-phone with the "face stays stable" line. Delivery rate bumped from 135 wpm (2.25 wps) to 180 wpm (3 wps) across both workers - the playbook is explicit that natural TikTok UGC pacing is 3 words per second, and every "still slow" report during the iteration loop was pointing at this. Polish29 dialogue notation switched to Seedance 2.5 curly braces {} (dialogue tokens route directly to TTS verbatim without prose punctuation re-interpretation). Polish30 keeps quoted dialogue since Google Flow Omni router treats {} as literal chars. New shared file packages/jobs/src/lib/ugc-prose-prompt.ts holds the builder so the future kie.ai Seedance 2.5 worker adopts it for free. WORDS_PER_CLIP for polish29 bumped 18 -> 24 to match the new 3 wps target over an 8s clip.';
+  'Polish-29.0.41 Commit 150 - hotfix polish30 Nano Banana still submit. useapi.net rejected the very first step of every polish30 variation with `Parameter account not supported` (HTTP 400). Root cause: /google-flow/images is a stateless Gemini call under the hood (Nano Banana IS Gemini 2.5 Flash Image, 0 credits on every Google AI plan) - the API token identifies the billed org, no per-account routing. /google-flow/videos on the other hand does need account because Omni + Veo bill against a specific Google AI subscription tier. My Commit 145 client wrongly copy-pasted the videos body shape onto the images call. Fix: drop account from the /google-flow/images request body. Kept the account param on SubmitNanoBananaImageInput (now optional) so the polish30 worker call site does not need to change - the field just gets hashed for the audit log instead of sent to useapi. Video submits (Omni seed clip + V2V extend chain) unchanged; those still send account correctly. This unblocks Commit 149 (seedance25-ugc-yapper skill playbook port), which never actually ran end-to-end because the still submit died first.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -747,7 +747,19 @@ export async function submitVeoVideo(input: SubmitVeoVideoInput): Promise<Submit
 
 export interface SubmitNanoBananaImageInput {
   userId: string;
-  account: string;
+  /**
+   * Polish-29.0.41 Commit 150: `account` is now IGNORED for the images
+   * endpoint. useapi.net's `/google-flow/images` route rejects the
+   * field with `{"error":"Parameter account not supported","code":400}`
+   * because Nano Banana is a stateless Gemini call under the hood —
+   * the API token identifies the billed org, no per-account routing
+   * needed. `/google-flow/videos` (Omni, Veo) still requires
+   * `account` because those bill against a specific Google AI
+   * subscription tier. The field is retained on the input type only
+   * for the request-body log hash (audit trail parity with videos),
+   * and callers can drop it once they no longer need the audit line.
+   */
+  account?: string;
   prompt: string;
   /**
    * Polish-29.0.35 Commit 145: Google Flow ships several image models
@@ -770,8 +782,9 @@ export interface SubmitNanoBananaImageInput {
 export async function submitNanoBananaImage(
   input: SubmitNanoBananaImageInput,
 ): Promise<SubmitJobResult> {
+  // Polish-29.0.41 Commit 150: `account` deliberately omitted from
+  // the body — see SubmitNanoBananaImageInput header for the reason.
   const body = {
-    account: input.account,
     prompt: input.prompt,
     model: input.model ?? 'nano-banana-2-lite',
     aspectRatio: input.aspectRatio ?? '9:16',
@@ -790,7 +803,7 @@ export async function submitNanoBananaImage(
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
-      account_hash: hashAccount(input.account),
+      account_hash: input.account ? hashAccount(input.account) : 'not-sent',
       model: body.model,
       aspect_ratio: body.aspectRatio,
       n: body.n,
