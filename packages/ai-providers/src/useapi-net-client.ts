@@ -784,11 +784,21 @@ export async function submitNanoBananaImage(
 ): Promise<SubmitJobResult> {
   // Polish-29.0.41 Commit 150: `account` deliberately omitted from
   // the body — see SubmitNanoBananaImageInput header for the reason.
+  //
+  // Polish-29.0.42 Commit 151: `n` + `aspectRatio` also stripped.
+  // useapi.net's /google-flow/images validator returned
+  // `{"error":"Parameter n not supported","code":400}` after the
+  // account fix. Nano Banana returns exactly one image per call by
+  // design (n=1 is implicit), and the model derives aspect ratio
+  // from the prose prompt itself, not a schema field. Our
+  // composeSeedStillPrompt already opens with "A single 9:16
+  // vertical portrait photo of ..." — that's what Nano Banana
+  // reads. The endpoint's supported body is essentially just
+  // `{prompt, model}` plus optional `images` for reference-based
+  // edits.
   const body = {
     prompt: input.prompt,
     model: input.model ?? 'nano-banana-2-lite',
-    aspectRatio: input.aspectRatio ?? '9:16',
-    n: input.n ?? 1,
     ...(input.referenceImages && input.referenceImages.length > 0
       ? { images: input.referenceImages.map((r) => r.assetId ?? r.url) }
       : {}),
@@ -805,8 +815,10 @@ export async function submitNanoBananaImage(
     requestBodyForLog: {
       account_hash: input.account ? hashAccount(input.account) : 'not-sent',
       model: body.model,
-      aspect_ratio: body.aspectRatio,
-      n: body.n,
+      // Ignored aspect_ratio / n retained here as a diagnostic so a
+      // future prompt-length regression is easy to spot in the log.
+      aspect_ratio_requested: input.aspectRatio ?? '9:16-in-prose',
+      n_requested: input.n ?? 1,
       prompt_chars: input.prompt.length,
       reference_count: input.referenceImages?.length ?? 0,
     },

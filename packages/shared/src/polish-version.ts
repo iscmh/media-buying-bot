@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.41';
+export const POLISH_VERSION = '29.0.42';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.41';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.41 Commit 150 - hotfix polish30 Nano Banana still submit. useapi.net rejected the very first step of every polish30 variation with `Parameter account not supported` (HTTP 400). Root cause: /google-flow/images is a stateless Gemini call under the hood (Nano Banana IS Gemini 2.5 Flash Image, 0 credits on every Google AI plan) - the API token identifies the billed org, no per-account routing. /google-flow/videos on the other hand does need account because Omni + Veo bill against a specific Google AI subscription tier. My Commit 145 client wrongly copy-pasted the videos body shape onto the images call. Fix: drop account from the /google-flow/images request body. Kept the account param on SubmitNanoBananaImageInput (now optional) so the polish30 worker call site does not need to change - the field just gets hashed for the audit log instead of sent to useapi. Video submits (Omni seed clip + V2V extend chain) unchanged; those still send account correctly. This unblocks Commit 149 (seedance25-ugc-yapper skill playbook port), which never actually ran end-to-end because the still submit died first.';
+  'Polish-29.0.42 Commit 151 - second hotfix on the same /google-flow/images call. After dropping account (Commit 150), useapi.net now returned `Parameter n not supported`. Nano Banana returns exactly one image per call by design (n=1 is implicit) and derives aspect ratio from the prose prompt itself, not a schema field. composeSeedStillPrompt already opens with "A single 9:16 vertical portrait photo of ..." which is what Nano Banana actually reads. Fix: strip both n and aspectRatio from the request body; keep the supported body to essentially just `{prompt, model}` plus optional `images` for reference-based edits. Retained the values on the request log for diagnostic parity. If a THIRD field is now flagged (unlikely - we are down to just prompt + model), same one-line fix pattern applies. Commit 150 blurb preserved below.\n\nPolish-29.0.41 Commit 150 - hotfix polish30 Nano Banana still submit. useapi.net rejected the very first step of every polish30 variation with `Parameter account not supported` (HTTP 400). Root cause: /google-flow/images is a stateless Gemini call under the hood (Nano Banana IS Gemini 2.5 Flash Image, 0 credits on every Google AI plan) - the API token identifies the billed org, no per-account routing. /google-flow/videos on the other hand does need account because Omni + Veo bill against a specific Google AI subscription tier. My Commit 145 client wrongly copy-pasted the videos body shape onto the images call. Fix: drop account from the /google-flow/images request body. Kept the account param on SubmitNanoBananaImageInput (now optional) so the polish30 worker call site does not need to change - the field just gets hashed for the audit log instead of sent to useapi. Video submits (Omni seed clip + V2V extend chain) unchanged; those still send account correctly. This unblocks Commit 149 (seedance25-ugc-yapper skill playbook port), which never actually ran end-to-end because the still submit died first.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
