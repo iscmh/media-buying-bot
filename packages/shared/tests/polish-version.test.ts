@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.37 (Polish-29.0.37 Commit 146 — polish30_omni_variations pipeline plumbing: descriptor, PipelineType, estimator branch, event union, omni-flash-ugc credit model)', () => {
+  it('is currently 29.0.38 (Polish-29.0.38 Commit 147 — polish30_omni_variations worker: Nano Banana 2 Lite seed still → Omni I2V seed clip → V2V extends → Google Flow concat)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.37');
+    expect(POLISH_VERSION).toBe('29.0.38');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.37';
+export const POLISH_VERSION = '29.0.38';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.37';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.37 Commit 146 - polish30_omni_variations pipeline plumbing. Registers the PipelineType, descriptor (providerChoice=clone_ugc, format=polish30_omni_variations, workerEvent=generation/polish30-omni-variations.requested, requiredProviders=[claude]), ALL_PIPELINES entry, cost-estimator branch (10s composite ~47 Flow credits = $0.47 at Ultra tier), and analyze-concept event-union entry. Also adds omni-flash-ugc credit model to credit-pricing.ts at 8 platform credits per clip = $0.16 (break-even at Ultra tier, unprofitable at Plus tier where user is currently). No worker yet — Commit 147 lands generate-polish30-omni-variations.ts, Commit 148 adds the frontend picker card.';
+  'Polish-29.0.38 Commit 147 - polish30_omni_variations worker end-to-end. Nano Banana 2 Lite seed still (0 Flow credits, via new submitNanoBananaImage model=nano-banana-2-lite path) -> Omni 1.1 Flash I2V seed clip (7 cr, startFrame=endFrame=still so both ends land on the same reference frame -> invisible joins later) -> serial V2V extend chain (20 cr per extend, each new clip references the previous via referenceVideo_1, inherits voice+motion+camera+framing, delivers next dialogue line) -> Google Flow /videos/concatenate with per-segment trimStart 0.458s / trimEnd 0.375s to cut the pin-frame quiet beats at joins (0 cr) -> Supabase upload -> generated_creatives row. Sentence-boundary script split (~8 words per 4s clip). Resilient to individual extend failures (continues past a failed extend, requires >=2 clips for concat). Only Claude BYOK required. Registered in functions/index.ts + REGISTERED_GENERATION_WORKER_EVENTS set. Frontend picker card lands Commit 148.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

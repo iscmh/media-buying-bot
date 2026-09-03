@@ -36,6 +36,13 @@ import { generatePolish29Seedance } from './generate-polish29-seedance';
 // Nano Banana Pro for character anchor + Claude batch for N distinct
 // persona+script pairs + Replicate ffmpeg concat for the composite.
 import { generatePolish29SeedanceVariations } from './generate-polish29-seedance-variations';
+// Polish-29.0.38 Commit 147: Google Flow / Omni 1.1 Flash variations.
+// Same value prop as polish29_seedance_variations but 9-25× cheaper —
+// runs entirely on the user's Google Flow subscription credits via
+// useapi.net. Nano Banana 2 Lite seed still (0 credits) → Omni I2V
+// seed clip (7 cr) → M V2V extends (20 cr each) → Google Flow concat
+// (0 cr). Only Claude BYOK required.
+import { generatePolish30OmniVariations } from './generate-polish30-omni-variations';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -108,6 +115,10 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // credits; Claude + Gemini + Replicate BYOK cover the char ref,
   // persona+script batch, and clip concat.
   'generation/polish29-seedance-variations.requested',
+  // Polish-29.0.38 Commit 147: Google Flow / Omni 1.1 Flash variations.
+  // Sibling of polish29_seedance_variations, 9-25× cheaper per variation
+  // on the Omni V2V chain. Only Claude BYOK needed.
+  'generation/polish30-omni-variations.requested',
 ] as const);
 
 export const functions = [
@@ -140,6 +151,8 @@ export const functions = [
   generatePolish29Seedance,
   // Polish-29.0.10 Commit 119: multi-clip Seedance variations worker.
   generatePolish29SeedanceVariations,
+  // Polish-29.0.38 Commit 147: Google Flow / Omni 1.1 Flash variations worker.
+  generatePolish30OmniVariations,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.
