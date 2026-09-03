@@ -90,16 +90,12 @@ console.log(
 // -----------------------------------------------------------------
 
 const MAX_VARIANTS_PER_JOB = 10;
-/**
- * Max clips per variation. Polish-29.0.30 Commit 139: 10 → 5.
- * A 10-clip variation burns 10 × 35 Dreamina credits = 350 credits per
- * test run. At $10/1000 credits that's $3.50 of Dreamina spend per
- * test — brutal for iteration. Capping at 5 clips = 175 credits per
- * test (~5-6 tests per $10 Dreamina pack). Real UGC ads are 30-40s
- * anyway, so 5 × 8s = 40s composite is on-target for a typical
- * Meta Reels/TikTok spec.
- */
-const MAX_CLIPS_PER_VARIANT = 5;
+/** Max clips per variation. Polish-29.0.31 Commit 140: reverted 5 → 10
+ *  per user push-back: "we dont want limits like that". Full-length
+ *  composites (up to 80s) allowed. Cost warning still surfaces via
+ *  the preflight-dreamina-balance step so no BYOK $$ gets wasted
+ *  when the wallet is empty. */
+const MAX_CLIPS_PER_VARIANT = 10;
 /** Min clips per variation. */
 const MIN_CLIPS_PER_VARIANT = 2;
 /** Default clips when source ad duration is unknown. */
@@ -116,14 +112,14 @@ const SEEDANCE_CLIP_SECONDS = 8;
  */
 const WORDS_PER_CLIP = 14;
 /**
- * Polish-29.0.30 Commit 139: 80 → 55 words. 80 was pushing Claude
- * to write ~140 word scripts which produced 10-clip variations
- * (MAX-capped) → 350 Dreamina credits per test = $3.50/test. 55 words
- * gives ~4-5 clips at 14 words each = 32-40s composite, 140-175
- * Dreamina credits per test, ~$1.75/test. Better cost per iteration
- * while staying above the "just enough to be a real ad" threshold.
+ * Polish-29.0.31 Commit 140: reverted 55 → 80 per user push-back on
+ * the length cap. Claude generates ad-length scripts (~140 words →
+ * ~10 clip full 80s composite), matching what a real 60-90s UGC ad
+ * runs. Higher per-test cost but the user explicitly wants the full
+ * ad-length output; the preflight-dreamina-balance step + surface
+ * the warning about wallet impact.
  */
-const MIN_SCRIPT_WORDS = 55;
+const MIN_SCRIPT_WORDS = 80;
 const DEFAULT_MODEL_ID = 'seedance-2-0-ugc';
 const ALLOWED_MODEL_IDS = new Set([
   'seedance-2-5-ugc',

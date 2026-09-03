@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.30 (Polish-29.0.30 Commit 139 — economics: cap MAX_CLIPS_PER_VARIANT 10→5, MIN_SCRIPT_WORDS 80→55, add Dreamina balance pre-flight to fail fast before BYOK spend)', () => {
+  it('is currently 29.0.31 (Polish-29.0.31 Commit 140 — revert length caps: MAX_CLIPS 5→10 and MIN_SCRIPT_WORDS 55→80; keep the preflight-dreamina-balance safety net)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.30');
+    expect(POLISH_VERSION).toBe('29.0.31');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

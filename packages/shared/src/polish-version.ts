@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.30';
+export const POLISH_VERSION = '29.0.31';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.30';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.30 Commit 139 - cost/economics fix: cap Dreamina credit burn per test + preflight balance check. User feedback: "no creds again, we gotta lock in i keep wasting money". 29.0.29 pushed MIN_SCRIPT_WORDS to 80 which made Claude write ~140 word scripts producing 10-clip variations at 350 Dreamina credits each ($3.50/test). Four levers to cut cost per iteration by ~50%: (1) MAX_CLIPS_PER_VARIANT 10 -> 5 (hard cap; 40s composite is on-target for Meta Reels), (2) MIN_SCRIPT_WORDS 80 -> 55 (~4-5 clips at 14 words), (3) new getDreaminaAccountBalance() helper hits GET /dreamina/accounts/{email} and reads credits.total, (4) new preflight-dreamina-balance step at worker start - aborts fast with a clear top-up message if balance < 35 credits (one clip), warns if balance < needed ceiling. Fail-fast avoids blowing Claude + Nano Banana BYOK $$ on runs that will die at Seedance submit with ret:1006. Each test now burns ~175 Dreamina credits ($1.75) instead of $3.50.';
+  'Polish-29.0.31 Commit 140 - revert length caps per user push-back. User asked to remove the MAX_CLIPS_PER_VARIANT 5 + MIN_SCRIPT_WORDS 55 caps from 29.0.30. They want full ad-length composites (up to 80s at 10 clips × 8s), cost be damned. Reverted both back to 10 / 80 respectively. KEPT the preflight-dreamina-balance step from Commit 139 - it fails fast when the wallet is empty without capping output length, so no BYOK $$ gets wasted on runs Dreamina will reject with ret:1006.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
