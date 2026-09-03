@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.23';
+export const POLISH_VERSION = '29.0.24';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.23';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.23 Commit 132 - resilience: continue past individual clip failures instead of aborting the whole variation. Live 29.0.22 was a huge win - 2 out of 4 clips actually rendered end-to-end (character upload, imageRef, i2v submit, poll, video URL extraction all worked). Died on clip 3 with Dreamina content-moderation fail_code 2039 and the old worker short-circuited on first-clip failure. Loop now continues past individual clip failures, tracks them in a clipFailures[] array, and gates the concat step on clipsSucceeded >= MIN_CLIPS_PER_VARIANT (2). If enough clips rendered, Replicate ffmpeg stitches whatever we got into a shorter-but-real composite. Failure metadata persisted on generated_creatives.generationMetadata.clip_failures so the runs page shows which clips died and why. InsufficientCreditsError still short-circuits (no point trying more clips with empty wallet) unless we already have enough to concat.';
+  'Polish-29.0.24 Commit 133 - polish: fix delivery pacing + camera motion on generated variants. First working generation (29.0.23) shipped a real composite, character locked in, but the delivery was robotic/fast, Seedance kept adding cinematic zooms/pans, and the composite was 24s from a 60s source. Two changes: (1) WORDS_PER_CLIP 22 -> 15 (from 165 wpm robotic machine-gun to 112 wpm natural conversational pace with breathing room for filler words), (2) composeClipPrompt rewritten with explicit CAMERA HARD RULES (no zoom / pan / dolly / tilt / push-in - static handheld phone camera) + LOOK HARD RULES (amateur raw selfie, no color grading, no cinematic bokeh, iPhone front-camera UGC aesthetic) + DELIVERY HARD RULES (speak SLOWLY, filler words welcome, do not perform, do not over-enunciate). Composite length still bounded by Claude script length x 15 words per 8s clip; if source is 60s, script should be ~150 words -> 10 clips = 80s.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

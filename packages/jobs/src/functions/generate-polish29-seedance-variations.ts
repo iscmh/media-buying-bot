@@ -97,9 +97,15 @@ const MIN_CLIPS_PER_VARIANT = 2;
 const DEFAULT_CLIPS_PER_VARIANT = 4;
 /** Seedance clip length in seconds. 8s = Seedance's per-call max. */
 const SEEDANCE_CLIP_SECONDS = 8;
-/** Words per clip: 170 wpm × 8s ≈ 22 words. Keeps dialogue segmentation
- *  aligned with Seedance's audio timing. */
-const WORDS_PER_CLIP = 22;
+/**
+ * Words per clip. Polish-29.0.24 Commit 133: dropped from 22 → 15.
+ * Seedance's TTS was cramming 22 words into 8s → robotic ~165 wpm
+ * machine-gun delivery. 15 words at 8s ≈ 112 wpm — closer to natural
+ * conversational pace with breathing room for pauses and filler words
+ * ("um", "like"). Trades a bit of composite length (fewer words per
+ * variation) for delivery that sounds human.
+ */
+const WORDS_PER_CLIP = 15;
 const DEFAULT_MODEL_ID = 'seedance-2-0-ugc';
 const ALLOWED_MODEL_IDS = new Set([
   'seedance-2-5-ugc',
@@ -193,12 +199,33 @@ export function composeClipPrompt(input: {
   totalClips: number;
 }): string {
   const { personaLockPrefix, clipDialogue, clipIndex, totalClips } = input;
+  const dialogue = clipDialogue.replace(/\s+/g, ' ').trim();
+  // Polish-29.0.24 Commit 133: complete rewrite of the per-clip prompt
+  // to fix the three delivery issues from the first working generation:
+  //   1. Robotic/fast speech → explicit slow, conversational pacing +
+  //      filler-word permission + pause markup.
+  //   2. Random cinematic zooms/pans → hard NO CAMERA MOVEMENT block +
+  //      the word "static" repeated (Seedance weights repetition).
+  //   3. Overproduced look → explicit amateur / unedited / raw-selfie
+  //      language to override the model's cinematic default.
   return [
     `${personaLockPrefix}\n\n`,
-    `This is clip ${clipIndex + 1} of ${totalClips} in one UGC ad. `,
-    `Same person, same setting, same clothing, same lighting as the reference image. `,
-    `Filmed on a phone camera, natural lighting, direct-to-camera delivery. `,
-    `The speaker says (deliver naturally, not word-perfect): "${clipDialogue.replace(/\s+/g, ' ').trim()}"`,
+    `SHOT ${clipIndex + 1} OF ${totalClips} — one continuous take of the same person from the reference image.\n\n`,
+    `CAMERA — HARD RULES:\n`,
+    `- Static handheld phone camera. No zoom. No pan. No dolly. No tilt. No push-in. No pull-out. No parallax. No re-framing.\n`,
+    `- Slight, natural handheld micro-wobble is fine — cinematic camera moves are NOT.\n`,
+    `- Fixed medium close-up on the speaker's face and upper chest, same framing as the reference image.\n\n`,
+    `LOOK — HARD RULES:\n`,
+    `- Amateur raw selfie video. Unedited. No color grading. No cinematic bokeh. No dramatic lighting shifts.\n`,
+    `- Same person, same clothing, same background, same lighting as the reference image throughout the entire clip.\n`,
+    `- Aesthetic: iPhone front-camera talking-head UGC, the kind a real customer would post to TikTok.\n\n`,
+    `DELIVERY — HARD RULES:\n`,
+    `- Speak SLOWLY and CONVERSATIONALLY, like a real person talking to a friend, not reading a script.\n`,
+    `- Natural pauses between phrases. Occasional filler words ("um", "like", "you know") are welcome — do not read the line verbatim like a robot.\n`,
+    `- Warm, sincere, casual tone. Direct to camera.\n`,
+    `- Do not rush. Do not over-enunciate. Do not perform.\n\n`,
+    `DIALOGUE (deliver in a natural conversational cadence — this is the meaning to convey, not a strict script):\n`,
+    `"${dialogue}"`,
   ].join('');
 }
 
