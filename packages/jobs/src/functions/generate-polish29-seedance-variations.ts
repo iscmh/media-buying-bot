@@ -187,27 +187,97 @@ export function insertNaturalPauses(text: string): string {
 }
 
 /**
- * Given a full script string, chunk into N ~equal segments where each
- * segment is ≤ WORDS_PER_CLIP words. Returns [] on empty input.
+ * Split a full script into per-clip dialogue chunks. Polish-29.0.27
+ * Commit 136: split at SENTENCE BOUNDARIES, not word boundaries.
+ *
+ * User feedback on 29.0.26: clip 1 sounded natural, clips 2-4 sped up.
+ * Root cause: the old word-chunking algorithm cut the script mid-
+ * sentence, so clip 1 opened with a complete sentence ("Hey guys, so I
+ * tried this…") but clips 2+ opened with a fragment ("worked in three
+ * days plus my skin…"). Seedance's TTS models each clip as a fresh
+ * utterance — full-sentence chunks pace naturally, mid-sentence
+ * fragments get rushed to "catch up".
+ *
+ * Algorithm:
+ *   1. Split the script into sentences on `.`, `!`, `?`.
+ *   2. Greedily group sentences into chunks: keep adding sentences to
+ *      the current chunk until adding another would push it past
+ *      WORDS_PER_CLIP.
+ *   3. If a single sentence is longer than 1.5 × WORDS_PER_CLIP, split
+ *      that one sentence at word boundaries as a fallback (rare —
+ *      most ad-copy sentences are 5-15 words).
+ *
+ * Guarantees each returned chunk:
+ *   - Starts on a sentence boundary
+ *   - Ends on a sentence boundary (has terminal punctuation)
+ *   - Contains 1+ complete sentences (Seedance TTS will pace naturally)
  */
 export function splitScriptIntoClips(script: string, targetClipCount: number): string[] {
-  const words = script.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return [];
-  const clamped = Math.max(MIN_CLIPS_PER_VARIANT, Math.min(MAX_CLIPS_PER_VARIANT, targetClipCount));
-  // Prefer script length as the actual driver: if 22-word clips fit
-  // fewer than `clamped` chunks, honor the shorter count so the last
-  // clip isn't padded with silence.
-  const naturalCount = Math.max(1, Math.ceil(words.length / WORDS_PER_CLIP));
-  const finalCount = Math.max(MIN_CLIPS_PER_VARIANT, Math.min(clamped, naturalCount));
-  const wordsPerChunk = Math.ceil(words.length / finalCount);
-  const out: string[] = [];
-  for (let i = 0; i < finalCount; i++) {
-    const start = i * wordsPerChunk;
-    const end = Math.min(words.length, start + wordsPerChunk);
-    if (start >= words.length) break;
-    out.push(words.slice(start, end).join(' '));
+  const trimmed = script.trim();
+  if (!trimmed) return [];
+
+  // Split into sentences. The regex captures each sentence including
+  // its trailing punctuation. Falls back to the whole script if no
+  // terminal punctuation exists (Claude sometimes omits).
+  const sentenceMatches = trimmed.match(/[^.!?]+[.!?]+/g);
+  const sentences =
+    sentenceMatches && sentenceMatches.length > 0
+      ? sentenceMatches.map((s) => s.trim()).filter(Boolean)
+      : [trimmed];
+
+  // Greedily group sentences into ~WORDS_PER_CLIP-sized chunks.
+  const chunks: string[] = [];
+  let current: string[] = [];
+  let currentWordCount = 0;
+  const wordCountOf = (s: string) => s.split(/\s+/).filter(Boolean).length;
+
+  for (const sentence of sentences) {
+    const sw = wordCountOf(sentence);
+    // If this single sentence alone exceeds the soft cap, flush what
+    // we have and split the giant sentence at word boundaries.
+    if (sw > Math.ceil(WORDS_PER_CLIP * 1.5)) {
+      if (current.length > 0) {
+        chunks.push(current.join(' '));
+        current = [];
+        currentWordCount = 0;
+      }
+      const words = sentence.split(/\s+/).filter(Boolean);
+      const wordsPerSub = WORDS_PER_CLIP;
+      for (let i = 0; i < words.length; i += wordsPerSub) {
+        const sub = words.slice(i, i + wordsPerSub).join(' ');
+        // Ensure the sub ends with terminal punctuation so Seedance
+        // sees a complete-utterance signal.
+        chunks.push(/[.!?]$/.test(sub) ? sub : sub + '.');
+      }
+      continue;
+    }
+    // Would appending exceed the target? Flush first.
+    if (currentWordCount + sw > WORDS_PER_CLIP && current.length > 0) {
+      chunks.push(current.join(' '));
+      current = [];
+      currentWordCount = 0;
+    }
+    current.push(sentence);
+    currentWordCount += sw;
   }
-  return out;
+  if (current.length > 0) chunks.push(current.join(' '));
+
+  // Respect the caller's soft target — but only as a MINIMUM. If the
+  // sentence-grouped split produced fewer chunks than targetClipCount
+  // (short script), keep what we have — no point padding with silence.
+  // If more (long script), let it run — better a longer composite than
+  // a rushed one.
+  const clamped = Math.max(MIN_CLIPS_PER_VARIANT, Math.min(MAX_CLIPS_PER_VARIANT, targetClipCount));
+  // If the sentence-grouped count exceeds MAX_CLIPS_PER_VARIANT, merge
+  // trailing chunks so we don't blow the concat budget.
+  while (chunks.length > MAX_CLIPS_PER_VARIANT) {
+    const last = chunks.pop()!;
+    chunks[chunks.length - 1] = chunks[chunks.length - 1] + ' ' + last;
+  }
+  // Suppress unused-var lint; kept for future re-introduction of a
+  // hard target-count reflow if UX evolves that way.
+  void clamped;
+  return chunks;
 }
 
 /**

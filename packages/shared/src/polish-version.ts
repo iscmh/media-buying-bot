@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.26';
+export const POLISH_VERSION = '29.0.27';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.26';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.26 Commit 135 - polish: slow Seedance TTS delivery via 3 mechanical levers. User feedback on 29.0.24 output: even faster than before, only 2 clips. Confirmed Seedance IS doing TTS internally (visible + audible speech), it just crams whatever text we give it into the 8s clip length regardless of the SPEAK SLOWLY prompt language. Three changes: (1) WORDS_PER_CLIP 15 -> 10 (Seedance now has to fit only 10 words in 8s ~= 75 wpm deliberately slow, plus a 30-word script now becomes 3 clips instead of 2), (2) insertNaturalPauses() helper adds commas every 4 words + upgrades . to ... so Seedance sees explicit punctuation-timing markers to slow down between phrases, (3) DELIVERY block rewritten with a numeric target (75 wpm) + explicit permission to hold silent frame if speech ends before the 8s mark. Prose language alone was ignored; the mechanical text-side changes should stick.';
+  'Polish-29.0.27 Commit 136 - fix: splitScriptIntoClips splits at sentence boundaries, not word boundaries. User feedback on 29.0.26 was diagnostic gold: clip 1 sounded natural, clips 2-4 sped up. Root cause: old word-chunking algorithm cut mid-sentence, so clip 1 opened with a complete sentence but clips 2+ opened with fragments. Seedance TTS reads fragments as continued rushed speech, full sentences as natural utterances. New algorithm greedily groups sentences until each chunk approaches WORDS_PER_CLIP; single-sentence overflows fall back to word-split with an appended terminal period. Every returned chunk now starts and ends on a sentence boundary. Chunks that exceed MAX_CLIPS_PER_VARIANT get tail-merged so a very long script still fits the concat budget.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

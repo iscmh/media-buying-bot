@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.26 (Polish-29.0.26 Commit 135 — polish: slow Seedance TTS via WORDS_PER_CLIP 15→10 + insertNaturalPauses + 75 wpm target)', () => {
+  it('is currently 29.0.27 (Polish-29.0.27 Commit 136 — fix: splitScriptIntoClips splits at sentence boundaries so every clip is a complete utterance for Seedance TTS)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.26');
+    expect(POLISH_VERSION).toBe('29.0.27');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {
