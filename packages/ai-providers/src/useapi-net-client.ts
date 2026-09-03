@@ -725,6 +725,21 @@ type RawJobBody = {
     video?: { url?: string };
     images?: Array<string | { url?: string }>;
   };
+  // Polish-29.0.22 Commit 131: Dreamina wraps outputs in `response`
+  // per docs. Live run completed but returned no_video_url because
+  // the parser didn't look inside body.response.*. Cover the shapes
+  // that make sense for the docs schema.
+  response?: {
+    video?: { url?: string; downloadUrl?: string };
+    videoUrl?: string;
+    video_url?: string;
+    videos?: Array<string | { url?: string; downloadUrl?: string }>;
+    output?: string | { url?: string };
+    result?: { url?: string; video?: { url?: string } };
+    url?: string;
+    // downloadUrls[] shows up on the completed-video Dreamina response
+    downloadUrls?: string[];
+  };
   error?: unknown;
   errorMessage?: string;
   message?: string;
@@ -786,13 +801,39 @@ function normalizeJobBody(body: RawJobBody): UseapiJobResult {
     status = 'processing';
   }
 
+  // Polish-29.0.22 Commit 131: Dreamina wraps its outputs in `response`
+  // per docs. Check response.* variants alongside the flat + result.*
+  // shapes other useapi.net services use. First non-null wins.
+  const responseVideos = body.response?.videos ?? [];
+  const firstResponseVideo = (() => {
+    const v = responseVideos[0];
+    if (typeof v === 'string') return v;
+    if (v && typeof v === 'object') return v.url ?? v.downloadUrl ?? undefined;
+    return undefined;
+  })();
+  const responseOutput = (() => {
+    const o = body.response?.output;
+    if (typeof o === 'string') return o;
+    if (o && typeof o === 'object') return o.url ?? undefined;
+    return undefined;
+  })();
   const videoUrl =
     body.videoUrl ??
     body.video_url ??
     body.video?.url ??
     body.video?.downloadUrl ??
     body.result?.url ??
-    body.result?.video?.url;
+    body.result?.video?.url ??
+    body.response?.video?.url ??
+    body.response?.video?.downloadUrl ??
+    body.response?.videoUrl ??
+    body.response?.video_url ??
+    body.response?.result?.url ??
+    body.response?.result?.video?.url ??
+    body.response?.url ??
+    body.response?.downloadUrls?.[0] ??
+    firstResponseVideo ??
+    responseOutput;
 
   const imageUrls: string[] | undefined = (() => {
     const collected: string[] = [];

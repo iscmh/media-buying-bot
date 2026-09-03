@@ -225,10 +225,22 @@ export async function runSeedanceCreditedJob(
           jobId,
         };
       } else if (!last.videoUrl) {
+        // Polish-29.0.22 Commit 131: dump the raw body when we get a
+        // completed job with no videoUrl — that means our parser hasn't
+        // seen this response shape yet. The dump shows the exact keys
+        // Dreamina used so the next commit fixes normalizeJobBody one-
+        // shot. Truncated to 400 chars.
+        let bodyHint = '';
+        try {
+          const s = JSON.stringify(last.raw).slice(0, 400);
+          if (s && s !== '{}' && s !== 'null') bodyHint = ` :: body=${s}`;
+        } catch {
+          /* raw unserializable — skip */
+        }
         outcome = {
           ok: false,
           reason: 'no_video_url',
-          errorMessage: 'Seedance reported complete but returned no video URL.',
+          errorMessage: 'Seedance reported complete but returned no video URL.' + bodyHint,
           creditsReleased: model.credits,
           pollAttempts,
           jobId,

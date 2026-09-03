@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.21';
+export const POLISH_VERSION = '29.0.22';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.21';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.21 Commit 130 - fix: drop encodeURIComponent from Dreamina poll jobid + surface raw body in poll errors. Live 29.0.20 got past the 404 (Commit 129 fixed the /videos/ vs /jobs/ path) and hit HTTP 400 on the same poll step. Dreamina jobids contain `:` and `@` (e.g. `j0223...-CA:user@example.com-bot:dreamina`) which are technically URL-safe per RFC 3986, and Dreaminas router expects them RAW - percent-encoding to %3A/%40 makes it look up a job with the literal encoded string, returning 400. checkUseapiJob now skips encoding for dreamina and appends a truncated rawBody dump to errorMessage on failure (same trick Commit 122 used for submit) so future 400s show Dreaminas actual rejection reason.';
+  'Polish-29.0.22 Commit 131 - fix: normalizeJobBody looks inside body.response.* for Dreamina video URL + rawBody dump on no_video_url. Live 29.0.21 was the biggest jump yet - the poll worked (4 minutes elapsed = Dreamina rendered the full video), Dreamina reported completed, but the parser could not find the video URL because it only checked flat + result.* shapes. Per docs Dreamina wraps outputs in response.* - added response.video.url, response.videos[0], response.downloadUrls[0], response.output, response.url, response.result.url, response.videoUrl to the extraction chain. Also added a body-dump diagnostic in seedance-credit-flow.ts no_video_url branch so if the exact shape is still missed, we see the actual keys next run.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
