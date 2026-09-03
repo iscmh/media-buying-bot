@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.25';
+export const POLISH_VERSION = '29.0.26';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.25';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.25 Commit 134 - hotfix: Dreamina asset upload timeout bumped 60s -> 180s. Live 29.0.24 died at "Provider call timed out after 60000ms" - useapi.nets Dreamina upload proxy handed off to ByteDance CDN slowly this run. Nano Banana Pro PNG is 500KB-2MB and normally uploads in <10s but the proxy stalls under load. 180s ceiling is well within Vercels 15 min serverless budget and drops the retry loop for transient CDN slowness.';
+  'Polish-29.0.26 Commit 135 - polish: slow Seedance TTS delivery via 3 mechanical levers. User feedback on 29.0.24 output: even faster than before, only 2 clips. Confirmed Seedance IS doing TTS internally (visible + audible speech), it just crams whatever text we give it into the 8s clip length regardless of the SPEAK SLOWLY prompt language. Three changes: (1) WORDS_PER_CLIP 15 -> 10 (Seedance now has to fit only 10 words in 8s ~= 75 wpm deliberately slow, plus a 30-word script now becomes 3 clips instead of 2), (2) insertNaturalPauses() helper adds commas every 4 words + upgrades . to ... so Seedance sees explicit punctuation-timing markers to slow down between phrases, (3) DELIVERY block rewritten with a numeric target (75 wpm) + explicit permission to hold silent frame if speech ends before the 8s mark. Prose language alone was ignored; the mechanical text-side changes should stick.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.25 (Polish-29.0.25 Commit 134 — hotfix: Dreamina asset upload timeout 60s → 180s for slow useapi.net proxy hand-offs)', () => {
+  it('is currently 29.0.26 (Polish-29.0.26 Commit 135 — polish: slow Seedance TTS via WORDS_PER_CLIP 15→10 + insertNaturalPauses + 75 wpm target)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.25');
+    expect(POLISH_VERSION).toBe('29.0.26');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

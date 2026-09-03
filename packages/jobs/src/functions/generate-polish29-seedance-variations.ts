@@ -98,14 +98,18 @@ const DEFAULT_CLIPS_PER_VARIANT = 4;
 /** Seedance clip length in seconds. 8s = Seedance's per-call max. */
 const SEEDANCE_CLIP_SECONDS = 8;
 /**
- * Words per clip. Polish-29.0.24 Commit 133: dropped from 22 → 15.
- * Seedance's TTS was cramming 22 words into 8s → robotic ~165 wpm
- * machine-gun delivery. 15 words at 8s ≈ 112 wpm — closer to natural
- * conversational pace with breathing room for pauses and filler words
- * ("um", "like"). Trades a bit of composite length (fewer words per
- * variation) for delivery that sounds human.
+ * Words per clip. Polish-29.0.26 Commit 135: 15 → 10.
+ * User feedback on the 29.0.24 run: "even faster than before, and only
+ * 2 clips". Seedance's TTS gates delivery rate to fit whatever text we
+ * give it into the clip duration — 15 words / 8s meant ~112 wpm but
+ * Seedance apparently reads it faster (~150+ wpm perceived). Dropping
+ * to 10 words / 8s ≈ 75 wpm — deliberately slow, matches how real
+ * people speak in UGC ads with pauses between phrases. Bonus: same
+ * Claude script now produces MORE clips (10-word chunks vs 15-word
+ * chunks = 1.5x more clips per variation) — a 30-word script that was
+ * 2 clips becomes 3 clips, a 100-word script becomes 10 clips.
  */
-const WORDS_PER_CLIP = 15;
+const WORDS_PER_CLIP = 10;
 const DEFAULT_MODEL_ID = 'seedance-2-0-ugc';
 const ALLOWED_MODEL_IDS = new Set([
   'seedance-2-5-ugc',
@@ -146,6 +150,40 @@ export interface Polish29SeedanceVariationsEventPayload {
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Polish-29.0.26 Commit 135: inject ellipses at natural pause points
+ * to slow Seedance TTS delivery.
+ *
+ * Seedance reads punctuation as timing hints. A bare 10-word sentence
+ * with no punctuation gets rushed through in 3s; the same words with
+ * pauses take the full 8s. Rules:
+ *   - Every 4th word gets a trailing comma if it doesn't already have
+ *     terminal punctuation nearby.
+ *   - Any word followed by a period gets an ellipsis instead (bigger
+ *     pause than a period on its own).
+ *   - Existing commas / ellipses preserved.
+ */
+export function insertNaturalPauses(text: string): string {
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length <= 3) return text; // too short to need pause insertion
+  const out: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i]!;
+    // Terminal '.' → '...' for a bigger pause
+    if (w.endsWith('.') && !w.endsWith('...')) {
+      out.push(w.slice(0, -1) + '...');
+      continue;
+    }
+    // Every 4th word: add trailing comma if the word has no punctuation yet
+    if (i > 0 && (i + 1) % 4 === 0 && /[a-z0-9]$/i.test(w)) {
+      out.push(w + ',');
+      continue;
+    }
+    out.push(w);
+  }
+  return out.join(' ');
 }
 
 /**
@@ -199,7 +237,14 @@ export function composeClipPrompt(input: {
   totalClips: number;
 }): string {
   const { personaLockPrefix, clipDialogue, clipIndex, totalClips } = input;
-  const dialogue = clipDialogue.replace(/\s+/g, ' ').trim();
+  // Polish-29.0.26 Commit 135: inject ellipses at natural pause points
+  // in the dialogue. Seedance's TTS respects punctuation — an ellipsis
+  // or comma → real pause, no punctuation → words run together at max
+  // rate. We already ask for slow delivery in the prompt, but the
+  // dialogue TEXT is what Seedance actually reads, so mechanical pause
+  // markers work better than prose instructions.
+  const dialogueRaw = clipDialogue.replace(/\s+/g, ' ').trim();
+  const dialogue = insertNaturalPauses(dialogueRaw);
   // Polish-29.0.24 Commit 133: complete rewrite of the per-clip prompt
   // to fix the three delivery issues from the first working generation:
   //   1. Robotic/fast speech → explicit slow, conversational pacing +
@@ -220,11 +265,12 @@ export function composeClipPrompt(input: {
     `- Same person, same clothing, same background, same lighting as the reference image throughout the entire clip.\n`,
     `- Aesthetic: iPhone front-camera talking-head UGC, the kind a real customer would post to TikTok.\n\n`,
     `DELIVERY — HARD RULES:\n`,
-    `- Speak SLOWLY and CONVERSATIONALLY, like a real person talking to a friend, not reading a script.\n`,
-    `- Natural pauses between phrases. Occasional filler words ("um", "like", "you know") are welcome — do not read the line verbatim like a robot.\n`,
+    `- Target speech rate: approximately 75 words per minute. This is DELIBERATELY SLOW — think "casual conversation with a friend", not "reading a script".\n`,
+    `- Real pauses between phrases (respect the commas and ellipses in the dialogue below — those are timing markers).\n`,
     `- Warm, sincere, casual tone. Direct to camera.\n`,
-    `- Do not rush. Do not over-enunciate. Do not perform.\n\n`,
-    `DIALOGUE (deliver in a natural conversational cadence — this is the meaning to convey, not a strict script):\n`,
+    `- Do NOT rush. Do NOT speed up to fit the 8-second clip length — if you finish speaking early, stay silent and hold the frame.\n`,
+    `- Do NOT over-enunciate. Do NOT perform. Do NOT act.\n\n`,
+    `DIALOGUE (commas and ellipses are pause markers — respect them literally, do not just glide over):\n`,
     `"${dialogue}"`,
   ].join('');
 }
