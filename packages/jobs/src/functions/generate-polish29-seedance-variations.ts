@@ -528,7 +528,14 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
     // Seedance 2.0 720p 8s). With N variations that's the ceiling —
     // failing fast here avoids blowing ~$0.20 of BYOK $$ on a run
     // that will only ever succeed at 0/N clips.
-    const APPROX_DREAMINA_CREDITS_PER_CLIP = 35;
+    // Polish-29.0.33 Commit 142: bumped 35 -> 100 after live evidence
+    // that 71 Dreamina credits wasn't enough for a single Seedance 2.0
+    // clip. Actual per-clip cost seen: 65-100 depending on Dreamina's
+    // internal load balancing and (probably) the reference-image
+    // complexity. 100 keeps the preflight safe-erring on the "abort"
+    // side — better to warn/fail early than eat the BYOK spend for a
+    // guaranteed rejection.
+    const APPROX_DREAMINA_CREDITS_PER_CLIP = 100;
     await guardedStepRun(step, 'preflight-dreamina-balance', async () => {
       const balance = await getDreaminaAccountBalance({
         userId: jobUserId,

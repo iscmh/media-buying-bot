@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.32';
+export const POLISH_VERSION = '29.0.33';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.32';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.32 Commit 141 - polish: bump pace slightly + kill dramatic pauses. User feedback: still slow, needs to be a BIT faster, and the pauses its taking are too long, sometimes 3 seconds. Two tweaks: (1) WORDS_PER_CLIP 14 -> 16 (~120 wpm — mid TikTok conversational range instead of 105 wpm slower end), (2) insertNaturalPauses cut back: removed the . -> ... upgrade entirely (ellipses were causing 2-3s dramatic pauses), and dropped added-comma density from every 4th word to every 6th word (fewer micro-pauses). DELIVERY block target bumped from 105 to 120 wpm. Kept everything else from 29.0.29+ (sentence-boundary split, standalone-clip prompt shape, preflight balance check).';
+  'Polish-29.0.33 Commit 142 - hotfix: bump APPROX_DREAMINA_CREDITS_PER_CLIP 35 -> 100. Live evidence: user had 71 Dreamina credits, preflight said OK (71 > 35 threshold), Seedance immediately rejected clip 1 with ret:1006 not enough credits. Actual Dreamina charge for Seedance 2.0 720p 8s is 65-100 credits depending on load and reference image complexity. Bumping the preflight constant to 100 keeps the safety net erring on the abort side - better a warned false-negative than a wasted BYOK spend on a guaranteed rejection.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a
