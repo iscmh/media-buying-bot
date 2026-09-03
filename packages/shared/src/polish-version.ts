@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.24';
+export const POLISH_VERSION = '29.0.25';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.24';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.24 Commit 133 - polish: fix delivery pacing + camera motion on generated variants. First working generation (29.0.23) shipped a real composite, character locked in, but the delivery was robotic/fast, Seedance kept adding cinematic zooms/pans, and the composite was 24s from a 60s source. Two changes: (1) WORDS_PER_CLIP 22 -> 15 (from 165 wpm robotic machine-gun to 112 wpm natural conversational pace with breathing room for filler words), (2) composeClipPrompt rewritten with explicit CAMERA HARD RULES (no zoom / pan / dolly / tilt / push-in - static handheld phone camera) + LOOK HARD RULES (amateur raw selfie, no color grading, no cinematic bokeh, iPhone front-camera UGC aesthetic) + DELIVERY HARD RULES (speak SLOWLY, filler words welcome, do not perform, do not over-enunciate). Composite length still bounded by Claude script length x 15 words per 8s clip; if source is 60s, script should be ~150 words -> 10 clips = 80s.';
+  'Polish-29.0.25 Commit 134 - hotfix: Dreamina asset upload timeout bumped 60s -> 180s. Live 29.0.24 died at "Provider call timed out after 60000ms" - useapi.nets Dreamina upload proxy handed off to ByteDance CDN slowly this run. Nano Banana Pro PNG is 500KB-2MB and normally uploads in <10s but the proxy stalls under load. 180s ceiling is well within Vercels 15 min serverless budget and drops the retry loop for transient CDN slowness.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

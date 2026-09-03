@@ -49,7 +49,12 @@ const USEAPI_BASE = 'https://api.useapi.net/v1';
 const SUBMIT_TIMEOUT_MS = 45_000;
 const POLL_TIMEOUT_MS = 20_000;
 const ACCOUNTS_TIMEOUT_MS = 30_000;
-const UPLOAD_TIMEOUT_MS = 60_000;
+// Polish-29.0.25 Commit 134: Dreamina character-PNG upload hit the
+// 60s timeout on 29.0.24. Nano Banana Pro output is ~500KB-2MB PNG;
+// useapi.net's Dreamina proxy needs to hand-off to ByteDance CDN which
+// sometimes stalls under load. Bump to 3 min — well under Vercel's
+// serverless 15 min ceiling.
+const UPLOAD_TIMEOUT_MS = 180_000;
 
 // -----------------------------------------------------------------
 // Token resolver
