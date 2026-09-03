@@ -618,8 +618,16 @@ export interface SubmitOmniVideoInput {
 }
 
 export async function submitOmniVideo(input: SubmitOmniVideoInput): Promise<SubmitJobResult> {
+  // Polish-29.0.46 Commit 155: `account` deliberately omitted — same
+  // reason as submitNanoBananaImage. The whole /google-flow/*
+  // namespace on useapi.net infers the account from the API token,
+  // not the body. Sending it trips the strict-schema validator with
+  // {"error":"Parameter account not supported","code":400}. My earlier
+  // assumption that /google-flow/videos differed from /google-flow/images
+  // was wrong — both are stateless-per-request routes; per-account
+  // usage tracking happens on useapi's side against the token, not
+  // against a body field.
   const body: Record<string, unknown> = {
-    account: input.account,
     prompt: input.prompt,
     model: 'omni-flash',
     duration: input.durationSeconds ?? 4,
@@ -706,8 +714,10 @@ export async function submitGoogleFlowConcat(
       errorMessage: `Google Flow concat needs at least 2 segments (got ${input.segments.length}).`,
     };
   }
+  // Polish-29.0.46 Commit 155: `account` stripped from body — see
+  // submitOmniVideo header for the reason. Same rule for every
+  // /google-flow/* submit endpoint.
   const body = {
-    account: input.account,
     videos: input.segments.map((s) => ({
       video: s.videoRef,
       ...(s.trimStart != null ? { trimStart: s.trimStart } : {}),
@@ -733,8 +743,12 @@ export async function submitGoogleFlowConcat(
 }
 
 export async function submitVeoVideo(input: SubmitVeoVideoInput): Promise<SubmitJobResult> {
+  // Polish-29.0.46 Commit 155: `account` stripped from body — same
+  // /google-flow/* rule as Omni + concat + Nano Banana. Veo isn't
+  // called by any active worker at time of this commit but keeping
+  // the client consistent so it doesn't fail the same way when
+  // someone wires it up.
   const body = {
-    account: input.account,
     prompt: input.prompt,
     model: input.model ?? 'veo-3-fast',
     duration: input.durationSeconds ?? 5,
