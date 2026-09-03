@@ -27,9 +27,12 @@ import {
   POLISH29_VARIATIONS_DISPLAY_NAME,
   POLISH29_MODEL_TIERS,
   POLISH29_DEFAULT_MODEL_ID,
+  POLISH30_OMNI_DESCRIPTION,
+  POLISH30_OMNI_DISPLAY_NAME,
   estimatePolish28CostPerVariantUsd,
   estimatePolish28VariationsCostPerVariantUsd,
   estimatePolish29VariationsCostUsd,
+  estimatePolish30OmniCostPerVariantUsd,
   type Polish29ModelTier,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
@@ -151,6 +154,10 @@ export function SimplifiedGenerationForm({
   const [polish29VariationsSelected, setPolish29VariationsSelected] = React.useState(false);
   const [polish29ModelId, setPolish29ModelId] =
     React.useState<Polish29ModelTier['id']>(POLISH29_DEFAULT_MODEL_ID);
+  // Polish-29.0.39 Commit 148: Google Flow / Omni 1.1 Flash variations
+  // picker. Cheapest variations tier — video, image, concat all covered
+  // by Google Flow subscription credits via useapi.net.
+  const [polish30OmniSelected, setPolish30OmniSelected] = React.useState(false);
   // Polish-25.3 Commit 18b: static ad picker + quality tier. Mutually
   // exclusive with polish23Selected + polish26Selected + modelId.
   // Defaults to Medium quality — matches the shipped cost line.
@@ -194,6 +201,7 @@ export function SimplifiedGenerationForm({
     polish28VariationsSelected,
     polish29VariationsSelected,
     polish29ModelId,
+    polish30OmniSelected,
     staticOpenaiSelected,
     staticOpenaiQuality,
     staticOpenaiIntensity,
@@ -242,6 +250,17 @@ export function SimplifiedGenerationForm({
         }).usd,
       }
     : null;
+  // Polish-29.0.39 Commit 148: Google Flow / Omni 1.1 Flash variations
+  // cost preview. ~$0.47 per 12s composite at Ultra tier.
+  const polish30OmniEstimate = polish30OmniSelected
+    ? {
+        estimateUsd:
+          variantCount *
+          estimatePolish30OmniCostPerVariantUsd({
+            sourceDurationSeconds: detectedSourceSeconds,
+          }).usd,
+      }
+    : null;
   // Polish-25.3 Commit 18b: static-openai cost preview per quality
   // tier. Fixed per-variant, no duration scaling (image, not video).
   const staticOpenaiEstimate = staticOpenaiSelected
@@ -249,26 +268,28 @@ export function SimplifiedGenerationForm({
         estimateUsd: variantCount * estimateStaticOpenaiCostPerVariantUsd(staticOpenaiQuality).usd,
       }
     : null;
-  const estimate = polish29VariationsEstimate
-    ? polish29VariationsEstimate
-    : polish28VariationsEstimate
-      ? polish28VariationsEstimate
-      : polish28Estimate
-        ? polish28Estimate
-        : staticOpenaiEstimate
-          ? staticOpenaiEstimate
-          : polish26Estimate
-            ? polish26Estimate
-            : polish23Estimate
-              ? polish23Estimate
-              : modelId
-                ? estimateGenerationCost({
-                    conceptType: 'ugc',
-                    variantCount,
-                    videoModelId: modelId,
-                    sourceDurationSeconds: previewSeconds,
-                  })
-                : null;
+  const estimate = polish30OmniEstimate
+    ? polish30OmniEstimate
+    : polish29VariationsEstimate
+      ? polish29VariationsEstimate
+      : polish28VariationsEstimate
+        ? polish28VariationsEstimate
+        : polish28Estimate
+          ? polish28Estimate
+          : staticOpenaiEstimate
+            ? staticOpenaiEstimate
+            : polish26Estimate
+              ? polish26Estimate
+              : polish23Estimate
+                ? polish23Estimate
+                : modelId
+                  ? estimateGenerationCost({
+                      conceptType: 'ugc',
+                      variantCount,
+                      videoModelId: modelId,
+                      sourceDurationSeconds: previewSeconds,
+                    })
+                  : null;
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate != null && estimate.estimateUsd > remaining;
@@ -328,6 +349,15 @@ export function SimplifiedGenerationForm({
   if (!connectedProviders.replicate.connected) polish29VariationsMissingKeys.push('Replicate');
   const hasPolish29VariationsKeys = polish29VariationsMissingKeys.length === 0;
 
+  // Polish-29.0.39 Commit 148: Omni-variations gate — Claude only.
+  // Video, image (Nano Banana 2 Lite), and concat all covered by the
+  // platform-side Google Flow subscription via useapi.net. No Gemini
+  // (persona batch reuses the polish28 Claude prompt with no vision
+  // step). No Replicate (concat runs Google Flow /videos/concatenate).
+  const polish30OmniMissingKeys: string[] = [];
+  if (!connectedProviders.claude.connected) polish30OmniMissingKeys.push('Claude');
+  const hasPolish30OmniKeys = polish30OmniMissingKeys.length === 0;
+
   // Polish-25.3 Commit 18b: static-openai gate. Needs Claude
   // (copy rewrite) + OpenAI (gpt-image-2). Gemini optional (source
   // vision analysis is skipped for the static path). Missing keys
@@ -342,32 +372,36 @@ export function SimplifiedGenerationForm({
   if (!hasElevenLabsKey) legacyMissingKeys.push('ElevenLabs');
   const hasLegacyKeys = hasHedraKey && hasElevenLabsKey;
 
-  const hasProviderKey = polish29VariationsSelected
-    ? hasPolish29VariationsKeys
-    : polish28VariationsSelected
-      ? hasPolish28VariationsKeys
-      : polish28Selected
-        ? hasPolish28Keys
-        : staticOpenaiSelected
-          ? hasStaticOpenaiKeys
-          : polish26Selected
-            ? hasPolish26Keys
-            : polish23Selected
-              ? hasPolish23Keys
-              : hasLegacyKeys;
-  const missingKeys = polish29VariationsSelected
-    ? polish29VariationsMissingKeys
-    : polish28VariationsSelected
-      ? polish28VariationsMissingKeys
-      : polish28Selected
-        ? polish28MissingKeys
-        : staticOpenaiSelected
-          ? staticOpenaiMissingKeys
-          : polish26Selected
-            ? polish26MissingKeys
-            : polish23Selected
-              ? polish23MissingKeys
-              : legacyMissingKeys;
+  const hasProviderKey = polish30OmniSelected
+    ? hasPolish30OmniKeys
+    : polish29VariationsSelected
+      ? hasPolish29VariationsKeys
+      : polish28VariationsSelected
+        ? hasPolish28VariationsKeys
+        : polish28Selected
+          ? hasPolish28Keys
+          : staticOpenaiSelected
+            ? hasStaticOpenaiKeys
+            : polish26Selected
+              ? hasPolish26Keys
+              : polish23Selected
+                ? hasPolish23Keys
+                : hasLegacyKeys;
+  const missingKeys = polish30OmniSelected
+    ? polish30OmniMissingKeys
+    : polish29VariationsSelected
+      ? polish29VariationsMissingKeys
+      : polish28VariationsSelected
+        ? polish28VariationsMissingKeys
+        : polish28Selected
+          ? polish28MissingKeys
+          : staticOpenaiSelected
+            ? staticOpenaiMissingKeys
+            : polish26Selected
+              ? polish26MissingKeys
+              : polish23Selected
+                ? polish23MissingKeys
+                : legacyMissingKeys;
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -447,12 +481,36 @@ export function SimplifiedGenerationForm({
             onPick={() => {
               setPolish28VariationsSelected(true);
               setPolish29VariationsSelected(false);
+              setPolish30OmniSelected(false);
               setPolish28Selected(false);
               setStaticOpenaiSelected(false);
               setPolish26Selected(false);
               setPolish23Selected(false);
               setModelId(null);
             }}
+          />
+
+          {/* Polish-29.0.39 Commit 148: cheapest variations tier —
+              Google Flow / Omni 1.1 Flash. Only Claude BYOK required;
+              video, image, and concat all pay in Flow credits via the
+              platform-side useapi.net token. ~9-25× cheaper than the
+              Seedance variations card below. */}
+          <Polish30OmniPickerCard
+            picked={polish30OmniSelected}
+            disabled={isPending}
+            missingKeys={polish30OmniMissingKeys}
+            onPick={() => {
+              setPolish30OmniSelected(true);
+              setPolish29VariationsSelected(false);
+              setPolish28VariationsSelected(false);
+              setPolish28Selected(false);
+              setStaticOpenaiSelected(false);
+              setPolish26Selected(false);
+              setPolish23Selected(false);
+              setModelId(null);
+            }}
+            variantCount={variantCount}
+            detectedSourceSeconds={detectedSourceSeconds}
           />
 
           {/* Polish-29.0.10 Commit 120: credit-backed sibling — same
@@ -465,6 +523,7 @@ export function SimplifiedGenerationForm({
             selectedModelId={polish29ModelId}
             onPick={() => {
               setPolish29VariationsSelected(true);
+              setPolish30OmniSelected(false);
               setPolish28VariationsSelected(false);
               setPolish28Selected(false);
               setStaticOpenaiSelected(false);
@@ -486,6 +545,7 @@ export function SimplifiedGenerationForm({
               setPolish28Selected(true);
               setPolish28VariationsSelected(false);
               setPolish29VariationsSelected(false);
+              setPolish30OmniSelected(false);
               setStaticOpenaiSelected(false);
               setPolish26Selected(false);
               setPolish23Selected(false);
@@ -508,6 +568,7 @@ export function SimplifiedGenerationForm({
             setPolish28Selected(false);
             setPolish28VariationsSelected(false);
             setPolish29VariationsSelected(false);
+            setPolish30OmniSelected(false);
             setModelId(null);
           }}
           onQualityChange={setStaticOpenaiQuality}
@@ -630,7 +691,14 @@ export function SimplifiedGenerationForm({
             User read "greyed-out button with no visible error" and
             couldn't figure out the OpenAI-key requirement. */}
         {!hasProviderKey &&
-          (modelId != null || polish23Selected || polish26Selected || staticOpenaiSelected) && (
+          (modelId != null ||
+            polish23Selected ||
+            polish26Selected ||
+            polish28Selected ||
+            polish28VariationsSelected ||
+            polish29VariationsSelected ||
+            polish30OmniSelected ||
+            staticOpenaiSelected) && (
             <p className="mt-3 text-xs text-[color:var(--accent-negative)]">
               Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
               <Link
@@ -1123,5 +1191,85 @@ function Polish29VariationsPickerCard({
         </div>
       )}
     </div>
+  );
+}
+
+// -------------------------------------------------------------------
+// Polish-29.0.39 Commit 148: Google Flow / Omni 1.1 Flash variations
+// picker card. Cheapest variations tier. Only Claude BYOK; video +
+// image + concat all pay in Google Flow subscription credits via
+// useapi.net. Sibling of Polish29VariationsPickerCard.
+// -------------------------------------------------------------------
+
+interface Polish30OmniPickerCardProps {
+  picked: boolean;
+  disabled: boolean;
+  missingKeys: string[];
+  onPick: () => void;
+  variantCount: number;
+  detectedSourceSeconds: number | null;
+}
+
+function Polish30OmniPickerCard({
+  picked,
+  disabled,
+  missingKeys,
+  onPick,
+  variantCount,
+  detectedSourceSeconds,
+}: Polish30OmniPickerCardProps) {
+  const canPick = missingKeys.length === 0;
+  const perVariant = estimatePolish30OmniCostPerVariantUsd({
+    sourceDurationSeconds: detectedSourceSeconds,
+  });
+  const totalUsd = variantCount * perVariant.usd;
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      disabled={disabled || !canPick}
+      aria-pressed={picked}
+      className={cn(
+        'group relative flex w-full flex-col gap-2 rounded-md border p-4 text-left transition-colors',
+        picked
+          ? 'border-fg bg-fg/5'
+          : 'border-[color:var(--accent-positive)]/50 bg-bg-surface hover:border-fg/50',
+        (disabled || !canPick) && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <span
+        className={cn(
+          'absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+          'bg-[color:var(--accent-positive)]/15 text-[color:var(--accent-positive)]',
+        )}
+      >
+        Cheapest
+      </span>
+      {picked && (
+        <CheckCircle2 className="text-fg absolute right-24 top-3 h-4 w-4" aria-hidden="true" />
+      )}
+      <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
+        Omni UGC (Google Flow)
+      </div>
+      <div className="text-fg text-sm font-semibold">{POLISH30_OMNI_DISPLAY_NAME}</div>
+      <div className="text-fg-muted text-xs leading-relaxed">{POLISH30_OMNI_DESCRIPTION}</div>
+      <div className="text-fg-subtle mt-1 text-[11px]">
+        Output: {variantCount} × 9:16 vertical, {perVariant.clipCount} clips each. ~$
+        {totalUsd.toFixed(2)} total (${perVariant.usd.toFixed(2)}/variant).
+      </div>
+      {!canPick && (
+        <div className="mt-2 text-xs text-[color:var(--accent-negative)]">
+          Connect {missingKeys.join(' + ')} at{' '}
+          <Link
+            href="/settings/connections"
+            className="underline underline-offset-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Settings → Connections
+          </Link>{' '}
+          to unlock.
+        </div>
+      )}
+    </button>
   );
 }

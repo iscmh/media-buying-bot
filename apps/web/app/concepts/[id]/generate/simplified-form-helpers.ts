@@ -167,6 +167,30 @@ export function estimatePolish28VariationsCostPerVariantUsd(): { usd: number } {
 }
 
 /**
+ * Polish-29.0.39 Commit 148: Google Flow / Omni 1.1 Flash variations
+ * picker. Sibling of polish29 Seedance variations but ~9-25× cheaper
+ * per variation. Only Claude BYOK required (no Gemini, no Replicate).
+ * Video render pays in Google Flow subscription credits via useapi.net.
+ */
+export const POLISH30_OMNI_PIPELINE_ID = 'polish30_omni_variations' as const;
+export const POLISH30_OMNI_DISPLAY_NAME = 'Omni UGC (Google Flow, credits)';
+export const POLISH30_OMNI_DESCRIPTION =
+  'Google Omni 1.1 Flash V2V-extend chain. ~9-25× cheaper per variation than Seedance. ' +
+  'Only Claude BYOK required — video, image, and concat all covered by your Google Flow subscription.';
+/** Per-variant cost preview. Assumes ~3 clips per 12s composite: 7 seed + 2×20 extends = 47 Flow credits. */
+export function estimatePolish30OmniCostPerVariantUsd(input: {
+  sourceDurationSeconds: number | null;
+}): { usd: number; clipCount: number } {
+  const target = input.sourceDurationSeconds ?? SIMPLIFIED_DEFAULT_DURATION_SECONDS;
+  const clipCount = Math.max(2, Math.min(10, Math.ceil(target / 4)));
+  // 7 seed + (clipCount-1) × 20 extends = Flow credits. $0.01/credit at Ultra tier.
+  const flowCredits = 7 + (clipCount - 1) * 20;
+  const usdAtUltra = flowCredits * 0.01;
+  const usdWithBYOK = usdAtUltra + 0.05; // Claude batch amortized
+  return { usd: round4(usdWithBYOK), clipCount };
+}
+
+/**
  * Polish-29.0.10 Commit 120: credit-backed multi-clip Seedance
  * variations picker. Feeds a winning creative → N cloned-character
  * variants matching source ad length. Video render pays in credits
@@ -356,6 +380,12 @@ export interface SimplifiedFormState {
   polish29VariationsSelected?: boolean;
   polish29ModelId?: Polish29ModelTier['id'];
   /**
+   * Polish-29.0.39 Commit 148: Google Flow / Omni 1.1 Flash variations.
+   * Routes to generation/polish30-omni-variations.requested.
+   * No tier picker — Omni has one model. Mutually exclusive.
+   */
+  polish30OmniSelected?: boolean;
+  /**
    * Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad flag.
    * Mutually exclusive with polish23Selected / polish25Selected /
    * polish26Selected / modelId. Companion field `staticOpenaiQuality`
@@ -391,6 +421,7 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
     state.polish28Selected === true ||
     state.polish28VariationsSelected === true ||
     state.polish29VariationsSelected === true ||
+    state.polish30OmniSelected === true ||
     state.staticOpenaiSelected === true;
   if (!hasPickedPipeline && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
@@ -460,6 +491,13 @@ export function buildSubmissionFormData(input: {
   // because no metadata.model_id is set. Cleaner than adding
   // polish23 as a synthetic VideoModelId, which would tangle two
   // descriptor systems.
+  if (input.state.polish30OmniSelected === true) {
+    // Polish-29.0.39 Commit 148: Google Flow / Omni variations. Routes
+    // to generation/polish30-omni-variations.requested. No tier config
+    // (Omni has one model).
+    fd.set('pipeline', POLISH30_OMNI_PIPELINE_ID);
+    return fd;
+  }
   if (input.state.polish29VariationsSelected === true) {
     // Polish-29.0.10 Commit 120: credit-backed Seedance variations.
     // Threads the picked model tier through job.metadata.model_id so
