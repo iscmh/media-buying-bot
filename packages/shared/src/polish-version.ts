@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.36';
+export const POLISH_VERSION = '29.0.37';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.36';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.36 Commit 145 - Google Flow / Omni 1.1 Flash foundation for the polish30 variations pipeline. User pivoted off Dreamina Seedance after per-clip cost math (65-137 Dreamina credits per 8s clip = ~$1.37) vs Omni 1.1 Flash (7 credits per 4s clip = $0.07, or 20 credits for a V2V extend = $0.20). A full 10s UGC talking-head chain in Omni = 47 Flow credits total = ~$0.47, vs $6-14 for the same length in Seedance. Adds submitOmniVideo (T2V + I2V first+last-frame + V2V edit on /google-flow/videos), submitGoogleFlowConcat (server-side join with per-segment trimStart/trimEnd for cutting the pin-frame beats at joins), widens submitNanoBananaImage with a model param (nano-banana-2-lite / -2 / -pro; default lite = 0-credit on any Google AI plan). Ships as API surface only in useapi-net-client.ts + ai-providers barrel. No worker yet; Commits 146-148 add pricing/descriptor, worker, frontend picker.';
+  'Polish-29.0.37 Commit 146 - polish30_omni_variations pipeline plumbing. Registers the PipelineType, descriptor (providerChoice=clone_ugc, format=polish30_omni_variations, workerEvent=generation/polish30-omni-variations.requested, requiredProviders=[claude]), ALL_PIPELINES entry, cost-estimator branch (10s composite ~47 Flow credits = $0.47 at Ultra tier), and analyze-concept event-union entry. Also adds omni-flash-ugc credit model to credit-pricing.ts at 8 platform credits per clip = $0.16 (break-even at Ultra tier, unprofitable at Plus tier where user is currently). No worker yet — Commit 147 lands generate-polish30-omni-variations.ts, Commit 148 adds the frontend picker card.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

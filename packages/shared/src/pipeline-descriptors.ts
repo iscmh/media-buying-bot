@@ -60,7 +60,13 @@ export interface PipelineDescriptor {
     // variations. Same shape as polish28_variations_ugc but the video
     // render pays in credits (per-clip reserve via
     // runSeedanceCreditedJob) instead of HeyGen BYOK.
-    | 'generation/polish29-seedance-variations.requested';
+    | 'generation/polish29-seedance-variations.requested'
+    // Polish-29.0.37 Commit 146: Google Flow / Omni 1.1 Flash
+    // variations pipeline. Same value prop, different + far cheaper
+    // render chain (Nano Banana seed still → Omni I2V seed clip →
+    // Omni V2V extends → Google Flow concat, all on user's Google Flow
+    // subscription credits via useapi.net).
+    | 'generation/polish30-omni-variations.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -207,6 +213,21 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     // seedance-credit-flow.ts) so nothing to gate at pipeline pick.
     requiredProviders: [],
   },
+  polish30_omni_variations: {
+    pipeline: 'polish30_omni_variations',
+    label: 'Omni variations (credits)',
+    // Same "no per-user provider choice" story as polish29 — the video
+    // render pays in Google Flow credits via the platform-side
+    // useapi.net token + registered Google Flow account. Only Claude
+    // (persona+script batch) needs user BYOK; Nano Banana + Omni are
+    // all covered by the Google Flow subscription itself.
+    providerChoice: 'clone_ugc',
+    format: 'polish30_omni_variations',
+    workerEvent: 'generation/polish30-omni-variations.requested',
+    // Claude is the sole BYOK requirement — everything else runs
+    // through the platform's registered Google Flow account.
+    requiredProviders: ['claude'],
+  },
   polish29_seedance_variations: {
     pipeline: 'polish29_seedance_variations',
     label: 'Seedance variations (credits)',
@@ -298,4 +319,6 @@ export const ALL_PIPELINES: PipelineType[] = [
   // variations. Feed a winning creative → N cloned-character variants
   // each matching the source ad's length.
   'polish29_seedance_variations',
+  // Polish-29.0.37 Commit 146: Google Flow / Omni 1.1 Flash variations.
+  'polish30_omni_variations',
 ];

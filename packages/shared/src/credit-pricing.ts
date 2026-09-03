@@ -71,6 +71,9 @@ export interface CreditModel {
     | 'useapi.runway'
     | 'useapi.pixverse'
     | 'useapi.veo'
+    // Polish-29.0.37 Commit 146: Google Flow / Omni 1.1 Flash for the
+    // polish30 variations pipeline (per-clip is cheap via V2V extends).
+    | 'useapi.omni_flash'
     | 'useapi.minimax'
     | 'byok.heygen'
     | 'byok.openai_image'
@@ -133,6 +136,27 @@ export const CREDIT_MODELS: readonly CreditModel[] = [
     mode: 'credits',
     credits: 10,
     retailUsdPerAction: 1.2,
+    family: 'ugc',
+    qualityTier: 'value',
+  },
+  // Polish-29.0.37 Commit 146: Omni 1.1 Flash via Google Flow.
+  // Per-clip credit charge covers the AMORTIZED cost of the seed+extend
+  // chain: 1 seed clip (7 Flow credits) + (N-1) V2V extends (20 Flow
+  // credits each). Average per-clip Flow cost ≈ 16-17 credits ≈ $0.16
+  // at Ultra tier ($10/1000 Flow credits). Charging users 8 platform
+  // credits per clip = $0.16 = break-even at Ultra. At Plus tier
+  // ($0.04/credit) the platform loses money; must upgrade before
+  // shipping to real users. Full 10s composite (3 clips) = 24 platform
+  // credits = $0.48 to user.
+  {
+    id: 'omni-flash-ugc',
+    displayName: 'Omni 1.1 Flash (Google Flow)',
+    description:
+      'Google Omni 1.1 Flash — audio-native talking-head UGC generation via Google Flow. Ultra-cheap credit cost (~$0.16 per 4s clip at Ultra tier). Best for iterating on variations at high volume.',
+    provider: 'useapi.omni_flash',
+    mode: 'credits',
+    credits: 8,
+    retailUsdPerAction: 0.48,
     family: 'ugc',
     qualityTier: 'value',
   },

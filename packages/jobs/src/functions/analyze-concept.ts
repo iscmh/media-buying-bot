@@ -438,6 +438,8 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   // variations. Descriptor lookup returns this event for the
   // polish29_seedance_variations pipeline.
   | 'generation/polish29-seedance-variations.requested'
+  // Polish-29.0.37 Commit 146: Google Flow / Omni 1.1 Flash variations.
+  | 'generation/polish30-omni-variations.requested'
 > {
   try {
     const db = getDb();

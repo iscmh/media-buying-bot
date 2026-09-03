@@ -181,7 +181,17 @@ export type PipelineType =
   // variant matching source ad length. First credit-backed pipeline
   // that mirrors the polish28_variations_ugc shape but pays the
   // video render in credits instead of HeyGen BYOK.
-  | 'polish29_seedance_variations';
+  | 'polish29_seedance_variations'
+  // Polish-29.0.37 Commit 146: Google Flow / Omni 1.1 Flash variations.
+  // Same value prop as polish29_seedance_variations (feed winning ad,
+  // get N cloned-character variations) but the render chain is
+  // fundamentally different + 20-30× cheaper: 1 Nano Banana 2 Lite
+  // still (0 Flow credits) → 1 Omni seed clip using that still as both
+  // startImage + endImage (7 credits) → M V2V extends inheriting the
+  // seed's voice+motion+framing (20 credits each) → server-side
+  // Google Flow concat (0 credits). Full 10s ad ≈ 47 Flow credits ≈
+  // $0.47 at Ultra tier vs $6-14 for the same length in Seedance.
+  | 'polish30_omni_variations';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -622,6 +632,28 @@ function estimateByPipeline(
       breakdown.push({
         item: `Seedance 2.5 via credits (${variantCount} × ${P29_CREDITS_PER_CLIP} credits @ $${P29_CREDIT_UNIT_USD.toFixed(2)})`,
         cost: round4(variantCount * P29_PER_CLIP_USD),
+      });
+      break;
+    }
+    case 'polish30_omni_variations': {
+      // Polish-29.0.37 Commit 146: Google Flow / Omni chain.
+      // Full 10s composite ≈ 47 Flow credits at Ultra ($0.47), so:
+      //   Seed still (Nano Banana 2 Lite):  0 Flow credits
+      //   Seed clip (Omni 4s, I2V):         7 Flow credits
+      //   Each extend (Omni V2V):           20 Flow credits
+      //   Concat:                           0 Flow credits
+      // Model at ~3 clips per variation (10s composite). Frontend
+      // shows this as the retail $ line; the credit-mode reservation
+      // uses the omni-flash-ugc credit model in credit-pricing.ts.
+      const target30 = targetSecondsHint ?? 30;
+      const clipCount30 = Math.max(2, Math.min(10, Math.ceil(target30 / 4)));
+      const OMNI_SEED_USD = 0.07;
+      const OMNI_EXTEND_USD = 0.2;
+      const OMNI_STORAGE = 0.02;
+      const perVariantUsd = OMNI_SEED_USD + (clipCount30 - 1) * OMNI_EXTEND_USD + OMNI_STORAGE;
+      breakdown.push({
+        item: `Omni 1.1 Flash chain (1 seed + ${clipCount30 - 1} V2V extends @ 4s)`,
+        cost: round4(variantCount * perVariantUsd),
       });
       break;
     }

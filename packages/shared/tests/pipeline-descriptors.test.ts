@@ -92,6 +92,8 @@ describe('Polish-20 Commit 4 → Polish-29 Commit 119: ALL_PIPELINES coverage', 
     // credits-mode pipeline).
     // Polish-29.0.10 Commit 119 added polish29_seedance_variations
     // (credit-backed multi-clip Seedance variations flow).
+    // Polish-29.0.37 Commit 146 added polish30_omni_variations
+    // (Google Flow / Omni 1.1 Flash chain — 25× cheaper per variation).
     const expected: PipelineType[] = [
       'heygen_avatar_talking_head',
       'sora_2_single_shot',
@@ -101,6 +103,7 @@ describe('Polish-20 Commit 4 → Polish-29 Commit 119: ALL_PIPELINES coverage', 
       'polish28_variations_ugc',
       'polish29_seedance',
       'polish29_seedance_variations',
+      'polish30_omni_variations',
     ];
     expect(new Set(ALL_PIPELINES)).toEqual(new Set(expected));
   });
