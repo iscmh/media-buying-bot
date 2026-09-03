@@ -448,14 +448,12 @@ export interface CheckJobInput {
   service: UseapiService;
   jobId: string;
   /**
-   * Polish-29.0.43 Commit 152: `/google-flow` splits its poll surface
-   * by resource kind. Video jobs (Omni + Veo) poll at
-   * /google-flow/jobs/{jobid}; image jobs (Nano Banana 2/2-Lite/Pro)
-   * poll at /google-flow/images/{jobid} — hitting /jobs/ with an
-   * image jobid returns `Invalid job ID format` because the video
-   * router's id parser rejects it. Default 'video' keeps the
-   * behaviour of every current caller unchanged; polish30's still
-   * poll passes 'image'. Ignored for non-google-flow services.
+   * Polish-29.0.43 Commit 152 tried to route google-flow image polls
+   * to /google-flow/images/{jobid} — turned out to be a wrong guess.
+   * The real root cause (fixed in Commit 153) was the jobid being
+   * URL-encoded before it hit the router. Field kept on the type as
+   * an inert breadcrumb so a future refactor doesn't reintroduce the
+   * mistake and to avoid a call-site diff at the polish30 site.
    */
   resourceKind?: 'video' | 'image';
   generationJobId?: string;
@@ -474,25 +472,30 @@ export interface CheckJobInput {
  * a dedicated GET /jobs/{jobid} endpoint so keep it on /jobs. Branch
  * by service.
  *
- * Polish-29.0.43 Commit 152: google-flow branches further by resource
- * kind — see CheckJobInput.resourceKind header for why.
+ * Polish-29.0.44 Commit 153: google-flow image polls ALSO go to
+ * /google-flow/jobs/{jobid}, same as video — Commit 152's split-by-
+ * resource-kind guess was wrong (useapi returned "Wrong GET url" for
+ * /google-flow/images/{jobid}, that endpoint is submit-only). The real
+ * fix is that google-flow jobids ALSO carry `:` and `@` and must NOT
+ * be URL-encoded, same as Dreamina — the raw form is
+ *   j0903180709650836584i-u3061-email:isaacisverygoatedtho@gmail.com-bot:google-flow
+ * and encoding `%3A` / `%40` trips the router into
+ * "Invalid job ID format". Added google-flow to the no-encode list.
  */
 export async function checkUseapiJob(input: CheckJobInput): Promise<UseapiJobResult> {
-  const pathSegment =
-    input.service === 'dreamina'
-      ? 'videos'
-      : input.service === 'google-flow' && input.resourceKind === 'image'
-        ? 'images'
-        : 'jobs';
-  // Polish-29.0.21 Commit 130: don't encodeURIComponent the jobid.
-  // Dreamina jobids look like:
-  //   j0223140530123456789v-u12345-CA:user@example.com-bot:dreamina
-  // The `:` and `@` chars are technically URL-safe (RFC 3986 sub-delims
-  // / unreserved) and Dreamina's router appears to expect them RAW —
-  // percent-encoding them to %3A and %40 causes the router to look up
-  // a job with the literal encoded string, returning HTTP 400. Skip
-  // encoding for dreamina; keep it for other services out of caution.
-  const encodedJobId = input.service === 'dreamina' ? input.jobId : encodeURIComponent(input.jobId);
+  const pathSegment = input.service === 'dreamina' ? 'videos' : 'jobs';
+  // Polish-29.0.21 Commit 130 + Polish-29.0.44 Commit 153: don't
+  // encodeURIComponent the jobid for Dreamina OR google-flow. Both
+  // useapi routers embed the account email in the id and expect the
+  // `:` / `@` chars raw. Percent-encoding trips their router into
+  // "Invalid job ID format" (Dreamina) or 400 (google-flow). Keep
+  // encoding for every OTHER service out of caution — kling / runway /
+  // pixverse / minimax have not been observed carrying account chars,
+  // but their format isn't guaranteed stable either.
+  const encodedJobId =
+    input.service === 'dreamina' || input.service === 'google-flow'
+      ? input.jobId
+      : encodeURIComponent(input.jobId);
   const url = `${USEAPI_BASE}/${input.service}/${pathSegment}/${encodedJobId}`;
   const result = await callProvider<RawJobBody>({
     userId: input.userId,
