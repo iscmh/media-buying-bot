@@ -66,6 +66,7 @@ import {
   parsePolish28VariationsResponse,
   type Polish28VariationEntry,
 } from '../lib/polish28-variations-prompt';
+import { buildUgcClipProse, ugcConstraintTail } from '../lib/ugc-prose-prompt';
 import { uploadGeneratedVideoFromUrl } from '../lib/storage';
 
 console.log(
@@ -199,48 +200,62 @@ export function composeSeedStillPrompt(persona: Polish28VariationEntry['persona'
 
 /**
  * Seed-clip prompt: the ~first line of the script + explicit rules
- * that the clip begins and ends on the reference still. Blog: allow
- * motion in the middle (leaning in, hand gestures, head tilt, laugh)
- * but pin both ends. Later V2V extends inherit this seed's voice +
- * mannerisms.
+ * that the clip begins and ends on the reference still.
+ *
+ * Polish-29.0.40 Commit 149: rewritten in the flowing-prose style
+ * from the seedance25-ugc-yapper skill playbook via the shared
+ * buildUgcClipProse helper. Adds the pin-frame rule as an
+ * `extraSceneRule` so the seed clip still lands both ends on the
+ * reference frame (later V2V extends need matching in/out frames for
+ * invisible joins). Omni gets quoted dialogue rather than Seedance's
+ * `{...}` — Google Flow's Omni router is not documented to honour
+ * curly braces and treats them as literal characters.
  */
 export function composeSeedClipPrompt(
   persona: Polish28VariationEntry['persona'],
   firstDialogue: string,
 ): string {
-  const cleaned = firstDialogue.replace(/\s+/g, ' ').trim();
-  return [
-    `A single 4-second UGC selfie video of a ${persona.age_range} ${persona.ethnicity} ${persona.gender}. Same person, same setting, same lighting as the reference image.`,
-    ``,
-    `CAMERA: static handheld phone camera, natural micro-wobble only, no zoom, no pan, no dolly, no tilt. Fixed medium close-up on face and upper chest.`,
-    ``,
-    `LOOK: amateur raw selfie video, unedited, no color grading, no cinematic bokeh. iPhone front-camera UGC aesthetic. Same clothing, same background, same window lighting as the reference image throughout.`,
-    ``,
-    `MOTION: the speaker starts on the reference frame, moves naturally through the clip — leaning slightly forward, one hand gesture, small head tilt, a small warm smile — and returns to the reference frame at the end. Both the FIRST and LAST frames of this clip must match the reference image exactly. Free motion in the middle.`,
-    ``,
-    `DELIVERY: natural conversational pace, around 120 words per minute. Warm sincere casual tone, direct to camera. Do not rush. Do not over-enunciate. Do not perform.`,
-    ``,
-    `The speaker says: "${cleaned}"`,
-    ``,
-    `Full frame, no phone bezel, no border, no text, no captions, no watermarks.`,
-  ].join('\n');
+  const dialogue = firstDialogue.replace(/\s+/g, ' ').trim();
+  const prose = buildUgcClipProse({
+    persona,
+    cameraMode: 'selfie',
+    clipSeconds: OMNI_CLIP_SECONDS,
+    targetWordsPerSecond: 2,
+    extraSceneRule: `The speaker begins on the reference frame, moves naturally in the middle — a small lean forward, one hand gesture, a head tilt, a small warm smile — and returns to the reference frame at the end. Both the FIRST and LAST frames of this clip land on the reference image exactly, with free motion in the middle.`,
+  });
+  return prose.replace('__DIALOGUE__', `"${dialogue}"`);
 }
 
 /**
  * Extend-clip prompt: V2V edit inheriting the previous clip's voice +
- * motion + camera + framing, delivering the next dialogue line. Blog
- * pattern: first paragraph pins what must NOT change, quoted line is
- * the new content, last sentence keeps hands empty and strips captions.
+ * motion + camera + framing, delivering the next dialogue line.
+ *
+ * Polish-29.0.40 Commit 149: swapped to prose + shared constraint
+ * tail. The prior version leaned on the word "Remove" in the last
+ * sentence — the seedance25 skill playbook is explicit that
+ * `remove` / `edit` / `change` reclassify the router task type on
+ * Seedance and produce degraded output; Omni's router is different
+ * but positive statements never hurt, so we align both workers on
+ * the same idiom. Uses ugcConstraintTail directly (not the full
+ * prose builder) because the V2V reference video already carries
+ * persona / camera / lighting / room — restating them fights the
+ * reference.
  */
-export function composeExtendClipPrompt(dialogue: string): string {
+export function composeExtendClipPrompt(
+  dialogue: string,
+  persona: Polish28VariationEntry['persona'],
+): string {
   const cleaned = dialogue.replace(/\s+/g, ' ').trim();
+  const gLower = (persona.gender ?? '').toLowerCase();
+  const subject = gLower === 'male' || gLower === 'man' || gLower === 'guy' ? 'He' : 'She';
+  const possessive = gLower === 'male' || gLower === 'man' || gLower === 'guy' ? 'his' : 'her';
   return [
-    `Same person as the reference video: same face, same clothing, same background, same lighting, same voice, same camera, same framing, same handheld micro-wobble. She begins and ends exactly as the reference video does — both first and last frames match the reference video's first and last frames.`,
-    ``,
-    `She says: "${cleaned}"`,
-    ``,
-    `Hands stay empty. Remove all text, captions, buttons, subtitles, and watermarks.`,
-  ].join('\n');
+    `${subject} is the same person as the reference video: same face, same clothing, same background, same lighting, same voice, same camera, same framing, same handheld micro-wobble.`,
+    `${subject} begins and ends exactly as the reference video does — both first and last frames match the reference video's first and last frames.`,
+    `${subject} says "${cleaned}" in the same warm, sincere, casual tone as the reference video, at the same natural conversational pace.`,
+    `Hands stay empty and out of ${possessive} face throughout. Deep focus, real skin texture, one continuous take with no cuts.`,
+    ugcConstraintTail(persona.gender),
+  ].join(' ');
 }
 
 // -----------------------------------------------------------------
@@ -725,7 +740,7 @@ async function renderOneVariation(
         const r = await submitOmniVideo({
           userId,
           account: googleFlowAccount,
-          prompt: composeExtendClipPrompt(dialogue),
+          prompt: composeExtendClipPrompt(dialogue, entry.persona),
           resolution,
           referenceVideo: { assetId: previousClipMediaId },
           generationJobId: jobId,

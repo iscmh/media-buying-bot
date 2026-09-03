@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.39';
+export const POLISH_VERSION = '29.0.40';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.39';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.39 Commit 148 - polish30_omni_variations frontend picker card. Third UGC card mounts above the Seedance credit card in the simplified generation form. Only Claude BYOK required (Omni video + Nano Banana image + Flow concat all pay in Google Flow subscription credits via the platform-side useapi.net token, so Gemini + Replicate + HeyGen keys are all skipped). Card shows per-variant + total dollar preview, clip count per variant, and the standard missing-keys nudge when Claude is not connected. Reset wiring added to every sibling card so picking one clears polish30OmniSelected, and vice versa. FormData routing already lands pipeline=polish30_omni_variations from Commit 145. Env prerequisite before end-to-end test: USEAPI_NET_DEFAULT_GOOGLE_FLOW_ACCOUNT=<google-flow-account-email> on Vercel + the useapi.net token already set from the Seedance work. Cheapest variations tier the platform offers - ~$0.47 per 12s composite at Ultra tier vs $14 in Seedance 2.0.';
+  'Polish-29.0.40 Commit 149 - port the seedance25-ugc-yapper skill playbook into a shared UGC prose prompt builder used by polish29 (Seedance via Dreamina) and polish30 (Omni via Google Flow). The playbook is provider-agnostic on the parts that matter: flowing prose in subject -> action/event -> scene/environment -> visual style -> camera -> sound order (not bracketed HARD-RULES fields), single camera behaviour per clip (no combined moves), positive statements only (never edit/add/remove/change - those reclassify Seedance task type and read as delta cues on any generator), uneven practical light + deep focus + real skin texture as anti-AI-tell language, and a verbatim constraint tail excluding music/subtitles/watermark/logo/visible-phone with the "face stays stable" line. Delivery rate bumped from 135 wpm (2.25 wps) to 180 wpm (3 wps) across both workers - the playbook is explicit that natural TikTok UGC pacing is 3 words per second, and every "still slow" report during the iteration loop was pointing at this. Polish29 dialogue notation switched to Seedance 2.5 curly braces {} (dialogue tokens route directly to TTS verbatim without prose punctuation re-interpretation). Polish30 keeps quoted dialogue since Google Flow Omni router treats {} as literal chars. New shared file packages/jobs/src/lib/ugc-prose-prompt.ts holds the builder so the future kie.ai Seedance 2.5 worker adopts it for free. WORDS_PER_CLIP for polish29 bumped 18 -> 24 to match the new 3 wps target over an 8s clip.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

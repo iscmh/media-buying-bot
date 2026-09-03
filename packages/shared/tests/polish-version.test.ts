@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.39 (Polish-29.0.39 Commit 148 — polish30_omni_variations frontend picker card, Claude-only BYOK, third UGC card in simplified generation form)', () => {
+  it('is currently 29.0.40 (Polish-29.0.40 Commit 149 — port seedance25-ugc-yapper skill playbook: shared UGC prose prompt builder, 3 wps delivery target, {} dialogue for Seedance)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.39');
+    expect(POLISH_VERSION).toBe('29.0.40');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

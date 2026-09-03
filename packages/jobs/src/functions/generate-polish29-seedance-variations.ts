@@ -72,6 +72,7 @@ import {
   parsePolish28VariationsResponse,
   type Polish28VariationEntry,
 } from '../lib/polish28-variations-prompt';
+import { buildUgcClipProse } from '../lib/ugc-prose-prompt';
 // Polish-29.0.15 Commit 124: intentionally NOT importing
 // wrapWithPsywarCorpus. Its "psychological manipulation techniques"
 // framing triggers Claude Sonnet 4.5+ refusals (observed on 29.0.14 —
@@ -103,12 +104,15 @@ const DEFAULT_CLIPS_PER_VARIANT = 4;
 /** Seedance clip length in seconds. 8s = Seedance's per-call max. */
 const SEEDANCE_CLIP_SECONDS = 8;
 /**
- * Words per clip. Polish-29.0.34 Commit 143: 16 → 18.
- * User feedback: "still talking slow, needs to be a bit faster".
- * 18 words / 8s ≈ 135 wpm — upper-conversational, matches typical
- * TikTok UGC talking rate. Fine dial, not overhaul.
+ * Words per clip. Polish-29.0.40 Commit 149: 18 → 24. The
+ * seedance25-ugc-yapper skill playbook (the one the user forwarded
+ * in the Omni pivot) is explicit: natural UGC delivery runs about 3
+ * words per second, not the 2.25 wps (135 wpm) we were shipping.
+ * Under-target and Seedance pads with dead air or invents filler;
+ * over-target and the mouth outruns the audio. The playbook table
+ * pins 8s → 22-25 words; we take the middle at 24.
  */
-const WORDS_PER_CLIP = 18;
+const WORDS_PER_CLIP = 24;
 /**
  * Polish-29.0.31 Commit 140: reverted 55 → 80 per user push-back on
  * the length cap. Claude generates ad-length scripts (~140 words →
@@ -282,60 +286,49 @@ export function pickClipCountForSourceDuration(sourceSeconds: number | null): nu
 }
 
 /**
- * Compose the per-clip Seedance prompt. The character-lock prefix
- * repeats verbatim across every clip in a variation so Seedance sees
- * identical persona text on every call. The image reference PNG
- * (Nano Banana output) is the visual anchor; this prefix is the text
- * anchor. Together they minimize character drift between clips.
+ * Compose the per-clip Seedance prompt.
+ *
+ * Polish-29.0.40 Commit 149: full rewrite from bracketed HARD-RULES
+ * blocks to the flowing prose style from the seedance25-ugc-yapper
+ * skill playbook — subject → camera/delivery → dialogue → sound world
+ * → constraint tail, all in one paragraph. Seedance's scene parser
+ * was trained on prose, not labelled fields, so prose scores higher
+ * on the visual-realism + pacing axes we've been fighting.
+ *
+ * Also switches dialogue from `"..."` to `{...}` — the official
+ * Seedance 2.5 spoken-dialogue marker. Curly braces route the tokens
+ * inside directly to the TTS layer verbatim, which means Claude's
+ * commas / ellipses / capitalisation land in the audio the way they
+ * were written, without being reinterpreted as prose punctuation
+ * cues by the diffusion model.
+ *
+ * personaLockPrefix from composePersonaLockPrefix() is now unused —
+ * the persona demographics are folded into the prose subject clause
+ * via buildUgcClipProse(). Kept on the input type so callers don't
+ * need to change shape (they'll drop it Commit 150+).
  */
 export function composeClipPrompt(input: {
   personaLockPrefix: string;
   clipDialogue: string;
   clipIndex: number;
   totalClips: number;
+  persona: Polish28VariationEntry['persona'];
 }): string {
-  // Polish-29.0.28 Commit 137: destructure without clipIndex/totalClips.
-  // User feedback on 29.0.27: sentence-boundary split didn't help — clip 1
-  // still natural, clips 2+ still sped up. Diagnosis: my "SHOT 2 OF 4 — one
-  // continuous take" prompt was telling Seedance it was in the MIDDLE of a
-  // multi-shot sequence. Middle segments get paced faster (Seedance
-  // interprets them as continuation, "we've still got more to cover"). Clip
-  // 1 always sounded natural because "SHOT 1 OF N" reads as an opening
-  // beat that gets time to establish.
-  //
-  // Fix: treat every clip as a STANDALONE UGC selfie video. Zero clip-index
-  // metadata, zero "part of a series" language. Each Seedance call is an
-  // independent generation; each prompt should look identical structurally
-  // to Seedance. If clip 1 paces naturally, all clips will.
-  const { personaLockPrefix, clipDialogue } = input;
-  // Polish-29.0.26 Commit 135: inject ellipses at natural pause points
-  // in the dialogue.
-  const dialogueRaw = clipDialogue.replace(/\s+/g, ' ').trim();
-  const dialogue = insertNaturalPauses(dialogueRaw);
+  const dialogue = input.clipDialogue.replace(/\s+/g, ' ').trim();
+  const prose = buildUgcClipProse({
+    persona: input.persona,
+    cameraMode: 'selfie',
+    clipSeconds: SEEDANCE_CLIP_SECONDS,
+    targetWordsPerSecond: 3,
+  });
   // Silence unused-var lint for the interface fields we intentionally
   // ignore — kept on the type so callers don't need to change shape.
   void input.clipIndex;
   void input.totalClips;
-  return [
-    `${personaLockPrefix}\n\n`,
-    `A single 8-second UGC selfie video of the person from the reference image, talking directly to the camera.\n\n`,
-    `CAMERA — HARD RULES:\n`,
-    `- Static handheld phone camera. No zoom. No pan. No dolly. No tilt. No push-in. No pull-out. No parallax. No re-framing.\n`,
-    `- Slight, natural handheld micro-wobble is fine — cinematic camera moves are NOT.\n`,
-    `- Fixed medium close-up on the speaker's face and upper chest, same framing as the reference image.\n\n`,
-    `LOOK — HARD RULES:\n`,
-    `- Amateur raw selfie video. Unedited. No color grading. No cinematic bokeh. No dramatic lighting shifts.\n`,
-    `- Same person, same clothing, same background, same lighting as the reference image throughout the entire clip.\n`,
-    `- Aesthetic: iPhone front-camera talking-head UGC, the kind a real customer would post to TikTok.\n\n`,
-    `DELIVERY — HARD RULES:\n`,
-    `- Target speech rate: approximately 135 words per minute — natural upper-conversational pace, like a TikTok creator talking directly to camera. Not slow, not rushed.\n`,
-    `- Real pauses between phrases (respect the commas and ellipses in the dialogue below — those are timing markers).\n`,
-    `- Warm, sincere, casual tone. Direct to camera.\n`,
-    `- Do NOT rush. Do NOT speed up to fit the 8-second clip length — if you finish speaking early, stay silent and hold the frame.\n`,
-    `- Do NOT over-enunciate. Do NOT perform. Do NOT act.\n\n`,
-    `DIALOGUE (commas and ellipses are pause markers — respect them literally, do not just glide over):\n`,
-    `"${dialogue}"`,
-  ].join('');
+  void input.personaLockPrefix;
+  // Seedance 2.5 curly-brace dialogue notation. See ugc-prose-prompt.ts
+  // header for why prose > brackets and why {} > "" for the spoken line.
+  return prose.replace('__DIALOGUE__', `{${dialogue}}`);
 }
 
 /**
@@ -843,6 +836,7 @@ async function renderOneVariation(
       clipDialogue: dialogue,
       clipIndex,
       totalClips: clipDialogues.length,
+      persona: entry.persona,
     });
     const clipResult = await guardedStepRun(step, `clip-${stepSuffix}-${clipIndex}`, async () => {
       try {
