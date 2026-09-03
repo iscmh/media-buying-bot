@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '29.0.27';
+export const POLISH_VERSION = '29.0.28';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-
@@ -59,7 +59,7 @@ export const POLISH_VERSION = '29.0.27';
  * belong in commit messages, not runtime constants.
  */
 export const POLISH_RELEASE_NAME =
-  'Polish-29.0.27 Commit 136 - fix: splitScriptIntoClips splits at sentence boundaries, not word boundaries. User feedback on 29.0.26 was diagnostic gold: clip 1 sounded natural, clips 2-4 sped up. Root cause: old word-chunking algorithm cut mid-sentence, so clip 1 opened with a complete sentence but clips 2+ opened with fragments. Seedance TTS reads fragments as continued rushed speech, full sentences as natural utterances. New algorithm greedily groups sentences until each chunk approaches WORDS_PER_CLIP; single-sentence overflows fall back to word-split with an appended terminal period. Every returned chunk now starts and ends on a sentence boundary. Chunks that exceed MAX_CLIPS_PER_VARIANT get tail-merged so a very long script still fits the concat budget.';
+  'Polish-29.0.28 Commit 137 - fix: remove SHOT X OF Y clip-index metadata from Seedance prompts, treat every clip as standalone UGC. User feedback on 29.0.27: sentence-boundary split did not fix it - clip 1 still natural, clips 2+ still sped up. Diagnosis: my SHOT 2 OF 4 - one continuous take language was telling Seedance clip 2+ was a MIDDLE segment in a multi-shot sequence. Middle segments get paced fast (Seedance treats them as continuation). Clip 1 always sounded natural because SHOT 1 OF N reads as an opening beat with time to establish. Fix: rewrote composeClipPrompt to remove ALL clip-index / totalClips / continuous-take language. Every prompt now says the same thing: A single 8-second UGC selfie video. Each Seedance call is an independent generation, so each prompt now looks structurally identical to Seedance. If clip 1 paces naturally, all clips will.';
 
 /**
  * Frozen at module-load time so cold-start diagnostics have a

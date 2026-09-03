@@ -306,26 +306,31 @@ export function composeClipPrompt(input: {
   clipIndex: number;
   totalClips: number;
 }): string {
-  const { personaLockPrefix, clipDialogue, clipIndex, totalClips } = input;
+  // Polish-29.0.28 Commit 137: destructure without clipIndex/totalClips.
+  // User feedback on 29.0.27: sentence-boundary split didn't help — clip 1
+  // still natural, clips 2+ still sped up. Diagnosis: my "SHOT 2 OF 4 — one
+  // continuous take" prompt was telling Seedance it was in the MIDDLE of a
+  // multi-shot sequence. Middle segments get paced faster (Seedance
+  // interprets them as continuation, "we've still got more to cover"). Clip
+  // 1 always sounded natural because "SHOT 1 OF N" reads as an opening
+  // beat that gets time to establish.
+  //
+  // Fix: treat every clip as a STANDALONE UGC selfie video. Zero clip-index
+  // metadata, zero "part of a series" language. Each Seedance call is an
+  // independent generation; each prompt should look identical structurally
+  // to Seedance. If clip 1 paces naturally, all clips will.
+  const { personaLockPrefix, clipDialogue } = input;
   // Polish-29.0.26 Commit 135: inject ellipses at natural pause points
-  // in the dialogue. Seedance's TTS respects punctuation — an ellipsis
-  // or comma → real pause, no punctuation → words run together at max
-  // rate. We already ask for slow delivery in the prompt, but the
-  // dialogue TEXT is what Seedance actually reads, so mechanical pause
-  // markers work better than prose instructions.
+  // in the dialogue.
   const dialogueRaw = clipDialogue.replace(/\s+/g, ' ').trim();
   const dialogue = insertNaturalPauses(dialogueRaw);
-  // Polish-29.0.24 Commit 133: complete rewrite of the per-clip prompt
-  // to fix the three delivery issues from the first working generation:
-  //   1. Robotic/fast speech → explicit slow, conversational pacing +
-  //      filler-word permission + pause markup.
-  //   2. Random cinematic zooms/pans → hard NO CAMERA MOVEMENT block +
-  //      the word "static" repeated (Seedance weights repetition).
-  //   3. Overproduced look → explicit amateur / unedited / raw-selfie
-  //      language to override the model's cinematic default.
+  // Silence unused-var lint for the interface fields we intentionally
+  // ignore — kept on the type so callers don't need to change shape.
+  void input.clipIndex;
+  void input.totalClips;
   return [
     `${personaLockPrefix}\n\n`,
-    `SHOT ${clipIndex + 1} OF ${totalClips} — one continuous take of the same person from the reference image.\n\n`,
+    `A single 8-second UGC selfie video of the person from the reference image, talking directly to the camera.\n\n`,
     `CAMERA — HARD RULES:\n`,
     `- Static handheld phone camera. No zoom. No pan. No dolly. No tilt. No push-in. No pull-out. No parallax. No re-framing.\n`,
     `- Slight, natural handheld micro-wobble is fine — cinematic camera moves are NOT.\n`,
