@@ -618,53 +618,59 @@ export interface SubmitOmniVideoInput {
 }
 
 export async function submitOmniVideo(input: SubmitOmniVideoInput): Promise<SubmitJobResult> {
-  // Polish-29.0.46 Commit 155: `account` deliberately omitted — same
-  // reason as submitNanoBananaImage. The whole /google-flow/*
-  // namespace on useapi.net infers the account from the API token,
-  // not the body. Sending it trips the strict-schema validator with
-  // {"error":"Parameter account not supported","code":400}. My earlier
-  // assumption that /google-flow/videos differed from /google-flow/images
-  // was wrong — both are stateless-per-request routes; per-account
-  // usage tracking happens on useapi's side against the token, not
-  // against a body field.
-  const body: Record<string, unknown> = {
-    prompt: input.prompt,
-    model: 'omni-flash',
-    duration: input.durationSeconds ?? 4,
-    resolution: input.resolution ?? '720p',
-  };
-  // V2V edit takes length from the source video — durationSeconds is
-  // ignored. Aspect ratio also auto-derived from source.
+  // Polish-29.0.48 Commit 157: body rewritten to the real
+  // /google-flow/videos spec (llm-friendly API doc, see
+  // submitNanoBananaImage header for the URL). `email` in body for
+  // account routing — same rule as images.
+  // - V2V edit: `referenceVideo_1` set, no `duration` (input length
+  //   determines output), no `aspectRatio`.
+  // - I2V (seed clip): `startImage` + `endImage`, no `aspectRatio`
+  //   (derived from frames), `duration` accepted.
+  // - T2V: `aspectRatio` explicit (`landscape` / `portrait` for
+  //   omni-flash), `duration` accepted.
+  // `async: true` returns 201 immediately with a jobId — the worker
+  // polls GET /jobs/{jobId}. Without async, useapi holds the HTTP
+  // connection for the full 60-180s generation, which is longer than
+  // most Inngest step timeouts.
   const referenceVideoRef = input.referenceVideo?.assetId ?? input.referenceVideo?.url;
   const startRef = input.startFrame?.assetId ?? input.startFrame?.url;
   const endRef = input.endFrame?.assetId ?? input.endFrame?.url;
+  const body: Record<string, unknown> = {
+    prompt: input.prompt,
+    model: 'omni-flash',
+    resolution: input.resolution ?? '720p',
+    async: true,
+    ...(input.account ? { email: input.account } : {}),
+  };
   if (referenceVideoRef) {
-    body.referenceVideo_1 = referenceVideoRef;
-    // For V2V edit, don't send startFrame/endFrame — Omni auto-derives
-    // ratio and length from the source video.
+    body['referenceVideo_1'] = referenceVideoRef;
+    // V2V edit — do NOT send duration (input length wins) or aspectRatio.
   } else if (startRef || endRef) {
-    if (startRef) body.startImage = startRef;
-    if (endRef) body.endImage = endRef;
-    // I2V mode — omni derives ratio from the frames, don't send ratio.
+    if (startRef) body['startImage'] = startRef;
+    if (endRef) body['endImage'] = endRef;
+    body['duration'] = input.durationSeconds ?? 4;
+    // I2V — aspect ratio derived from the frames.
   } else {
-    // T2V mode — send aspect ratio explicitly.
-    body.aspectRatio = input.aspectRatio ?? '9:16';
+    body['duration'] = input.durationSeconds ?? 4;
+    // T2V — aspect ratio explicit. omni-flash accepts landscape/portrait only.
+    body['aspectRatio'] =
+      input.aspectRatio === '9:16' ? 'portrait' : (input.aspectRatio ?? 'portrait');
   }
 
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
     provider: 'useapi_net',
-    url: withGoogleFlowAccount(`${USEAPI_BASE}/google-flow/videos`, input.account),
+    url: `${USEAPI_BASE}/google-flow/videos`,
     method: 'POST',
     headers: authHeaders(),
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: hashAccount(input.account),
-      account_slug_sent: input.account ?? '(none)',
+      email_sent: input.account ?? '(none)',
       model: 'omni-flash',
-      duration: body.duration,
-      resolution: body.resolution,
+      duration: body['duration'],
+      resolution: body['resolution'],
       prompt_chars: input.prompt.length,
       mode: referenceVideoRef ? 'v2v_edit' : startRef || endRef ? 'i2v' : 't2v',
       has_start_frame: Boolean(startRef),
@@ -715,26 +721,38 @@ export async function submitGoogleFlowConcat(
       errorMessage: `Google Flow concat needs at least 2 segments (got ${input.segments.length}).`,
     };
   }
-  // Polish-29.0.46 Commit 155: `account` stripped from body — see
-  // submitOmniVideo header for the reason. Same rule for every
-  // /google-flow/* submit endpoint.
-  const body = {
-    videos: input.segments.map((s) => ({
-      video: s.videoRef,
+  // Polish-29.0.48 Commit 157: body shape rewritten to match the real
+  // /google-flow/videos/concatenate spec.
+  //   - Field is `media` (not `videos`); each entry has
+  //     `mediaGenerationId` (not `video`) plus optional
+  //     `trimStart` / `trimEnd`.
+  //   - `email` in body for account routing.
+  //   - Response is synchronous with `jobId` + base64 `encodedVideo` —
+  //     no async mode on concat. Worker either decodes the base64 to
+  //     upload the composite, or polls GET /jobs/{jobId} for a
+  //     resolvable videoUrl (the useapi docs say concat jobs also
+  //     re-resolve URLs on the job poll, same as Veo/Omni). Our worker
+  //     currently uses uploadGeneratedVideoFromUrl, so the poll path
+  //     is the simpler wire-up.
+  const body: Record<string, unknown> = {
+    media: input.segments.map((s) => ({
+      mediaGenerationId: s.videoRef,
       ...(s.trimStart != null ? { trimStart: s.trimStart } : {}),
       ...(s.trimEnd != null ? { trimEnd: s.trimEnd } : {}),
     })),
+    ...(input.account ? { email: input.account } : {}),
   };
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
     provider: 'useapi_net',
-    url: withGoogleFlowAccount(`${USEAPI_BASE}/google-flow/videos/concatenate`, input.account),
+    url: `${USEAPI_BASE}/google-flow/videos/concatenate`,
     method: 'POST',
     headers: authHeaders(),
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: hashAccount(input.account),
+      email_sent: input.account ?? '(none)',
       segment_count: input.segments.length,
     },
     generationJobId: input.generationJobId,
@@ -744,35 +762,45 @@ export async function submitGoogleFlowConcat(
 }
 
 export async function submitVeoVideo(input: SubmitVeoVideoInput): Promise<SubmitJobResult> {
-  // Polish-29.0.46 Commit 155: `account` stripped from body — same
-  // /google-flow/* rule as Omni + concat + Nano Banana. Veo isn't
-  // called by any active worker at time of this commit but keeping
-  // the client consistent so it doesn't fail the same way when
-  // someone wires it up.
-  const body = {
+  // Polish-29.0.48 Commit 157: brought in line with the real
+  // /google-flow/videos spec. Same conventions as submitOmniVideo:
+  // `email` (not `account`) in body, no query-string account routing,
+  // `async: true` for the job-poll flow. Model IDs are the useapi
+  // dotted form (`veo-3.1-fast`, etc.). Reference image goes into
+  // `startImage` (I2V), not a top-level `image` field. Still no live
+  // caller; keeping the client consistent so wiring one up doesn't
+  // hit the same class of shape bugs Omni + Nano Banana just did.
+  const body: Record<string, unknown> = {
     prompt: input.prompt,
-    model: input.model ?? 'veo-3-fast',
-    duration: input.durationSeconds ?? 5,
-    aspectRatio: input.aspectRatio ?? '9:16',
+    model: input.model ?? 'veo-3.1-fast',
+    duration: input.durationSeconds ?? 8,
+    aspectRatio:
+      input.aspectRatio === '9:16'
+        ? 'portrait'
+        : input.aspectRatio === '16:9'
+          ? 'landscape'
+          : (input.aspectRatio ?? 'landscape'),
+    async: true,
+    ...(input.account ? { email: input.account } : {}),
     ...(input.referenceImage
-      ? { image: input.referenceImage.assetId ?? input.referenceImage.url }
+      ? { startImage: input.referenceImage.assetId ?? input.referenceImage.url }
       : {}),
   };
 
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
     provider: 'useapi_net',
-    url: withGoogleFlowAccount(`${USEAPI_BASE}/google-flow/videos`, input.account),
+    url: `${USEAPI_BASE}/google-flow/videos`,
     method: 'POST',
     headers: authHeaders(),
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: hashAccount(input.account),
-      account_slug_sent: input.account ?? '(none)',
-      model: body.model,
-      duration: body.duration,
-      aspect_ratio: body.aspectRatio,
+      email_sent: input.account ?? '(none)',
+      model: body['model'],
+      duration: body['duration'],
+      aspect_ratio: body['aspectRatio'],
       prompt_chars: input.prompt.length,
       has_reference: Boolean(input.referenceImage),
     },
@@ -820,46 +848,61 @@ export interface SubmitNanoBananaImageInput {
 export async function submitNanoBananaImage(
   input: SubmitNanoBananaImageInput,
 ): Promise<SubmitJobResult> {
-  // Polish-29.0.41 Commit 150: `account` deliberately omitted from
-  // the body — see SubmitNanoBananaImageInput header for the reason.
-  //
-  // Polish-29.0.42 Commit 151: `n` + `aspectRatio` also stripped.
-  // useapi.net's /google-flow/images validator returned
-  // `{"error":"Parameter n not supported","code":400}` after the
-  // account fix. Nano Banana returns exactly one image per call by
-  // design (n=1 is implicit), and the model derives aspect ratio
-  // from the prose prompt itself, not a schema field. Our
-  // composeSeedStillPrompt already opens with "A single 9:16
-  // vertical portrait photo of ..." — that's what Nano Banana
-  // reads. The endpoint's supported body is essentially just
-  // `{prompt, model}` plus optional `images` for reference-based
-  // edits.
-  const body = {
+  // Polish-29.0.48 Commit 157: body shape rewritten to match the real
+  // /google-flow/images spec (see llm-friendly API doc at
+  // https://useapi.net/assets/aibot/api-google-flow-v1.txt). Key
+  // corrections over Commits 150-156:
+  //   - `email` (not `account`) is the body field for account routing.
+  //     Optional; omit for auto-load-balancing across configured
+  //     accounts. `?account=` on the URL (Commit 156) is not a route
+  //     useapi supports.
+  //   - `count` (not `n`) is the field name for number-of-images.
+  //     `n` gets rejected with "Parameter n not supported" — my
+  //     Commit 151 misdiagnosed this as "images endpoint is minimal"
+  //     and dropped the field entirely.
+  //   - `aspectRatio` IS supported. Valid values: 16:9, 4:3, 1:1,
+  //     3:4, 9:16, auto (auto only with references). Legacy
+  //     `landscape`/`portrait` aliases also work. My Commit 151
+  //     dropped this over-cautiously — should have kept 9:16.
+  //   - Reference-image slots are `reference_1..reference_10`, not
+  //     a single `images` array. Rewrote to spread individual slots.
+  // Response is synchronous — `media[0].image.generatedImage.fifeUrl`
+  // holds the URL and `.mediaGenerationId` holds the id. The
+  // downstream poll flow still works because the same shape comes
+  // back from GET /jobs/{jobId}, so we don't need to short-circuit
+  // the polling here — submitResultOf grabs the jobId, and the poll
+  // picks up the same data.
+  const references = input.referenceImages ?? [];
+  const referenceSlots: Record<string, string> = {};
+  references.slice(0, 10).forEach((ref, idx) => {
+    const value = ref.assetId ?? ref.url;
+    if (value) referenceSlots[`reference_${idx + 1}`] = value;
+  });
+  const body: Record<string, unknown> = {
     prompt: input.prompt,
     model: input.model ?? 'nano-banana-2-lite',
-    ...(input.referenceImages && input.referenceImages.length > 0
-      ? { images: input.referenceImages.map((r) => r.assetId ?? r.url) }
-      : {}),
+    aspectRatio: input.aspectRatio ?? '9:16',
+    count: input.n ?? 1,
+    ...(input.account ? { email: input.account } : {}),
+    ...referenceSlots,
   };
 
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
     provider: 'useapi_net',
-    url: withGoogleFlowAccount(`${USEAPI_BASE}/google-flow/images`, input.account),
+    url: `${USEAPI_BASE}/google-flow/images`,
     method: 'POST',
     headers: authHeaders(),
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: input.account ? hashAccount(input.account) : 'not-sent',
-      account_slug_sent: input.account ?? '(none)',
-      model: body.model,
-      // Ignored aspect_ratio / n retained here as a diagnostic so a
-      // future prompt-length regression is easy to spot in the log.
-      aspect_ratio_requested: input.aspectRatio ?? '9:16-in-prose',
-      n_requested: input.n ?? 1,
+      email_sent: input.account ?? '(none)',
+      model: body['model'],
+      aspect_ratio: body['aspectRatio'],
+      count: body['count'],
       prompt_chars: input.prompt.length,
-      reference_count: input.referenceImages?.length ?? 0,
+      reference_count: references.length,
     },
     generationJobId: input.generationJobId,
     generatedCreativeId: input.generatedCreativeId,
@@ -1197,24 +1240,21 @@ function hashAccount(account: string): string {
 }
 
 /**
- * Polish-29.0.47 Commit 156: append `?account=<email>` to a
- * /google-flow/* URL when the caller has a specific account to route
- * against, otherwise return the base URL unchanged. Needed because
- * useapi.net's Google Flow endpoints reject `account` in the body but
- * ALSO can't infer which account to bill when the API token has more
- * than one Google Flow account registered — the token points at the
- * useapi user, not a specific Google account. Without a query-param
- * discriminator, useapi silently picks the first-registered account,
- * which is why the polish30 pipeline was hitting the free-tier
- * `isaacisverygoatedtho` account even after the env var was flipped
- * to the paid `sunpredictorv5` one.
- *
- * `:` and `@` in the email are URL-safe per RFC 3986 sub-delims and
- * useapi's router accepts them raw (verified for Dreamina asset paths
- * in Commit 129 — same convention across services), so no encoding.
+ * Polish-29.0.47 Commit 156 tried `?account=<email>` on the URL as
+ * the disambiguator — turned out wrong. useapi.net's real convention
+ * (verified against the LLM-friendly API spec at
+ * https://useapi.net/assets/aibot/api-google-flow-v1.txt in Commit
+ * 157) is `email: <string>` in the request BODY, not a query param.
+ * The `?account=` route returns "Endpoint not found" because useapi's
+ * router doesn't recognize the query key at all — the earlier
+ * "Parameter account not supported" error from Commit 150 was
+ * specific to the field name `account` in the body; the correct body
+ * field name is `email`. This helper is retained as a no-op wrapper
+ * so a future edit can't reintroduce the query-param mistake.
  */
-function withGoogleFlowAccount(baseUrl: string, account: string | undefined): string {
-  if (!account) return baseUrl;
-  const sep = baseUrl.includes('?') ? '&' : '?';
-  return `${baseUrl}${sep}account=${account}`;
+function withGoogleFlowAccount(baseUrl: string, _account: string | undefined): string {
+  return baseUrl;
 }
+// Silence unused-var lint — kept as an inert breadcrumb to warn a
+// future refactor off the ?account= mistake, see the header above.
+void withGoogleFlowAccount;
