@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.48 (Polish-29.0.48 Commit 157 — rewrite /google-flow/* submit bodies to match the real useapi spec: email in body, count/aspectRatio for images, media[] for concat, async:true for videos)', () => {
+  it('is currently 29.0.49 (Polish-29.0.49 Commit 158 — drop `email` from concat body; account routing derives from each mediaGenerationId which encodes its own account)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.48');
+    expect(POLISH_VERSION).toBe('29.0.49');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

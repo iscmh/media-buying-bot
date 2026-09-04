@@ -734,13 +734,20 @@ export async function submitGoogleFlowConcat(
   //     re-resolve URLs on the job poll, same as Veo/Omni). Our worker
   //     currently uses uploadGeneratedVideoFromUrl, so the poll path
   //     is the simpler wire-up.
+  // Polish-29.0.49 Commit 158: NO `email` field on concat. Each
+  // mediaGenerationId in the array already encodes its owning
+  // account (`user:12345-email:6a6f...-video:...`), so useapi derives
+  // the account from the videos themselves; sending `email` on top
+  // of that trips the schema validator with "Parameter email not
+  // supported". This is the one /google-flow/* submit where account
+  // routing is fully implicit — every other submit (images, videos,
+  // veo, upload) accepts and needs it.
   const body: Record<string, unknown> = {
     media: input.segments.map((s) => ({
       mediaGenerationId: s.videoRef,
       ...(s.trimStart != null ? { trimStart: s.trimStart } : {}),
       ...(s.trimEnd != null ? { trimEnd: s.trimEnd } : {}),
     })),
-    ...(input.account ? { email: input.account } : {}),
   };
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
