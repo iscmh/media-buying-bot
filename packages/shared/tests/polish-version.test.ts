@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.49 (Polish-29.0.49 Commit 158 — drop `email` from concat body; account routing derives from each mediaGenerationId which encodes its own account)', () => {
+  it('is currently 29.0.50 (Polish-29.0.50 Commit 159 — concat is synchronous; extract base64 encodedVideo, decode + upload directly, skip poll)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.49');
+    expect(POLISH_VERSION).toBe('29.0.50');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

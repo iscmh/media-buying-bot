@@ -237,6 +237,40 @@ export async function uploadGeneratedVideoFromUrl(input: {
 }
 
 /**
+ * Polish-29.0.50 Commit 159: upload an MP4 buffer directly (no
+ * remote fetch). Sibling of uploadGeneratedVideoFromUrl for callers
+ * that already hold the bytes — currently the polish30 concat step,
+ * which receives its composite as base64 in the submit response
+ * rather than a downloadable URL. Path convention matches the URL
+ * variant; compression not offered here (concat outputs are already
+ * server-side re-muxed).
+ */
+export async function uploadGeneratedVideoFromBuffer(input: {
+  userId: string;
+  jobId: string;
+  buffer: Buffer;
+  filename?: string;
+  maxBytes?: number;
+}): Promise<{ path: string; publicUrl: string; sizeBytes: number }> {
+  const supabase = getServiceRoleSupabase();
+  const stem = input.filename ?? 'output';
+  const path = `${input.userId}/generated/${input.jobId}/${stem}.mp4`;
+  if (input.maxBytes != null && input.buffer.byteLength > input.maxBytes) {
+    throw new Error(
+      `Video buffer is ${input.buffer.byteLength} bytes; max allowed is ${input.maxBytes}`,
+    );
+  }
+  const { error } = await supabase.storage
+    .from('generated-creatives')
+    .upload(path, input.buffer, { contentType: 'video/mp4', upsert: true });
+  if (error) {
+    throw new Error(`Video upload failed for ${path}: ${error.message}`);
+  }
+  const { data } = supabase.storage.from('generated-creatives').getPublicUrl(path);
+  return { path, publicUrl: data.publicUrl, sizeBytes: input.buffer.byteLength };
+}
+
+/**
  * Polish-11: upload an ElevenLabs MP3 to the generated-creatives
  * bucket so the Replicate lipsync model can fetch it via public URL.
  * Path mirrors uploadGeneratedImage but with an audio-specific stem

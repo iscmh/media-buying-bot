@@ -556,6 +556,15 @@ export interface SubmitJobResult {
   jobId?: string;
   latencyMs: number;
   errorMessage?: string;
+  /**
+   * Polish-29.0.50 Commit 159: base64-encoded MP4 present ONLY on
+   * synchronous submits — currently just /google-flow/videos/concatenate.
+   * Every other submit returns a jobId to poll and this field stays
+   * undefined. Callers that submit concat MUST check for this and
+   * skip the pollUntilComplete step (concat has no asset URL to poll
+   * for; the bytes are the entire return value).
+   */
+  encodedVideo?: string;
 }
 
 /**
@@ -749,14 +758,20 @@ export async function submitGoogleFlowConcat(
       ...(s.trimEnd != null ? { trimEnd: s.trimEnd } : {}),
     })),
   };
-  const result = await callProvider<RawSubmitBody>({
+  // Polish-29.0.50 Commit 159: concat takes noticeably longer than
+  // other submits — docs say 15-20s typical for a 3-clip join, and
+  // the response payload is a base64 MP4 (~7 MB per input clip). Bump
+  // the timeout ceiling accordingly; the normal 45s SUBMIT budget
+  // gets clipped by the download of the response body itself.
+  const CONCAT_TIMEOUT_MS = 180_000;
+  const result = await callProvider<RawSubmitBody & { encodedVideo?: string }>({
     userId: input.userId,
     provider: 'useapi_net',
     url: `${USEAPI_BASE}/google-flow/videos/concatenate`,
     method: 'POST',
     headers: authHeaders(),
     body,
-    timeoutMs: SUBMIT_TIMEOUT_MS,
+    timeoutMs: CONCAT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: hashAccount(input.account),
       email_sent: input.account ?? '(none)',
@@ -765,7 +780,22 @@ export async function submitGoogleFlowConcat(
     generationJobId: input.generationJobId,
     generatedCreativeId: input.generatedCreativeId,
   });
-  return submitResultOf(result);
+  const base = submitResultOf(result);
+  // Polish-29.0.50 Commit 159: /google-flow/videos/concatenate is
+  // FULLY SYNCHRONOUS — the MP4 lands in `encodedVideo` on the same
+  // response as the jobId. No pollable output exists (there's no
+  // mediaGenerationId for the composite, and GET /jobs/{jobId} for a
+  // concat returns the same base64 payload rather than a signed URL).
+  // Surface it on the SubmitJobResult so the worker skips its usual
+  // pollUntilComplete step and decodes the bytes straight into
+  // Supabase.
+  if (base.ok && result.ok) {
+    const encodedVideo = (result.data as { encodedVideo?: unknown })?.encodedVideo;
+    if (typeof encodedVideo === 'string' && encodedVideo.length > 0) {
+      base.encodedVideo = encodedVideo;
+    }
+  }
+  return base;
 }
 
 export async function submitVeoVideo(input: SubmitVeoVideoInput): Promise<SubmitJobResult> {

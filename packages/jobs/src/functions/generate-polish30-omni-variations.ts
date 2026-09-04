@@ -67,7 +67,7 @@ import {
   type Polish28VariationEntry,
 } from '../lib/polish28-variations-prompt';
 import { buildUgcClipProse, ugcConstraintTail } from '../lib/ugc-prose-prompt';
-import { uploadGeneratedVideoFromUrl } from '../lib/storage';
+import { uploadGeneratedVideoFromBuffer, uploadGeneratedVideoFromUrl } from '../lib/storage';
 
 console.log(
   `[jobs.generate-polish30-omni-variations] cold start — POLISH_VERSION=${POLISH_VERSION}`,
@@ -858,6 +858,13 @@ async function renderOneVariation(
 
   // 4. Concatenate via Google Flow /videos/concatenate.
   // Trim the pin-frame quiet beats at the joins.
+  //
+  // Polish-29.0.50 Commit 159: concat is FULLY SYNCHRONOUS on
+  // useapi.net — the composite MP4 comes back as base64 in the same
+  // response as the jobId, and there is no pollable asset URL for it
+  // (concat outputs don't get a mediaGenerationId). Skip the usual
+  // pollUntilComplete and decode the bytes directly. The submit
+  // helper carries this through via SubmitJobResult.encodedVideo.
   const concatSubmit = await guardedStepRun(step, `concat-submit-${stepSuffix}`, async () => {
     const segments = clipMediaIds.map((mediaId, i) => ({
       videoRef: mediaId,
@@ -870,36 +877,25 @@ async function renderOneVariation(
       segments,
       generationJobId: jobId,
     });
-    if (!r.ok || !r.jobId) {
-      throw new Error(`Google Flow concat submit failed: ${r.errorMessage ?? 'no jobId'}`);
+    if (!r.ok) {
+      throw new Error(`Google Flow concat submit failed: ${r.errorMessage ?? 'unknown error'}`);
     }
-    return safeInngestStepReturn({ jobId: r.jobId });
+    if (!r.encodedVideo) {
+      throw new Error(
+        `Google Flow concat submit returned no encodedVideo (jobId=${r.jobId ?? 'unknown'}) — the endpoint should hand back the composite MP4 base64 synchronously`,
+      );
+    }
+    return safeInngestStepReturn({ encodedVideo: r.encodedVideo });
   });
-  const concatPoll = await pollUntilComplete({
-    userId,
-    jobId: concatSubmit.jobId,
-    generationJobId: jobId,
-    step,
-    stepLabel: `concat-${stepSuffix}`,
-    maxAttempts: 24,
-    intervalSeconds: 5,
-  });
-  if (!concatPoll.ok || !concatPoll.videoUrl) {
-    throw new Error(
-      `Google Flow concat poll failed: ${
-        concatPoll.ok ? 'no videoUrl in response' : concatPoll.errorMessage
-      }`,
-    );
-  }
-  const concatUrl = concatPoll.videoUrl;
 
-  // 5. Store composite in Supabase.
+  // 5. Decode + store composite in Supabase.
   const stored = await guardedStepRun(step, `store-composite-${stepSuffix}`, async () => {
     try {
-      const r = await uploadGeneratedVideoFromUrl({
+      const buffer = Buffer.from(concatSubmit.encodedVideo, 'base64');
+      const r = await uploadGeneratedVideoFromBuffer({
         userId,
         jobId,
-        remoteUrl: concatUrl,
+        buffer,
         filename: `polish30-omni-var-${jobId}-${index}.mp4`,
       });
       return safeInngestStepReturn({ kind: 'ok' as const, publicUrl: r.publicUrl });
@@ -910,7 +906,13 @@ async function renderOneVariation(
       });
     }
   });
-  const finalUrl = stored.kind === 'ok' ? stored.publicUrl : concatUrl;
+  if (stored.kind !== 'ok') {
+    throw new Error(`polish30 composite upload failed: ${stored.errorMessage}`);
+  }
+  const finalUrl = stored.publicUrl;
+  // Silence unused-var lint for the URL-based upload helper — it stays
+  // imported for future callers (Nano Banana URL variant will land next).
+  void uploadGeneratedVideoFromUrl;
 
   // 6. Persist creative row.
   await guardedStepRun(step, `persist-${stepSuffix}`, async () => {
@@ -934,9 +936,9 @@ async function renderOneVariation(
         clips_succeeded: clipsSucceeded,
         clip_media_ids: clipMediaIds,
         still_media_id: stillMediaId,
-        composite_source_url: concatUrl,
-        composite_supabase_ok: stored.kind === 'ok',
-        composite_supabase_error: stored.kind === 'err' ? stored.errorMessage : null,
+        composite_source_url: null,
+        composite_supabase_ok: true,
+        composite_supabase_error: null,
         persona: entry.persona,
         resolution,
       },
