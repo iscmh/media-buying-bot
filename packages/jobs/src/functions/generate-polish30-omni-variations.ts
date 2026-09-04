@@ -883,16 +883,26 @@ async function renderOneVariation(
     };
   }
 
-  // 4. Concatenate via Google Flow /videos/concatenate.
-  // Trim the pin-frame quiet beats at the joins.
+  // 4-5. Concatenate + upload composite in ONE Inngest step.
   //
   // Polish-29.0.50 Commit 159: concat is FULLY SYNCHRONOUS on
   // useapi.net — the composite MP4 comes back as base64 in the same
   // response as the jobId, and there is no pollable asset URL for it
-  // (concat outputs don't get a mediaGenerationId). Skip the usual
-  // pollUntilComplete and decode the bytes directly. The submit
-  // helper carries this through via SubmitJobResult.encodedVideo.
-  const concatSubmit = await guardedStepRun(step, `concat-submit-${stepSuffix}`, async () => {
+  // (concat outputs don't get a mediaGenerationId).
+  //
+  // Polish-29.0.52 Commit 161: MUST NOT return `encodedVideo` across
+  // an Inngest step boundary. The base64 payload is ~7 MB per input
+  // clip (so ~21 MB for a 3-clip concat), and Inngest step returns
+  // are capped around 4 MB → the framework throws
+  // `output_too_large` on the step-return checkpoint, retries the
+  // whole step, and eventually gives up while the job.status stays
+  // wedged at 'processing' for hours (the exact symptom hit on
+  // 29.0.51). Fix: fuse submit + decode + upload into a single
+  // step.run body so the giant buffer never crosses a checkpoint —
+  // the only thing that leaves the step is the small `publicUrl`
+  // string. Same shape the Dreamina credit worker uses for its
+  // composite-upload chain.
+  const stored = await guardedStepRun(step, `concat-and-store-${stepSuffix}`, async () => {
     const segments = clipMediaIds.map((mediaId, i) => ({
       videoRef: mediaId,
       ...(i < clipMediaIds.length - 1 ? { trimEnd: CONCAT_TRIM_END_SECONDS } : {}),
@@ -905,27 +915,26 @@ async function renderOneVariation(
       generationJobId: jobId,
     });
     if (!r.ok) {
-      throw new Error(`Google Flow concat submit failed: ${r.errorMessage ?? 'unknown error'}`);
+      return safeInngestStepReturn({
+        kind: 'err' as const,
+        errorMessage: `Google Flow concat submit failed: ${r.errorMessage ?? 'unknown error'}`,
+      });
     }
     if (!r.encodedVideo) {
-      throw new Error(
-        `Google Flow concat submit returned no encodedVideo (jobId=${r.jobId ?? 'unknown'}) — the endpoint should hand back the composite MP4 base64 synchronously`,
-      );
+      return safeInngestStepReturn({
+        kind: 'err' as const,
+        errorMessage: `Google Flow concat submit returned no encodedVideo (jobId=${r.jobId ?? 'unknown'})`,
+      });
     }
-    return safeInngestStepReturn({ encodedVideo: r.encodedVideo });
-  });
-
-  // 5. Decode + store composite in Supabase.
-  const stored = await guardedStepRun(step, `store-composite-${stepSuffix}`, async () => {
     try {
-      const buffer = Buffer.from(concatSubmit.encodedVideo, 'base64');
-      const r = await uploadGeneratedVideoFromBuffer({
+      const buffer = Buffer.from(r.encodedVideo, 'base64');
+      const upload = await uploadGeneratedVideoFromBuffer({
         userId,
         jobId,
         buffer,
         filename: `polish30-omni-var-${jobId}-${index}.mp4`,
       });
-      return safeInngestStepReturn({ kind: 'ok' as const, publicUrl: r.publicUrl });
+      return safeInngestStepReturn({ kind: 'ok' as const, publicUrl: upload.publicUrl });
     } catch (err) {
       return safeInngestStepReturn({
         kind: 'err' as const,
