@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.50 (Polish-29.0.50 Commit 159 — concat is synchronous; extract base64 encodedVideo, decode + upload directly, skip poll)', () => {
+  it('is currently 29.0.51 (Polish-29.0.51 Commit 160 — polish30 writes polish25_progress step so frontend timeline advances live + mark-completed status write split from metadata write for resilience)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.50');
+    expect(POLISH_VERSION).toBe('29.0.51');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

@@ -486,6 +486,14 @@ export const generatePolish30OmniVariations = inngest.createFunction(
     }
 
     // ---------- B: mark processing ----------
+    // Polish-29.0.51 Commit 160: also write polish25_progress.step so
+    // the frontend timeline (apps/web/app/runs/[id]/job-timeline.tsx)
+    // advances live. The timeline was built for polish25/28 and reads
+    // that key; polish30 was leaving it unset, so the fallback shape
+    // logic pegged "scripts" + "avatars" at running for the entire
+    // run and never advanced. Reusing the polish25_progress schema
+    // is safer than a new key because every timeline path is already
+    // wired for it.
     await guardedStepRun(step, 'mark-processing', async () => {
       const db = getDb();
       await db
@@ -493,6 +501,7 @@ export const generatePolish30OmniVariations = inngest.createFunction(
         .set({ status: 'processing' })
         .where(eq(schema.generationJobs.id, data.jobId));
       await patchMetadata(data.jobId, {
+        polish25_progress: { step: 'mark-processing', at: nowIso() },
         polish30_omni_variations_start: {
           resolution,
           variant_count_requested: requestedVariantCount,
@@ -586,6 +595,11 @@ export const generatePolish30OmniVariations = inngest.createFunction(
         );
       }
       await patchMetadata(data.jobId, {
+        // Polish-29.0.51 Commit 160: advance timeline to "avatars picked"
+        // — the polish25_progress "submitted" bucket maps to the videos
+        // row on the UGC timeline, which is the right cell for "we've
+        // finished the persona batch and are about to hit Omni".
+        polish25_progress: { step: 'submitted', at: nowIso() },
         polish30_omni_variations_batch: {
           variations_returned: parsed.entries.length,
           parse_errors: parsed.errors,
@@ -631,9 +645,17 @@ export const generatePolish30OmniVariations = inngest.createFunction(
     const failed = variantResults.filter((r) => !r.ok);
 
     // ---------- G: mark completed ----------
-    await guardedStepRun(step, 'mark-completed', async () => {
+    // Polish-29.0.51 Commit 160: mark-completed is the load-bearing
+    // write that flips job.status → completed | failed. Previously the
+    // patchMetadata call happened AFTER the .update inside the same
+    // step.run, so a patchMetadata throw (undefined field in the
+    // summary, Postgres constraint, transient network) could take the
+    // whole step down and retry it, leaving job.status stuck at
+    // 'processing' while Inngest's retry budget burned. Split the
+    // status write out on its own step + own guardedStepRun boundary
+    // so a metadata-write failure never wedges the status flip.
+    await guardedStepRun(step, 'mark-completed-status', async () => {
       const db = getDb();
-      const durationMs = Date.now() - startedAt;
       const anySucceeded = successful.length > 0;
       await db
         .update(schema.generationJobs)
@@ -646,7 +668,12 @@ export const generatePolish30OmniVariations = inngest.createFunction(
             : `All ${variantResults.length} variations failed. First error: ${failed[0]?.errorMessage ?? 'unknown'}`,
         })
         .where(eq(schema.generationJobs.id, data.jobId));
+      return safeInngestStepReturn({ ok: true });
+    });
+    await guardedStepRun(step, 'mark-completed-metadata', async () => {
+      const durationMs = Date.now() - startedAt;
       await patchMetadata(data.jobId, {
+        polish25_progress: { step: 'video-ready', at: nowIso() },
         polish30_omni_variations_summary: {
           requested: variations.entries.length,
           succeeded: successful.length,
