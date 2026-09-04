@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.46 (Polish-29.0.46 Commit 155 — strip `account` from every /google-flow/* submit; whole namespace infers account from token)', () => {
+  it('is currently 29.0.47 (Polish-29.0.47 Commit 156 — route /google-flow/* submits with ?account=<email> query param when multiple accounts on token)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.46');
+    expect(POLISH_VERSION).toBe('29.0.47');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

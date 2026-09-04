@@ -654,13 +654,14 @@ export async function submitOmniVideo(input: SubmitOmniVideoInput): Promise<Subm
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
     provider: 'useapi_net',
-    url: `${USEAPI_BASE}/google-flow/videos`,
+    url: withGoogleFlowAccount(`${USEAPI_BASE}/google-flow/videos`, input.account),
     method: 'POST',
     headers: authHeaders(),
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: hashAccount(input.account),
+      account_slug_sent: input.account ?? '(none)',
       model: 'omni-flash',
       duration: body.duration,
       resolution: body.resolution,
@@ -727,7 +728,7 @@ export async function submitGoogleFlowConcat(
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
     provider: 'useapi_net',
-    url: `${USEAPI_BASE}/google-flow/videos/concatenate`,
+    url: withGoogleFlowAccount(`${USEAPI_BASE}/google-flow/videos/concatenate`, input.account),
     method: 'POST',
     headers: authHeaders(),
     body,
@@ -761,13 +762,14 @@ export async function submitVeoVideo(input: SubmitVeoVideoInput): Promise<Submit
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
     provider: 'useapi_net',
-    url: `${USEAPI_BASE}/google-flow/videos`,
+    url: withGoogleFlowAccount(`${USEAPI_BASE}/google-flow/videos`, input.account),
     method: 'POST',
     headers: authHeaders(),
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: hashAccount(input.account),
+      account_slug_sent: input.account ?? '(none)',
       model: body.model,
       duration: body.duration,
       aspect_ratio: body.aspectRatio,
@@ -843,13 +845,14 @@ export async function submitNanoBananaImage(
   const result = await callProvider<RawSubmitBody>({
     userId: input.userId,
     provider: 'useapi_net',
-    url: `${USEAPI_BASE}/google-flow/images`,
+    url: withGoogleFlowAccount(`${USEAPI_BASE}/google-flow/images`, input.account),
     method: 'POST',
     headers: authHeaders(),
     body,
     timeoutMs: SUBMIT_TIMEOUT_MS,
     requestBodyForLog: {
       account_hash: input.account ? hashAccount(input.account) : 'not-sent',
+      account_slug_sent: input.account ?? '(none)',
       model: body.model,
       // Ignored aspect_ratio / n retained here as a diagnostic so a
       // future prompt-length regression is easy to spot in the log.
@@ -1191,4 +1194,27 @@ function hashAccount(account: string): string {
     h = (h * 31 + account.charCodeAt(i)) | 0;
   }
   return `acct_${(h >>> 0).toString(36)}`;
+}
+
+/**
+ * Polish-29.0.47 Commit 156: append `?account=<email>` to a
+ * /google-flow/* URL when the caller has a specific account to route
+ * against, otherwise return the base URL unchanged. Needed because
+ * useapi.net's Google Flow endpoints reject `account` in the body but
+ * ALSO can't infer which account to bill when the API token has more
+ * than one Google Flow account registered — the token points at the
+ * useapi user, not a specific Google account. Without a query-param
+ * discriminator, useapi silently picks the first-registered account,
+ * which is why the polish30 pipeline was hitting the free-tier
+ * `isaacisverygoatedtho` account even after the env var was flipped
+ * to the paid `sunpredictorv5` one.
+ *
+ * `:` and `@` in the email are URL-safe per RFC 3986 sub-delims and
+ * useapi's router accepts them raw (verified for Dreamina asset paths
+ * in Commit 129 — same convention across services), so no encoding.
+ */
+function withGoogleFlowAccount(baseUrl: string, account: string | undefined): string {
+  if (!account) return baseUrl;
+  const sep = baseUrl.includes('?') ? '&' : '?';
+  return `${baseUrl}${sep}account=${account}`;
 }
