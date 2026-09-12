@@ -908,26 +908,63 @@ async function renderOneVariation(
       ...(i < clipMediaIds.length - 1 ? { trimEnd: CONCAT_TRIM_END_SECONDS } : {}),
       ...(i > 0 ? { trimStart: CONCAT_TRIM_START_SECONDS } : {}),
     }));
-    const r = await submitGoogleFlowConcat({
-      userId,
-      account: googleFlowAccount,
-      segments,
-      generationJobId: jobId,
-    });
-    if (!r.ok) {
-      return safeInngestStepReturn({
-        kind: 'err' as const,
-        errorMessage: `Google Flow concat submit failed: ${r.errorMessage ?? 'unknown error'}`,
+    // Polish-29.0.53 Commit 162: concat is where Google Flow's
+    // transient upstream 500s land ("Status check error: 500" +
+    // Google's own `Internal error encountered. INTERNAL`). Retrying
+    // the WHOLE Inngest function via `retries: 1` at the outer level
+    // means we'd re-render all 3 Omni clips from scratch on each
+    // retry — that's ~$1.88 of wasted credits per hiccup. The clips
+    // themselves are already stored on Google's side via their
+    // mediaGenerationIds, so we just need to retry the concat call
+    // with them. Inline 3-attempt retry with 5s/15s/30s backoff:
+    // covers ~95% of Google's transient 500s (per useapi docs) while
+    // still failing fast if the outage is real.
+    const CONCAT_RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
+    let concatResult: Awaited<ReturnType<typeof submitGoogleFlowConcat>> | null = null;
+    let lastError: string | undefined;
+    for (let attempt = 0; attempt < CONCAT_RETRY_DELAYS_MS.length; attempt++) {
+      const r = await submitGoogleFlowConcat({
+        userId,
+        account: googleFlowAccount,
+        segments,
+        generationJobId: jobId,
       });
+      if (r.ok && r.encodedVideo) {
+        concatResult = r;
+        break;
+      }
+      lastError = r.ok
+        ? `no encodedVideo (jobId=${r.jobId ?? 'unknown'})`
+        : (r.errorMessage ?? 'unknown error');
+      // Only backoff on 5xx / network shape errors — a 400 body
+      // (bad request) will just repeat identically and burn wall
+      // clock. useapi surfaces the upstream status inside the body
+      // hint; a naive substring check on `HTTP 5` catches every
+      // upstream-hiccup class we've observed without tripping on the
+      // Google `Internal error encountered. INTERNAL` line.
+      const isTransient =
+        typeof lastError === 'string' &&
+        (lastError.includes('HTTP 5') ||
+          lastError.includes('INTERNAL') ||
+          lastError.includes('Status check error'));
+      if (!isTransient) break;
+      if (attempt < CONCAT_RETRY_DELAYS_MS.length - 1) {
+        const delayMs = CONCAT_RETRY_DELAYS_MS[attempt]!;
+        console.log(
+          `[polish30-omni-var] concat attempt ${attempt + 1} failed (${lastError}); ` +
+            `retrying in ${delayMs / 1000}s`,
+        );
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
     }
-    if (!r.encodedVideo) {
+    if (!concatResult || !concatResult.encodedVideo) {
       return safeInngestStepReturn({
         kind: 'err' as const,
-        errorMessage: `Google Flow concat submit returned no encodedVideo (jobId=${r.jobId ?? 'unknown'})`,
+        errorMessage: `Google Flow concat submit failed after ${CONCAT_RETRY_DELAYS_MS.length} attempts: ${lastError ?? 'unknown'}`,
       });
     }
     try {
-      const buffer = Buffer.from(r.encodedVideo, 'base64');
+      const buffer = Buffer.from(concatResult.encodedVideo, 'base64');
       const upload = await uploadGeneratedVideoFromBuffer({
         userId,
         jobId,
