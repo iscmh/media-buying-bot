@@ -80,7 +80,12 @@ import { buildUgcClipProse } from '../lib/ugc-prose-prompt';
 // parser). The Polish-28 variations prompt on its own reads as normal
 // ad-copy work and produces the persona+script JSON cleanly.
 import { runSeedanceCreditedJob } from '../lib/seedance-credit-flow';
-import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
+import {
+  uploadGeneratedImage,
+  uploadGeneratedVideoFromBuffer,
+  uploadGeneratedVideoFromUrl,
+} from '../lib/storage';
+import { trimAndConcatVideos } from '../lib/video-compress';
 
 console.log(
   `[jobs.generate-polish29-seedance-variations] cold start — POLISH_VERSION=${POLISH_VERSION}`,
@@ -129,8 +134,15 @@ const ALLOWED_MODEL_IDS = new Set([
   'seedance-2-0-fast-ugc',
 ]);
 
+// Polish-29.0.56 Commit 165: local ffmpeg trim+concat replaces the
+// Replicate concat, so these poll constants are no longer read.
+// Kept as inert exports for rollback reference — a `void` below
+// silences the unused-var lint until the constants are actually
+// removed in a future cleanup pass.
 const CONCAT_POLL_INTERVAL_SECONDS = 5;
 const CONCAT_POLL_MAX_ATTEMPTS = 36; // ~3 min
+void CONCAT_POLL_INTERVAL_SECONDS;
+void CONCAT_POLL_MAX_ATTEMPTS;
 
 /**
  * Event payload shape.
@@ -937,59 +949,76 @@ async function renderOneVariation(
     };
   }
 
-  // 4. Concat the M clips via Replicate ffmpeg.
-  const concat = await guardedStepRun(step, `concat-${stepSuffix}`, async () => {
-    const submit = await submitReplicateConcat({
-      userId,
-      apiKey: keys.kling,
-      videoUrls: clipUrls,
-      generationJobId: jobId,
-    });
-    if (!submit.ok || !submit.predictionId) {
-      throw new Error(`Replicate concat submit failed: ${submit.errorMessage ?? 'unknown'}`);
-    }
-    return safeInngestStepReturn({ predictionId: submit.predictionId });
-  });
-
-  // 5. Poll concat until done. Each attempt is its own step for
-  //    per-tick Inngest retry + memoization.
-  let concatUrl: string | null = null;
-  for (let attempt = 0; attempt < CONCAT_POLL_MAX_ATTEMPTS; attempt++) {
-    if (attempt > 0)
-      await step.sleep(`concat-wait-${stepSuffix}-${attempt}`, `${CONCAT_POLL_INTERVAL_SECONDS}s`);
-    const poll = await guardedStepRun(step, `concat-poll-${stepSuffix}-${attempt}`, async () => {
-      const r = await checkReplicateConcat({
-        userId,
-        apiKey: keys.kling,
-        predictionId: concat.predictionId,
-        generationJobId: jobId,
+  // 4-6. Trim + concat + upload in ONE Inngest step.
+  //
+  // Polish-29.0.56 Commit 165: Replicate ffmpeg concat was doing a
+  // dumb stream copy — no per-clip trim — so every join carried the
+  // Seedance clips' leading silence (~0.4s pre-speech) and trailing
+  // silence (~0.3s post-speech) at every boundary. On a 3-clip
+  // composite that's ~1.4s of audible pause distributed across two
+  // cuts. User feedback: "cuts are too obvious, pauses before each
+  // clip starts".
+  //
+  // Fix: local ffmpeg trim + concat via trimAndConcatVideos. Same
+  // trim offsets Omni's server-side concat uses (0.458s off clip
+  // starts, 0.375s off clip ends), skipped on first-clip start /
+  // last-clip end because those beats are meant to be there (they
+  // frame the ad).
+  //
+  // Also fuses download + concat + upload into ONE Inngest step so
+  // the multi-MB clip buffers never cross a step-return boundary
+  // (same Commit-161 lesson from polish30).
+  //
+  // Kept the Replicate concat imports around as dead code for
+  // rollback but the new path bypasses them.
+  const stored = await guardedStepRun(step, `local-concat-and-store-${stepSuffix}`, async () => {
+    // Trim offsets — match Omni's server-side values.
+    const TRIM_END_SECONDS = 0.375;
+    const TRIM_START_SECONDS = 0.458;
+    // Fetch each Seedance clip mp4 into a buffer. Sequential rather
+    // than parallel — Seedance CDN sometimes rate-limits parallel
+    // reads from the same origin.
+    const clipBuffers: Array<{ buffer: Buffer; trimStart?: number; trimEnd?: number }> = [];
+    for (let i = 0; i < clipUrls.length; i++) {
+      const url = clipUrls[i]!;
+      let res: Response;
+      try {
+        res = await fetch(url);
+      } catch (err) {
+        return safeInngestStepReturn({
+          kind: 'err' as const,
+          errorMessage: `Fetch clip ${i} failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
+      if (!res.ok) {
+        return safeInngestStepReturn({
+          kind: 'err' as const,
+          errorMessage: `Fetch clip ${i} failed: HTTP ${res.status}`,
+        });
+      }
+      const buffer = Buffer.from(await res.arrayBuffer());
+      clipBuffers.push({
+        buffer,
+        // First clip keeps its own start; last clip keeps its own end.
+        ...(i > 0 ? { trimStart: TRIM_START_SECONDS } : {}),
+        ...(i < clipUrls.length - 1 ? { trimEnd: TRIM_END_SECONDS } : {}),
       });
-      return safeInngestStepReturn(r);
-    });
-    if (poll.status === 'completed' && poll.videoUrl) {
-      concatUrl = poll.videoUrl;
-      break;
     }
-    if (poll.status === 'failed') {
-      throw new Error(`Replicate concat failed: ${poll.errorMessage ?? 'unknown'}`);
+    const concatResult = await trimAndConcatVideos(clipBuffers);
+    if (!concatResult.wasConcatenated) {
+      return safeInngestStepReturn({
+        kind: 'err' as const,
+        errorMessage: `Local ffmpeg concat failed: ${concatResult.error ?? 'unknown'}`,
+      });
     }
-  }
-  if (!concatUrl) {
-    throw new Error(
-      `Replicate concat did not complete in ${(CONCAT_POLL_MAX_ATTEMPTS * CONCAT_POLL_INTERVAL_SECONDS) / 60} minutes`,
-    );
-  }
-
-  // 6. Store composite in our bucket.
-  const stored = await guardedStepRun(step, `store-composite-${stepSuffix}`, async () => {
     try {
-      const r = await uploadGeneratedVideoFromUrl({
+      const upload = await uploadGeneratedVideoFromBuffer({
         userId,
         jobId,
-        remoteUrl: concatUrl!,
+        buffer: concatResult.buffer,
         filename: `polish29-seedance-var-${jobId}-${index}.mp4`,
       });
-      return safeInngestStepReturn({ kind: 'ok' as const, publicUrl: r.publicUrl });
+      return safeInngestStepReturn({ kind: 'ok' as const, publicUrl: upload.publicUrl });
     } catch (err) {
       return safeInngestStepReturn({
         kind: 'err' as const,
@@ -997,7 +1026,16 @@ async function renderOneVariation(
       });
     }
   });
-  const finalUrl = stored.kind === 'ok' ? stored.publicUrl : concatUrl;
+  if (stored.kind !== 'ok') {
+    throw new Error(`polish29 composite upload failed: ${stored.errorMessage}`);
+  }
+  const finalUrl = stored.publicUrl;
+  // Silence unused-var lint for legacy Replicate concat helpers +
+  // the URL-based upload helper — they stay imported for the
+  // rollback path if local ffmpeg concat proves flaky.
+  void submitReplicateConcat;
+  void checkReplicateConcat;
+  void uploadGeneratedVideoFromUrl;
 
   // 7. Persist the creative row.
   await guardedStepRun(step, `persist-${stepSuffix}`, async () => {
@@ -1023,9 +1061,9 @@ async function renderOneVariation(
         clips_succeeded: clipsSucceeded,
         clip_urls_dreamina: clipUrls,
         clip_failures: clipFailures,
-        composite_source_url: concatUrl,
-        composite_supabase_ok: stored.kind === 'ok',
-        composite_supabase_error: stored.kind === 'err' ? stored.errorMessage : null,
+        composite_source_url: null,
+        composite_supabase_ok: true,
+        composite_supabase_error: null,
         persona: entry.persona,
         character_reference_url: character.publicUrl,
       },

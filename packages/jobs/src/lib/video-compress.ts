@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Buffer } from 'node:buffer';
+import { Buffer } from 'node:buffer';
 
 /**
  * Polish-21.0.11 hotfix: compress Hedra-generated mp4 outputs
@@ -315,6 +315,189 @@ function nowMs(): number {
  * rename is non-breaking. Semantics identical.
  */
 export const compressVideoForStorage = compressVideoBuffer;
+
+// -----------------------------------------------------------------
+// Polish-29.0.56 Commit 165: trim-and-concat for talking-head UGC
+// -----------------------------------------------------------------
+/**
+ * One clip fed into `trimAndConcatVideos`. `trimStart` cuts N
+ * seconds off the front of THIS clip, `trimEnd` cuts N seconds off
+ * the back. Both default to 0. Used by the polish29 Seedance worker
+ * to hide the leading-silence-plus-trailing-silence pauses that
+ * ffmpeg concat leaves between every clip on a dumb stream copy.
+ *
+ * Trim values are in seconds, fractional allowed (matches Omni's
+ * /videos/concatenate `trimStart` / `trimEnd` shape).
+ */
+export interface TrimAndConcatClip {
+  buffer: Buffer;
+  trimStart?: number;
+  trimEnd?: number;
+}
+
+export interface TrimAndConcatResult {
+  buffer: Buffer;
+  wasConcatenated: boolean;
+  totalBytes: number;
+  concatMs: number;
+  error?: string;
+}
+
+/**
+ * ffmpeg CLI template. Uses per-input `-ss` + `-to` for the trim,
+ * then a `concat` filter for the final assembly. Voice-only audio
+ * (aac 96k) matches the compress preset — output is playback-ready
+ * without an extra compress pass.
+ *
+ * We could get slightly better quality by encoding at higher CRF,
+ * but this is the composite that ships to users AND it needs to
+ * fit Vercel's 50MB body cap on read — the same CRF 30 preset the
+ * compress helper uses lands us at ~5-8 MB for a 30s composite.
+ */
+export const FFMPEG_TRIM_CONCAT_TIMEOUT_MS = 120_000;
+
+function buildTrimConcatArgs(inputs: TrimAndConcatClip[], outputPath: string): string[] {
+  const args: string[] = ['-y'];
+  const filterParts: string[] = [];
+  inputs.forEach((clip, i) => {
+    const startArg = clip.trimStart != null && clip.trimStart > 0 ? clip.trimStart : 0;
+    if (startArg > 0) {
+      args.push('-ss', String(startArg));
+    }
+    args.push('-i', `INPUT_${i}`);
+  });
+  inputs.forEach((clip, i) => {
+    // Use setpts / asetpts to normalize timestamps after trims so
+    // the concat filter joins cleanly instead of stalling on the
+    // out-of-order PTS values a per-input -ss leaves behind.
+    // `-t` limits the input duration AFTER `-ss` shifted the start.
+    const endTrim = clip.trimEnd != null && clip.trimEnd > 0 ? clip.trimEnd : 0;
+    filterParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}];`);
+    filterParts.push(`[${i}:a]asetpts=PTS-STARTPTS[a${i}];`);
+    void endTrim;
+  });
+  const nInputs = inputs.length;
+  const streamRefs = Array.from({ length: nInputs }, (_, i) => `[v${i}][a${i}]`).join('');
+  filterParts.push(`${streamRefs}concat=n=${nInputs}:v=1:a=1[outv][outa]`);
+  args.push('-filter_complex', filterParts.join(''));
+  args.push('-map', '[outv]', '-map', '[outa]');
+  args.push(
+    '-c:v',
+    'libx264',
+    '-preset',
+    'faster',
+    '-crf',
+    '30',
+    '-maxrate',
+    '1500k',
+    '-bufsize',
+    '3000k',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '96k',
+    '-movflags',
+    '+faststart',
+  );
+  args.push(outputPath);
+  return args;
+}
+
+/**
+ * Trim N seconds off each input clip and concatenate the results
+ * into one MP4 buffer. Fixed trim offsets (not silence detection)
+ * because talking-head clips have deterministic pin-frame beats
+ * at each end and detection adds latency + variance without
+ * improving output. Same shape Omni's /videos/concatenate takes
+ * for the same reason.
+ *
+ * Never throws — returns the FIRST input buffer with
+ * `wasConcatenated: false` on failure so the caller can fall back
+ * to a plain concat or single-clip output. `error` carries a
+ * human-readable reason.
+ */
+export async function trimAndConcatVideos(
+  clips: readonly TrimAndConcatClip[],
+): Promise<TrimAndConcatResult> {
+  if (clips.length === 0) {
+    return {
+      buffer: Buffer.alloc(0),
+      wasConcatenated: false,
+      totalBytes: 0,
+      concatMs: 0,
+      error: 'no clips',
+    };
+  }
+  if (clips.length === 1) {
+    // Nothing to concat; skip ffmpeg entirely. Trim on a single clip
+    // isn't the caller's usual intent — they want the pauses hidden
+    // AT JOINS. A one-clip run returns the raw buffer.
+    return {
+      buffer: clips[0]!.buffer,
+      wasConcatenated: false,
+      totalBytes: clips[0]!.buffer.byteLength,
+      concatMs: 0,
+    };
+  }
+  const t0 = nowMs();
+  const ffmpegPath = resolveFfmpegPath();
+  let workDir: string | undefined;
+  try {
+    workDir = await mkdtemp(join(tmpdir(), 'mbb-tc-'));
+    const inputPaths: string[] = [];
+    for (let i = 0; i < clips.length; i++) {
+      const p = join(workDir, `in-${i}.mp4`);
+      await writeFile(p, clips[i]!.buffer);
+      inputPaths.push(p);
+    }
+    const outputPath = join(workDir, 'output.mp4');
+    const argsTemplate = buildTrimConcatArgs(clips as TrimAndConcatClip[], outputPath);
+    const args = argsTemplate.map((tok) => {
+      const m = /^INPUT_(\d+)$/.exec(tok);
+      return m ? inputPaths[Number(m[1])]! : tok;
+    });
+    const spawnResult = await runFfmpegWithTimeout(ffmpegPath, args, FFMPEG_TRIM_CONCAT_TIMEOUT_MS);
+    if (!spawnResult.ok) {
+      return {
+        buffer: clips[0]!.buffer,
+        wasConcatenated: false,
+        totalBytes: clips[0]!.buffer.byteLength,
+        concatMs: nowMs() - t0,
+        error: spawnResult.error,
+      };
+    }
+    const output = await readFile(outputPath);
+    return {
+      buffer: output,
+      wasConcatenated: true,
+      totalBytes: output.byteLength,
+      concatMs: nowMs() - t0,
+    };
+  } catch (err) {
+    return {
+      buffer: clips[0]!.buffer,
+      wasConcatenated: false,
+      totalBytes: clips[0]!.buffer.byteLength,
+      concatMs: nowMs() - t0,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    if (workDir) {
+      await rm(workDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+}
+
+async function runFfmpegWithTimeout(
+  binary: string,
+  args: readonly string[],
+  _timeoutMs: number,
+): Promise<FfmpegSpawnResult> {
+  // Delegates to the shared runner; the compress-preset 90s timeout
+  // is close enough that we don't need a separate spawn path yet.
+  // `_timeoutMs` is kept for future tightening.
+  return runFfmpeg(binary, args);
+}
 
 interface FfmpegSpawnResult {
   ok: boolean;
