@@ -129,7 +129,7 @@ export function ugcCameraAndDeliveryBlock(input: {
       `Subject drifts naturally inside the frame. Deep focus — the room behind stays sharp. No cinematic bokeh, no rack focus, no dolly, no zoom, no pan.`,
       `Uneven practical light: warm window light on one side of the face, cooler ceiling light on the other, with a small blown-out highlight somewhere.`,
       `Real skin texture with visible pores and a few flyaway hairs, unretouched colour, one continuous take with no cuts.`,
-      `Delivery is warm, sincere, casual, direct to camera at roughly ${wpm} words per minute (~${wps} words per second) — the natural upper-conversational pace of a TikTok creator, not broadcast news.`,
+      `Delivery is warm, sincere, casual, direct to camera at roughly ${wpm} words per minute (~${wps} words per second) — the natural upper-conversational pace of a TikTok creator, not broadcast news. Fill the entire runtime with speech; no silent gaps.`,
     ].join(' ');
   }
   return [
@@ -138,7 +138,7 @@ export function ugcCameraAndDeliveryBlock(input: {
     `Uneven practical light: warm window light on one side of the face, cooler indoor light on the other, with a small blown-out highlight somewhere.`,
     `Deep focus — the room behind stays sharp. Real skin texture with visible pores and a few flyaway hairs, unretouched colour, slightly crooked framing that drifts as the wrist tires.`,
     `Delivery is warm, sincere, casual, direct to camera at roughly ${wpm} words per minute (~${wps} words per second) — the natural upper-conversational pace of a TikTok creator, not broadcast news.`,
-    `${input.clipSeconds}-second clip. If the dialogue finishes early, stay silent and hold the frame — do not speed up to fill the runtime.`,
+    `${input.clipSeconds}-second clip. Keep speaking naturally throughout the entire ${input.clipSeconds} seconds — the dialogue below is sized to fill the runtime, do NOT leave silent gaps between sentences or pauses in the middle. If you finish the sentence a beat early, extend the final syllables warmly rather than falling silent.`,
   ].join(' ');
 }
 

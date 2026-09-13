@@ -116,17 +116,52 @@ const SEEDANCE_CLIP_SECONDS = 8;
  * Under-target and Seedance pads with dead air or invents filler;
  * over-target and the mouth outruns the audio. The playbook table
  * pins 8s → 22-25 words; we take the middle at 24.
+ *
+ * Polish-29.0.59 Commit 168: bumped 24 → 27 after user reported
+ * silent gaps mid-clip. Root cause: Seedance's TTS was finishing
+ * dialogue before the 8s clip ran out, and the prompt used to say
+ * "hold the frame silently" — that literal instruction is now
+ * reversed in the prose builder. A slightly denser 27-word target
+ * (still under the playbook's 8s → 22-28 upper bound) gives TTS
+ * material to fill the runtime.
  */
-const WORDS_PER_CLIP = 24;
+const WORDS_PER_CLIP = 27;
 /**
  * Polish-29.0.31 Commit 140: reverted 55 → 80 per user push-back on
- * the length cap. Claude generates ad-length scripts (~140 words →
- * ~10 clip full 80s composite), matching what a real 60-90s UGC ad
- * runs. Higher per-test cost but the user explicitly wants the full
- * ad-length output; the preflight-dreamina-balance step + surface
- * the warning about wallet impact.
+ * the length cap.
+ *
+ * Polish-29.0.59 Commit 168: this is now a FLOOR, not the target.
+ * User reported: "i fed it a 1 min vid it didnt get the whole
+ * script". Root cause: Claude was generating ~140-word scripts for
+ * any source ad regardless of source duration, so a 60s ad got
+ * scripted to 40-48s of speech content → 12-20s of the composite
+ * had no dialogue. Fix: pass the source duration through to the
+ * Claude batch prompt so the script scales with clip runtime. The
+ * MIN_SCRIPT_WORDS floor still applies for very short source ads
+ * where we still want a reasonable-length ad.
  */
 const MIN_SCRIPT_WORDS = 80;
+
+/**
+ * Compute the target script word count for a variation given the
+ * source-ad duration in seconds. Roughly matches the WORDS_PER_CLIP
+ * × MAX_CLIPS_PER_VARIANT ceiling so a 60s source lands ~180 words
+ * (≈ 7 clips × 27 words per clip) and a 90s source lands ~240 words
+ * (≈ MAX_CLIPS_PER_VARIANT × 27, capped). Floor at MIN_SCRIPT_WORDS
+ * for short source ads (< ~30s).
+ */
+export function pickScriptWordTarget(sourceSeconds: number | null): number {
+  const seconds =
+    typeof sourceSeconds === 'number' && Number.isFinite(sourceSeconds) && sourceSeconds > 0
+      ? sourceSeconds
+      : 30;
+  const clipCount = Math.max(
+    MIN_CLIPS_PER_VARIANT,
+    Math.min(MAX_CLIPS_PER_VARIANT, Math.round(seconds / SEEDANCE_CLIP_SECONDS)),
+  );
+  const derived = clipCount * WORDS_PER_CLIP;
+  return Math.max(MIN_SCRIPT_WORDS, derived);
+}
 const DEFAULT_MODEL_ID = 'seedance-2-0-ugc';
 const ALLOWED_MODEL_IDS = new Set([
   'seedance-2-5-ugc',
@@ -617,10 +652,15 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
         await markJobFailed(data.jobId, jobUserId, msg, 0);
         throw new NonRetriableError(msg);
       }
+      // Polish-29.0.59 Commit 168: script word target scales with
+      // source-ad duration so a 60s source ad actually gets a 60s
+      // scripted variation, not the fixed ~140-word cap Claude was
+      // hitting on shorter defaults. See pickScriptWordTarget header.
+      const scriptWordTarget = pickScriptWordTarget(source.sourceSeconds);
       const userPrompt = composePolish28VariationsUserPrompt(
         rawInput,
         requestedVariantCount,
-        MIN_SCRIPT_WORDS,
+        scriptWordTarget,
       );
       const r = await callClaude({
         userId: jobUserId,
