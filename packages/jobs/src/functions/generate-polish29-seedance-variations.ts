@@ -898,7 +898,16 @@ async function renderOneVariation(
   let creditsSpent = 0;
   let clipsSucceeded = 0;
   for (let clipIndex = 0; clipIndex < clipDialogues.length; clipIndex++) {
-    const dialogue = clipDialogues[clipIndex]!;
+    // Polish-29.0.62 Commit 171: prepend a soft lead-in filler ("So,")
+    // to the FIRST clip's dialogue only. User reported the first
+    // sentence was getting swallowed — Seedance's TTS spends the
+    // opening ~0.3s on the vocal "attack" (breath in, lip-open) before
+    // real speech starts. On extend clips this doesn't matter because
+    // TTS is already primed; on clip 1 it eats real content. A tiny
+    // filler word that's meant to BE consumed keeps the actual first
+    // line intact.
+    const rawDialogue = clipDialogues[clipIndex]!;
+    const dialogue = clipIndex === 0 ? `So, ${rawDialogue}` : rawDialogue;
     const clipPrompt = composeClipPrompt({
       personaLockPrefix,
       clipDialogue: dialogue,

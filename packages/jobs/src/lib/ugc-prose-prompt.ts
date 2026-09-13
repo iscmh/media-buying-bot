@@ -138,7 +138,7 @@ export function ugcCameraAndDeliveryBlock(input: {
     `Uneven practical light: warm window light on one side of the face, cooler indoor light on the other, with a small blown-out highlight somewhere.`,
     `Deep focus — the room behind stays sharp. Real skin texture with visible pores and a few flyaway hairs, unretouched colour, slightly crooked framing that drifts as the wrist tires.`,
     `Delivery is warm, sincere, casual, direct to camera at roughly ${wpm} words per minute (~${wps} words per second) — the natural upper-conversational pace of a TikTok creator, not broadcast news.`,
-    `${input.clipSeconds}-second clip. Keep speaking naturally throughout the entire ${input.clipSeconds} seconds — the dialogue below is sized to fill the runtime, do NOT leave silent gaps between sentences or pauses in the middle. If you finish the sentence a beat early, extend the final syllables warmly rather than falling silent.`,
+    `${input.clipSeconds}-second clip. Keep speaking naturally throughout the entire ${input.clipSeconds} seconds — the dialogue below is sized to fill the runtime, no silent gaps between sentences or pauses in the middle. If you finish the sentence a beat early, hold a brief natural in-breath rather than repeating words or extending syllables — do NOT loop the last phrase to pad time.`,
   ].join(' ');
 }
 

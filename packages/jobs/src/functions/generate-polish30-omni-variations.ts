@@ -838,7 +838,9 @@ async function renderOneVariation(
     const r = await submitOmniVideo({
       userId,
       account: googleFlowAccount,
-      prompt: composeSeedClipPrompt(entry.persona, clipDialogues[0]!),
+      // Polish-29.0.62 Commit 171: seed clip lead-in filler — TTS
+      // attack window eats the first ~0.3s. See polish29 twin.
+      prompt: composeSeedClipPrompt(entry.persona, `So, ${clipDialogues[0]!}`),
       durationSeconds: OMNI_CLIP_SECONDS,
       resolution,
       startFrame: stillFrameRef,
