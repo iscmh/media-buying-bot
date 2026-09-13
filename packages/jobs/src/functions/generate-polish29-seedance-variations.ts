@@ -560,69 +560,16 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
       }
     });
 
-    // ---------- C2: pre-flight Dreamina account balance ----------
-    // Polish-29.0.30 Commit 139: bail BEFORE Claude batch + Nano Banana
-    // BYOK spend when the Dreamina account is out of credits. Each
-    // variation needs at most MAX_CLIPS_PER_VARIANT × 35 Dreamina
-    // credits (35 is the ~observed per-clip Dreamina charge for
-    // Seedance 2.0 720p 8s). With N variations that's the ceiling —
-    // failing fast here avoids blowing ~$0.20 of BYOK $$ on a run
-    // that will only ever succeed at 0/N clips.
-    // Polish-29.0.33 Commit 142: bumped 35 -> 100 after live evidence
-    // that 71 Dreamina credits wasn't enough for a single Seedance 2.0
-    // clip. Actual per-clip cost seen: 65-100 depending on Dreamina's
-    // internal load balancing and (probably) the reference-image
-    // complexity. 100 keeps the preflight safe-erring on the "abort"
-    // side — better to warn/fail early than eat the BYOK spend for a
-    // guaranteed rejection.
-    const APPROX_DREAMINA_CREDITS_PER_CLIP = 100;
-    await guardedStepRun(step, 'preflight-dreamina-balance', async () => {
-      const balance = await getDreaminaAccountBalance({
-        userId: jobUserId,
-        account: dreaminaAccount,
-      });
-      if (!balance.ok) {
-        // Log and continue — a Dreamina API blip shouldn't kill the
-        // run, and the per-clip submit will surface a real error if
-        // credits really are gone.
-        console.warn(
-          `[polish29-seedance-var] Dreamina balance check failed (${balance.errorMessage}) — continuing with generation anyway.`,
-        );
-        return safeInngestStepReturn({ ok: true, skipped: true });
-      }
-      // Polish-29.0.35 Commit 144: fail HARD if balance can't cover
-      // the full run. Previous "warn but continue" behaviour let user
-      // spend BYOK $$ on runs that only partially rendered and left
-      // composites cut off mid-story (see the "just open what" run).
-      // For a $$-heavy pipeline the right default is "don't start
-      // what you can't finish".
-      const needed =
-        requestedVariantCount * MAX_CLIPS_PER_VARIANT * APPROX_DREAMINA_CREDITS_PER_CLIP;
-      if (balance.totalCredits < needed) {
-        const missing = needed - balance.totalCredits;
-        const msg = `Dreamina balance too low for a full render. Have ${balance.totalCredits} credits, need ~${needed} for ${requestedVariantCount} variation${requestedVariantCount === 1 ? '' : 's'} × ${MAX_CLIPS_PER_VARIANT} clips × ~${APPROX_DREAMINA_CREDITS_PER_CLIP} credits/clip. Short by ${missing} credits (~$${(missing / 100).toFixed(2)} at $10/1000). Top up at dreamina.ai/billing then retry.`;
-        // Polish-29.0.55 Commit 164: flip job.status → failed BEFORE
-        // throwing NonRetriableError, otherwise Inngest catches the
-        // throw and the outer function exits with mark-completed
-        // never having run — leaving job.status pinned at 'processing'
-        // from the mark-processing step, wedging the frontend timeline
-        // for 30+ minutes until someone manually SQL-updates the row.
-        // Same class of fix polish30 got in Commit 160 via the split
-        // mark-completed-status boundary. Doing it inline here rather
-        // than a full split because polish29 has multiple preflight
-        // failure sites (balance, keys, source-not-found, ...) that
-        // all follow this same throw shape.
-        await markJobFailed(data.jobId, jobUserId, msg, 0);
-        throw new NonRetriableError(msg);
-      }
-      return safeInngestStepReturn({
-        ok: true,
-        totalCredits: balance.totalCredits,
-        region: balance.region,
-      });
-    });
-
     // ---------- D: load concept + vision-analysis JSON + source duration ----------
+    // Polish-29.0.61 Commit 170: MOVED BEFORE the Dreamina balance
+    // preflight (used to run after). Reason: the balance check
+    // needs to know the actual clip count to compute a realistic
+    // needed-credits number. With MAX_CLIPS_PER_VARIANT bumped to
+    // 40 in Commit 169, the old worst-case math (variantCount × 40 ×
+    // 100 = 4000 credits per variation) tripped on wallets that
+    // could easily cover the realistic ~7-clip 60s ad render (~700
+    // credits). Loading source-context first lets us use
+    // pickClipCountForSourceDuration to size the estimate right.
     const source = await guardedStepRun(step, 'load-source-context', async () => {
       const db = getDb();
       const concept = await db.query.concepts.findFirst({
@@ -650,6 +597,44 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
     });
 
     const clipsPerVariant = pickClipCountForSourceDuration(source.sourceSeconds);
+
+    // ---------- C2: pre-flight Dreamina account balance ----------
+    // Polish-29.0.30 Commit 139: bail BEFORE Claude batch + Nano Banana
+    // BYOK spend when the Dreamina account is out of credits. Historical
+    // cost anchor: 100 credits/clip is safe-side of 65-100 observed.
+    //
+    // Polish-29.0.61 Commit 170: uses `clipsPerVariant` (source-derived,
+    // 2-40) instead of the flat MAX_CLIPS_PER_VARIANT ceiling that
+    // Commit 169 bumped to 40. On a 60s source we now need ~700
+    // credits, not the 4000 the old worst-case math threw.
+    const APPROX_DREAMINA_CREDITS_PER_CLIP = 100;
+    await guardedStepRun(step, 'preflight-dreamina-balance', async () => {
+      const balance = await getDreaminaAccountBalance({
+        userId: jobUserId,
+        account: dreaminaAccount,
+      });
+      if (!balance.ok) {
+        // Log and continue — a Dreamina API blip shouldn't kill the
+        // run, and the per-clip submit will surface a real error if
+        // credits really are gone.
+        console.warn(
+          `[polish29-seedance-var] Dreamina balance check failed (${balance.errorMessage}) — continuing with generation anyway.`,
+        );
+        return safeInngestStepReturn({ ok: true, skipped: true });
+      }
+      const needed = requestedVariantCount * clipsPerVariant * APPROX_DREAMINA_CREDITS_PER_CLIP;
+      if (balance.totalCredits < needed) {
+        const missing = needed - balance.totalCredits;
+        const msg = `Dreamina balance too low for a full render. Have ${balance.totalCredits} credits, need ~${needed} for ${requestedVariantCount} variation${requestedVariantCount === 1 ? '' : 's'} × ${clipsPerVariant} clips × ~${APPROX_DREAMINA_CREDITS_PER_CLIP} credits/clip. Short by ${missing} credits (~$${(missing / 100).toFixed(2)} at $10/1000). Top up at dreamina.ai/billing then retry.`;
+        await markJobFailed(data.jobId, jobUserId, msg, 0);
+        throw new NonRetriableError(msg);
+      }
+      return safeInngestStepReturn({
+        ok: true,
+        totalCredits: balance.totalCredits,
+        region: balance.region,
+      });
+    });
 
     // ---------- E: Claude batch → N persona+script pairs ----------
     const variations = await guardedStepRun(step, 'generate-variations', async () => {
