@@ -97,11 +97,16 @@ console.log(
 
 const MAX_VARIANTS_PER_JOB = 10;
 /** Max clips per variation. Polish-29.0.31 Commit 140: reverted 5 → 10
- *  per user push-back: "we dont want limits like that". Full-length
- *  composites (up to 80s) allowed. Cost warning still surfaces via
- *  the preflight-dreamina-balance step so no BYOK $$ gets wasted
- *  when the wallet is empty. */
-const MAX_CLIPS_PER_VARIANT = 10;
+ *  per user push-back: "we dont want limits like that".
+ *
+ *  Polish-29.0.60 Commit 169: bumped 10 → 40. Users pushed a 60s
+ *  source and hit the 80s composite ceiling; on a 2-3 min source
+ *  the truncation was severe. New cap 40 clips × 8s = 320s = ~5min
+ *  composite, which is way past anything a paid ad needs but
+ *  handles user's "just do the full video no matter what" ask.
+ *  Cost warning still surfaces via the preflight-dreamina-balance
+ *  step so no BYOK $$ gets wasted when the wallet is empty. */
+const MAX_CLIPS_PER_VARIANT = 40;
 /** Min clips per variation. */
 const MIN_CLIPS_PER_VARIANT = 2;
 /** Default clips when source ad duration is unknown. */
@@ -141,14 +146,23 @@ const WORDS_PER_CLIP = 27;
  * where we still want a reasonable-length ad.
  */
 const MIN_SCRIPT_WORDS = 80;
+// Polish-29.0.60 Commit 169: MIN_SCRIPT_WORDS floor is dead — the
+// dynamic target from pickScriptWordTarget always exceeds it now.
+// Kept as an inert constant with a `void` reference for rollback,
+// removable in a future cleanup pass.
+void MIN_SCRIPT_WORDS;
 
 /**
  * Compute the target script word count for a variation given the
- * source-ad duration in seconds. Roughly matches the WORDS_PER_CLIP
- * × MAX_CLIPS_PER_VARIANT ceiling so a 60s source lands ~180 words
- * (≈ 7 clips × 27 words per clip) and a 90s source lands ~240 words
- * (≈ MAX_CLIPS_PER_VARIANT × 27, capped). Floor at MIN_SCRIPT_WORDS
- * for short source ads (< ~30s).
+ * source-ad duration in seconds. Purely derived from source length —
+ * 3 wps × source seconds, no floor, no ceiling beyond the clip cap
+ * (MAX_CLIPS_PER_VARIANT × 8s). User asked for full source coverage
+ * with no artificial minimum.
+ *
+ * Polish-29.0.60 Commit 169: dropped MIN_SCRIPT_WORDS floor entirely
+ * — was meaningless for the common case (≥30s source) and misleading
+ * in messaging. When source is unknown, defaults to a 30s ad (~80
+ * words) which matches an average TikTok UGC hook length.
  */
 export function pickScriptWordTarget(sourceSeconds: number | null): number {
   const seconds =
@@ -159,8 +173,7 @@ export function pickScriptWordTarget(sourceSeconds: number | null): number {
     MIN_CLIPS_PER_VARIANT,
     Math.min(MAX_CLIPS_PER_VARIANT, Math.round(seconds / SEEDANCE_CLIP_SECONDS)),
   );
-  const derived = clipCount * WORDS_PER_CLIP;
-  return Math.max(MIN_SCRIPT_WORDS, derived);
+  return clipCount * WORDS_PER_CLIP;
 }
 const DEFAULT_MODEL_ID = 'seedance-2-0-ugc';
 const ALLOWED_MODEL_IDS = new Set([

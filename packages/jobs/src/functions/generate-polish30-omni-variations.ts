@@ -78,8 +78,17 @@ console.log(
 // -----------------------------------------------------------------
 
 const MAX_VARIANTS_PER_JOB = 10;
-/** Max clips per variation. Omni 4s clips × 10 = 40s composite cap. */
-const MAX_CLIPS_PER_VARIANT = 10;
+/**
+ * Max clips per variation. Omni 4s clips.
+ *
+ * Polish-29.0.60 Commit 169: bumped 10 → 40 to match polish29 —
+ * user asked for full source coverage on ads up to a couple minutes.
+ * At 40 clips × 4s = 160s composite, we cover any ad length that
+ * makes sense for paid social. Cost scales linearly (each V2V
+ * extend is 20 Flow credits), so a 60s source at Ultra tier =
+ * ~150 credits ≈ $1.50; at Pro tier = ~$6. User is aware.
+ */
+const MAX_CLIPS_PER_VARIANT = 40;
 const MIN_CLIPS_PER_VARIANT = 2;
 const DEFAULT_CLIPS_PER_VARIANT = 3;
 /** Omni clip length. 4s = cheapest tier per Google Flow credit table. */
@@ -91,6 +100,10 @@ const OMNI_CLIP_SECONDS = 4;
  */
 const WORDS_PER_CLIP = 8;
 const MIN_SCRIPT_WORDS = 40;
+// Polish-29.0.60 Commit 169: MIN_SCRIPT_WORDS is dead here too — the
+// dynamic target (~clipCount × WORDS_PER_CLIP) always exceeds it.
+// Kept inert for rollback reference.
+void MIN_SCRIPT_WORDS;
 
 // Google Flow's job-poll cadence per useapi.net docs: Omni 1.1 Flash
 // typically completes in 40-70s. Poll every 8s for up to 3 min.
@@ -584,10 +597,23 @@ export const generatePolish30OmniVariations = inngest.createFunction(
             `Re-run analyze-concept on this concept before submitting.`,
         );
       }
+      // Polish-29.0.60 Commit 169: dynamic script word target scales
+      // with source-ad duration so a 60s source ad gets a script that
+      // actually covers the full runtime. Omni does 4s clips at ~8
+      // words each; a 60s source → 15 clips × 8 = 120 words.
+      const seconds =
+        typeof source.sourceSeconds === 'number' && source.sourceSeconds > 0
+          ? source.sourceSeconds
+          : 30;
+      const targetClipCount = Math.max(
+        MIN_CLIPS_PER_VARIANT,
+        Math.min(MAX_CLIPS_PER_VARIANT, Math.round(seconds / OMNI_CLIP_SECONDS)),
+      );
+      const scriptWordTarget = targetClipCount * WORDS_PER_CLIP;
       const userPrompt = composePolish28VariationsUserPrompt(
         rawInput,
         requestedVariantCount,
-        MIN_SCRIPT_WORDS,
+        scriptWordTarget,
       );
       const r = await callClaude({
         userId: jobUserId,
