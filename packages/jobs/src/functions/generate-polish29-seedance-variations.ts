@@ -134,11 +134,12 @@ const ALLOWED_MODEL_IDS = new Set([
   'seedance-2-0-fast-ugc',
 ]);
 
-// Polish-29.0.56 Commit 165: local ffmpeg trim+concat replaces the
-// Replicate concat, so these poll constants are no longer read.
-// Kept as inert exports for rollback reference — a `void` below
-// silences the unused-var lint until the constants are actually
-// removed in a future cleanup pass.
+// Polish-29.0.57 Commit 166: local ffmpeg trim+concat is best-effort;
+// falls back to Replicate concat when the Vercel bundle doesn't ship
+// ffmpeg. The Replicate fallback path uses its own inline poll
+// (setTimeout, not step.sleep) since it's inside one guardedStepRun,
+// so these top-level constants stayed unused. Left as inert exports
+// for rollback + documentation reference until a future cleanup pass.
 const CONCAT_POLL_INTERVAL_SECONDS = 5;
 const CONCAT_POLL_MAX_ATTEMPTS = 36; // ~3 min
 void CONCAT_POLL_INTERVAL_SECONDS;
@@ -1004,12 +1005,84 @@ async function renderOneVariation(
         ...(i < clipUrls.length - 1 ? { trimEnd: TRIM_END_SECONDS } : {}),
       });
     }
-    const concatResult = await trimAndConcatVideos(clipBuffers);
+    // Try local ffmpeg trim+concat first. Falls back to Replicate
+    // stream-copy concat when ffmpeg isn't in the runtime bundle
+    // (Vercel Hobby's 50MB serverless cap has kept @ffmpeg-installer
+    // out of the deploy since Polish-28.0.5 Commit 64.5 — see
+    // apps/web/next.config.mjs). The Replicate fallback ships the
+    // pipeline WITHOUT trim quality, so joins carry the ~1.4s of
+    // Seedance leading/trailing silence per boundary the user
+    // flagged — but at least the composite completes. Upgrade path:
+    // bump Vercel to Pro (250MB serverless cap) and re-enable the
+    // ffmpeg bundling in next.config.mjs to get the clean joins.
+    let concatResult = await trimAndConcatVideos(clipBuffers);
     if (!concatResult.wasConcatenated) {
-      return safeInngestStepReturn({
-        kind: 'err' as const,
-        errorMessage: `Local ffmpeg concat failed: ${concatResult.error ?? 'unknown'}`,
+      console.log(
+        `[polish29-seedance-var] local ffmpeg trim+concat unavailable ` +
+          `(${concatResult.error ?? 'unknown'}); falling back to Replicate concat without trim. ` +
+          `Composite joins will carry Seedance's leading/trailing silence.`,
+      );
+      const submit = await submitReplicateConcat({
+        userId,
+        apiKey: keys.kling,
+        videoUrls: clipUrls,
+        generationJobId: jobId,
       });
+      if (!submit.ok || !submit.predictionId) {
+        return safeInngestStepReturn({
+          kind: 'err' as const,
+          errorMessage: `Replicate concat submit failed: ${submit.errorMessage ?? 'unknown'}`,
+        });
+      }
+      // Poll Replicate concat inline (kept in one step so state stays
+      // contained). Reuse the CONCAT_POLL_* constants restored above.
+      let replicateUrl: string | null = null;
+      const CONCAT_POLL_MAX = 36;
+      const CONCAT_POLL_INTERVAL_MS = 5000;
+      for (let attempt = 0; attempt < CONCAT_POLL_MAX; attempt++) {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, CONCAT_POLL_INTERVAL_MS));
+        const poll = await checkReplicateConcat({
+          userId,
+          apiKey: keys.kling,
+          predictionId: submit.predictionId,
+          generationJobId: jobId,
+        });
+        if (poll.status === 'completed' && poll.videoUrl) {
+          replicateUrl = poll.videoUrl;
+          break;
+        }
+        if (poll.status === 'failed') {
+          return safeInngestStepReturn({
+            kind: 'err' as const,
+            errorMessage: `Replicate concat failed: ${poll.errorMessage ?? 'unknown'}`,
+          });
+        }
+      }
+      if (!replicateUrl) {
+        return safeInngestStepReturn({
+          kind: 'err' as const,
+          errorMessage: `Replicate concat did not complete in ~3 min`,
+        });
+      }
+      // Download the Replicate-concat result into a buffer and route
+      // it through uploadGeneratedVideoFromBuffer so both concat
+      // paths land on the same final Supabase-upload code path.
+      try {
+        const dl = await fetch(replicateUrl);
+        if (!dl.ok) throw new Error(`Replicate concat URL HTTP ${dl.status}`);
+        const buffer = Buffer.from(await dl.arrayBuffer());
+        concatResult = {
+          buffer,
+          wasConcatenated: true,
+          totalBytes: buffer.byteLength,
+          concatMs: 0,
+        };
+      } catch (err) {
+        return safeInngestStepReturn({
+          kind: 'err' as const,
+          errorMessage: `Fetch Replicate concat result failed: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     }
     try {
       const upload = await uploadGeneratedVideoFromBuffer({
@@ -1030,11 +1103,9 @@ async function renderOneVariation(
     throw new Error(`polish29 composite upload failed: ${stored.errorMessage}`);
   }
   const finalUrl = stored.publicUrl;
-  // Silence unused-var lint for legacy Replicate concat helpers +
-  // the URL-based upload helper — they stay imported for the
-  // rollback path if local ffmpeg concat proves flaky.
-  void submitReplicateConcat;
-  void checkReplicateConcat;
+  // uploadGeneratedVideoFromUrl is imported but not used on the
+  // buffer-upload path. Kept for the rollback plan (revert Commit
+  // 165+166 to plain Replicate concat) so the import doesn't churn.
   void uploadGeneratedVideoFromUrl;
 
   // 7. Persist the creative row.

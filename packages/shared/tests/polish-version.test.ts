@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.56 (Polish-29.0.56 Commit 165 — polish29 Seedance switches from Replicate concat to local ffmpeg trim+concat to hide the leading/trailing silence at every clip join)', () => {
+  it('is currently 29.0.57 (Polish-29.0.57 Commit 166 — polish29 concat falls back to Replicate stream-copy when local ffmpeg is unavailable on Vercel, so pipeline completes even without trim quality)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.56');
+    expect(POLISH_VERSION).toBe('29.0.57');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {
