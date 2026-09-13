@@ -147,12 +147,88 @@ export function ugcCameraAndDeliveryBlock(input: {
  * — fast, dry, mildly irritated — she says {…}". This shared version
  * omits the `@Audio 1` binding (Seedance-specific) and yields a plain
  * "in a <voice> tone" clause both providers understand.
+ *
+ * Polish-29.0.58 Commit 167: BEEFED UP the voice clause into a
+ * detailed voice fingerprint. First live Seedance runs showed voice
+ * drifting between clips within a single variation — even with the
+ * same character image, Seedance's TTS layer picked a different
+ * voice per clip because each clip is an independent i2v render
+ * (no cross-clip voice reference like Omni's V2V-extend chain).
+ *
+ * The only lever we have is the prompt. Vague voice hints
+ * ("plain, unhurried") give TTS too much room to pick differently
+ * each call. Concrete fingerprints — age, pitch, texture, accent,
+ * pace — narrow the sample space and increase the chance the model
+ * picks the same voice on every clip within a variation.
+ *
+ * The fingerprint is DETERMINISTIC from the persona fields (gender +
+ * age_range + ethnicity) so all clips in a variation get IDENTICAL
+ * voice prose. When a `voice_direction` is set explicitly (future
+ * Claude batch schema addition), it appends as an extra layer on top
+ * of the generated fingerprint rather than replacing it.
  */
-export function ugcVoiceClause(persona: { gender: string; voice_direction?: string }): string {
+export function ugcVoiceClause(persona: {
+  gender: string;
+  age_range?: string;
+  ethnicity?: string;
+  voice_direction?: string;
+}): string {
   const gLower = (persona.gender ?? '').toLowerCase();
-  const subject = gLower === 'male' || gLower === 'man' || gLower === 'guy' ? 'He' : 'She';
-  const tone = persona.voice_direction?.trim() || 'plain, unhurried, slightly amused';
-  return `${subject} speaks in a ${tone} tone`;
+  const isMale = gLower === 'male' || gLower === 'man' || gLower === 'guy';
+  const subject = isMale ? 'He' : 'She';
+
+  // Pitch band from gender + age. Values within each group are
+  // deliberately close so a Claude persona batch that returns "25"
+  // and one that returns "20s" both land in the same band.
+  const ageStr = (persona.age_range ?? '').toLowerCase();
+  const ageNum = extractAge(ageStr);
+  let pitch: string;
+  if (isMale) {
+    if (ageNum <= 25) pitch = 'medium-high, slightly nasal, youthful';
+    else if (ageNum <= 40) pitch = 'medium, warm, grounded';
+    else pitch = 'medium-low, slightly gravelly, seasoned';
+  } else {
+    if (ageNum <= 25) pitch = 'medium-high, clear, slightly upspoken';
+    else if (ageNum <= 40) pitch = 'medium, warm, alto range';
+    else pitch = 'medium-low, mature, unhurried';
+  }
+
+  // Accent bucket from ethnicity. Kept generic-American across the
+  // board because niche accents (British, Australian, non-native
+  // English) DIVERGE Seedance's voice picker across clips even more
+  // than the vague-tone fallback did. A shared American baseline is
+  // the closest we can get to "same voice every call".
+  const accent = 'general American accent, no vocal fry, no exaggerated upspeak';
+
+  // Delivery hint stays tight — same style across all clips.
+  const deliveryTone =
+    persona.voice_direction?.trim() ?? 'warm, sincere, conversational, direct-to-camera';
+
+  return (
+    `${subject} speaks in a ${pitch} voice — ${accent} — with a ${deliveryTone} delivery, ` +
+    `the same voice across every second of the clip`
+  );
+}
+
+/**
+ * Extract a numeric age midpoint from a Claude-emitted age_range
+ * string. Handles "20s", "30s", "40-50", "60s", plain integers, and
+ * empty/malformed strings (defaults to 30 so pitch lands in the
+ * medium band). Not exported — helper for the voice fingerprint.
+ */
+function extractAge(raw: string): number {
+  if (!raw) return 30;
+  const decadeMatch = /(\d{2})s\b/.exec(raw);
+  if (decadeMatch) return Number(decadeMatch[1]) + 5;
+  const rangeMatch = /(\d{2})\s*[-–]\s*(\d{2})/.exec(raw);
+  if (rangeMatch) {
+    const lo = Number(rangeMatch[1]);
+    const hi = Number(rangeMatch[2]);
+    return Math.round((lo + hi) / 2);
+  }
+  const plainMatch = /(\d{2})/.exec(raw);
+  if (plainMatch) return Number(plainMatch[1]);
+  return 30;
 }
 
 /**
@@ -193,7 +269,14 @@ export function buildUgcClipProse(input: {
     }),
   );
   if (input.extraSceneRule) parts.push(input.extraSceneRule);
-  parts.push(`${ugcVoiceClause(input.persona)}: __DIALOGUE__`);
+  parts.push(
+    `${ugcVoiceClause({
+      gender: input.persona.gender,
+      age_range: input.persona.age_range,
+      ethnicity: input.persona.ethnicity,
+      voice_direction: input.persona.voice_direction,
+    })}: __DIALOGUE__`,
+  );
   parts.push(UGC_SOUND_WORLD);
   parts.push(ugcConstraintTail(input.persona.gender));
   return parts.join(' ');

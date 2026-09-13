@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.57 (Polish-29.0.57 Commit 166 — polish29 concat falls back to Replicate stream-copy when local ffmpeg is unavailable on Vercel, so pipeline completes even without trim quality)', () => {
+  it('is currently 29.0.58 (Polish-29.0.58 Commit 167 — detailed voice fingerprint in the UGC prose builder to keep Seedance TTS from drifting between clips)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.57');
+    expect(POLISH_VERSION).toBe('29.0.58');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {
