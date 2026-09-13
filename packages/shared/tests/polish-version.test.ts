@@ -22,12 +22,12 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.54 (Polish-29.0.54 Commit 163 — omni-flash always sends aspectRatio portrait; extend prompt rewritten to make new dialogue replace reference speech instead of inheriting it)', () => {
+  it('is currently 29.0.55 (Polish-29.0.55 Commit 164 — polish29 Seedance preflight throws now call markJobFailed before throwing, so balance/key/vision failures surface as job.status=failed instead of wedging at processing)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.54');
+    expect(POLISH_VERSION).toBe('29.0.55');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

@@ -486,11 +486,14 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
         });
       } catch (err) {
         if (err instanceof MissingProviderKeyError) {
-          throw new NonRetriableError(
+          const msg =
             `Seedance variations needs 3 BYOK keys (Claude + Gemini + Replicate). ` +
-              `Missing: ${err.message}. Connect at /settings/connections. ` +
-              `(Video render itself pays in credits — these keys drive persona+script batch, character reference, and clip concat.)`,
-          );
+            `Missing: ${err.message}. Connect at /settings/connections. ` +
+            `(Video render itself pays in credits — these keys drive persona+script batch, character reference, and clip concat.)`;
+          // Polish-29.0.55 Commit 164: flip job.status → failed before
+          // throwing so the frontend doesn't wedge at 'processing'.
+          await markJobFailed(data.jobId, jobUserId, msg, 0);
+          throw new NonRetriableError(msg);
         }
         throw err;
       }
@@ -536,9 +539,20 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
         requestedVariantCount * MAX_CLIPS_PER_VARIANT * APPROX_DREAMINA_CREDITS_PER_CLIP;
       if (balance.totalCredits < needed) {
         const missing = needed - balance.totalCredits;
-        throw new NonRetriableError(
-          `Dreamina balance too low for a full render. Have ${balance.totalCredits} credits, need ~${needed} for ${requestedVariantCount} variation${requestedVariantCount === 1 ? '' : 's'} × ${MAX_CLIPS_PER_VARIANT} clips × ~${APPROX_DREAMINA_CREDITS_PER_CLIP} credits/clip. Short by ${missing} credits (~$${(missing / 100).toFixed(2)} at $10/1000). Top up at dreamina.ai/billing then retry.`,
-        );
+        const msg = `Dreamina balance too low for a full render. Have ${balance.totalCredits} credits, need ~${needed} for ${requestedVariantCount} variation${requestedVariantCount === 1 ? '' : 's'} × ${MAX_CLIPS_PER_VARIANT} clips × ~${APPROX_DREAMINA_CREDITS_PER_CLIP} credits/clip. Short by ${missing} credits (~$${(missing / 100).toFixed(2)} at $10/1000). Top up at dreamina.ai/billing then retry.`;
+        // Polish-29.0.55 Commit 164: flip job.status → failed BEFORE
+        // throwing NonRetriableError, otherwise Inngest catches the
+        // throw and the outer function exits with mark-completed
+        // never having run — leaving job.status pinned at 'processing'
+        // from the mark-processing step, wedging the frontend timeline
+        // for 30+ minutes until someone manually SQL-updates the row.
+        // Same class of fix polish30 got in Commit 160 via the split
+        // mark-completed-status boundary. Doing it inline here rather
+        // than a full split because polish29 has multiple preflight
+        // failure sites (balance, keys, source-not-found, ...) that
+        // all follow this same throw shape.
+        await markJobFailed(data.jobId, jobUserId, msg, 0);
+        throw new NonRetriableError(msg);
       }
       return safeInngestStepReturn({
         ok: true,
@@ -555,7 +569,9 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
         columns: { metadata: true, ugcOriginalScript: true },
       });
       if (!concept) {
-        throw new NonRetriableError(`Seedance-variations: concept ${conceptId} not found.`);
+        const msg = `Seedance-variations: concept ${conceptId} not found.`;
+        await markJobFailed(data.jobId, jobUserId, msg, 0);
+        throw new NonRetriableError(msg);
       }
       const conceptMeta = (concept.metadata ?? null) as Record<string, unknown> | null;
       const analysis = (conceptMeta?.['analysis'] ?? null) as Record<string, unknown> | null;
@@ -582,10 +598,11 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
           ? source.ugcOriginalScript
           : null);
       if (!rawInput) {
-        throw new NonRetriableError(
+        const msg =
           `Concept ${conceptId} has no vision-analyzed metadata or usable original script. ` +
-            `Re-run analyze-concept on this concept before submitting.`,
-        );
+          `Re-run analyze-concept on this concept before submitting.`;
+        await markJobFailed(data.jobId, jobUserId, msg, 0);
+        throw new NonRetriableError(msg);
       }
       const userPrompt = composePolish28VariationsUserPrompt(
         rawInput,
@@ -608,15 +625,15 @@ export const generatePolish29SeedanceVariations = inngest.createFunction(
         generationJobId: data.jobId,
       });
       if (!r.ok || !r.text || r.text.trim().length === 0) {
-        throw new NonRetriableError(
-          `Claude batch call failed: ${r.errorMessage ?? 'empty response'}`,
-        );
+        const msg = `Claude batch call failed: ${r.errorMessage ?? 'empty response'}`;
+        await markJobFailed(data.jobId, jobUserId, msg, 0);
+        throw new NonRetriableError(msg);
       }
       const parsed = parsePolish28VariationsResponse(r.text);
       if (parsed.entries.length === 0) {
-        throw new NonRetriableError(
-          `Claude returned 0 valid persona+script entries. Errors: ${parsed.errors.slice(0, 5).join(' | ')}`,
-        );
+        const msg = `Claude returned 0 valid persona+script entries. Errors: ${parsed.errors.slice(0, 5).join(' | ')}`;
+        await markJobFailed(data.jobId, jobUserId, msg, 0);
+        throw new NonRetriableError(msg);
       }
       await patchMetadata(data.jobId, {
         polish29_seedance_variations_batch: {
