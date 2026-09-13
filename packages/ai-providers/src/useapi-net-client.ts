@@ -644,26 +644,41 @@ export async function submitOmniVideo(input: SubmitOmniVideoInput): Promise<Subm
   const referenceVideoRef = input.referenceVideo?.assetId ?? input.referenceVideo?.url;
   const startRef = input.startFrame?.assetId ?? input.startFrame?.url;
   const endRef = input.endFrame?.assetId ?? input.endFrame?.url;
+  // Polish-29.0.54 Commit 163: `aspectRatio` was only being sent in
+  // T2V mode. The first live polish30 render came back landscape 16:9
+  // (YouTube-shape) instead of vertical 9:16 despite the Nano Banana
+  // still being 9:16 and the prompt naming vertical framing — because
+  // omni-flash's default when no aspectRatio is specified is
+  // `landscape`, not "derived from the reference frame" the way I'd
+  // assumed. Fix: ALWAYS send the explicit aspectRatio for omni-flash
+  // regardless of I2V/V2V/T2V mode. omni-flash only accepts
+  // `landscape` or `portrait`; map any `9:16` alias to `portrait`.
+  const aspectRatio =
+    input.aspectRatio === '9:16'
+      ? 'portrait'
+      : input.aspectRatio === '16:9'
+        ? 'landscape'
+        : (input.aspectRatio ?? 'portrait');
   const body: Record<string, unknown> = {
     prompt: input.prompt,
     model: 'omni-flash',
     resolution: input.resolution ?? '720p',
+    aspectRatio,
     async: true,
     ...(input.account ? { email: input.account } : {}),
   };
   if (referenceVideoRef) {
     body['referenceVideo_1'] = referenceVideoRef;
-    // V2V edit — do NOT send duration (input length wins) or aspectRatio.
+    // V2V edit — omit `duration` (input length wins) but keep aspectRatio
+    // set explicitly above.
   } else if (startRef || endRef) {
     if (startRef) body['startImage'] = startRef;
     if (endRef) body['endImage'] = endRef;
     body['duration'] = input.durationSeconds ?? 4;
-    // I2V — aspect ratio derived from the frames.
+    // I2V — send aspectRatio explicit (see header note).
   } else {
     body['duration'] = input.durationSeconds ?? 4;
-    // T2V — aspect ratio explicit. omni-flash accepts landscape/portrait only.
-    body['aspectRatio'] =
-      input.aspectRatio === '9:16' ? 'portrait' : (input.aspectRatio ?? 'portrait');
+    // T2V — aspectRatio already set above.
   }
 
   const result = await callProvider<RawSubmitBody>({

@@ -249,10 +249,25 @@ export function composeExtendClipPrompt(
   const gLower = (persona.gender ?? '').toLowerCase();
   const subject = gLower === 'male' || gLower === 'man' || gLower === 'guy' ? 'He' : 'She';
   const possessive = gLower === 'male' || gLower === 'man' || gLower === 'guy' ? 'his' : 'her';
+  // Polish-29.0.54 Commit 163: extend prompt was leading with "same
+  // voice, same as reference" which Omni interpreted as "preserve
+  // the whole audio track" — the first live test rendered a 30s
+  // ad that just repeated the seed clip's opening line for the
+  // entire duration. Every V2V extend has to override the audio.
+  //
+  // New shape: lead with the DIALOGUE as the primary instruction,
+  // preserve visual identity only (face / wardrobe / room / camera).
+  // Removed "same voice" (voice timbre is inherited from the
+  // reference automatically via V2V — restating it in prose reads
+  // as "same audio content"), removed "begins and ends exactly as
+  // the reference video does" (that was tying the model to the
+  // reference's speech timing), and added an explicit note that
+  // THIS clip's spoken line replaces whatever the reference said.
   return [
-    `${subject} is the same person as the reference video: same face, same clothing, same background, same lighting, same voice, same camera, same framing, same handheld micro-wobble.`,
-    `${subject} begins and ends exactly as the reference video does — both first and last frames match the reference video's first and last frames.`,
-    `${subject} says "${cleaned}" in the same warm, sincere, casual tone as the reference video, at the same natural conversational pace.`,
+    `${subject} speaks a NEW line into the phone camera in this shot: "${cleaned}"`,
+    `This new line REPLACES the spoken audio of the reference video — the reference is the visual reference only, not the audio content.`,
+    `Keep from the reference video: same face, same wardrobe, same room, same handheld selfie framing, same natural voice timbre.`,
+    `Delivery matches ${possessive} previous clip: warm, sincere, casual, direct to camera, at natural TikTok-creator pace.`,
     `Hands stay empty and out of ${possessive} face throughout. Deep focus, real skin texture, one continuous take with no cuts.`,
     ugcConstraintTail(persona.gender),
   ].join(' ');
