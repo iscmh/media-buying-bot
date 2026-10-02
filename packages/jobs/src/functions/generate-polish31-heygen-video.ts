@@ -79,15 +79,18 @@ console.log(`[jobs.generate-polish31-heygen-video] cold start — POLISH_VERSION
 // -----------------------------------------------------------------
 
 const MAX_VARIANTS_PER_JOB = 10;
-/** HeyGen Video 1.0 min 5s, max 15s. 8s matches our proven ugc-prose
- *  pacing across polish29 Seedance and polish30 Omni. */
-const HEYGEN_V1_CLIP_SECONDS: HeygenVideo1DurationSeconds = 8;
-const MAX_CLIPS_PER_VARIANT = 40; // 320s composite ceiling
-const MIN_CLIPS_PER_VARIANT = 2;
-const DEFAULT_CLIPS_PER_VARIANT = 4;
-/** Target words per 8s clip. Same 3 wps delivery rate the Seedance
- *  pipeline landed on after live-test calibration (Commit 168). */
-const WORDS_PER_CLIP = 24;
+/** Polish-30.0.9 Commit 181: 8s → 15s per clip. HeyGen Video 1.0's
+ *  max per-call duration is 15s; using the max cuts clip count by
+ *  ~2× for the same composite length, which halves concat workload
+ *  and the number of join seams where voice/face drift can show up. */
+const HEYGEN_V1_CLIP_SECONDS: HeygenVideo1DurationSeconds = 15;
+const MAX_CLIPS_PER_VARIANT = 20; // 300s = 5min composite ceiling
+const MIN_CLIPS_PER_VARIANT = 1;
+const DEFAULT_CLIPS_PER_VARIANT = 2;
+/** Target words per 15s clip at 3 wps (HeyGen docs: "Written
+ *  dialogue fits at roughly 2.5 words per second"). We lean slightly
+ *  denser (3 wps) to match the UGC-prose-prompt tuning. */
+const WORDS_PER_CLIP = 45;
 
 /** HeyGen poll: typical render ~1-3 min at 768p. */
 const HEYGEN_POLL_INTERVAL_SECONDS = 10;
@@ -578,6 +581,17 @@ async function renderOneVariation(
 ): Promise<RenderOneVariationResult> {
   const { step, index, entry, jobId, userId, resolution, aspectRatio, keys } = input;
   const stepSuffix = `v${index}`;
+  // Polish-30.0.9 Commit 181: fixed random seed PER variation shared
+  // across every clip's HeyGen submit. HeyGen docs: "Hold the seed and
+  // change one clause at a time to iterate." Using one seed for every
+  // clip in a variation means the model samples from the same noise
+  // base for each render, which materially tightens voice timbre,
+  // face continuity, and lighting consistency across clip joins —
+  // the single biggest quality lever beyond the reference image.
+  // Random per variation (so variants still differ from each other)
+  // and derived once outside the clip loop (so it's identical across
+  // the 2-20 clips in one variation).
+  const variationSeed = Math.floor(Math.random() * 0x7fffffff);
 
   // 1. Nano Banana Pro character still — the visual anchor fed to
   //    every HeyGen clip as reference_images[0].
@@ -677,6 +691,9 @@ async function renderOneVariation(
             resolution,
             aspectRatio,
             referenceImages: [{ assetId: heygenAsset.assetId }],
+            // Polish-30.0.9 Commit 181: variation-wide fixed seed for
+            // cross-clip consistency.
+            seed: variationSeed,
             generationJobId: jobId,
           });
           lastResult = r;
@@ -876,6 +893,8 @@ async function renderOneVariation(
         polish31_heygen_video: true,
         variant_index: index,
         resolution,
+        clip_seconds: HEYGEN_V1_CLIP_SECONDS,
+        variation_seed: variationSeed,
         clips_total: clipDialogues.length,
         clips_succeeded: clipsSucceeded,
         clip_urls_heygen: clipUrls,
