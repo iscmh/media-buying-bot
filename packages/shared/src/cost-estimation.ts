@@ -191,7 +191,14 @@ export type PipelineType =
   // seed's voice+motion+framing (20 credits each) → server-side
   // Google Flow concat (0 credits). Full 10s ad ≈ 47 Flow credits ≈
   // $0.47 at Ultra tier vs $6-14 for the same length in Seedance.
-  | 'polish30_omni_variations';
+  | 'polish30_omni_variations'
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 UGC variations.
+  // The convergence pipeline — ONE API call per clip. Built on MiniMax
+  // H3, post-trained by HeyGen. Nano Banana Pro char still → N × HeyGen
+  // Video 1.0 reference_to_video clips (8s each, scene + subject + sound
+  // + lip-sync in one pass) → local ffmpeg trim+concat → composite.
+  // Promo pricing $0.01/sec through October 2026 → ~$0.08 per 8s clip.
+  | 'polish31_heygen_video';
 
 export interface EstimateInput {
   conceptType: ConceptType;
@@ -697,6 +704,48 @@ function estimateByPipeline(
       breakdown.push({
         item: `Storage (${variantCount} × $${V29_STORAGE.toFixed(2)})`,
         cost: round4(variantCount * V29_STORAGE),
+      });
+      break;
+    }
+    case 'polish31_heygen_video': {
+      // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
+      // Per variant:
+      //   Claude persona+script batch (one call for N pairs)   $0.05 / N
+      //   Nano Banana Pro character still                     $0.13
+      //   HeyGen Video 1.0 clips (M × 8s × $0.01/sec promo)
+      //   Replicate ffmpeg-concat                             $0.02
+      //   Storage                                             $0.02
+      // 60s source → M=~7 clips → ~$0.56 clips → ~$0.76/variant.
+      const V31_CLAUDE_BATCH = 0.05;
+      const V31_NANO_BANANA = 0.13;
+      const V31_REPLICATE_CONCAT = 0.02;
+      const V31_STORAGE = 0.02;
+      const V31_HEYGEN_PER_SEC = 0.01;
+      const V31_CLIP_SECONDS = 8;
+      const target31 = targetSecondsHint ?? 30;
+      const clipCount31 = Math.max(2, Math.min(40, Math.round(target31 / V31_CLIP_SECONDS)));
+      const perVariantClipsUsd = clipCount31 * V31_CLIP_SECONDS * V31_HEYGEN_PER_SEC;
+      breakdown.push({
+        item: `Claude persona+script batch (1 call, produces ${variantCount} pairs)`,
+        cost: round4(V31_CLAUDE_BATCH),
+      });
+      breakdown.push({
+        item: `Nano Banana Pro character (${variantCount} × $${V31_NANO_BANANA.toFixed(2)})`,
+        cost: round4(variantCount * V31_NANO_BANANA),
+      });
+      breakdown.push({
+        item:
+          `HeyGen Video 1.0 clips (${variantCount} variants × ${clipCount31} clips × ` +
+          `${V31_CLIP_SECONDS}s × $${V31_HEYGEN_PER_SEC.toFixed(2)}/sec, promo)`,
+        cost: round4(variantCount * perVariantClipsUsd),
+      });
+      breakdown.push({
+        item: `Replicate ffmpeg-concat (${variantCount} × $${V31_REPLICATE_CONCAT.toFixed(2)})`,
+        cost: round4(variantCount * V31_REPLICATE_CONCAT),
+      });
+      breakdown.push({
+        item: `Storage (${variantCount} × $${V31_STORAGE.toFixed(2)})`,
+        cost: round4(variantCount * V31_STORAGE),
       });
       break;
     }

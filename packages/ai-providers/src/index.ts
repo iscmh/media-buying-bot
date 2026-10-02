@@ -320,6 +320,31 @@ export {
   type SubmitHeygenVideoResult,
 } from './heygen-v3-client';
 
+// Polish-30.0.0 Commit 172: HeyGen Video 1.0 (`heygen-video-1`)
+// foundation model. ONE API call renders subject + setting + sound +
+// lip-sync in a single pass — the simplification that collapses the
+// polish29/polish30 multi-step chains to a single clip submit.
+export {
+  submitHeygenVideo1,
+  pollHeygenVideo1,
+  uploadHeygenAsset as uploadHeygenV1Asset,
+  heygenVideo1UsdPerSecond,
+  estimateHeygenVideo1ClipUsd,
+  HEYGEN_VIDEO_1_PROMO_USD_PER_SEC,
+  HEYGEN_VIDEO_1_STANDARD_USD_PER_SEC,
+  type SubmitHeygenVideo1Input,
+  type SubmitHeygenVideo1Result,
+  type PollHeygenVideo1Input,
+  type PollHeygenVideo1Result,
+  type UploadHeygenAssetInput as UploadHeygenV1AssetInput,
+  type UploadHeygenAssetResult as UploadHeygenV1AssetResult,
+  type HeygenVideo1Mode,
+  type HeygenVideo1Resolution,
+  type HeygenVideo1AspectRatio,
+  type HeygenVideo1DurationSeconds,
+  type HeygenVideo1Status,
+} from './heygen-video1-client';
+
 // Polish-28.0.0 Commit 64: HeyGen Avatar IV image-to-video client
 // (BYOK per user). Distinct from the v3 pre-cast-avatar client above
 // — takes a caller-supplied reference image + audio URL, returns a

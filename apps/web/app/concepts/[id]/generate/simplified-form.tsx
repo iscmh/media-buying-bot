@@ -29,10 +29,14 @@ import {
   POLISH29_DEFAULT_MODEL_ID,
   POLISH30_OMNI_DESCRIPTION,
   POLISH30_OMNI_DISPLAY_NAME,
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
+  POLISH31_HEYGEN_DESCRIPTION,
+  POLISH31_HEYGEN_DISPLAY_NAME,
   estimatePolish28CostPerVariantUsd,
   estimatePolish28VariationsCostPerVariantUsd,
   estimatePolish29VariationsCostUsd,
   estimatePolish30OmniCostPerVariantUsd,
+  estimatePolish31HeygenCostPerVariantUsd,
   type Polish29ModelTier,
   SIMPLIFIED_DEFAULT_DURATION_SECONDS,
   SIMPLIFIED_DEFAULT_VARIANTS,
@@ -53,6 +57,15 @@ import {
   type StaticOpenaiQuality,
   type VideoModelId,
 } from './simplified-form-helpers';
+
+/**
+ * Polish-30.0.0 Commit 172: convergence flag. When false (default) the
+ * generate form shows ONLY the HeyGen Video 1.0 picker, hiding the
+ * polish23/25/26/28-variations/29/30 cards. The state hooks and card
+ * components stay live so flipping this back to true restores every
+ * pre-convergence picker without touching any state or JSX.
+ */
+const SHOW_LEGACY_UGC_CARDS = false;
 
 interface Props {
   conceptId: string;
@@ -158,6 +171,11 @@ export function SimplifiedGenerationForm({
   // picker. Cheapest variations tier — video, image, concat all covered
   // by Google Flow subscription credits via useapi.net.
   const [polish30OmniSelected, setPolish30OmniSelected] = React.useState(false);
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
+  // The simplification the user asked for — ONE API call per clip.
+  // Default-selected on mount (replaces the former polish28 default)
+  // so new users land on the recommended pipeline without a click.
+  const [polish31HeygenSelected, setPolish31HeygenSelected] = React.useState(true);
   // Polish-25.3 Commit 18b: static ad picker + quality tier. Mutually
   // exclusive with polish23Selected + polish26Selected + modelId.
   // Defaults to Medium quality — matches the shipped cost line.
@@ -202,6 +220,7 @@ export function SimplifiedGenerationForm({
     polish29VariationsSelected,
     polish29ModelId,
     polish30OmniSelected,
+    polish31HeygenSelected,
     staticOpenaiSelected,
     staticOpenaiQuality,
     staticOpenaiIntensity,
@@ -261,6 +280,17 @@ export function SimplifiedGenerationForm({
           }).usd,
       }
     : null;
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline
+  // cost preview. ~$0.76 per 60s composite at promo rate.
+  const polish31HeygenEstimate = polish31HeygenSelected
+    ? {
+        estimateUsd:
+          variantCount *
+          estimatePolish31HeygenCostPerVariantUsd({
+            sourceDurationSeconds: detectedSourceSeconds,
+          }).usd,
+      }
+    : null;
   // Polish-25.3 Commit 18b: static-openai cost preview per quality
   // tier. Fixed per-variant, no duration scaling (image, not video).
   const staticOpenaiEstimate = staticOpenaiSelected
@@ -268,28 +298,30 @@ export function SimplifiedGenerationForm({
         estimateUsd: variantCount * estimateStaticOpenaiCostPerVariantUsd(staticOpenaiQuality).usd,
       }
     : null;
-  const estimate = polish30OmniEstimate
-    ? polish30OmniEstimate
-    : polish29VariationsEstimate
-      ? polish29VariationsEstimate
-      : polish28VariationsEstimate
-        ? polish28VariationsEstimate
-        : polish28Estimate
-          ? polish28Estimate
-          : staticOpenaiEstimate
-            ? staticOpenaiEstimate
-            : polish26Estimate
-              ? polish26Estimate
-              : polish23Estimate
-                ? polish23Estimate
-                : modelId
-                  ? estimateGenerationCost({
-                      conceptType: 'ugc',
-                      variantCount,
-                      videoModelId: modelId,
-                      sourceDurationSeconds: previewSeconds,
-                    })
-                  : null;
+  const estimate = polish31HeygenEstimate
+    ? polish31HeygenEstimate
+    : polish30OmniEstimate
+      ? polish30OmniEstimate
+      : polish29VariationsEstimate
+        ? polish29VariationsEstimate
+        : polish28VariationsEstimate
+          ? polish28VariationsEstimate
+          : polish28Estimate
+            ? polish28Estimate
+            : staticOpenaiEstimate
+              ? staticOpenaiEstimate
+              : polish26Estimate
+                ? polish26Estimate
+                : polish23Estimate
+                  ? polish23Estimate
+                  : modelId
+                    ? estimateGenerationCost({
+                        conceptType: 'ugc',
+                        variantCount,
+                        videoModelId: modelId,
+                        sourceDurationSeconds: previewSeconds,
+                      })
+                    : null;
 
   const remaining = Math.max(0, capUsd - spentTodayUsd);
   const overCap = estimate != null && estimate.estimateUsd > remaining;
@@ -358,6 +390,18 @@ export function SimplifiedGenerationForm({
   if (!connectedProviders.claude.connected) polish30OmniMissingKeys.push('Claude');
   const hasPolish30OmniKeys = polish30OmniMissingKeys.length === 0;
 
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
+  // Needs Claude (persona+script batch), Gemini (Nano Banana Pro char
+  // still), HeyGen (video 1.0 render), Replicate (ffmpeg concat
+  // fallback). Four BYOK — none new vs existing pipelines so most
+  // existing users are already fully connected.
+  const polish31HeygenMissingKeys: string[] = [];
+  if (!connectedProviders.claude.connected) polish31HeygenMissingKeys.push('Claude');
+  if (!connectedProviders.gemini.connected) polish31HeygenMissingKeys.push('Gemini');
+  if (!connectedProviders.heygen.connected) polish31HeygenMissingKeys.push('HeyGen');
+  if (!connectedProviders.replicate.connected) polish31HeygenMissingKeys.push('Replicate');
+  const hasPolish31HeygenKeys = polish31HeygenMissingKeys.length === 0;
+
   // Polish-25.3 Commit 18b: static-openai gate. Needs Claude
   // (copy rewrite) + OpenAI (gpt-image-2). Gemini optional (source
   // vision analysis is skipped for the static path). Missing keys
@@ -372,36 +416,40 @@ export function SimplifiedGenerationForm({
   if (!hasElevenLabsKey) legacyMissingKeys.push('ElevenLabs');
   const hasLegacyKeys = hasHedraKey && hasElevenLabsKey;
 
-  const hasProviderKey = polish30OmniSelected
-    ? hasPolish30OmniKeys
-    : polish29VariationsSelected
-      ? hasPolish29VariationsKeys
-      : polish28VariationsSelected
-        ? hasPolish28VariationsKeys
-        : polish28Selected
-          ? hasPolish28Keys
-          : staticOpenaiSelected
-            ? hasStaticOpenaiKeys
-            : polish26Selected
-              ? hasPolish26Keys
-              : polish23Selected
-                ? hasPolish23Keys
-                : hasLegacyKeys;
-  const missingKeys = polish30OmniSelected
-    ? polish30OmniMissingKeys
-    : polish29VariationsSelected
-      ? polish29VariationsMissingKeys
-      : polish28VariationsSelected
-        ? polish28VariationsMissingKeys
-        : polish28Selected
-          ? polish28MissingKeys
-          : staticOpenaiSelected
-            ? staticOpenaiMissingKeys
-            : polish26Selected
-              ? polish26MissingKeys
-              : polish23Selected
-                ? polish23MissingKeys
-                : legacyMissingKeys;
+  const hasProviderKey = polish31HeygenSelected
+    ? hasPolish31HeygenKeys
+    : polish30OmniSelected
+      ? hasPolish30OmniKeys
+      : polish29VariationsSelected
+        ? hasPolish29VariationsKeys
+        : polish28VariationsSelected
+          ? hasPolish28VariationsKeys
+          : polish28Selected
+            ? hasPolish28Keys
+            : staticOpenaiSelected
+              ? hasStaticOpenaiKeys
+              : polish26Selected
+                ? hasPolish26Keys
+                : polish23Selected
+                  ? hasPolish23Keys
+                  : hasLegacyKeys;
+  const missingKeys = polish31HeygenSelected
+    ? polish31HeygenMissingKeys
+    : polish30OmniSelected
+      ? polish30OmniMissingKeys
+      : polish29VariationsSelected
+        ? polish29VariationsMissingKeys
+        : polish28VariationsSelected
+          ? polish28VariationsMissingKeys
+          : polish28Selected
+            ? polish28MissingKeys
+            : staticOpenaiSelected
+              ? staticOpenaiMissingKeys
+              : polish26Selected
+                ? polish26MissingKeys
+                : polish23Selected
+                  ? polish23MissingKeys
+                  : legacyMissingKeys;
 
   function performSubmit() {
     if (overCap || !canSubmit) return;
@@ -473,34 +521,21 @@ export function SimplifiedGenerationForm({
           on every concept, confusing users. */}
       {conceptType === 'ugc' && (
         <>
-          {/* PRIMARY variations card — N distinct personas per job. 3-BYOK. */}
-          <Polish28VariationsPickerCard
-            picked={polish28VariationsSelected}
+          {/* Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence
+              pipeline. ONE API call per clip. User's explicit ask:
+              "find 1 simple API and focus on it, then add multiple."
+              This is the one — polish23/25/26/28-variations/29/30 cards
+              are hidden to converge every user on the single simple
+              pipeline. State hooks + card components for the hidden
+              pipelines are preserved on disk for a one-flag rollback
+              (flip the picker-card block below to show them). */}
+          <Polish31HeygenPickerCard
+            picked={polish31HeygenSelected}
             disabled={isPending}
-            missingKeys={polish28VariationsMissingKeys}
+            missingKeys={polish31HeygenMissingKeys}
             onPick={() => {
-              setPolish28VariationsSelected(true);
-              setPolish29VariationsSelected(false);
+              setPolish31HeygenSelected(true);
               setPolish30OmniSelected(false);
-              setPolish28Selected(false);
-              setStaticOpenaiSelected(false);
-              setPolish26Selected(false);
-              setPolish23Selected(false);
-              setModelId(null);
-            }}
-          />
-
-          {/* Polish-29.0.39 Commit 148: cheapest variations tier —
-              Google Flow / Omni 1.1 Flash. Only Claude BYOK required;
-              video, image, and concat all pay in Flow credits via the
-              platform-side useapi.net token. ~9-25× cheaper than the
-              Seedance variations card below. */}
-          <Polish30OmniPickerCard
-            picked={polish30OmniSelected}
-            disabled={isPending}
-            missingKeys={polish30OmniMissingKeys}
-            onPick={() => {
-              setPolish30OmniSelected(true);
               setPolish29VariationsSelected(false);
               setPolish28VariationsSelected(false);
               setPolish28Selected(false);
@@ -512,46 +547,84 @@ export function SimplifiedGenerationForm({
             variantCount={variantCount}
             detectedSourceSeconds={detectedSourceSeconds}
           />
-
-          {/* Polish-29.0.10 Commit 120: credit-backed sibling — same
-              variations flow but pays the video render in credits.
-              Cheaper per-variant, no HeyGen key needed. */}
-          <Polish29VariationsPickerCard
-            picked={polish29VariationsSelected}
-            disabled={isPending}
-            missingKeys={polish29VariationsMissingKeys}
-            selectedModelId={polish29ModelId}
-            onPick={() => {
-              setPolish29VariationsSelected(true);
-              setPolish30OmniSelected(false);
-              setPolish28VariationsSelected(false);
-              setPolish28Selected(false);
-              setStaticOpenaiSelected(false);
-              setPolish26Selected(false);
-              setPolish23Selected(false);
-              setModelId(null);
-            }}
-            onModelIdChange={setPolish29ModelId}
-            variantCount={variantCount}
-            detectedSourceSeconds={detectedSourceSeconds}
-          />
-
-          {/* SECONDARY clone card — one video that replicates the source actor. 4-BYOK. */}
-          <Polish28PickerCard
-            picked={polish28Selected}
-            disabled={isPending}
-            missingKeys={polish28MissingKeys}
-            onPick={() => {
-              setPolish28Selected(true);
-              setPolish28VariationsSelected(false);
-              setPolish29VariationsSelected(false);
-              setPolish30OmniSelected(false);
-              setStaticOpenaiSelected(false);
-              setPolish26Selected(false);
-              setPolish23Selected(false);
-              setModelId(null);
-            }}
-          />
+          {/* Polish-30.0.0 Commit 172: older UGC picker cards hidden to
+              converge the user on the one simple API. Code paths kept
+              live for rollback — flip SHOW_LEGACY_UGC_CARDS to true to
+              resurrect. */}
+          {SHOW_LEGACY_UGC_CARDS && (
+            <>
+              <Polish28VariationsPickerCard
+                picked={polish28VariationsSelected}
+                disabled={isPending}
+                missingKeys={polish28VariationsMissingKeys}
+                onPick={() => {
+                  setPolish28VariationsSelected(true);
+                  setPolish31HeygenSelected(false);
+                  setPolish29VariationsSelected(false);
+                  setPolish30OmniSelected(false);
+                  setPolish28Selected(false);
+                  setStaticOpenaiSelected(false);
+                  setPolish26Selected(false);
+                  setPolish23Selected(false);
+                  setModelId(null);
+                }}
+              />
+              <Polish30OmniPickerCard
+                picked={polish30OmniSelected}
+                disabled={isPending}
+                missingKeys={polish30OmniMissingKeys}
+                onPick={() => {
+                  setPolish30OmniSelected(true);
+                  setPolish31HeygenSelected(false);
+                  setPolish29VariationsSelected(false);
+                  setPolish28VariationsSelected(false);
+                  setPolish28Selected(false);
+                  setStaticOpenaiSelected(false);
+                  setPolish26Selected(false);
+                  setPolish23Selected(false);
+                  setModelId(null);
+                }}
+                variantCount={variantCount}
+                detectedSourceSeconds={detectedSourceSeconds}
+              />
+              <Polish29VariationsPickerCard
+                picked={polish29VariationsSelected}
+                disabled={isPending}
+                missingKeys={polish29VariationsMissingKeys}
+                selectedModelId={polish29ModelId}
+                onPick={() => {
+                  setPolish29VariationsSelected(true);
+                  setPolish31HeygenSelected(false);
+                  setPolish30OmniSelected(false);
+                  setPolish28VariationsSelected(false);
+                  setPolish28Selected(false);
+                  setStaticOpenaiSelected(false);
+                  setPolish26Selected(false);
+                  setPolish23Selected(false);
+                  setModelId(null);
+                }}
+                onModelIdChange={setPolish29ModelId}
+                variantCount={variantCount}
+                detectedSourceSeconds={detectedSourceSeconds}
+              />
+              <Polish28PickerCard
+                picked={polish28Selected}
+                disabled={isPending}
+                missingKeys={polish28MissingKeys}
+                onPick={() => {
+                  setPolish28Selected(true);
+                  setPolish31HeygenSelected(false);
+                  setPolish28VariationsSelected(false);
+                  setPolish29VariationsSelected(false);
+                  setPolish30OmniSelected(false);
+                  setStaticOpenaiSelected(false);
+                  setPolish26Selected(false);
+                  setPolish23Selected(false);
+                  setModelId(null);
+                }}
+              />
+            </>
+          )}
         </>
       )}
 
@@ -569,6 +642,7 @@ export function SimplifiedGenerationForm({
             setPolish28VariationsSelected(false);
             setPolish29VariationsSelected(false);
             setPolish30OmniSelected(false);
+            setPolish31HeygenSelected(false);
             setModelId(null);
           }}
           onQualityChange={setStaticOpenaiQuality}
@@ -698,6 +772,7 @@ export function SimplifiedGenerationForm({
             polish28VariationsSelected ||
             polish29VariationsSelected ||
             polish30OmniSelected ||
+            polish31HeygenSelected ||
             staticOpenaiSelected) && (
             <p className="mt-3 text-xs text-[color:var(--accent-negative)]">
               Connect your {missingKeys.join(' + ')} key{missingKeys.length > 1 ? 's' : ''} on{' '}
@@ -1208,6 +1283,87 @@ interface Polish30OmniPickerCardProps {
   onPick: () => void;
   variantCount: number;
   detectedSourceSeconds: number | null;
+}
+
+// -------------------------------------------------------------------
+// Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence picker card.
+// ONE API call per clip renders scene + subject + sound + lip-sync.
+// Promo pricing $0.01/sec through October 2026. The user's explicit
+// "find 1 simple API" ask — this card replaces every other UGC picker
+// as the recommended + default pipeline.
+// -------------------------------------------------------------------
+
+interface Polish31HeygenPickerCardProps {
+  picked: boolean;
+  disabled: boolean;
+  missingKeys: string[];
+  onPick: () => void;
+  variantCount: number;
+  detectedSourceSeconds: number | null;
+}
+
+function Polish31HeygenPickerCard({
+  picked,
+  disabled,
+  missingKeys,
+  onPick,
+  variantCount,
+  detectedSourceSeconds,
+}: Polish31HeygenPickerCardProps) {
+  const canPick = missingKeys.length === 0;
+  const perVariant = estimatePolish31HeygenCostPerVariantUsd({
+    sourceDurationSeconds: detectedSourceSeconds,
+  });
+  const totalUsd = variantCount * perVariant.usd;
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      disabled={disabled || !canPick}
+      aria-pressed={picked}
+      className={cn(
+        'group relative flex w-full flex-col gap-2 rounded-md border p-4 text-left transition-colors',
+        picked
+          ? 'border-fg bg-fg/5'
+          : 'border-[color:var(--accent-positive)]/50 bg-bg-surface hover:border-fg/50',
+        (disabled || !canPick) && 'cursor-not-allowed opacity-60',
+      )}
+    >
+      <span
+        className={cn(
+          'absolute right-3 top-3 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider',
+          'bg-[color:var(--accent-positive)]/15 text-[color:var(--accent-positive)]',
+        )}
+      >
+        Recommended
+      </span>
+      {picked && (
+        <CheckCircle2 className="text-fg absolute right-28 top-3 h-4 w-4" aria-hidden="true" />
+      )}
+      <div className="text-fg-subtle text-[10px] font-semibold uppercase tracking-wider">
+        UGC — one simple API
+      </div>
+      <div className="text-fg text-sm font-semibold">{POLISH31_HEYGEN_DISPLAY_NAME}</div>
+      <div className="text-fg-muted text-xs leading-relaxed">{POLISH31_HEYGEN_DESCRIPTION}</div>
+      <div className="text-fg-subtle mt-1 text-[11px]">
+        Output: {variantCount} × 9:16 vertical, {perVariant.clipCount} clips each. ~$
+        {totalUsd.toFixed(2)} total (${perVariant.usd.toFixed(2)}/variant @ $0.01/sec promo).
+      </div>
+      {!canPick && (
+        <div className="mt-2 text-xs text-[color:var(--accent-negative)]">
+          Connect {missingKeys.join(' + ')} at{' '}
+          <Link
+            href="/settings/connections"
+            className="underline underline-offset-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Settings → Connections
+          </Link>{' '}
+          to unlock.
+        </div>
+      )}
+    </button>
+  );
 }
 
 function Polish30OmniPickerCard({

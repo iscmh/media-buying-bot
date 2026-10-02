@@ -66,7 +66,11 @@ export interface PipelineDescriptor {
     // render chain (Nano Banana seed still → Omni I2V seed clip →
     // Omni V2V extends → Google Flow concat, all on user's Google Flow
     // subscription credits via useapi.net).
-    | 'generation/polish30-omni-variations.requested';
+    | 'generation/polish30-omni-variations.requested'
+    // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
+    // ONE API call per clip renders subject + setting + sound + lip-sync
+    // in a single pass.
+    | 'generation/polish31-heygen-video.requested';
   /** providers the user MUST have connected for this pipeline to work. */
   requiredProviders: Array<
     | 'heygen'
@@ -228,6 +232,20 @@ const DESCRIPTORS: Record<PipelineType, PipelineDescriptor> = {
     // through the platform's registered Google Flow account.
     requiredProviders: ['claude'],
   },
+  polish31_heygen_video: {
+    pipeline: 'polish31_heygen_video',
+    label: 'HeyGen Video 1.0 (UGC)',
+    // Polish-30.0.0 Commit 172: HeyGen Video 1.0 — ONE call renders
+    // scene + subject + sound + lip-sync in a single pass. Collapses
+    // the polish29/30 multi-step chains to a single clip submit.
+    // Four BYOK: Claude (persona+script batch), Gemini (Nano Banana
+    // Pro character still), HeyGen (video 1.0 render), Replicate
+    // (ffmpeg concat fallback).
+    providerChoice: 'clone_ugc',
+    format: 'polish31_heygen_video',
+    workerEvent: 'generation/polish31-heygen-video.requested',
+    requiredProviders: ['claude', 'gemini', 'heygen', 'replicate'],
+  },
   polish29_seedance_variations: {
     pipeline: 'polish29_seedance_variations',
     label: 'Seedance variations (credits)',
@@ -321,4 +339,6 @@ export const ALL_PIPELINES: PipelineType[] = [
   'polish29_seedance_variations',
   // Polish-29.0.37 Commit 146: Google Flow / Omni 1.1 Flash variations.
   'polish30_omni_variations',
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
+  'polish31_heygen_video',
 ];

@@ -224,7 +224,12 @@ export const analyzeConcept = inngest.createFunction(
         // character-clone prompt AND concept.metadata.analysis.
         // duration_seconds for the clip-count math — both live in the
         // POLISH23_VISION output, not the UGC_DECONSTRUCTOR one.
-        picked === 'polish29_seedance_variations';
+        picked === 'polish29_seedance_variations' ||
+        // Polish-30.0.0 Commit 172: HeyGen Video 1.0 pipeline reads
+        // concept.metadata.analysis.persona (same shape as polish28/29)
+        // for its Nano Banana Pro char still prompt, and
+        // concept.metadata.analysis.duration_seconds for clip-count math.
+        picked === 'polish31_heygen_video';
       const visionSystemPrompt = usesPolish23Vision
         ? POLISH23_VISION_SYSTEM_PROMPT
         : UGC_DECONSTRUCTOR_SYSTEM_PROMPT;
@@ -440,6 +445,8 @@ async function loadJobRoutingEvent(jobId: string): Promise<
   | 'generation/polish29-seedance-variations.requested'
   // Polish-29.0.37 Commit 146: Google Flow / Omni 1.1 Flash variations.
   | 'generation/polish30-omni-variations.requested'
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 UGC variations.
+  | 'generation/polish31-heygen-video.requested'
 > {
   try {
     const db = getDb();

@@ -191,6 +191,40 @@ export function estimatePolish30OmniCostPerVariantUsd(input: {
 }
 
 /**
+ * Polish-30.0.0 Commit 172: HeyGen Video 1.0 (`heygen-video-1`) picker.
+ * The convergence pipeline — ONE API call per clip renders scene +
+ * subject + sound + lip-sync. Promo pricing $0.01/sec through October
+ * 2026. BYOK: Claude + Gemini + HeyGen + Replicate.
+ */
+export const POLISH31_HEYGEN_PIPELINE_ID = 'polish31_heygen_video' as const;
+export const POLISH31_HEYGEN_DISPLAY_NAME = 'HeyGen Video 1.0 — the simple one (NEW)';
+export const POLISH31_HEYGEN_DESCRIPTION =
+  'The new HeyGen foundation model. ONE call renders character + voice + lip-sync per clip ' +
+  '— no multi-step chains. Promo $0.01/sec through October ($0.08 per 8s clip). ' +
+  'BYOK: Claude + Gemini + HeyGen + Replicate.';
+/** Per-variant cost preview. 8s clips at $0.01/sec promo rate. */
+export function estimatePolish31HeygenCostPerVariantUsd(input: {
+  sourceDurationSeconds: number | null;
+}): { usd: number; clipCount: number } {
+  const target = input.sourceDurationSeconds ?? SIMPLIFIED_DEFAULT_DURATION_SECONDS;
+  const CLIP_SECONDS = 8;
+  const clipCount = Math.max(2, Math.min(40, Math.round(target / CLIP_SECONDS)));
+  const HEYGEN_USD_PER_SEC = 0.01; // promo rate through Oct 2026
+  const NANO_BANANA = 0.13;
+  const CLAUDE_BATCH_AMORTIZED = 0.05;
+  const REPLICATE_CONCAT = 0.02;
+  const STORAGE = 0.02;
+  const usd = round4(
+    CLAUDE_BATCH_AMORTIZED +
+      NANO_BANANA +
+      clipCount * CLIP_SECONDS * HEYGEN_USD_PER_SEC +
+      REPLICATE_CONCAT +
+      STORAGE,
+  );
+  return { usd, clipCount };
+}
+
+/**
  * Polish-29.0.10 Commit 120: credit-backed multi-clip Seedance
  * variations picker. Feeds a winning creative → N cloned-character
  * variants matching source ad length. Video render pays in credits
@@ -386,6 +420,12 @@ export interface SimplifiedFormState {
    */
   polish30OmniSelected?: boolean;
   /**
+   * Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
+   * ONE API call per clip. Routes to generation/polish31-heygen-video.
+   * requested. Mutually exclusive with all other pipeline flags.
+   */
+  polish31HeygenSelected?: boolean;
+  /**
    * Polish-25.3 Commit 18b: OpenAI gpt-image-2 static ad flag.
    * Mutually exclusive with polish23Selected / polish25Selected /
    * polish26Selected / modelId. Companion field `staticOpenaiQuality`
@@ -422,6 +462,7 @@ export function canSubmitState(state: SimplifiedFormState): boolean {
     state.polish28VariationsSelected === true ||
     state.polish29VariationsSelected === true ||
     state.polish30OmniSelected === true ||
+    state.polish31HeygenSelected === true ||
     state.staticOpenaiSelected === true;
   if (!hasPickedPipeline && state.modelId == null) return false;
   if (!Number.isInteger(state.variantCount) || state.variantCount < SIMPLIFIED_MIN_VARIANTS) {
@@ -491,6 +532,13 @@ export function buildSubmissionFormData(input: {
   // because no metadata.model_id is set. Cleaner than adding
   // polish23 as a synthetic VideoModelId, which would tangle two
   // descriptor systems.
+  if (input.state.polish31HeygenSelected === true) {
+    // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
+    // Routes to generation/polish31-heygen-video.requested. No tier
+    // picker — HeyGen Video 1.0 has one model.
+    fd.set('pipeline', POLISH31_HEYGEN_PIPELINE_ID);
+    return fd;
+  }
   if (input.state.polish30OmniSelected === true) {
     // Polish-29.0.39 Commit 148: Google Flow / Omni variations. Routes
     // to generation/polish30-omni-variations.requested. No tier config

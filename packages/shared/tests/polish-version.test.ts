@@ -12,7 +12,7 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // Polish-26.0 Commit 61: first Polish-26 release lands the HeyGen
     // v3 backend replacement. Regex now permits the "26" major slot.
     expect(POLISH_VERSION).toMatch(
-      /^2(1|3|4|5|6|7|8|9|10)\.\d+\.\d+$|^26\.\d+\.\d+$|^28\.\d+\.\d+$|^29\.\d+\.\d+$/,
+      /^2(1|3|4|5|6|7|8|9|10)\.\d+\.\d+$|^26\.\d+\.\d+$|^28\.\d+\.\d+$|^29\.\d+\.\d+$|^30\.\d+\.\d+$/,
     );
     // Polish-28.4.0 Commit 98: Meta launch backend un-hardcoded. The
     // 28.\d+.\d+ arm above already covers 28.4.x — no regex bump
@@ -22,12 +22,16 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 29.0.62 (Polish-29.0.62 Commit 171 — 3 quality fixes: seed-clip lead-in filler eats TTS attack, no-repeat-last-phrase padding rule, N=1 persona rotation across 10 demographic buckets)', () => {
+  it('is currently 30.0.0 (Polish-30.0.0 Commit 172 — CONVERGENCE on HeyGen Video 1.0: ONE API call per clip, hides polish23/25/26/28-variations/29/30 pickers, polish31_heygen_video is the new recommended default)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
     // a silent edit.
-    expect(POLISH_VERSION).toBe('29.0.62');
+    //
+    // 30.0.0 is a MAJOR bump: the user asked for convergence on one
+    // simple API; the generate form now shows ONE UGC picker instead
+    // of six. Older pipelines stay on disk for rollback.
+    expect(POLISH_VERSION).toBe('30.0.0');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

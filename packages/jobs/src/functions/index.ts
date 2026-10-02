@@ -43,6 +43,11 @@ import { generatePolish29SeedanceVariations } from './generate-polish29-seedance
 // seed clip (7 cr) → M V2V extends (20 cr each) → Google Flow concat
 // (0 cr). Only Claude BYOK required.
 import { generatePolish30OmniVariations } from './generate-polish30-omni-variations';
+// Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline. ONE
+// API call per clip renders scene + subject + sound + lip-sync in a
+// single pass. Collapses the polish29/polish30 multi-step chains to a
+// single clip submit. Promo pricing $0.01/sec through October 2026.
+import { generatePolish31HeygenVideo } from './generate-polish31-heygen-video';
 import { generateStaticVariants } from './generate-static-variants';
 import { generateUgcVariants } from './generate-ugc-variants';
 import { generationJobProcessor } from './generation-job-processor';
@@ -119,6 +124,8 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // Sibling of polish29_seedance_variations, 9-25× cheaper per variation
   // on the Omni V2V chain. Only Claude BYOK needed.
   'generation/polish30-omni-variations.requested',
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 UGC variations.
+  'generation/polish31-heygen-video.requested',
 ] as const);
 
 export const functions = [
@@ -153,6 +160,8 @@ export const functions = [
   generatePolish29SeedanceVariations,
   // Polish-29.0.38 Commit 147: Google Flow / Omni 1.1 Flash variations worker.
   generatePolish30OmniVariations,
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 UGC variations worker.
+  generatePolish31HeygenVideo,
   // Phase 4 launch.
   metaAdLauncher,
   // Phase 5 — kill / scale loop.

@@ -172,6 +172,23 @@ export const CREDIT_MODELS: readonly CreditModel[] = [
     family: 'ugc',
     qualityTier: 'premium',
   },
+  // Polish-30.0.0 Commit 172: HeyGen Video 1.0 (`heygen-video-1`) —
+  // foundation model built on MiniMax H3, post-trained by HeyGen. ONE
+  // call renders scene + subject + sound + lip-sync. Promo pricing
+  // $0.01/sec through October 2026 (standard $0.02/sec after).
+  // BYOK — users pay HeyGen direct; platform cost = $0.
+  {
+    id: 'heygen-video-1-ugc',
+    displayName: 'HeyGen Video 1.0 (NEW)',
+    description:
+      'HeyGen Video 1.0 — the simplest API in the UGC stack. ONE call does scene + subject + sound + lip-sync. Promo $0.01/sec through October. Bring your own HeyGen key.',
+    provider: 'byok.heygen',
+    mode: 'byok',
+    credits: 0,
+    retailUsdPerAction: null,
+    family: 'ugc',
+    qualityTier: 'premium',
+  },
   {
     id: 'kling-o3-ugc',
     displayName: 'Kling Pro',
