@@ -178,11 +178,18 @@ export interface UploadHeygenAssetResult {
 export async function submitHeygenVideo1(
   input: SubmitHeygenVideo1Input,
 ): Promise<SubmitHeygenVideo1Result> {
+  // Polish-30.0.6 Commit 178: fixed field name `duration_seconds` →
+  // `duration`. HeyGen's strict schema (Pydantic) rejected
+  // `duration_seconds` with "Extra inputs are not permitted" and the
+  // real field name is `duration` per HeyGen's reference docs
+  // (https://developers.heygen.com/reference/create-heygen-video).
+  // Integer seconds, 5-15 range. The input type's camelCase
+  // `durationSeconds` keeps the TS-side readability.
   const body: Record<string, unknown> = {
     model: 'heygen-video-1',
     prompt: input.prompt,
     mode: input.mode,
-    duration_seconds: input.durationSeconds,
+    duration: input.durationSeconds,
     resolution: input.resolution ?? '768p',
     aspect_ratio: input.aspectRatio ?? '9:16',
   };
