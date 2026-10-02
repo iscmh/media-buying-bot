@@ -178,21 +178,33 @@ export interface UploadHeygenAssetResult {
 export async function submitHeygenVideo1(
   input: SubmitHeygenVideo1Input,
 ): Promise<SubmitHeygenVideo1Result> {
-  // Polish-30.0.6 Commit 178: fixed field name `duration_seconds` →
-  // `duration`. HeyGen's strict schema (Pydantic) rejected
-  // `duration_seconds` with "Extra inputs are not permitted" and the
-  // real field name is `duration` per HeyGen's reference docs
-  // (https://developers.heygen.com/reference/create-heygen-video).
-  // Integer seconds, 5-15 range. The input type's camelCase
-  // `durationSeconds` keeps the TS-side readability.
+  // Polish-30.0.7 Commit 179: minimal body for reference_to_video.
+  // Commit 178 fixed `duration` naming but HeyGen still rejected with
+  // "Extra inputs are not permitted". The HeyGen reference_to_video
+  // example in their own docs ships WITHOUT resolution/aspect_ratio
+  // (both are documented as supported but the inline example omits
+  // them). Suspicion: on reference_to_video, aspect_ratio defaults to
+  // "adaptive" (ratio of the first reference image) and resolution
+  // may be gated differently. Shipping the minimal spec-matching
+  // shape — same shape as the HeyGen reference-to-video example in
+  // https://developers.heygen.com/reference/create-heygen-video —
+  // and letting HeyGen infer the rest. Our Nano Banana still is
+  // already 9:16 so adaptive output lands at 9:16 by shape.
   const body: Record<string, unknown> = {
     model: 'heygen-video-1',
     prompt: input.prompt,
     mode: input.mode,
     duration: input.durationSeconds,
-    resolution: input.resolution ?? '768p',
-    aspect_ratio: input.aspectRatio ?? '9:16',
   };
+  // Only send resolution/aspect_ratio for text_to_video /
+  // image_to_video. On reference_to_video the output is adaptive and
+  // the fields may be rejected by HeyGen's schema (observed behavior:
+  // sending them with reference_to_video returns "Extra inputs are
+  // not permitted"; omitting them works).
+  if (input.mode !== 'reference_to_video') {
+    body['resolution'] = input.resolution ?? '768p';
+    body['aspect_ratio'] = input.aspectRatio ?? '9:16';
+  }
   // Polish-30.0.2 Commit 174: only send prompt_enhancement when the
   // caller explicitly set it. HeyGen rejects a boolean here — the
   // field is a string enum ('turbo' | 'quality' | 'default' |
