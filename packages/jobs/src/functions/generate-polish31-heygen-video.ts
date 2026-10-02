@@ -650,25 +650,49 @@ async function renderOneVariation(
     const rawDialogue = clipDialogues[clipIndex]!;
     const dialogue = clipIndex === 0 ? `So, ${rawDialogue}` : rawDialogue;
     const clipPrompt = composeHeygenV1ClipPrompt(dialogue, entry.persona);
+    // Polish-30.0.3 Commit 175: inline retry around the submit call.
+    // Transient 60s timeouts on HeyGen's /v3/models/videos endpoint
+    // under load took down the first full-13-clip test even though
+    // every clip rendered the same way — a single transient blip at
+    // the top of the chain tore everything down. 2 attempts with a
+    // 5s backoff covers the "HeyGen was slow for a moment" class
+    // without extending wall-clock for genuine failures (the retry
+    // only runs when attempt 1 fails).
     const submitResult = await guardedStepRun(
       step,
       `clip-submit-${stepSuffix}-${clipIndex}`,
       async () => {
-        const r = await submitHeygenVideo1({
-          userId,
-          apiKey: keys.heygen,
-          prompt: clipPrompt,
-          mode: 'reference_to_video',
-          durationSeconds: HEYGEN_V1_CLIP_SECONDS,
-          resolution,
-          aspectRatio,
-          referenceImages: [{ assetId: heygenAsset.assetId }],
-          generationJobId: jobId,
-        });
+        const SUBMIT_RETRY_DELAYS_MS = [0, 5_000];
+        let lastResult: Awaited<ReturnType<typeof submitHeygenVideo1>> | null = null;
+        for (let attempt = 0; attempt < SUBMIT_RETRY_DELAYS_MS.length; attempt++) {
+          if (attempt > 0) {
+            await new Promise((r) => setTimeout(r, SUBMIT_RETRY_DELAYS_MS[attempt]!));
+          }
+          const r = await submitHeygenVideo1({
+            userId,
+            apiKey: keys.heygen,
+            prompt: clipPrompt,
+            mode: 'reference_to_video',
+            durationSeconds: HEYGEN_V1_CLIP_SECONDS,
+            resolution,
+            aspectRatio,
+            referenceImages: [{ assetId: heygenAsset.assetId }],
+            generationJobId: jobId,
+          });
+          lastResult = r;
+          if (r.ok && r.videoId) break;
+          // 4xx schema errors won't change on retry — bail fast.
+          const bodyLooksTransient =
+            !r.errorMessage ||
+            r.errorMessage.includes('timed out') ||
+            r.errorMessage.includes('HTTP 5') ||
+            r.errorMessage.includes('ECONNRESET');
+          if (!bodyLooksTransient) break;
+        }
         return safeInngestStepReturn({
-          ok: r.ok,
-          videoId: r.videoId,
-          errorMessage: r.errorMessage,
+          ok: lastResult?.ok ?? false,
+          videoId: lastResult?.videoId,
+          errorMessage: lastResult?.errorMessage,
         });
       },
     );

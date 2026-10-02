@@ -58,9 +58,17 @@ import type { Buffer } from 'node:buffer';
 import { callProvider } from './chokepoint';
 
 const HEYGEN_V3_BASE = 'https://api.heygen.com/v3';
-const SUBMIT_TIMEOUT_MS = 45_000;
-const POLL_TIMEOUT_MS = 20_000;
-const ASSET_UPLOAD_TIMEOUT_MS = 120_000;
+// Polish-30.0.3 Commit 175: bumped submit 45s → 120s and poll 20s → 45s.
+// First real-world submit timed out somewhere with "Provider call timed
+// out after 60000ms" during the per-clip submit chain; even though the
+// chokepoint message doesn't match any explicit timeout in this file,
+// the simplest explanation is HeyGen's /v3/models/videos endpoint is
+// slow to respond under load. Doubling the budget removes any chance
+// this file is the culprit and makes the next failure error-message
+// unambiguous.
+const SUBMIT_TIMEOUT_MS = 120_000;
+const POLL_TIMEOUT_MS = 45_000;
+const ASSET_UPLOAD_TIMEOUT_MS = 180_000;
 
 export type HeygenVideo1Mode = 'text_to_video' | 'image_to_video' | 'reference_to_video';
 
