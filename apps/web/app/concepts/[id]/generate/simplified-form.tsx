@@ -158,9 +158,10 @@ export function SimplifiedGenerationForm({
   // Polish-28.0.0 Commit 64: cloned-UGC card selection state.
   const [polish28Selected, setPolish28Selected] = React.useState(false);
   // Polish-28.3.0 Commit 86: variations-mode card selection state.
-  // Default primary picker experience — most operators want N distinct
-  // spokespeople, not one clone of the source actor.
-  const [polish28VariationsSelected, setPolish28VariationsSelected] = React.useState(false);
+  // Polish-30.0.10 Commit 182: back to default-selected after polish31
+  // HeyGen Video 1.0 showed it's a general cinematic model, not a
+  // talking-head UGC one. Avatar IV is HeyGen's actual UGC product.
+  const [polish28VariationsSelected, setPolish28VariationsSelected] = React.useState(true);
   // Polish-29.0.10 Commit 120: credit-backed multi-clip Seedance
   // variations picker + model tier state. Same variations flow but
   // pays the video render in credits instead of HeyGen.
@@ -172,10 +173,12 @@ export function SimplifiedGenerationForm({
   // by Google Flow subscription credits via useapi.net.
   const [polish30OmniSelected, setPolish30OmniSelected] = React.useState(false);
   // Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence pipeline.
-  // The simplification the user asked for — ONE API call per clip.
-  // Default-selected on mount (replaces the former polish28 default)
-  // so new users land on the recommended pipeline without a click.
-  const [polish31HeygenSelected, setPolish31HeygenSelected] = React.useState(true);
+  // Polish-30.0.10 Commit 182: default DISABLED. HeyGen Video 1.0 is a
+  // general cinematic model (built on MiniMax H3), not a UGC-tuned
+  // talking-head model like HeyGen's own Avatar IV. Live testing
+  // confirmed the output doesn't read as UGC. State hooks + card
+  // component stay live for rollback.
+  const [polish31HeygenSelected, setPolish31HeygenSelected] = React.useState(false);
   // Polish-25.3 Commit 18b: static ad picker + quality tier. Mutually
   // exclusive with polish23Selected + polish26Selected + modelId.
   // Defaults to Medium quality — matches the shipped cost line.
@@ -521,53 +524,51 @@ export function SimplifiedGenerationForm({
           on every concept, confusing users. */}
       {conceptType === 'ugc' && (
         <>
-          {/* Polish-30.0.0 Commit 172: HeyGen Video 1.0 convergence
-              pipeline. ONE API call per clip. User's explicit ask:
-              "find 1 simple API and focus on it, then add multiple."
-              This is the one — polish23/25/26/28-variations/29/30 cards
-              are hidden to converge every user on the single simple
-              pipeline. State hooks + card components for the hidden
-              pipelines are preserved on disk for a one-flag rollback
-              (flip the picker-card block below to show them). */}
-          <Polish31HeygenPickerCard
-            picked={polish31HeygenSelected}
+          {/* Polish-30.0.10 Commit 182: PRIMARY card now Avatar IV
+              (polish28 variations). polish31 HeyGen Video 1.0 was
+              demoted after live testing confirmed the output
+              doesn't read as UGC — it's HeyGen's general cinematic
+              model, not their talking-head UGC product. Avatar IV
+              IS the HeyGen UGC product (image-to-video lip-sync
+              from a Nano Banana character still). The polish31 card
+              moves behind SHOW_LEGACY_UGC_CARDS alongside polish23/
+              25/26/29/30 for rollback. */}
+          <Polish28VariationsPickerCard
+            picked={polish28VariationsSelected}
             disabled={isPending}
-            missingKeys={polish31HeygenMissingKeys}
+            missingKeys={polish28VariationsMissingKeys}
             onPick={() => {
-              setPolish31HeygenSelected(true);
-              setPolish30OmniSelected(false);
+              setPolish28VariationsSelected(true);
+              setPolish31HeygenSelected(false);
               setPolish29VariationsSelected(false);
-              setPolish28VariationsSelected(false);
+              setPolish30OmniSelected(false);
               setPolish28Selected(false);
               setStaticOpenaiSelected(false);
               setPolish26Selected(false);
               setPolish23Selected(false);
               setModelId(null);
             }}
-            variantCount={variantCount}
-            detectedSourceSeconds={detectedSourceSeconds}
           />
-          {/* Polish-30.0.0 Commit 172: older UGC picker cards hidden to
-              converge the user on the one simple API. Code paths kept
-              live for rollback — flip SHOW_LEGACY_UGC_CARDS to true to
-              resurrect. */}
+          {/* Polish-30.0.10 Commit 182: polish31 moved to legacy. */}
           {SHOW_LEGACY_UGC_CARDS && (
             <>
-              <Polish28VariationsPickerCard
-                picked={polish28VariationsSelected}
+              <Polish31HeygenPickerCard
+                picked={polish31HeygenSelected}
                 disabled={isPending}
-                missingKeys={polish28VariationsMissingKeys}
+                missingKeys={polish31HeygenMissingKeys}
                 onPick={() => {
-                  setPolish28VariationsSelected(true);
-                  setPolish31HeygenSelected(false);
-                  setPolish29VariationsSelected(false);
+                  setPolish31HeygenSelected(true);
+                  setPolish28VariationsSelected(false);
                   setPolish30OmniSelected(false);
+                  setPolish29VariationsSelected(false);
                   setPolish28Selected(false);
                   setStaticOpenaiSelected(false);
                   setPolish26Selected(false);
                   setPolish23Selected(false);
                   setModelId(null);
                 }}
+                variantCount={variantCount}
+                detectedSourceSeconds={detectedSourceSeconds}
               />
               <Polish30OmniPickerCard
                 picked={polish30OmniSelected}
