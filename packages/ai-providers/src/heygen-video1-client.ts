@@ -289,12 +289,19 @@ function normalizeStatus(raw: string | null): HeygenVideo1Status {
 /**
  * Uploads one asset (image/audio/video) to HeyGen's asset store.
  *
- * The v3 asset endpoint accepts raw binary with a Content-Type matching
- * the asset mime. HeyGen's own docs show the body as the file bytes
- * directly, not a multipart form. We bypass the shared callProvider
- * JSON wrapper for the body (callProvider does JSON.stringify) and
- * call fetch directly — but still log through logAiProviderApiCall for
- * audit parity. Keeps secrets out of logs the same way.
+ * Polish-30.0.1 Commit 173 hotfix: HeyGen's /v3/assets endpoint is
+ * MULTIPART, not raw binary. First live test failed with:
+ *   "File is required. Send a multipart/form-data request with a
+ *    'file' field."
+ * My Commit-172 wrapper sent raw bytes with Content-Type: image/png
+ * + x-filename header on the assumption HeyGen Video 1.0 reused the
+ * raw-binary pattern some other providers use (useapi.net's Dreamina
+ * asset upload, Replicate signed URLs). HeyGen wants a classic
+ * multipart form with a `file` field. Fix: build a FormData with
+ * the buffer wrapped in a Blob under the field name "file", drop the
+ * x-filename header (filename rides as the third arg to form.append),
+ * and let fetch pick its own multipart boundary (don't send a manual
+ * content-type — overriding the boundary would corrupt the body).
  */
 export async function uploadHeygenAsset(
   input: UploadHeygenAssetInput,
@@ -303,14 +310,17 @@ export async function uploadHeygenAsset(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ASSET_UPLOAD_TIMEOUT_MS);
   try {
+    const form = new FormData();
+    const blob = new Blob([new Uint8Array(input.buffer)], { type: input.contentType });
+    form.append('file', blob, input.filename);
     const res = await fetch(`${HEYGEN_V3_BASE}/assets`, {
       method: 'POST',
       headers: {
         'x-api-key': input.apiKey,
-        'content-type': input.contentType,
-        'x-filename': input.filename,
+        // No content-type — undici sets multipart/form-data with the
+        // right boundary when we pass a FormData body.
       },
-      body: new Uint8Array(input.buffer),
+      body: form,
       signal: controller.signal,
     });
     const text = await res.text();
