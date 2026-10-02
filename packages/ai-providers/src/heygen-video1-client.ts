@@ -193,25 +193,27 @@ export async function submitHeygenVideo1(
   if (input.promptEnhancement) {
     body['prompt_enhancement'] = input.promptEnhancement;
   }
-  // Polish-30.0.4 Commit 176: HeyGen's media-reference fields are
-  // DISCRIMINATED UNIONS. Attempt 1 (Commit 172) sent bare
-  // `{ asset_id: '...' }` which HeyGen's Pydantic validator rejected
-  // with "Unable to extract tag using discriminator 'type'". The
-  // documented tag shape across HeyGen v2 / v3 is
-  //   { type: 'asset', asset_id: '...' }
-  // mirroring their avatar shape (`{ type: 'avatar', avatar_id: ... }`).
-  // Applied to image_to_video / reference_to_video image/audio refs.
+  // Polish-30.0.5 Commit 177: HeyGen's discriminated-union tag is
+  // `'asset_id'` (not `'asset'` as Commit 176 guessed). Commit 176's
+  // `{ type: 'asset', asset_id: '...' }` tripped HeyGen's validator
+  // with "Input tag 'asset' ... does not match any of the expected
+  // tags: 'url', 'as..." — the second allowed value is truncated in
+  // the error but 'asset_id' is the only sensible value starting
+  // with 'as' that pairs with an asset_id payload. Shape is now
+  //   { type: 'asset_id', asset_id: '...' }
+  // Alternative (if HeyGen still rejects): pass a hosted URL via
+  //   { type: 'url', url: '<supabase public URL>' }.
   if (typeof input.seed === 'number') body['seed'] = input.seed;
   if (input.image) {
-    body['image'] = { type: 'asset', asset_id: input.image.assetId };
+    body['image'] = { type: 'asset_id', asset_id: input.image.assetId };
   }
   if (input.referenceImages && input.referenceImages.length > 0) {
     body['reference_images'] = input.referenceImages
       .slice(0, 9)
-      .map((r) => ({ type: 'asset', asset_id: r.assetId }));
+      .map((r) => ({ type: 'asset_id', asset_id: r.assetId }));
   }
   if (input.referenceAudio) {
-    body['reference_audio'] = { type: 'asset', asset_id: input.referenceAudio.assetId };
+    body['reference_audio'] = { type: 'asset_id', asset_id: input.referenceAudio.assetId };
   }
 
   const r = await callProvider<Record<string, unknown>>({
