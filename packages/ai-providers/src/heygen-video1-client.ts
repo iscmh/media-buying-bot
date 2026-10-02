@@ -193,15 +193,25 @@ export async function submitHeygenVideo1(
   if (input.promptEnhancement) {
     body['prompt_enhancement'] = input.promptEnhancement;
   }
+  // Polish-30.0.4 Commit 176: HeyGen's media-reference fields are
+  // DISCRIMINATED UNIONS. Attempt 1 (Commit 172) sent bare
+  // `{ asset_id: '...' }` which HeyGen's Pydantic validator rejected
+  // with "Unable to extract tag using discriminator 'type'". The
+  // documented tag shape across HeyGen v2 / v3 is
+  //   { type: 'asset', asset_id: '...' }
+  // mirroring their avatar shape (`{ type: 'avatar', avatar_id: ... }`).
+  // Applied to image_to_video / reference_to_video image/audio refs.
   if (typeof input.seed === 'number') body['seed'] = input.seed;
-  if (input.image) body['image'] = { asset_id: input.image.assetId };
+  if (input.image) {
+    body['image'] = { type: 'asset', asset_id: input.image.assetId };
+  }
   if (input.referenceImages && input.referenceImages.length > 0) {
     body['reference_images'] = input.referenceImages
       .slice(0, 9)
-      .map((r) => ({ asset_id: r.assetId }));
+      .map((r) => ({ type: 'asset', asset_id: r.assetId }));
   }
   if (input.referenceAudio) {
-    body['reference_audio'] = { asset_id: input.referenceAudio.assetId };
+    body['reference_audio'] = { type: 'asset', asset_id: input.referenceAudio.assetId };
   }
 
   const r = await callProvider<Record<string, unknown>>({
