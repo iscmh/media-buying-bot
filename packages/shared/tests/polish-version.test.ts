@@ -22,7 +22,7 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 30.0.1 (Polish-30.0.1 Commit 173 — HeyGen asset upload hotfix: multipart/form-data with `file` field instead of raw-binary POST)', () => {
+  it('is currently 30.0.2 (Polish-30.0.2 Commit 174 — HeyGen prompt_enhancement schema hotfix: string enum, not boolean)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
@@ -31,7 +31,7 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // 30.0.0 is a MAJOR bump: the user asked for convergence on one
     // simple API; the generate form now shows ONE UGC picker instead
     // of six. Older pipelines stay on disk for rollback.
-    expect(POLISH_VERSION).toBe('30.0.1');
+    expect(POLISH_VERSION).toBe('30.0.2');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {

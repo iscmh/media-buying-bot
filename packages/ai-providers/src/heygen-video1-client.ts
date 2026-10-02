@@ -104,12 +104,19 @@ export interface SubmitHeygenVideo1Input {
   /** Optional reference audio asset for voice conditioning. */
   referenceAudio?: { assetId: string };
   /**
-   * Prompt enhancement toggle. Default off — our ugc-prose-prompt
-   * builder already supplies the full scene/camera/delivery prose
-   * and HeyGen enhancement would overlay generic cinematic language
-   * that fights our hand-tuned prose.
+   * Prompt enhancement mode. Polish-30.0.2 Commit 174: HeyGen's
+   * `prompt_enhancement` field is a STRING ENUM (one of 'turbo' |
+   * 'quality' | 'default' | 'disabled'), not a boolean as my Commit-172
+   * guess assumed. First live run hit:
+   *   "Input should be 'turbo', 'quality', 'default' or 'disabled'"
+   *
+   * Default omitted so HeyGen picks its own default (our ugc-prose-
+   * prompt builder already supplies the full scene/camera/delivery
+   * prose so we don't need enhancement). polish31 can pass 'disabled'
+   * if we observe HeyGen injecting cinematic language on top of our
+   * hand-tuned prose.
    */
-  promptEnhancement?: boolean;
+  promptEnhancement?: 'turbo' | 'quality' | 'default' | 'disabled';
   generationJobId?: string;
 }
 
@@ -170,8 +177,14 @@ export async function submitHeygenVideo1(
     duration_seconds: input.durationSeconds,
     resolution: input.resolution ?? '768p',
     aspect_ratio: input.aspectRatio ?? '9:16',
-    prompt_enhancement: input.promptEnhancement ?? false,
   };
+  // Polish-30.0.2 Commit 174: only send prompt_enhancement when the
+  // caller explicitly set it. HeyGen rejects a boolean here — the
+  // field is a string enum ('turbo' | 'quality' | 'default' |
+  // 'disabled'). Omit → HeyGen picks its own default.
+  if (input.promptEnhancement) {
+    body['prompt_enhancement'] = input.promptEnhancement;
+  }
   if (typeof input.seed === 'number') body['seed'] = input.seed;
   if (input.image) body['image'] = { asset_id: input.image.assetId };
   if (input.referenceImages && input.referenceImages.length > 0) {
