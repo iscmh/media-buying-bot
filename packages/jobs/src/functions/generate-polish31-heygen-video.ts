@@ -781,7 +781,15 @@ async function renderOneVariation(
         });
       }
       let replicateUrl: string | null = null;
-      const CONCAT_POLL_MAX = 36;
+      // Polish-30.0.8 Commit 180: bumped poll ceiling 36 (3 min) →
+      // 60 (5 min). A 11-clip composite at 768p is ~55 MB of input
+      // video; Replicate's stream-copy concat typically runs 3-5 min
+      // on a payload that size, so 3 min was too tight — first fully
+      // successful HeyGen render (all 11 clips rendered) died here.
+      // 5 min is the ceiling for Vercel Pro's function timeout, so
+      // this is also the practical max before we'd need to split the
+      // concat poll across step.sleep boundaries.
+      const CONCAT_POLL_MAX = 60;
       const CONCAT_POLL_INTERVAL_MS = 5000;
       for (let attempt = 0; attempt < CONCAT_POLL_MAX; attempt++) {
         if (attempt > 0) await new Promise((r) => setTimeout(r, CONCAT_POLL_INTERVAL_MS));

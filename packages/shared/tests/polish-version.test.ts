@@ -22,7 +22,7 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // covered by the existing 28.\d+.\d+ arm above.
   });
 
-  it('is currently 30.0.7 (Polish-30.0.7 Commit 179 — HeyGen reference_to_video minimal body: drop aspect_ratio + resolution for that mode)', () => {
+  it('is currently 30.0.8 (Polish-30.0.8 Commit 180 — HeyGen clips rendered! Concat poll ceiling bumped 3→5 min)', () => {
     // The value MUST match packages/shared/src/polish-version.ts.
     // Bumping the constant without updating this pin fails CI —
     // that's the point: a version bump is a deliberate act, not
@@ -31,7 +31,7 @@ describe('Polish-21.0.15: POLISH_VERSION constant', () => {
     // 30.0.0 is a MAJOR bump: the user asked for convergence on one
     // simple API; the generate form now shows ONE UGC picker instead
     // of six. Older pipelines stay on disk for rollback.
-    expect(POLISH_VERSION).toBe('30.0.7');
+    expect(POLISH_VERSION).toBe('30.0.8');
   });
 
   it('POLISH_RELEASE_NAME is a non-empty human-readable slug', () => {
