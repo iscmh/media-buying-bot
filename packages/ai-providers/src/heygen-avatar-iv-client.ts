@@ -472,13 +472,18 @@ export async function fetchHeygenVoices(input: {
 
 /**
  * Pick the best-matching HeyGen voice for a persona description.
- * Heuristic: filter to English voices matching the target gender;
- * prefer voices with emotion_support; fall back to first English
- * voice if no gender match. Throws if no English voices exist at
- * all (should never happen — HeyGen ships hundreds by default).
  *
- * Persona → gender extraction uses the same keyword-scan as the
- * ElevenLabs matcher in @mbb/shared.
+ * Polish-30.0.13 Commit 185: scoring-based matcher instead of
+ * first-English-of-gender. The old matcher returned the FIRST
+ * emotion-support voice of the matched gender — on a 60yo male
+ * persona it would hand back whatever young male voice happened to
+ * come back first from HeyGen, which read totally wrong. New shape:
+ * score every voice by (gender, age, accent/ethnicity, emotion
+ * support, English language) and return the single highest-scoring
+ * voice. All extraction is done against the voice NAME string
+ * because HeyGen's voice object only exposes {voice_id, language,
+ * gender, name, preview_audio, support_pause, emotion_support} —
+ * age / accent live inside the human-readable name field.
  */
 export function matchHeygenVoiceForPersona(
   voices: readonly HeygenVoice[],
@@ -488,30 +493,132 @@ export function matchHeygenVoiceForPersona(
     throw new Error('matchHeygenVoiceForPersona: empty voice list from HeyGen.');
   }
   const lower = personaDescription.toLowerCase();
+
+  // ---- Persona → target gender ----
   const femaleHit = /\b(woman|female|girl|lady|she\b|her\b|hers|feminine)\b/.test(lower);
   const maleHit = /\b(man|male|guy|boy|dude|he\b|him\b|his\b|masculine)\b/.test(lower);
   const targetGender: 'female' | 'male' | null =
     femaleHit && !maleHit ? 'female' : maleHit && !femaleHit ? 'male' : null;
 
+  // ---- Persona → target age bucket ----
+  // Age-range strings land in the persona as "20s", "30s", "40-50",
+  // "60s", or (rarely) a bare integer. Pull the first 2-digit number.
+  const ageMatch = lower.match(/(\b\d{2})s\b|(\b\d{2})\s*[-–]\s*\d{2}|\b(\d{2})\b/);
+  const ageNum = ageMatch ? Number(ageMatch[1] ?? ageMatch[2] ?? ageMatch[3]) : null;
+  const targetAge: 'young' | 'adult' | 'mature' | 'senior' | null =
+    ageNum == null
+      ? null
+      : ageNum < 28
+        ? 'young'
+        : ageNum < 42
+          ? 'adult'
+          : ageNum < 55
+            ? 'mature'
+            : 'senior';
+
+  // ---- Persona → target ethnicity / accent hint ----
+  const ethnicityHints: Array<{ test: RegExp; keywords: string[] }> = [
+    { test: /\bblack\b|\bafrican[- ]american\b|\bafro\b/, keywords: ['african', 'black', 'aa'] },
+    {
+      test: /\bhispanic\b|\blatino\b|\blatina\b|\bmexican\b|\bspanish\b/,
+      keywords: ['hispanic', 'latino', 'latina', 'spanish', 'mexican'],
+    },
+    {
+      test: /\basian\b|\bchinese\b|\bjapanese\b|\bkorean\b|\bvietnamese\b/,
+      keywords: ['asian', 'chinese', 'japanese', 'korean'],
+    },
+    { test: /\bindian\b|\bsouth asian\b/, keywords: ['indian', 'south asian'] },
+    { test: /\bmiddle[- ]eastern\b|\barab\b/, keywords: ['arabic', 'middle eastern'] },
+    {
+      test: /\bbritish\b|\bbrit\b|\benglish\b.*\baccent\b/,
+      keywords: ['british', 'uk', 'english'],
+    },
+    { test: /\baustralian\b|\baussie\b/, keywords: ['australian', 'aussie'] },
+  ];
+  const ethBucket = ethnicityHints.find((h) => h.test.test(lower));
+  const ethKeywords = ethBucket?.keywords ?? [];
+
   const isEnglish = (v: HeygenVoice): boolean =>
     typeof v.language === 'string' && v.language.toLowerCase().startsWith('en');
-  const englishVoices = voices.filter(isEnglish);
-  if (englishVoices.length === 0) {
-    // Fallback: any language, first voice
-    return voices[0]!;
+
+  // Age keywords commonly found in HeyGen voice names (observed from
+  // the live /v2/voices roster): "Young Adult", "Teen", "Adult",
+  // "Middle-Aged", "Mature", "Senior", "Elderly", "Old". Also look
+  // for voice-timbre hints: "Deep" / "Warm" / "Rich" / "Gravelly" lean
+  // older; "Bright" / "Clear" / "Perky" / "Energetic" lean younger.
+  const AGE_KEYWORD_SCORE: Record<'young' | 'adult' | 'mature' | 'senior', RegExp[]> = {
+    young: [/\byoung\b/, /\bteen\b/, /\bperky\b/, /\benerget/, /\bbright\b/, /\bgen[- ]?z\b/],
+    adult: [/\badult\b(?!\s*young)/, /\bmillennial\b/, /\bprofessional\b/, /\bconfident\b/],
+    mature: [/\bmature\b/, /\bmiddle[- ]aged\b/, /\bwarm\b/, /\brich\b/, /\bfull\b/],
+    senior: [
+      /\bsenior\b/,
+      /\belderly\b/,
+      /\bold\b/,
+      /\bdeep\b/,
+      /\bgravell/,
+      /\bseasoned\b/,
+      /\bveteran\b/,
+      /\bgrandpa\b/,
+      /\bgrandma\b/,
+    ],
+  };
+
+  function scoreVoice(v: HeygenVoice): number {
+    let score = 0;
+    const name = (v.name ?? '').toLowerCase();
+
+    // English language: baseline hard requirement (negative if not).
+    if (isEnglish(v)) score += 10;
+    else score -= 100;
+
+    // Gender match: huge weight — a wrong-gender voice is unacceptable.
+    if (targetGender && typeof v.gender === 'string') {
+      if (v.gender.toLowerCase() === targetGender) score += 50;
+      else score -= 100;
+    }
+
+    // Age bucket match: scan voice name for age keywords.
+    if (targetAge) {
+      const positiveHits = AGE_KEYWORD_SCORE[targetAge].filter((re) => re.test(name)).length;
+      score += positiveHits * 30;
+      // Penalize if voice name signals the WRONG age bucket.
+      for (const otherAge of ['young', 'adult', 'mature', 'senior'] as const) {
+        if (otherAge === targetAge) continue;
+        const wrongHits = AGE_KEYWORD_SCORE[otherAge].filter((re) => re.test(name)).length;
+        if (wrongHits > 0) score -= wrongHits * 10;
+      }
+    }
+
+    // Ethnicity / accent match: scan voice name for keywords.
+    if (ethKeywords.length > 0) {
+      for (const kw of ethKeywords) {
+        if (name.includes(kw)) {
+          score += 25;
+          break;
+        }
+      }
+    }
+
+    // Emotion support — natural UGC delivery.
+    if (v.emotion_support === true) score += 5;
+
+    return score;
   }
-  if (targetGender) {
-    const matched = englishVoices.filter(
-      (v) => typeof v.gender === 'string' && v.gender.toLowerCase() === targetGender,
-    );
-    // Prefer emotion-support voices for UGC (more natural delivery)
-    const withEmotion = matched.filter((v) => v.emotion_support === true);
-    if (withEmotion.length > 0) return withEmotion[0]!;
-    if (matched.length > 0) return matched[0]!;
+
+  const scored = voices
+    .map((v) => ({ v, s: scoreVoice(v) }))
+    .filter((x) => x.s > -50) // drop hard-fails (wrong gender / non-English)
+    .sort((a, b) => b.s - a.s);
+
+  if (scored.length === 0) {
+    // Hard fallback: first English voice of ANY config, else first voice.
+    const englishVoices = voices.filter(isEnglish);
+    return englishVoices[0] ?? voices[0]!;
   }
-  // No gender match — first English voice with emotion support, else first English
-  const englishWithEmotion = englishVoices.filter((v) => v.emotion_support === true);
-  return englishWithEmotion[0] ?? englishVoices[0]!;
+
+  // Among the top-N tied-ish scores, pick the first — stable
+  // selection within a job so re-renders produce the same voice.
+  return scored[0]!.v;
 }
 
 // =========================================================================
