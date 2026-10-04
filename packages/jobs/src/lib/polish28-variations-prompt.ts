@@ -61,18 +61,42 @@ Emit ONE valid JSON array. NO surrounding text, NO markdown code fences,
 NO commentary. If you can't produce N pairs, produce as many as you can
 but still emit valid JSON.
 
-# DIVERSITY REQUIREMENT (persona only, not script)
+# PERSONA RULES — MATCH THE SOURCE ACTOR'S DEMO
 
-Personas MUST vary across the batch:
-- Gender: roughly balanced unless the offer is gender-locked (women's
-  health, testosterone, etc.).
-- Age: span at least 2 age buckets.
-- Ethnicity: at least 2 different values when N >= 3.
-- Look: distinct hair / wardrobe / energy per entry.
+The source actor in the vision analysis IS the audience's reference
+point. If the source is a 60yo white man, your variations are
+60-ish-year-old men. If the source is a 25yo black woman, your
+variations are 20s-ish women. The source's demographics are the
+PROVEN demographic for this offer — do not flip gender, do not jump
+2+ age buckets.
 
-Personas MATCH the offer's target demographic (keto → health-conscious
-30-50s, not teens; crypto → tech-forward 25-45, not retirees). Use the
-niche_category from the vision analysis to steer the pool.
+Hard rules per variant:
+
+- **Gender**: MUST match the source actor's gender. Never flip
+  male↔female. Only exception: an obvious male/female supporting
+  cast role the source already shows (a wife-testimonial beat
+  spoken by a woman inside a male-source ad). No gratuitous flips.
+- **Age**: stay within ±10 years of the source actor's age_range
+  midpoint. 60yo source → variants are 50-70. 25yo source → 20-35.
+  Never jump from 60s to 20s or vice versa.
+- **Ethnicity**: THIS is where you vary. Rotate ethnicity across
+  the batch — different ethnicity per variant where N allows — but
+  keep gender + age locked to source. 60yo white male source → 60yo
+  black male, 60yo hispanic male, 60yo asian male, 60yo white male
+  with a different wardrobe/vibe, etc.
+- **Look**: distinct hair / wardrobe / energy / grooming per entry.
+  This + ethnicity are your real variation axes.
+
+Why: this is an A/B test on the SAME proven demographic signal.
+Flipping a 60yo male source to a 20yo female variant isn't a
+variation — it's a totally different ad targeting a totally
+different audience. We want "more of what works," not "random
+demographic roulette."
+
+If the vision analysis is thin / missing persona info, use the
+niche_category to pick a plausible demographic and stay consistent
+across variants (don't invent diversity when the source demo is
+unknown — pick one and ride it).
 
 # SCRIPT REQUIREMENTS — THIS IS WHAT MATTERS
 
@@ -218,32 +242,16 @@ export function composePolish28VariationsUserPrompt(
     ? `\nSCRIPT LENGTH OVERRIDE: each script MUST be at least ${minScriptWords} words. This overrides the "match source length ±20%" rule from the system prompt for THIS request only — the caller is rendering a multi-clip composite ad and needs enough script to fill it. Do not cut the CTA short to hit the minimum; extend the middle (social proof, second benefit, "and here's the thing" beat) to reach the target.\n`
     : '';
 
-  // Polish-29.0.62 Commit 171: rotational persona hint. Live testing
-  // on N=1 always landed on the same demographic (Black woman, 30s)
-  // because Claude's temperature=0 output collapses to a single mode
-  // when the diversity constraint (>=2 ethnicities required at N>=3)
-  // isn't triggered. Fix: sprinkle a per-call random hint that
-  // suggests a specific demographic bucket. Claude can still deviate
-  // if the source ad's persona strongly demands otherwise (women's
-  // health offer with a male persona would look weird), but the
-  // baseline rotates evenly across single-variant jobs.
-  const rotationBuckets = [
-    { gender: 'female', ethnicity: 'white', age: '20s' },
-    { gender: 'female', ethnicity: 'hispanic', age: '20s' },
-    { gender: 'female', ethnicity: 'asian', age: '30s' },
-    { gender: 'female', ethnicity: 'black', age: '30s' },
-    { gender: 'female', ethnicity: 'white', age: '40s' },
-    { gender: 'male', ethnicity: 'white', age: '20s' },
-    { gender: 'male', ethnicity: 'hispanic', age: '30s' },
-    { gender: 'male', ethnicity: 'black', age: '30s' },
-    { gender: 'male', ethnicity: 'asian', age: '20s' },
-    { gender: 'male', ethnicity: 'white', age: '40s' },
-  ];
-  const pick = rotationBuckets[Math.floor(Math.random() * rotationBuckets.length)]!;
-  const rotationNote =
-    clampedN === 1
-      ? `\nDIVERSITY ROTATION: for THIS single-variant call, prefer a ${pick.gender} persona in ${pick.age}, ${pick.ethnicity} — unless the source ad has a clear gender-locked hook (women's health, testosterone product, etc.) that would make this persona incoherent. Do not add explanatory prose about the choice; just emit the JSON.\n`
-      : '';
+  // Polish-30.0.12 Commit 184: KILLED the N=1 random demographic rotation.
+  // Commit 171 was sprinkling a random demographic bucket to prevent
+  // Claude from collapsing to "Black woman 30s" on every N=1 call, but
+  // it was flipping a 60yo male source into a 20yo female variant —
+  // the opposite of what the operator wants. The new DIVERSITY → SOURCE
+  // DEMO MATCHING rules in the system prompt force source alignment,
+  // and the ethnicity-rotation emphasis gives Claude a legit variation
+  // axis without flipping gender/age. Keeping the symbol as a dead
+  // const for the rollback diff; rotationNote now empty.
+  const rotationNote = '';
 
   return `Source-ad vision analysis:
 
