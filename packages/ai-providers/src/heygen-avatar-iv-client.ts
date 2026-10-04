@@ -610,6 +610,21 @@ export function matchHeygenVoiceForPersona(
     .filter((x) => x.s > -50) // drop hard-fails (wrong gender / non-English)
     .sort((a, b) => b.s - a.s);
 
+  // Log the top-3 candidates + their scores so Vercel logs let the
+  // operator see WHY a voice was picked and what the runner-ups were.
+  // Flat one-liner for easy grep.
+  const top3 = scored
+    .slice(0, 3)
+    .map((x) => `${x.v.name ?? x.v.voice_id}(${x.s})`)
+    .join(' | ');
+  console.log(
+    `[heygen] voice-match persona=${JSON.stringify({
+      gender: targetGender,
+      age: targetAge,
+      ethKeywords,
+    })} roster_size=${voices.length} eligible=${scored.length} top3=${top3}`,
+  );
+
   if (scored.length === 0) {
     // Hard fallback: first English voice of ANY config, else first voice.
     const englishVoices = voices.filter(isEnglish);
