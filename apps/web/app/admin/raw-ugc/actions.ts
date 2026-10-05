@@ -1,43 +1,87 @@
 'use server';
 
-import { checkMakeugcVideoStatus, listMakeugcVoices, submitMakeugcVideo } from '@mbb/ai-providers';
+import { Buffer } from 'node:buffer';
+import {
+  checkHeygenAvatarIvStatus,
+  cloneCharacterReferenceImage,
+  composeNanoBananaCharacterClonePrompt,
+  fetchHeygenVoices,
+  matchHeygenVoiceForPersona,
+  submitHeygenAvatarIvGeneration,
+  uploadHeygenImageAsset,
+  type HeygenVoice,
+} from '@mbb/ai-providers';
+import { getDb, schema } from '@mbb/db';
+import { decryptSecret } from '@mbb/db';
 import { requireAdmin } from '@/lib/admin-gate';
+import { and, eq, isNull } from 'drizzle-orm';
 
 /**
- * Polish-25.6 Commit 35: admin-only raw MakeUGC generator server
- * actions. No DB persistence — this is a personal tool for the
- * operator to spin one-off UGC videos for their own ad campaigns.
- * Video URLs come back from MakeUGC's CDN, admin downloads directly.
+ * Polish-30.0.15 Commit 187: admin-only raw UGC generator rewired to
+ * the Avatar IV + Nano Banana Pro flow. The pre-Polish-27 version
+ * targeted MakeUGC which is deprecated; this version mirrors what
+ * polish28_variations_ugc does per-variant but drives the inputs
+ * (persona + script) from the admin's form instead of a Claude batch.
  *
- * NO SHARED CODE WITH POLISH-25 USER WORKER. Reuses the raw MakeUGC
- * client functions (`submitMakeugcVideo`, `checkMakeugcVideoStatus`,
- * `listMakeugcVoices`) — the same primitives Polish-25 wraps, but
- * without the analysis / condenser / avatar-matcher pipeline the
- * user-facing flow adds. Skipping those steps is the whole point.
+ * Flow:
+ *   1. Admin picks persona (gender, age bucket, ethnicity, look text) and
+ *      writes a script.
+ *   2. Server action loads admin's own BYOK (Gemini + HeyGen) from the
+ *      right table — gemini lives in tool_connections, heygen lives in
+ *      ai_provider_connections (same split loadDecryptedKeys uses).
+ *   3. Nano Banana Pro renders a character still from persona.look.
+ *   4. Upload still to HeyGen as asset_id.
+ *   5. Fetch HeyGen voice roster → matchHeygenVoiceForPersona scores and
+ *      picks a voice (same scoring matcher as the automated pipeline).
+ *   6. Submit Avatar IV with image_key + script + voice_id.
+ *   7. Return video_id.
  *
- * Auth: every action guards `requireAdmin()` first. Never invocable
- * by a non-admin session cookie.
- *
- * Key resolution: reads MAKEUGC_MANAGED_KEY directly (the operator's
- * platform key). Falls back to a clear error if missing so the admin
- * knows what to set. NOT using `resolveMakeugcKey` from packages/jobs
- * because that helper also probes for user BYOK — for an admin tool
- * the platform key is the only correct source.
+ * Client polls checkRawUgcStatusAction every ~5s until completed/failed.
  */
 
-const ENV_KEY_NAME = 'MAKEUGC_MANAGED_KEY';
-
-function resolveManagedKey(): string {
-  const key = process.env[ENV_KEY_NAME]?.trim();
-  if (!key || key.length === 0) {
-    throw new Error(`${ENV_KEY_NAME} env var is not set. Set it in Vercel + local .env.`);
+async function loadGeminiKey(userId: string): Promise<string> {
+  const db = getDb();
+  const row = await db.query.toolConnections.findFirst({
+    where: and(
+      eq(schema.toolConnections.userId, userId),
+      eq(schema.toolConnections.provider, 'gemini'),
+      eq(schema.toolConnections.status, 'active'),
+      isNull(schema.toolConnections.deletedAt),
+    ),
+    columns: { apiKeyEncrypted: true },
+  });
+  if (!row?.apiKeyEncrypted) {
+    throw new Error('No Gemini key connected. Connect at /settings/connections.');
   }
-  return key;
+  const decrypted = await decryptSecret(row.apiKeyEncrypted);
+  if (!decrypted?.trim()) throw new Error('Decrypted Gemini key is empty.');
+  return decrypted;
+}
+
+async function loadHeygenKey(userId: string): Promise<string> {
+  const db = getDb();
+  const row = await db.query.aiProviderConnections.findFirst({
+    where: and(
+      eq(schema.aiProviderConnections.userId, userId),
+      eq(schema.aiProviderConnections.provider, 'heygen'),
+      eq(schema.aiProviderConnections.status, 'active'),
+      isNull(schema.aiProviderConnections.deletedAt),
+    ),
+    columns: { apiKeyEncrypted: true },
+  });
+  if (!row?.apiKeyEncrypted) {
+    throw new Error('No HeyGen key connected. Connect at /settings/connections.');
+  }
+  const decrypted = await decryptSecret(row.apiKeyEncrypted);
+  if (!decrypted?.trim()) throw new Error('Decrypted HeyGen key is empty.');
+  return decrypted;
 }
 
 export interface SubmitRawUgcInput {
-  avatarId: string;
-  voiceId?: string;
+  gender: 'male' | 'female';
+  ageRange: string;
+  ethnicity: string;
+  look: string;
   script: string;
   videoName?: string;
 }
@@ -45,69 +89,158 @@ export interface SubmitRawUgcInput {
 export interface SubmitRawUgcResult {
   ok: boolean;
   videoId?: string;
+  characterUrl?: string;
+  voiceName?: string;
   errorMessage?: string;
 }
 
 /**
- * Fire the MakeUGC submit call with the admin's picked avatar +
- * script. Returns quickly with the video id; client polls
- * `checkRawUgcStatusAction` every few seconds until it flips to
- * completed or failed.
+ * Fire the full character-generate + voice-match + Avatar IV submit
+ * chain. Returns quickly with the HeyGen video_id; client polls
+ * checkRawUgcStatusAction every few seconds until completed.
  */
 export async function submitRawUgcAction(input: SubmitRawUgcInput): Promise<SubmitRawUgcResult> {
   const { userId } = await requireAdmin();
 
-  if (!input.avatarId) return { ok: false, errorMessage: 'Pick an avatar first.' };
+  if (!input.gender || !input.ageRange || !input.ethnicity) {
+    return { ok: false, errorMessage: 'Fill gender, age, and ethnicity.' };
+  }
+  if (!input.look?.trim()) return { ok: false, errorMessage: 'Describe the look.' };
   if (!input.script?.trim()) return { ok: false, errorMessage: 'Script is empty.' };
 
-  let apiKey: string;
+  let geminiKey: string;
+  let heygenKey: string;
   try {
-    apiKey = resolveManagedKey();
+    [geminiKey, heygenKey] = await Promise.all([loadGeminiKey(userId), loadHeygenKey(userId)]);
   } catch (err) {
     return { ok: false, errorMessage: err instanceof Error ? err.message : String(err) };
   }
 
+  // 1. Nano Banana Pro character still from persona.look
+  let characterBase64: string;
+  let characterMime: string;
   try {
-    const result = await submitMakeugcVideo({
-      userId, // for provider-log correlation only
-      apiKey,
-      avatarId: input.avatarId,
-      voiceScript: input.script,
-      voiceId: input.voiceId || undefined,
-      videoName: input.videoName || `admin-raw-${new Date().toISOString().slice(0, 19)}`,
+    const personaText =
+      `Age: ${input.ageRange}. Gender: ${input.gender}. ` +
+      `Ethnicity: ${input.ethnicity}. Look: ${input.look.trim()}`;
+    const prompt = composeNanoBananaCharacterClonePrompt(personaText);
+    const grayPixelPngBase64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    const r = await cloneCharacterReferenceImage({
+      userId,
+      apiKey: geminiKey,
+      prompt,
+      referenceImageBase64: grayPixelPngBase64,
+      referenceImageMimeType: 'image/png',
     });
-    if (!result.ok) {
+    if (!r.ok || !r.imageBase64) {
       return {
         ok: false,
-        errorMessage:
-          result.errorMessage ?? 'Instant UGC submit returned not-ok without a message.',
+        errorMessage: `Character gen failed: ${r.errorMessage ?? 'unknown Nano Banana error'}`,
       };
     }
-    return { ok: true, videoId: result.videoId };
+    characterBase64 = r.imageBase64;
+    characterMime = r.imageMimeType ?? 'image/png';
   } catch (err) {
-    return { ok: false, errorMessage: err instanceof Error ? err.message : String(err) };
+    return {
+      ok: false,
+      errorMessage: `Character gen crashed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  // 2. Upload character to HeyGen as asset
+  let imageKey: string;
+  try {
+    const bytes = new Uint8Array(Buffer.from(characterBase64, 'base64'));
+    const normalizedMime =
+      characterMime === 'image/jpeg' || characterMime === 'image/jpg' ? 'image/jpeg' : 'image/png';
+    const r = await uploadHeygenImageAsset({
+      userId,
+      apiKey: heygenKey,
+      imageBytes: bytes,
+      imageMimeType: normalizedMime,
+    });
+    if (!r.ok || !r.imageKey) {
+      return {
+        ok: false,
+        errorMessage: `HeyGen asset upload failed: ${r.errorMessage ?? 'unknown'}`,
+      };
+    }
+    imageKey = r.imageKey;
+  } catch (err) {
+    return {
+      ok: false,
+      errorMessage: `HeyGen upload crashed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  // 3. Fetch HeyGen voice roster + match persona
+  let matchedVoice: HeygenVoice;
+  try {
+    const fetched = await fetchHeygenVoices({ userId, apiKey: heygenKey });
+    if (!fetched.ok || fetched.voices.length === 0) {
+      return {
+        ok: false,
+        errorMessage: `HeyGen voice-list failed: ${fetched.errorMessage ?? 'no voices'}`,
+      };
+    }
+    const personaSentence = `${input.ageRange} ${input.gender} ${input.ethnicity}. ${input.look.trim()}`;
+    matchedVoice = matchHeygenVoiceForPersona(fetched.voices, personaSentence);
+  } catch (err) {
+    return {
+      ok: false,
+      errorMessage: `Voice match crashed: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
+  // 4. Submit Avatar IV with image_key + script + voice_id
+  try {
+    const title = input.videoName?.trim() ?? `admin-raw-${new Date().toISOString().slice(0, 19)}`;
+    const r = await submitHeygenAvatarIvGeneration({
+      userId,
+      apiKey: heygenKey,
+      imageKey,
+      script: input.script.trim(),
+      voiceId: matchedVoice.voice_id,
+      videoTitle: title,
+    });
+    if (!r.ok || !r.videoId) {
+      return {
+        ok: false,
+        errorMessage: `HeyGen submit failed: ${r.errorMessage ?? 'no videoId'}`,
+      };
+    }
+    return {
+      ok: true,
+      videoId: r.videoId,
+      voiceName: matchedVoice.name,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      errorMessage: `HeyGen submit crashed: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 }
 
 export interface CheckRawUgcResult {
   ok: boolean;
   status: 'processing' | 'completed' | 'failed';
-  url?: string;
+  videoUrl?: string;
   errorMessage?: string;
 }
 
 /**
- * Client polls this every ~5s while a submit is in flight. Returns
- * the same shape the underlying client returns — status +
- * (on completed) url pointing at MakeUGC's CDN.
+ * Poll the Avatar IV job. Client calls this every ~5s until the
+ * status flips to completed or failed.
  */
 export async function checkRawUgcStatusAction(videoId: string): Promise<CheckRawUgcResult> {
   const { userId } = await requireAdmin();
   if (!videoId) return { ok: false, status: 'failed', errorMessage: 'Missing videoId.' };
 
-  let apiKey: string;
+  let heygenKey: string;
   try {
-    apiKey = resolveManagedKey();
+    heygenKey = await loadHeygenKey(userId);
   } catch (err) {
     return {
       ok: false,
@@ -117,90 +250,26 @@ export async function checkRawUgcStatusAction(videoId: string): Promise<CheckRaw
   }
 
   try {
-    const result = await checkMakeugcVideoStatus({ userId, apiKey, videoId });
-    if (!result.ok) {
+    const r = await checkHeygenAvatarIvStatus({ userId, apiKey: heygenKey, videoId });
+    if (!r.ok) {
       return {
         ok: false,
         status: 'failed',
-        errorMessage:
-          result.errorMessage ?? 'Instant UGC status returned not-ok without a message.',
+        errorMessage: r.errorMessage ?? 'Status check returned not-ok.',
       };
     }
-    return { ok: true, status: result.status, url: result.url };
+    const bucket: 'processing' | 'completed' | 'failed' =
+      r.status === 'completed' ? 'completed' : r.status === 'failed' ? 'failed' : 'processing';
+    return {
+      ok: true,
+      status: bucket,
+      videoUrl: r.videoUrl ?? undefined,
+      errorMessage: r.errorMessage ?? undefined,
+    };
   } catch (err) {
     return {
       ok: false,
       status: 'failed',
-      errorMessage: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-export interface RawUgcVoice {
-  id: string;
-  name: string;
-  language?: string;
-  gender?: string;
-  accent?: string;
-}
-
-export interface ListRawUgcVoicesResult {
-  ok: boolean;
-  voices: RawUgcVoice[];
-  errorMessage?: string;
-}
-
-/**
- * Load the MakeUGC voice catalog on demand for the optional voice
- * override dropdown. Filtered by gender when passed. Kept as a
- * server action (not a static prop on the page) so the page-load
- * time isn't blocked on a 15s upstream — the client requests voices
- * only after the admin picks an avatar.
- */
-export async function listRawUgcVoicesAction(gender?: string): Promise<ListRawUgcVoicesResult> {
-  const { userId } = await requireAdmin();
-  let apiKey: string;
-  try {
-    apiKey = resolveManagedKey();
-  } catch (err) {
-    return {
-      ok: false,
-      voices: [],
-      errorMessage: err instanceof Error ? err.message : String(err),
-    };
-  }
-
-  const normalizedGender: 'Male' | 'Female' | undefined =
-    gender === 'Male' || gender === 'Female' ? gender : undefined;
-
-  try {
-    const result = await listMakeugcVoices({
-      userId,
-      apiKey,
-      gender: normalizedGender,
-      language: 'English',
-    });
-    if (!result.ok) {
-      return {
-        ok: false,
-        voices: [],
-        errorMessage: result.errorMessage ?? 'Instant UGC voices returned not-ok.',
-      };
-    }
-    return {
-      ok: true,
-      voices: result.voices.map((v) => ({
-        id: v.id,
-        name: v.name,
-        language: v.language,
-        gender: v.gender,
-        accent: v.accent,
-      })),
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      voices: [],
       errorMessage: err instanceof Error ? err.message : String(err),
     };
   }
