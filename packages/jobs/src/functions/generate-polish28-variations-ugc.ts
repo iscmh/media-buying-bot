@@ -280,30 +280,44 @@ export const generatePolish28VariationsUgc = inngest.createFunction(
         return safeInngestStepReturn({ voices: fetched.voices });
       });
 
-      // ---------- Step G: render each variant in parallel ----------
-      const variantResults = await Promise.all(
-        variations.entries.map((entry, index) =>
-          renderOneVariant({
+      // ---------- Step G: render each variant SEQUENTIALLY ----------
+      // Polish-30.0.16 Commit 188: switched Promise.all → sequential
+      // for loop. User reported N=1 works but N=2 hangs indefinitely.
+      // Root cause: Inngest v3's step.run + step.sleep combined with
+      // Promise.all deadlocks — when two parallel variants both hit
+      // step.sleep around the same time, Inngest's execution model
+      // can't reliably checkpoint both. Classic documented pitfall.
+      // The real fix is per-variant event dispatch (Phase-1 bulk-
+      // friendliness work); this is the fast unblock so N≥2 works
+      // today. Trade-off: 2 variants take ~2× wall-clock (sequential
+      // HeyGen renders are 10-22 min each so ~20-44 min for N=2).
+      const variantResults: Array<
+        { ok: true; index: number; costUsd: number } | { ok: false; index: number; error: string }
+      > = [];
+      for (let i = 0; i < variations.entries.length; i++) {
+        const entry = variations.entries[i]!;
+        try {
+          const r = await renderOneVariant({
             step,
-            index,
+            index: i,
             entry,
             jobId,
             jobUserId,
             voices: voices.voices,
             keys: { gemini: keys.gemini!, heygen: keys.heygen! },
-          }).catch((err) => {
-            // Per-variant failures don't kill the whole job — log +
-            // return a failure marker so the job still persists the
-            // successful variants.
-            console.error(`[polish28-var] variant ${index} failed:`, err);
-            return {
-              ok: false as const,
-              index,
-              error: err instanceof Error ? err.message : String(err),
-            };
-          }),
-        ),
-      );
+          });
+          variantResults.push(r);
+        } catch (err) {
+          // Per-variant failures don't kill the whole job — log +
+          // push a failure marker so successful variants still persist.
+          console.error(`[polish28-var] variant ${i} failed:`, err);
+          variantResults.push({
+            ok: false as const,
+            index: i,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
 
       const succeeded = variantResults.filter(
         (r): r is { ok: true; index: number; costUsd: number } => r.ok,
