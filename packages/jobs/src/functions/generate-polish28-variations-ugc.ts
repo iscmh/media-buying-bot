@@ -42,22 +42,9 @@
  * typical N=1-10. Future Polish-28.4 could fan out via separate event
  * dispatch to give per-variant retry isolation.
  */
-import { Buffer } from 'node:buffer';
 import { eq } from 'drizzle-orm';
 import { NonRetriableError } from 'inngest';
-import {
-  callClaude,
-  cloneCharacterReferenceImage,
-  composeNanoBananaCharacterClonePrompt,
-  estimateHeygenAvatarIvCostUsd,
-  fetchHeygenVoices,
-  isTerminalAvatarIvStatus,
-  matchHeygenVoiceForPersona,
-  submitHeygenAvatarIvGeneration,
-  checkHeygenAvatarIvStatus,
-  uploadHeygenImageAsset,
-  type HeygenVoice,
-} from '@mbb/ai-providers';
+import { callClaude, fetchHeygenVoices, matchHeygenVoiceForPersona } from '@mbb/ai-providers';
 import { getDb, schema } from '@mbb/db';
 import { POLISH_VERSION } from '@mbb/shared';
 import { inngest } from '../client';
@@ -75,19 +62,15 @@ import {
   POLISH28_VARIATIONS_SYSTEM_PROMPT,
   composePolish28VariationsUserPrompt,
   parsePolish28VariationsResponse,
-  type Polish28VariationEntry,
 } from '../lib/polish28-variations-prompt';
 import { wrapWithPsywarCorpus } from '../lib/polish28-psywar-corpus';
-import { uploadGeneratedImage, uploadGeneratedVideoFromUrl } from '../lib/storage';
 
 console.log(
   `[jobs.generate-polish28-variations-ugc] cold start — POLISH_VERSION=${POLISH_VERSION}`,
 );
 
-const HEYGEN_POLL_MAX_ATTEMPTS = 90;
-const HEYGEN_POLL_INTERVAL_SECONDS = 15;
 /** Hard cap per single-job invocation. Higher N should batch via
- *  multiple jobs or split via event dispatch in a future commit. */
+ *  multiple jobs; sub-worker already parallelizes per-variant. */
 const MAX_VARIANTS_PER_JOB = 10;
 
 function nowIso(): string {
@@ -280,44 +263,113 @@ export const generatePolish28VariationsUgc = inngest.createFunction(
         return safeInngestStepReturn({ voices: fetched.voices });
       });
 
-      // ---------- Step G: render each variant SEQUENTIALLY ----------
-      // Polish-30.0.16 Commit 188: switched Promise.all → sequential
-      // for loop. User reported N=1 works but N=2 hangs indefinitely.
-      // Root cause: Inngest v3's step.run + step.sleep combined with
-      // Promise.all deadlocks — when two parallel variants both hit
-      // step.sleep around the same time, Inngest's execution model
-      // can't reliably checkpoint both. Classic documented pitfall.
-      // The real fix is per-variant event dispatch (Phase-1 bulk-
-      // friendliness work); this is the fast unblock so N≥2 works
-      // today. Trade-off: 2 variants take ~2× wall-clock (sequential
-      // HeyGen renders are 10-22 min each so ~20-44 min for N=2).
+      // ---------- Step G: dispatch per-variant events + await completions ----------
+      // Polish-30.0.17 Commit 189: dropped the Commit-188 sequential
+      // for-loop for proper per-variant Inngest event dispatch. Each
+      // variant runs as its own Inngest function invocation
+      // (`generate-polish28-variant`) → true parallelism, no step.sleep
+      // checkpoint collisions, independent retry isolation per variant,
+      // unblocker for bulk use (10+ variations per job).
+      //
+      // Parent waits on N `polish28-variant.completed` events via
+      // Promise.all of step.waitForEvent. waitForEvent is server-side
+      // registered on the Inngest side (different primitive from
+      // step.run / step.sleep) and parallelizes cleanly.
+      //
+      // Voice matching stays on the parent — we already have the full
+      // roster in `voices.voices` from Step F; match once per variant
+      // and pass the picked voice through the event payload. Avoids
+      // N × fetch-voices calls on the sub-workers.
+      //
+      // Keys do NOT cross the event boundary — plaintext secrets must
+      // not persist in Inngest step state. Sub-workers re-load keys
+      // from the DB via loadDecryptedKeys using the userId in the event.
+      const variantDispatchPlan = variations.entries.map((entry, index) => {
+        const personaSentence =
+          `${entry.persona.age_range} ${entry.persona.gender} ${entry.persona.ethnicity}. ` +
+          entry.persona.look;
+        const matchedVoice = matchHeygenVoiceForPersona(voices.voices, personaSentence);
+        return {
+          index,
+          entry,
+          matchedVoice: {
+            voice_id: matchedVoice.voice_id,
+            name: matchedVoice.name,
+            gender: matchedVoice.gender,
+          },
+        };
+      });
+
+      // Fire all N sub-events in parallel.
+      await guardedStepRun(step, 'dispatch-variants', async () => {
+        await Promise.all(
+          variantDispatchPlan.map((plan) =>
+            step.sendEvent(`dispatch-variant-${plan.index}`, {
+              name: 'generation/polish28-variant.requested',
+              data: {
+                jobId,
+                userId: jobUserId,
+                variantIndex: plan.index,
+                entry: plan.entry,
+                matchedVoice: plan.matchedVoice,
+              },
+            }),
+          ),
+        );
+        await patchMetadata(jobId, {
+          polish28_progress: {
+            step: 'dispatched-variants',
+            pct: 40,
+            at: nowIso(),
+            variantCount: variantDispatchPlan.length,
+          },
+        });
+        return safeInngestStepReturn({ dispatched: variantDispatchPlan.length });
+      });
+
+      // Wait for N completion events in parallel.
+      const completionResults = await Promise.all(
+        variantDispatchPlan.map((plan) =>
+          step
+            .waitForEvent(`wait-variant-${plan.index}`, {
+              event: 'generation/polish28-variant.completed',
+              timeout: '45m', // HeyGen Avatar IV worst case ~22 min; 2x buffer
+              if: `async.data.jobId == "${jobId}" && async.data.variantIndex == ${plan.index}`,
+            })
+            .then((evt) => {
+              if (!evt || !evt.data) {
+                return {
+                  ok: false as const,
+                  index: plan.index,
+                  error: `variant ${plan.index} did not complete within 45 min (likely stuck in HeyGen)`,
+                };
+              }
+              const data = evt.data as {
+                jobId: string;
+                variantIndex: number;
+                ok: boolean;
+                costUsd?: number;
+                videoUrl?: string;
+                error?: string;
+              };
+              return data.ok
+                ? {
+                    ok: true as const,
+                    index: plan.index,
+                    costUsd: data.costUsd ?? 0,
+                  }
+                : {
+                    ok: false as const,
+                    index: plan.index,
+                    error: data.error ?? 'unknown error from sub-worker',
+                  };
+            }),
+        ),
+      );
+
       const variantResults: Array<
         { ok: true; index: number; costUsd: number } | { ok: false; index: number; error: string }
-      > = [];
-      for (let i = 0; i < variations.entries.length; i++) {
-        const entry = variations.entries[i]!;
-        try {
-          const r = await renderOneVariant({
-            step,
-            index: i,
-            entry,
-            jobId,
-            jobUserId,
-            voices: voices.voices,
-            keys: { gemini: keys.gemini!, heygen: keys.heygen! },
-          });
-          variantResults.push(r);
-        } catch (err) {
-          // Per-variant failures don't kill the whole job — log +
-          // push a failure marker so successful variants still persist.
-          console.error(`[polish28-var] variant ${i} failed:`, err);
-          variantResults.push({
-            ok: false as const,
-            index: i,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      > = completionResults;
 
       const succeeded = variantResults.filter(
         (r): r is { ok: true; index: number; costUsd: number } => r.ok,
@@ -371,218 +423,3 @@ export const generatePolish28VariationsUgc = inngest.createFunction(
     }
   },
 );
-
-// Inngest's step type is inferred from the handler tools object.
-// Loosely typed here to sidestep Inngest's Jsonify-wrapped return
-// types — the actual step calls inside renderOneVariant type-check
-// fine at the callsite thanks to inference from the arg fn.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type InngestStepTools = any;
-
-interface RenderOneInput {
-  step: InngestStepTools;
-  index: number;
-  entry: Polish28VariationEntry;
-  jobId: string;
-  jobUserId: string;
-  voices: readonly HeygenVoice[];
-  keys: { gemini: string; heygen: string };
-}
-
-type RenderOneResult =
-  | { ok: true; index: number; costUsd: number }
-  | { ok: false; index: number; error: string };
-
-/**
- * Render one variation end-to-end: Nano Banana character → match voice
- * → upload to HeyGen → submit av4 → poll → download → persist. Each
- * step uses a variantIndex-suffixed name so Inngest can uniquely
- * memoize per-variant steps within one function invocation.
- */
-async function renderOneVariant(input: RenderOneInput): Promise<RenderOneResult> {
-  const { step, index, entry, jobId, jobUserId, voices, keys } = input;
-  const stepSuffix = `v${index}`;
-
-  // 1. Nano Banana character (text-only, no source frame reference)
-  const characterUpload = await step.run(`clone-character-${stepSuffix}`, async () => {
-    // Compose a persona-text description string that the existing
-    // clonecharacter prompt can consume. We build a flattened persona
-    // string in the same shape flattenPersonaForClonePrompt would emit.
-    const personaText =
-      `Age: ${entry.persona.age_range}. Gender: ${entry.persona.gender}. ` +
-      `Ethnicity: ${entry.persona.ethnicity}. Look: ${entry.persona.look}`;
-    const prompt = composeNanoBananaCharacterClonePrompt(personaText);
-    // No reference image — variations mode intentionally generates a
-    // fresh character from persona text alone. cloneCharacterReferenceImage
-    // requires a ref image; we work around by sending a 1x1 gray PNG as
-    // a placeholder ref. Nano Banana Pro treats a tiny ref as a weak
-    // signal and generates primarily from the prompt.
-    const grayPixelPngBase64 =
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-    const r = await cloneCharacterReferenceImage({
-      userId: jobUserId,
-      apiKey: keys.gemini,
-      prompt,
-      referenceImageBase64: grayPixelPngBase64,
-      referenceImageMimeType: 'image/png',
-      generationJobId: jobId,
-    });
-    if (!r.ok || !r.imageBase64) {
-      throw new Error(
-        `variant ${index} Nano Banana character failed: ${r.errorMessage ?? 'unknown'}`,
-      );
-    }
-    const uploaded = await uploadGeneratedImage({
-      userId: jobUserId,
-      jobId,
-      variantIndex: index,
-      imageBase64: r.imageBase64,
-      mimeType: r.imageMimeType ?? 'image/png',
-      filenamePrefix: `polish28-var${index}-character-`,
-    });
-    return {
-      publicUrl: uploaded.publicUrl,
-      storagePath: uploaded.path,
-      mimeType: r.imageMimeType ?? 'image/png',
-      costUsd: r.costUsd,
-    };
-  });
-
-  // 2. Match voice for this variant's persona
-  const personaSentenceForMatch =
-    `${entry.persona.age_range} ${entry.persona.gender} ${entry.persona.ethnicity}. ` +
-    entry.persona.look;
-  const matchedVoice = matchHeygenVoiceForPersona(voices, personaSentenceForMatch);
-
-  // 3. Upload character to HeyGen
-  const heygenImageKey = await step.run(`upload-heygen-image-${stepSuffix}`, async () => {
-    const fetchRes = await fetch(characterUpload.publicUrl);
-    if (!fetchRes.ok) {
-      throw new Error(`variant ${index} character-fetch HTTP ${fetchRes.status}`);
-    }
-    const arr = await fetchRes.arrayBuffer();
-    const bytes = new Uint8Array(arr);
-    const characterMime =
-      characterUpload.mimeType === 'image/jpeg' || characterUpload.mimeType === 'image/jpg'
-        ? 'image/jpeg'
-        : 'image/png';
-    const r = await uploadHeygenImageAsset({
-      userId: jobUserId,
-      apiKey: keys.heygen,
-      imageBytes: bytes,
-      imageMimeType: characterMime,
-      generationJobId: jobId,
-    });
-    if (!r.ok || !r.imageKey) {
-      throw new Error(`variant ${index} HeyGen upload failed: ${r.errorMessage ?? 'unknown'}`);
-    }
-    return r.imageKey;
-  });
-
-  // 4. Submit av4/generate with script + voice_id
-  const heygenVideoId = await step.run(`submit-heygen-${stepSuffix}`, async () => {
-    const r = await submitHeygenAvatarIvGeneration({
-      userId: jobUserId,
-      apiKey: keys.heygen,
-      imageKey: heygenImageKey,
-      script: entry.script,
-      voiceId: matchedVoice.voice_id,
-      videoTitle: `polish28_var_${jobId.slice(0, 8)}_${index}`,
-      generationJobId: jobId,
-    });
-    if (!r.ok || !r.videoId) {
-      throw new Error(`variant ${index} HeyGen submit failed: ${r.errorMessage ?? 'unknown'}`);
-    }
-    return r.videoId;
-  });
-
-  // 5. Poll for completion (chunked)
-  let finalVideoUrl: string | null = null;
-  let finalDurationSeconds: number | null = null;
-  for (let attempt = 0; attempt < HEYGEN_POLL_MAX_ATTEMPTS; attempt++) {
-    const pollResult = await step.run(`poll-heygen-${stepSuffix}-${attempt}`, async () => {
-      const r = await checkHeygenAvatarIvStatus({
-        userId: jobUserId,
-        apiKey: keys.heygen,
-        videoId: heygenVideoId,
-        generationJobId: jobId,
-      });
-      return {
-        ok: r.ok,
-        status: r.status,
-        videoUrl: r.videoUrl ?? null,
-        durationSeconds: r.durationSeconds ?? null,
-        errorMessage: r.errorMessage ?? null,
-      };
-    });
-    if (!pollResult.ok || pollResult.status === 'failed') {
-      throw new Error(
-        `variant ${index} HeyGen failed after ${attempt + 1} polls: ${pollResult.errorMessage ?? 'unknown'}`,
-      );
-    }
-    if (pollResult.status === 'completed' && pollResult.videoUrl) {
-      finalVideoUrl = pollResult.videoUrl;
-      finalDurationSeconds = pollResult.durationSeconds;
-      break;
-    }
-    if (isTerminalAvatarIvStatus(pollResult.status)) break;
-    await step.sleep(`poll-wait-${stepSuffix}-${attempt}`, `${HEYGEN_POLL_INTERVAL_SECONDS}s`);
-  }
-  if (!finalVideoUrl) {
-    throw new Error(`variant ${index} HeyGen timed out after ${HEYGEN_POLL_MAX_ATTEMPTS} polls`);
-  }
-
-  // 6. Download + upload to Supabase
-  const uploaded = await step.run(`upload-final-${stepSuffix}`, async () => {
-    const r = await uploadGeneratedVideoFromUrl({
-      userId: jobUserId,
-      jobId,
-      remoteUrl: finalVideoUrl!,
-      filename: `polish28-var${index}-lipsync`,
-      compress: true,
-    });
-    return { path: r.path, publicUrl: r.publicUrl, sizeBytes: r.sizeBytes };
-  });
-
-  // 7. Persist creative row
-  await step.run(`persist-creative-${stepSuffix}`, async () => {
-    const db = getDb();
-    // DO NOT set imageStoragePath — that would misclassify as image
-    // (see Commit 82 / job-review-client isImageVariant predicate).
-    const creativeRecord = assertNoUndefinedForPostgres(
-      {
-        userId: jobUserId,
-        generationJobId: jobId,
-        fileUrl: uploaded.publicUrl,
-        hookVariantIndex: index,
-        bodyVariantIndex: index,
-        ctaVariantIndex: index,
-        aspectRatio: '9:16' as const,
-      },
-      'polish28-variations:generated-creatives-insert',
-    );
-    await db
-      .insert(schema.generatedCreatives)
-      .values(creativeRecord as typeof schema.generatedCreatives.$inferInsert);
-    return { inserted: true };
-  });
-
-  const heygenCost = estimateHeygenAvatarIvCostUsd(finalDurationSeconds ?? 30);
-  const variantCost = heygenCost + (characterUpload.costUsd ?? 0) + 0.02;
-  await patchMetadata(jobId, {
-    [`polish28_var_${index}_status`]: 'completed',
-    [`polish28_var_${index}_persona`]: entry.persona,
-    [`polish28_var_${index}_voice`]: {
-      voice_id: matchedVoice.voice_id,
-      name: matchedVoice.name,
-      gender: matchedVoice.gender,
-    },
-    [`polish28_var_${index}_video_url`]: uploaded.publicUrl,
-    [`polish28_var_${index}_cost_usd`]: variantCost,
-  });
-
-  // Suppress unused-var lint on Buffer import — kept for future use
-  // if we need to base64-decode audio bytes.
-  void Buffer;
-  return { ok: true, index, costUsd: variantCost };
-}

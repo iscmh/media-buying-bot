@@ -26,6 +26,11 @@ import { generateStaticOpenaiImageVariants } from './generate-static-openai-imag
 // image-to-video lip-sync). Rebuild successor to the Polish-25/26 nuke.
 import { generatePolish28CloneUgc } from './generate-polish28-clone-ugc';
 import { generatePolish28VariationsUgc } from './generate-polish28-variations-ugc';
+// Polish-30.0.17 Commit 189: per-variant sub-worker for polish28
+// variations. Parent dispatches N `polish28-variant.requested`
+// events, each handled by this worker in its own Inngest invocation.
+// Fixes the N≥2 Promise.all+step.sleep deadlock and unblocks bulk use.
+import { generatePolish28Variant } from './generate-polish28-variant';
 // Polish-29.0.6 Commit 115: Seedance credit-backed video generation
 // via useapi.net → Dreamina. First credits-mode worker end-to-end;
 // wraps the tested seedance-credit-flow helper.
@@ -109,6 +114,9 @@ export const REGISTERED_GENERATION_WORKER_EVENTS = new Set([
   // in Commit 85 but never surfaced here — dispatch-coverage caught
   // it on the Polish-29.0.6 rerun. Fixing forward.
   'generation/polish28-variations-ugc.requested',
+  // Polish-30.0.17 Commit 189: per-variant sub-worker event.
+  // Parent polish28_variations_ugc dispatches N of these.
+  'generation/polish28-variant.requested',
   // Polish-29.0.6 Commit 115: credit-backed Seedance via useapi.net.
   // Marks the switch from BYOK-only (Polish-28) to a hybrid where
   // credit-costed models run through the shared reserve/consume/
@@ -154,6 +162,7 @@ export const functions = [
   // Polish-28.0.0 Commit 64: BYOK cloned-UGC pipeline worker.
   generatePolish28CloneUgc,
   generatePolish28VariationsUgc,
+  generatePolish28Variant,
   // Polish-29.0.6 Commit 115: credit-backed Seedance worker.
   generatePolish29Seedance,
   // Polish-29.0.10 Commit 119: multi-clip Seedance variations worker.
