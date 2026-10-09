@@ -47,7 +47,7 @@
  * deck cleared for the Polish-28 Seedance 2.5 + Higgsfield Speak v2
  * + ElevenLabs BYOK rebuild.
  */
-export const POLISH_VERSION = '30.0.17';
+export const POLISH_VERSION = '30.0.18';
 
 /**
  * Short human-readable slug that pairs with the version for at-a-

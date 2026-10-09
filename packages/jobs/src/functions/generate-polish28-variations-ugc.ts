@@ -301,21 +301,30 @@ export const generatePolish28VariationsUgc = inngest.createFunction(
       });
 
       // Fire all N sub-events in parallel.
-      await guardedStepRun(step, 'dispatch-variants', async () => {
-        await Promise.all(
-          variantDispatchPlan.map((plan) =>
-            step.sendEvent(`dispatch-variant-${plan.index}`, {
-              name: 'generation/polish28-variant.requested',
-              data: {
-                jobId,
-                userId: jobUserId,
-                variantIndex: plan.index,
-                entry: plan.entry,
-                matchedVoice: plan.matchedVoice,
-              },
-            }),
-          ),
-        );
+      // Polish-30.0.18 Commit 190: UN-NESTED step.sendEvent. Previously
+      // this was wrapped in guardedStepRun (step.run), which Inngest
+      // v3 forbids — nesting step.* operations silently breaks execution
+      // and the parent hangs forever. User's N=2 jobs sat for 24+
+      // hours because the dispatch step never actually fired events.
+      // step.sendEvent is itself a durable step, so Promise.all of
+      // sendEvent at the function root is the correct pattern.
+      await Promise.all(
+        variantDispatchPlan.map((plan) =>
+          step.sendEvent(`dispatch-variant-${plan.index}`, {
+            name: 'generation/polish28-variant.requested',
+            data: {
+              jobId,
+              userId: jobUserId,
+              variantIndex: plan.index,
+              entry: plan.entry,
+              matchedVoice: plan.matchedVoice,
+            },
+          }),
+        ),
+      );
+
+      // Patch metadata separately (DB write doesn't need step wrapping).
+      await guardedStepRun(step, 'patch-dispatched-progress', async () => {
         await patchMetadata(jobId, {
           polish28_progress: {
             step: 'dispatched-variants',
